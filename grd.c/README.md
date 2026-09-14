@@ -6,7 +6,8 @@
 
 ## CLI
 
-Compute proportional splits for a given root area and set of weights.
+`grd split` computes one proportional split for a root area. It remains the
+simple interface when no nested boxes are needed.
 
 ### Examples
 
@@ -49,6 +50,49 @@ One line per child box, in the format `index x y w h`:
 2 0 810 1920 270
 ```
 
+### Hierarchical layouts
+
+`grd layout` reads a hierarchy from standard input, builds it through
+`libgrd`, calculates it once from the root, and prints the root plus every box
+in depth-first preorder.
+
+```bash
+cat <<'EOF' | ./bin/x86_64/linux/grd layout -x 0 -y 0 -w 120 -H 80
+. row 1,2
+0 col 1,1
+1 row 1,2,1 4 10
+EOF
+```
+
+Each input line is:
+
+```text
+<path> <row|col> <weights> [gap] [min]
+```
+
+- `.` is the root; `0`, `1`, and `0.1` select children by their zero-based index.
+- `weights` is a comma-separated list with at least two positive numbers.
+- `gap` and `min` are optional and otherwise use the `libgrd` split defaults.
+- Definitions must be parent-before-child: a path must already exist when its line is read.
+- `-x` and `-y` set the root origin (default `0`); `-w`/`--width` and `-H`/`--height` set its required positive dimensions.
+
+The example produces parseable rows in the form `path x y w h`:
+
+```text
+. 0 0 120 80
+0 0 0 40 80
+0.0 0 0 40 40
+0.1 0 41 40 39
+1 41 0 79 80
+1.0 41 0 18 80
+1.1 63 0 36 80
+1.2 103 0 17 80
+```
+
+Malformed lines, unknown paths, duplicate splits, invalid split kinds, and
+invalid numeric values fail with a diagnostic on standard error. No descriptive
+text is written to standard output.
+
 ---
 
 ## Public API
@@ -84,7 +128,7 @@ kc_grd_box_free(root);
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests

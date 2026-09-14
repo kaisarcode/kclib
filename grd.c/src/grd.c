@@ -14,6 +14,7 @@
 #include "libgrd.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,7 @@
 static void kc_grd_help(const char *name) {
     printf("Usage:\n");
     printf("  %s split [options]\n\n", name);
+    printf("  %s layout [options] < tree.txt\n\n", name);
     printf("Options:\n");
     printf("  --width,   -w <n>      Root width in pixels (required)\n");
     printf("  --height,  -H <n>      Root height in pixels (required)\n");
@@ -35,11 +37,15 @@ static void kc_grd_help(const char *name) {
     printf("  --min,     -m <n>      Minimum child size in pixels (default: 1)\n");
     printf("  --help,    -h          Show help\n");
     printf("  -v, --version          Show version\n\n");
+    printf("Layout options:\n");
+    printf("  --x,       -x <n>      Root X position (default: 0)\n");
+    printf("  --y,       -y <n>      Root Y position (default: 0)\n\n");
     printf("Output:\n");
     printf("  One line per child: index x y w h\n\n");
     printf("Examples:\n");
     printf("  %s split -w 1920 -H 1080 -k row -W \"1 2 1\"\n", name);
     printf("  %s split -w 800 -H 600 -k col -W \"1 1 1 1\" -g 4\n", name);
+    printf("  %s layout -x 0 -y 0 -w 1920 -H 1080 < tree.txt\n", name);
 }
 
 /**
@@ -196,6 +202,232 @@ static int kc_grd_cmd_split(
 }
 
 /**
+ * Parses a comma-separated positive finite weight list for layout input.
+ * @param text Weight list.
+ * @param weights Output array.
+ * @param cap Output capacity.
+ * @return Parsed count, or -1 on invalid input.
+ */
+static int kc_grd_layout_weights(const char *text, float *weights, int cap) {
+    char buffer[4096];
+    char *cursor;
+    char *comma;
+    int count = 0;
+
+    if (!text || !weights || cap <= 0 || strlen(text) >= sizeof(buffer)) return -1;
+    memcpy(buffer, text, strlen(text) + 1);
+    cursor = buffer;
+    do {
+        float weight;
+        comma = strchr(cursor, ',');
+        if (comma) *comma = '\0';
+        if (!*cursor || count >= cap || !kc_grd_parse_float(cursor, &weight) ||
+            !isfinite(weight) || weight <= 0.0f) return -1;
+        weights[count++] = weight;
+        cursor = comma ? comma + 1 : NULL;
+    } while (cursor);
+    return count;
+}
+
+/**
+ * Resolves a dot-separated box path from root.
+ * @param root Root box.
+ * @param path Dot path, with . denoting root.
+ * @return Borrowed matching box, or NULL.
+ */
+static kc_grd_box_t *kc_grd_layout_path(kc_grd_box_t *root, const char *path) {
+    const char *cursor;
+    kc_grd_box_t *box;
+
+    if (!root || !path) return NULL;
+    if (strcmp(path, ".") == 0) return root;
+    box = root;
+    cursor = path;
+    while (*cursor) {
+        char *end;
+        long index;
+        if (*cursor < '0' || *cursor > '9' || !box->split) return NULL;
+        if (*cursor == '0' && cursor[1] >= '0' && cursor[1] <= '9') return NULL;
+        errno = 0;
+        index = strtol(cursor, &end, 10);
+        if (errno != 0 || end == cursor || index < 0 || index > 2147483647L ||
+            (*end != '\0' && *end != '.')) return NULL;
+        box = kc_grd_split_at(box->split, (int)index);
+        if (!box) return NULL;
+        if (*end == '\0') return box;
+        cursor = end + 1;
+        if (!*cursor) return NULL;
+    }
+    return NULL;
+}
+
+/**
+ * Prints a box and descendants in child-order preorder.
+ * @param box Box to print.
+ * @param path Stable box path.
+ * @return 0 on success, 1 on path overflow.
+ */
+static int kc_grd_layout_print(const kc_grd_box_t *box, const char *path) {
+    int i;
+    if (!box || !path) return 1;
+    printf("%s %d %d %d %d\n", path, box->x, box->y, box->w, box->h);
+    if (!box->split) return 0;
+    for (i = 0; i < box->split->count; i++) {
+        char child_path[4096];
+        int n = strcmp(path, ".") == 0
+            ? snprintf(child_path, sizeof(child_path), "%d", i)
+            : snprintf(child_path, sizeof(child_path), "%s.%d", path, i);
+        if (n < 0 || (size_t)n >= sizeof(child_path) ||
+            kc_grd_layout_print(box->split->children[i], child_path) != 0) return 1;
+    }
+    return 0;
+}
+
+/**
+ * Builds and prints a hierarchical layout described on standard input.
+ * @param argc Argument count after the layout command.
+ * @param argv Argument vector after the layout command.
+ * @return 0 on success, 1 on invalid input or allocation failure.
+ */
+static int kc_grd_cmd_layout(int argc, char **argv) {
+    char line[4096];
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    int line_no = 0;
+    int i;
+    kc_grd_box_t *root;
+
+    for (i = 0; i < argc; i++) {
+        int *value = NULL;
+        const char *flag = argv[i];
+        if (strcmp(flag, "--help") == 0 || strcmp(flag, "-h") == 0) {
+            kc_grd_help("grd");
+            return 0;
+        }
+        if (strcmp(flag, "--version") == 0 || strcmp(flag, "-v") == 0) {
+            kc_grd_cli_version();
+            return 0;
+        }
+        if (strcmp(flag, "--x") == 0 || strcmp(flag, "-x") == 0) value = &x;
+        else if (strcmp(flag, "--y") == 0 || strcmp(flag, "-y") == 0) value = &y;
+        else if (strcmp(flag, "--width") == 0 || strcmp(flag, "-w") == 0) value = &width;
+        else if (strcmp(flag, "--height") == 0 || strcmp(flag, "-H") == 0) value = &height;
+        else {
+            fprintf(stderr, "grd: unknown layout argument: %s\n", flag);
+            return 1;
+        }
+        if (i + 1 >= argc || !kc_grd_parse_int(argv[++i], value) ||
+            ((value == &width || value == &height) && *value <= 0)) {
+            fprintf(stderr, "grd: invalid value for %s\n", flag);
+            return 1;
+        }
+    }
+    if (width <= 0 || height <= 0) {
+        fprintf(stderr, "grd: layout requires --width and --height\n");
+        return 1;
+    }
+
+    root = kc_grd_box_new();
+    if (!root) {
+        fprintf(stderr, "grd: allocation failed\n");
+        return 1;
+    }
+    root->border = 0;
+    root->padding = 0;
+    while (fgets(line, sizeof(line), stdin)) {
+        char *fields[5];
+        char *token;
+        char *state;
+        kc_grd_box_t *box;
+        kc_grd_split_t *split;
+        float weights[KC_GRD_WEIGHTS_CAP];
+        int count;
+        int field_count = 0;
+        int gap;
+        int min_px;
+
+        line_no++;
+        if (!strchr(line, '\n') && !feof(stdin)) {
+            fprintf(stderr, "grd: line %d is too long\n", line_no);
+            kc_grd_box_free(root);
+            return 1;
+        }
+        line[strcspn(line, "\r\n")] = '\0';
+        token = strtok_r(line, " \t", &state);
+        while (token && field_count < 5) {
+            fields[field_count++] = token;
+            token = strtok_r(NULL, " \t", &state);
+        }
+        if (token || field_count < 3) {
+            fprintf(stderr, "grd: malformed layout line %d\n", line_no);
+            kc_grd_box_free(root);
+            return 1;
+        }
+        box = kc_grd_layout_path(root, fields[0]);
+        if (!box) {
+            fprintf(stderr, "grd: invalid or nonexistent path on line %d\n", line_no);
+            kc_grd_box_free(root);
+            return 1;
+        }
+        if (box->split) {
+            fprintf(stderr, "grd: path already has a split on line %d\n", line_no);
+            kc_grd_box_free(root);
+            return 1;
+        }
+        if (strcmp(fields[1], "row") == 0) split = kc_grd_split_set(box, KC_GRD_ROW);
+        else if (strcmp(fields[1], "col") == 0) split = kc_grd_split_set(box, KC_GRD_COL);
+        else split = NULL;
+        if (!split) {
+            fprintf(stderr, "grd: invalid split kind or allocation failure on line %d\n", line_no);
+            kc_grd_box_free(root);
+            return 1;
+        }
+        count = kc_grd_layout_weights(fields[2], weights, KC_GRD_WEIGHTS_CAP);
+        if (count < 2) {
+            fprintf(stderr, "grd: layout line %d requires at least two valid weights\n", line_no);
+            kc_grd_box_free(root);
+            return 1;
+        }
+        gap = split->gap;
+        min_px = split->min_px;
+        if ((field_count >= 4 && (!kc_grd_parse_int(fields[3], &gap) || gap < 0)) ||
+            (field_count == 5 && (!kc_grd_parse_int(fields[4], &min_px) || min_px < 0))) {
+            fprintf(stderr, "grd: invalid gap or min on line %d\n", line_no);
+            kc_grd_box_free(root);
+            return 1;
+        }
+        kc_grd_split_gap(split, gap, min_px);
+        for (i = 0; i < count; i++) {
+            kc_grd_box_t *child = kc_grd_box_new();
+            if (!child || kc_grd_split_add(split, child, weights[i]) != 0) {
+                kc_grd_box_free(child);
+                fprintf(stderr, "grd: allocation failed on line %d\n", line_no);
+                kc_grd_box_free(root);
+                return 1;
+            }
+            child->border = 0;
+            child->padding = 0;
+        }
+    }
+    if (ferror(stdin)) {
+        fprintf(stderr, "grd: failed reading layout input\n");
+        kc_grd_box_free(root);
+        return 1;
+    }
+    kc_grd_box_bounds(root, x, y, width, height);
+    kc_grd_box_layout(root);
+    if (kc_grd_layout_print(root, ".") != 0) {
+        fprintf(stderr, "grd: layout path is too long to print\n");
+        kc_grd_box_free(root);
+        return 1;
+    }
+    kc_grd_box_free(root);
+    return 0;
+}
+
+/**
  * Entry point. Parses arguments and dispatches subcommands.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -222,6 +454,10 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
         kc_grd_cli_version();
         return 0;
+    }
+
+    if (strcmp(argv[1], "layout") == 0) {
+        return kc_grd_cmd_layout(argc - 2, argv + 2);
     }
 
     if (strcmp(argv[1], "split") != 0) {

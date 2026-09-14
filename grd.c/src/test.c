@@ -590,12 +590,95 @@ static int case_split_compute_errors(void) {
 }
 
 /**
+ * Tests a nested mixed-axis tree via the public API.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_nested_layout(void) {
+    const char *name = "nested mixed-axis layout via public API";
+    const char *detail = "three levels preserve gaps, minimums, and child order";
+    kc_grd_box_t *root = kc_grd_box_new();
+    kc_grd_split_t *root_split;
+    kc_grd_split_t *left_split;
+    kc_grd_split_t *deep_split;
+    kc_grd_box_t *left;
+    kc_grd_box_t *right;
+    int fail = 0;
+
+    if (!root) {
+        case_result(1, name, detail);
+        return 1;
+    }
+    root->border = 0;
+    root->padding = 0;
+    root_split = kc_grd_split_set(root, KC_GRD_ROW);
+    left = kc_grd_box_new();
+    right = kc_grd_box_new();
+    if (!root_split || !left || !right) {
+        kc_grd_box_free(left);
+        kc_grd_box_free(right);
+        kc_grd_box_free(root);
+        case_result(1, name, detail);
+        return 1;
+    }
+    if (kc_grd_split_add(root_split, left, 1.0f) != 0) {
+        kc_grd_box_free(left);
+        kc_grd_box_free(right);
+        kc_grd_box_free(root);
+        case_result(1, name, detail);
+        return 1;
+    }
+    if (kc_grd_split_add(root_split, right, 2.0f) != 0) {
+        kc_grd_box_free(right);
+        kc_grd_box_free(root);
+        case_result(1, name, detail);
+        return 1;
+    }
+    left->border = left->padding = 0;
+    right->border = right->padding = 0;
+    kc_grd_split_gap(root_split, 3, 1);
+    left_split = kc_grd_split_set(left, KC_GRD_COL);
+    if (!left_split ||
+        kc_grd_split_add(left_split, kc_grd_box_new(), 1.0f) != 0 ||
+        kc_grd_split_add(left_split, kc_grd_box_new(), 2.0f) != 0) {
+        kc_grd_box_free(root);
+        case_result(1, name, detail);
+        return 1;
+    }
+    left_split->children[0]->border = left_split->children[0]->padding = 0;
+    left_split->children[1]->border = left_split->children[1]->padding = 0;
+    kc_grd_split_gap(left_split, 5, 10);
+    deep_split = kc_grd_split_set(left_split->children[1], KC_GRD_ROW);
+    if (!deep_split ||
+        kc_grd_split_add(deep_split, kc_grd_box_new(), 1.0f) != 0 ||
+        kc_grd_split_add(deep_split, kc_grd_box_new(), 1.0f) != 0) {
+        kc_grd_box_free(root);
+        case_result(1, name, detail);
+        return 1;
+    }
+    deep_split->children[0]->border = deep_split->children[0]->padding = 0;
+    deep_split->children[1]->border = deep_split->children[1]->padding = 0;
+    kc_grd_split_gap(deep_split, 4, 10);
+    kc_grd_box_bounds(root, 7, 11, 100, 90);
+    kc_grd_box_layout(root);
+    fail |= expect_int("root x", 7, root->x);
+    fail |= expect_int("left width", 33, left->w);
+    fail |= expect_int("right x after root gap", 43, right->x);
+    fail |= expect_int("left child 0 height", 29, left_split->children[0]->h);
+    fail |= expect_int("left child 1 y after nested gap", 45, left_split->children[1]->y);
+    fail |= expect_int("deep child 0 width", 15, deep_split->children[0]->w);
+    fail |= expect_int("deep child 1 x after gap", 26, deep_split->children[1]->x);
+    kc_grd_box_free(root);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Runs all test cases in a single process.
  * @return 0 on success, 1 on failure.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 23;
+    test_case_total = 24;
     test_case_current = 0;
     run_case(&rc, case_version);
     run_case(&rc, case_options_default);
@@ -620,6 +703,7 @@ static int case_all(void) {
     run_case(&rc, case_split_compute_row);
     run_case(&rc, case_split_compute_col_gap);
     run_case(&rc, case_split_compute_errors);
+    run_case(&rc, case_nested_layout);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -659,6 +743,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "split-compute-row") == 0) return case_split_compute_row();
     if (strcmp(argv[1], "split-compute-col-gap") == 0) return case_split_compute_col_gap();
     if (strcmp(argv[1], "split-compute-errors") == 0) return case_split_compute_errors();
+    if (strcmp(argv[1], "nested-layout") == 0) return case_nested_layout();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
