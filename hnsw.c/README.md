@@ -59,9 +59,12 @@ echo "1 0 0" | ./bin/x86_64/linux/hnsw --dim 3 --input vectors.txt
 | `--dim`, `-d` | Vector dimension |
 | `--input`, `-i` | Input dataset file |
 | `--query`, `-q` | Query vector |
-| `--metric`, `-m` | Metric (`l2`, `cosine`, `ip`) |
+| `--metric`, `-m` | Metric (`l2`, `cosine`, `inner`, `inner_product`) |
 | `--top`, `-k` | Number of results |
 | `--threshold`, `-t` | Threshold filter |
+| `--max-conn` | Maximum graph connections per level (HNSW M) |
+| `--build-effort` | Index quality vs. build speed (higher improves recall but slows index construction) |
+| `--search-effort` | Search accuracy vs. query speed (higher improves recall but slows queries) |
 | `--help`, `-h` | Show help |
 | `--version`, `-v` | Show version |
 
@@ -83,7 +86,7 @@ Available metrics:
 
 - `l2`: squared Euclidean distance
 - `cosine`: cosine distance
-- `ip`: inner product similarity
+- `inner` (or `inner_product`): inner product similarity
 
 `l2` uses squared Euclidean distance:
 
