@@ -1,8 +1,12 @@
 # kclib
 
-`kclib` is a collection of small, independent, and composable native
-primitives. Each repository solves one specific problem through a reusable C
-library and, usually, a thin CLI built on the same public API.
+`kclib` is the public development repository for a collection of small,
+independent, and composable native primitives. Each project solves one specific
+problem through a reusable C library and, usually, a thin CLI built on the same
+public API.
+
+All kclib projects are developed together in this monorepo under `NAME.c/`
+directories. They are not maintained as separate Git repositories.
 
 It is not a framework or a monolithic library. The tools work independently or
 compose through stdin, stdout, files, sockets, and explicit text protocols. The
@@ -21,18 +25,17 @@ infrastructure.
 
 ## Catalog
 
-The complete inventory of the collection - name, purpose, when to use it, and
-repository reference - lives in [INDEX.md](INDEX.md). It is the single source
-of truth for the catalog; app and agent instructions read from the same
-file.
+The complete inventory of the collection - name, purpose, and when to use it -
+lives in [INDEX.md](INDEX.md). It is the single source of truth for the catalog;
+app and agent instructions read from the same file.
 
-Each local directory contains detailed documentation in `NAME.c/README.md`.
+Each project directory contains detailed documentation in `NAME.c/README.md`.
 That README defines the actual behavior, options, API, and constraints of its
 project.
 
 ## Common form
 
-A repository usually has this structure:
+A project usually has this structure:
 
 ```text
 NAME.c/
@@ -44,10 +47,11 @@ NAME.c/
 |   |-- libNAME.c
 |   |-- libNAME.h
 |   `-- test.c
-|-- LICENSE
-|-- .gitignore
-`-- .kcsignore
+`-- LICENSE
 ```
+
+Repository-wide ignore rules live in the monorepo root `.gitignore` and
+`.kcsignore`.
 
 - `src/libNAME.c` contains reusable behavior.
 - `src/libNAME.h` is the public library contract.
@@ -104,7 +108,7 @@ make test
 
 Projects normally use Make over CMake and Ninja. A local build creates
 artifacts under `bin/{arch}/{platform}/`; exact multiarch targets depend on the
-repository. The code is primarily C11. `llm.c` also requires C++17 for its
+project. The code is primarily C11. `llm.c` also requires C++17 for its
 llama.cpp integration.
 
 Important special dependencies:
@@ -115,11 +119,11 @@ Important special dependencies:
 - `redp2p.c` uses the index only for coordination; data travels directly between
     peers and no data relay exists.
 
-Each repository declares its requirements and supported targets in its own
+Each project declares its requirements and supported targets in its own
 README and Makefile.
 
 ## Status and license
 
 The projects are beta software and are validated primarily on Debian x86_64,
 although many include targets for other architectures and platforms. They are
-distributed under GPLv3; consult each repository for its exact terms.
+distributed under GPLv3; consult each project for its exact terms.

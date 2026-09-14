@@ -2,9 +2,15 @@
 
 ## Kclib
 
-This repository belongs to the kclib family.
+This repository is the public development monorepo for the kclib family.
 
 Read the workspace-level `AGENTS.md` first. These rules add kclib-specific conventions.
+
+Individual kclibs live as project directories under this repository, using the
+`NAME.c/` form. They are not separate Git repositories.
+
+Repository-wide source-control files such as `.gitignore` and `.kcsignore`
+belong at the monorepo root rather than inside each kclib project.
 
 A kclib is a small, independent native library built around one concrete capability, usually with a thin CLI.
 
