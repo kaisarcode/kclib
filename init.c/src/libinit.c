@@ -1,0 +1,1730 @@
+/**
+ * libinit.c - Persistent Startup Registration
+ * Summary: Core implementation for the init library.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+
+#include "libinit.h"
+
+#include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stddef.h>
+
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
+#endif
+#include <signal.h>
+#ifndef _WIN32
+#  include <dirent.h>
+#  include <sys/stat.h>
+#  include <sys/types.h>
+#  include <unistd.h>
+#endif
+
+#define KC_INIT_BUF   4096
+#define KC_INIT_PATH  512
+
+#ifndef KC_INIT_SYS_DIR
+#ifdef _WIN32
+#define KC_INIT_SYS_DIR "C:\\ProgramData\\kaisarcode\\init.c"
+#else
+#define KC_INIT_SYS_DIR "/etc/kaisarcode/init.c"
+#endif
+#endif
+
+typedef enum {
+    KC_INIT_BACKEND_NONE = 0,
+    KC_INIT_BACKEND_SYSTEMD,
+    KC_INIT_BACKEND_RUNIT,
+    KC_INIT_BACKEND_OPENRC,
+    KC_INIT_BACKEND_SYSV
+} kc_init_backend_t;
+
+struct kc_init {
+    char error[256];
+    char dir[KC_INIT_PATH];
+#ifndef _WIN32
+    kc_init_backend_t backend;
+#endif
+    volatile sig_atomic_t stop_requested;
+};
+
+/**
+ * Sets an error message on the context.
+ * @param ctx Context pointer.
+ * @param fmt printf-style format string.
+ * @return None.
+ */
+static void kc_init_set_error(kc_init_t *ctx, const char *fmt, ...) {
+    va_list ap;
+    if (!ctx || !fmt) return;
+    va_start(ap, fmt);
+    vsnprintf(ctx->error, sizeof(ctx->error), fmt, ap);
+    va_end(ap);
+    ctx->error[sizeof(ctx->error) - 1] = '\0';
+}
+
+typedef enum {
+    KC_ENV_TYPE_STR
+} kc_env_type_t;
+
+typedef struct {
+    const char *env_var;
+    size_t offset;
+    kc_env_type_t type;
+} kc_env_map_t;
+
+static const kc_env_map_t env_config_table[] = {
+    { "KC_INIT_DIR",     offsetof(kc_init_options_t, dir),     KC_ENV_TYPE_STR },
+    { "KC_INIT_BACKEND", offsetof(kc_init_options_t, backend), KC_ENV_TYPE_STR }
+};
+static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
+
+/**
+ * Duplicates one string.
+ * @param text Source string.
+ * @return Allocated copy, or NULL on failure.
+ */
+static char *kc_init_strdup(const char *text) {
+    char *copy;
+    size_t size;
+
+    if (!text) {
+        return NULL;
+    }
+
+    size = strlen(text) + 1;
+    copy = (char *)malloc(size);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, text, size);
+    return copy;
+}
+
+/**
+ * Resolves one backend name into a backend value.
+ * @param name Backend name.
+ * @return Backend value.
+ */
+#ifndef _WIN32
+static kc_init_backend_t kc_init_backend_from_string(const char *name) {
+    if (!name || !name[0]) return KC_INIT_BACKEND_NONE;
+    if (strcmp(name, "systemd") == 0) return KC_INIT_BACKEND_SYSTEMD;
+    if (strcmp(name, "runit") == 0) return KC_INIT_BACKEND_RUNIT;
+    if (strcmp(name, "openrc") == 0) return KC_INIT_BACKEND_OPENRC;
+    if (strcmp(name, "sysv") == 0) return KC_INIT_BACKEND_SYSV;
+    if (strcmp(name, "none") == 0) return KC_INIT_BACKEND_NONE;
+    return KC_INIT_BACKEND_NONE;
+}
+#endif
+
+/**
+ * Create default init options.
+ * @return Default-initialized options.
+ */
+kc_init_options_t kc_init_options_default(void) {
+    kc_init_options_t opts;
+
+    memset(&opts, 0, sizeof(opts));
+    opts.dir = kc_init_strdup(KC_INIT_SYS_DIR);
+    return opts;
+}
+
+/**
+ * Load init options from environment variables.
+ * @param opts Options to update.
+ * @return None.
+ */
+void kc_init_options_load_env(kc_init_options_t *opts) {
+    int i;
+
+    if (!opts) {
+        return;
+    }
+
+    for (i = 0; i < env_config_table_n; i++) {
+        const char *val;
+
+        val = getenv(env_config_table[i].env_var);
+        if (!val) {
+            continue;
+        }
+
+        switch (env_config_table[i].type) {
+            case KC_ENV_TYPE_STR: {
+                char **p;
+
+                p = (char **)((char *)opts + env_config_table[i].offset);
+                free(*p);
+                *p = kc_init_strdup(val);
+                break;
+            }
+        }
+    }
+}
+
+/**
+ * Free dynamically allocated resources within init options.
+ * @param opts Options to clean up.
+ * @return None.
+ */
+void kc_init_options_free(kc_init_options_t *opts) {
+    if (!opts) {
+        return;
+    }
+    free(opts->dir);
+    opts->dir = NULL;
+    free(opts->backend);
+    opts->backend = NULL;
+}
+
+/**
+ * Checks if the current process has administrative/root privileges.
+ * @return 1 if admin/root, 0 otherwise.
+ */
+static int kc_init_is_admin(void) {
+#ifdef _WIN32
+    HKEY hk;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software", 0,
+            KEY_READ | KEY_WRITE, &hk) == ERROR_SUCCESS) {
+        RegCloseKey(hk);
+        return 1;
+    }
+    return 0;
+#else
+    return geteuid() == 0;
+#endif
+}
+
+/**
+ * Writes the user name to a metadata file.
+ * @param path File path.
+ * @param user User name.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_write_user(const char *path, const char *user) {
+    FILE *fp = fopen(path, "w");
+    if (!fp) return 1;
+    fprintf(fp, "%s", user);
+    fclose(fp);
+#ifndef _WIN32
+    chmod(path, 0644);
+#endif
+    return 0;
+}
+
+/**
+ * Reads the user name from a metadata file.
+ * @param path File path.
+ * @param out  Output buffer.
+ * @param cap  Buffer capacity.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_read_user(const char *path, char *out, size_t cap) {
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 1;
+    if (!fgets(out, (int)cap, fp)) {
+        fclose(fp);
+        return 1;
+    }
+    fclose(fp);
+    size_t n = strlen(out);
+    if (n > 0 && out[n - 1] == '\n') out[n - 1] = '\0';
+    return 0;
+}
+
+/**
+ * Creates a directory and all intermediate parents.
+ * @param path Directory path.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_ensure_dir(const char *path) {
+#ifdef _WIN32
+    char buf[KC_INIT_PATH];
+    char *p;
+    if ((size_t)snprintf(buf, sizeof(buf), "%s", path) >= sizeof(buf))
+        return 1;
+    for (p = buf + 1; *p; p++) {
+        if (*p == '\\') {
+            *p = '\0';
+            if (!CreateDirectoryA(buf, NULL)
+                    && GetLastError() != ERROR_ALREADY_EXISTS)
+                return 1;
+            *p = '\\';
+        }
+    }
+    if (!CreateDirectoryA(buf, NULL)
+            && GetLastError() != ERROR_ALREADY_EXISTS)
+        return 1;
+    return 0;
+#else
+    char buf[KC_INIT_PATH];
+    char *p;
+    if ((size_t)snprintf(buf, sizeof(buf), "%s", path) >= sizeof(buf))
+        return 1;
+    for (p = buf + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(buf, 0755) != 0 && errno != EEXIST) return 1;
+            chmod(buf, 0755);
+            *p = '/';
+        }
+    }
+    if (mkdir(buf, 0755) != 0 && errno != EEXIST) return 1;
+    chmod(buf, 0755);
+    return 0;
+#endif
+}
+
+/**
+ * Detects the original user who invoked the tool.
+ * @return User name string (caller must not free).
+ */
+static const char *kc_init_detect_user(void) {
+    const char *u;
+    u = getenv("SUDO_USER");
+    if (u && u[0]) return u;
+    u = getenv("LOGNAME");
+    if (u && u[0] && strcmp(u, "root") != 0) return u;
+    u = getenv("USER");
+    if (u && u[0] && strcmp(u, "root") != 0) return u;
+    return "root";
+}
+
+/**
+ * Composes the metadata file path for a key.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param out  Output buffer.
+ * @param cap  Buffer capacity.
+ * @return 0 on success, 1 on overflow.
+ */
+static int kc_init_meta_path(
+    const char *dir, const char *key, char *out, size_t cap
+) {
+#ifdef _WIN32
+    if ((size_t)snprintf(out, cap, "%s\\%s", dir, key) >= cap)
+        return 1;
+    return 0;
+#else
+    if ((size_t)snprintf(out, cap, "%s/%s", dir, key) >= cap)
+        return 1;
+    return 0;
+#endif
+}
+
+/**
+ * Writes the command string to a metadata file.
+ * @param path  File path.
+ * @param cmd   Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_write_meta(const char *path, const char *cmd) {
+    FILE *fp = fopen(path, "w");
+    if (!fp) return 1;
+    fprintf(fp, "%s", cmd);
+    fclose(fp);
+#ifndef _WIN32
+    chmod(path, 0644);
+#endif
+    return 0;
+}
+
+/**
+ * Reads the command string from a metadata file.
+ * @param path     File path.
+ * @param out      Output buffer.
+ * @param cap      Buffer capacity.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_read_meta(const char *path, char *out, size_t cap) {
+    FILE *f;
+    size_t n;
+
+    f = fopen(path, "r");
+    if (!f) return 1;
+    if (!fgets(out, (int)cap, f)) {
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+    n = strlen(out);
+    if (n > 0 && out[n - 1] == '\n') out[n - 1] = '\0';
+    return 0;
+}
+
+#ifndef _WIN32
+/**
+ * Composes the backend metadata file path for a key.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param out  Output buffer.
+ * @param cap  Buffer capacity.
+ * @return 0 on success, 1 on overflow.
+ */
+static int kc_init_backend_path(
+    const char *dir, const char *key, char *out, size_t cap
+) {
+    if ((size_t)snprintf(out, cap, "%s/%s.backend", dir, key) >= cap)
+        return 1;
+    return 0;
+}
+
+/**
+ * Writes the backend type to a metadata file.
+ * @param path    File path.
+ * @param backend Backend type.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_write_backend(const char *path, kc_init_backend_t backend) {
+    FILE *fp = fopen(path, "w");
+    if (!fp) return 1;
+    fprintf(fp, "%d", backend);
+    fclose(fp);
+    chmod(path, 0644);
+    return 0;
+}
+
+/**
+ * Reads the backend type from a metadata file.
+ * @param path File path.
+ * @return Backend type or KC_INIT_BACKEND_NONE on failure.
+ */
+static kc_init_backend_t kc_init_read_backend(const char *path) {
+    FILE *f;
+    int b;
+
+    f = fopen(path, "r");
+    if (!f) return KC_INIT_BACKEND_NONE;
+    if (fscanf(f, "%d", &b) != 1) {
+        fclose(f);
+        return KC_INIT_BACKEND_NONE;
+    }
+    fclose(f);
+    return (kc_init_backend_t)b;
+}
+#endif
+
+#ifndef _WIN32
+/**
+ * Checks if a command exists and is executable.
+ * @param cmd Command name.
+ * @return 1 if exists, 0 otherwise.
+ */
+static int kc_init_cmd_exists(const char *cmd) {
+    char path[KC_INIT_PATH];
+    int found = 0;
+
+    if (snprintf(path, sizeof(path), "command -v %s > /dev/null 2>&1",
+            cmd) < (int)sizeof(path)) {
+        if (system(path) == 0) found = 1;
+    }
+    return found;
+}
+
+/**
+ * Detects the active init system backend.
+ * @return Backend enum value.
+ */
+static kc_init_backend_t kc_init_detect_backend(void) {
+    char buf[KC_INIT_PATH];
+    ssize_t len;
+
+    len = readlink("/proc/1/exe", buf, sizeof(buf) - 1);
+    if (len > 0) {
+        buf[len] = '\0';
+
+        if (strstr(buf, "systemd")) {
+            if (kc_init_cmd_exists("systemctl")) return KC_INIT_BACKEND_SYSTEMD;
+        }
+        if (strstr(buf, "runit")) {
+            if (kc_init_cmd_exists("sv")) return KC_INIT_BACKEND_RUNIT;
+        }
+        if (strstr(buf, "openrc")) {
+            if (kc_init_cmd_exists("rc-update")) return KC_INIT_BACKEND_OPENRC;
+        }
+        if (strstr(buf, "init")) {
+            if (kc_init_cmd_exists("update-rc.d") ||
+                    kc_init_cmd_exists("chkconfig"))
+                return KC_INIT_BACKEND_SYSV;
+        }
+    }
+
+    if (kc_init_cmd_exists("systemctl")) return KC_INIT_BACKEND_SYSTEMD;
+    if (kc_init_cmd_exists("rc-update")) return KC_INIT_BACKEND_OPENRC;
+    if (kc_init_cmd_exists("update-rc.d") || kc_init_cmd_exists("chkconfig"))
+        return KC_INIT_BACKEND_SYSV;
+
+    return KC_INIT_BACKEND_NONE;
+}
+#endif
+
+#ifndef _WIN32
+
+/**
+ * Returns the init.d directory, preferring /etc/init.d.
+ * @param out Output buffer.
+ * @param cap Buffer capacity.
+ * @return 0 on success, 1 on overflow.
+ */
+static int kc_init_initd_dir(char *out, size_t cap) {
+    struct stat st;
+    const char *path;
+
+    path = "/etc/init.d";
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if ((size_t)snprintf(out, cap, "%s", path) < cap)
+            return 0;
+    }
+    path = "/etc/rc.d/init.d";
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if ((size_t)snprintf(out, cap, "%s", path) < cap)
+            return 0;
+    }
+    return 1;
+}
+
+/**
+ * Returns the rc.d directory prefix, preferring /etc/rc.
+ * @param out Output buffer.
+ * @param cap Buffer capacity.
+ * @return 0 on success, 1 on overflow.
+ */
+static int kc_init_rcd_prefix(char *out, size_t cap) {
+    struct stat st;
+    const char *path;
+
+    path = "/etc/rc2.d";
+    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if ((size_t)snprintf(out, cap, "/etc/rc") < cap)
+            return 0;
+    }
+    path = "/etc/rc.d";
+    if ((size_t)snprintf(out, cap, "/etc/rc.d/rc") >= cap)
+        return 1;
+    return 0;
+}
+
+/**
+ * Composes the init.d script path for a key.
+ * @param initd Init.d directory.
+ * @param key   Registration key name.
+ * @param out   Output buffer.
+ * @param cap   Buffer capacity.
+ * @return 0 on success, 1 on overflow.
+ */
+static int kc_init_script_path(
+    const char *initd, const char *key, char *out, size_t cap
+) {
+    if ((size_t)snprintf(out, cap, "%s/%s", initd, key) >= cap)
+        return 1;
+    return 0;
+}
+
+/**
+ * Writes the init.d startup script for a key and command.
+ * @param script  Script file path.
+ * @param key     Registration key name.
+ * @param cmd     Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_write_script_sysv(
+    const char *script, const char *key, const char *cmd
+) {
+    FILE *f;
+
+    f = fopen(script, "w");
+    if (!f) return 1;
+    fprintf(f, "#!/bin/sh\n");
+    fputs("### BEGIN INIT INFO\n", f);
+    fprintf(f, "# Provides:          init-%s\n", key);
+    fprintf(f, "# Required-Start:    $remote_fs $syslog $network\n");
+    fprintf(f, "# Required-Stop:     $remote_fs $syslog $network\n");
+    fprintf(f, "# Default-Start:     2 3 4 5\n");
+    fprintf(f, "# Default-Stop:      0 1 6\n");
+    fprintf(f, "# Short-Description: init.c entry %s\n", key);
+    fputs("### END INIT INFO\n", f);
+    const char *user_name = kc_init_detect_user();
+    if (strcmp(user_name, "root") != 0) {
+        fprintf(f, "case \"$1\" in\n  start)\n");
+        fputs("    start-stop-daemon --start ", f);
+        fprintf(f, "--user %s ", user_name);
+        fputs("--exec /bin/sh ", f);
+        fprintf(f, "-- -c 'exec %s' &\n", cmd);
+        fprintf(f, "    ;;\n  *)\n    exec %s\n    ;;\nesac\n", cmd);
+    } else {
+        fprintf(f, "exec %s\n", cmd);
+    }
+    fclose(f);
+    if (chmod(script, 0755) != 0) return 1;
+    return 0;
+}
+
+/**
+ * Creates rc*.d symlinks for the given script and key.
+ * @param rcd_prefix rc.d directory prefix.
+ * @param script     Absolute path to the init.d script.
+ * @param key        Registration key name.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_create_links(
+    const char *rcd_prefix, const char *script, const char *key
+) {
+    static const int levels[] = { 2, 3, 4, 5 };
+    char link[KC_INIT_PATH];
+    size_t i;
+
+    for (i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
+        if ((size_t)snprintf(link, sizeof(link),
+                "%s%d.d/S99%s", rcd_prefix, levels[i], key)
+                >= sizeof(link))
+            return 1;
+        (void)unlink(link);
+        if (symlink(script, link) != 0 && errno != EEXIST)
+            return 1;
+    }
+    return 0;
+}
+
+/**
+ * Removes rc*.d symlinks for a key.
+ * @param rcd_prefix rc.d directory prefix.
+ * @param key        Registration key name.
+ * @return None.
+ */
+static void kc_init_remove_links(
+    const char *rcd_prefix, const char *key
+) {
+    static const int levels[] = { 2, 3, 4, 5 };
+    char link[KC_INIT_PATH];
+    size_t i;
+
+    for (i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
+        if ((size_t)snprintf(link, sizeof(link),
+                "%s%d.d/S99%s", rcd_prefix, levels[i], key)
+                < sizeof(link))
+            (void)unlink(link);
+    }
+}
+
+/**
+ * Registers or replaces a named startup entry on SysV.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cmd  Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_update_sysv(
+    const char *dir, const char *key, const char *cmd
+) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char initd[KC_INIT_PATH];
+    char rcd[KC_INIT_PATH];
+    char script[KC_INIT_PATH];
+
+    if (kc_init_ensure_dir(dir) != 0) return 1;
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0) return 1;
+    if (kc_init_write_meta(meta, cmd) != 0) return 1;
+
+    const char *user_name = kc_init_detect_user();
+    if (strcmp(user_name, "root") != 0) {
+        char umeta[KC_INIT_PATH];
+        if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta))
+            (void)kc_init_write_user(umeta, user_name);
+    }
+
+    if (!kc_init_is_admin()) return 0;
+
+    if (kc_init_initd_dir(initd, sizeof(initd)) != 0) {
+        (void)remove(meta);
+        return 1;
+    }
+    if (kc_init_script_path(initd, key, script, sizeof(script)) != 0) {
+        (void)remove(meta);
+        return 1;
+    }
+    if (kc_init_write_script_sysv(script, key, cmd) != 0) {
+        (void)remove(meta);
+        return 1;
+    }
+
+    const char *sudo_user = getenv("SUDO_USER");
+    if (sudo_user && sudo_user[0]) {
+        char umeta[KC_INIT_PATH];
+        if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta))
+            (void)kc_init_write_user(umeta, sudo_user);
+    }
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0)
+        (void)kc_init_write_backend(bmeta, KC_INIT_BACKEND_SYSV);
+
+    if (kc_init_rcd_prefix(rcd, sizeof(rcd)) != 0) {
+        (void)remove(meta);
+        (void)remove(script);
+        return 1;
+    }
+    if (kc_init_create_links(rcd, script, key) != 0) {
+        (void)remove(meta);
+        (void)remove(script);
+        kc_init_remove_links(rcd, key);
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Removes a named startup entry on SysV.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @return 0 always (best-effort cleanup).
+ */
+static int kc_init_run_delete_sysv(
+    const char *dir, const char *key
+) {
+    char meta[KC_INIT_PATH];
+    char initd[KC_INIT_PATH];
+    char rcd[KC_INIT_PATH];
+    char script[KC_INIT_PATH];
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0)
+        return 0;
+    (void)remove(meta);
+
+    if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
+        if (kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
+                sizeof(meta)) == 0) {
+            (void)remove(meta);
+        }
+    }
+
+    if (kc_init_initd_dir(initd, sizeof(initd)) == 0 &&
+            kc_init_script_path(initd, key, script,
+                sizeof(script)) == 0) {
+        (void)remove(script);
+    }
+    if (kc_init_rcd_prefix(rcd, sizeof(rcd)) == 0)
+        kc_init_remove_links(rcd, key);
+
+    return 0;
+}
+
+/**
+ * Executes the registered command for a key on SysV.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_exec_sysv(
+    const char *dir, const char *key
+) {
+    char meta[KC_INIT_PATH];
+    char cmd[KC_INIT_BUF];
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0)
+        return 1;
+    if (kc_init_read_meta(meta, cmd, sizeof(cmd)) != 0) {
+        if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
+            if (kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
+                    sizeof(meta)) == 0 &&
+                    kc_init_read_meta(meta, cmd, sizeof(cmd)) == 0) {
+                goto found;
+            }
+        }
+        return 1;
+    }
+found:
+    return system(cmd) >= 0 ? 0 : 1;
+}
+
+/**
+ * Calls the list callback for one key on SysV.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cb   Callback, or NULL.
+ * @param userdata Opaque pointer.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_ls_row_sysv(
+    const char *dir, const char *key, kc_init_list_cb cb, void *userdata
+) {
+    char meta[KC_INIT_PATH];
+    char umeta[KC_INIT_PATH];
+    char cmd[KC_INIT_BUF];
+    char user[64] = "root";
+
+    if (cb) {
+        if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0 &&
+                kc_init_read_meta(meta, cmd, sizeof(cmd)) == 0) {
+            if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta)) {
+                (void)kc_init_read_user(umeta, user, sizeof(user));
+            }
+            cb(key, user, cmd, userdata);
+        } else {
+            cb(key, "", "", userdata);
+        }
+    }
+    return 0;
+}
+
+/**
+ * Lists all registered startup entries on SysV.
+ * @param dir  Metadata directory.
+ * @param cb   Callback, or NULL.
+ * @param userdata Opaque pointer.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_list_sysv(const char *dir, kc_init_list_cb cb, void *userdata) {
+    DIR *dp;
+    struct dirent *de;
+
+    dp = opendir(dir);
+    if (dp) {
+        while ((de = readdir(dp))) {
+            if (de->d_name[0] == '.') continue;
+            if (strstr(de->d_name, ".user") || strstr(de->d_name, ".backend"))
+                continue;
+
+            (void)kc_init_ls_row_sysv(dir, de->d_name, cb, userdata);
+        }
+        closedir(dp);
+    }
+    if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
+        dp = opendir(KC_INIT_SYS_DIR);
+        if (dp) {
+            while ((de = readdir(dp))) {
+                if (de->d_name[0] == '.') continue;
+                if (strstr(de->d_name, ".backend")) continue;
+                (void)kc_init_ls_row_sysv(KC_INIT_SYS_DIR, de->d_name, cb, userdata);
+            }
+            closedir(dp);
+        }
+    }
+    return 0;
+}
+
+/**
+ * Lists one registered startup entry on SysV.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cb   Callback, or NULL.
+ * @param userdata Opaque pointer.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_list_one_sysv(
+    const char *dir, const char *key, kc_init_list_cb cb, void *userdata
+) {
+    char meta[KC_INIT_PATH];
+    struct stat st;
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0 &&
+            stat(meta, &st) == 0) {
+        return kc_init_ls_row_sysv(dir, key, cb, userdata);
+    }
+    if (strcmp(dir, KC_INIT_SYS_DIR) != 0 &&
+            kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
+                sizeof(meta)) == 0 &&
+            stat(meta, &st) == 0) {
+        return kc_init_ls_row_sysv(KC_INIT_SYS_DIR, key, cb, userdata);
+    }
+    return 1;
+}
+
+/**
+ * Registers or replaces a named startup entry on systemd.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cmd  Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_update_systemd(
+    const char *dir, const char *key, const char *cmd
+) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char service[KC_INIT_PATH];
+    char enable[KC_INIT_PATH];
+    FILE *f;
+
+    if (kc_init_ensure_dir(dir) != 0) return 1;
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0) return 1;
+    if (kc_init_write_meta(meta, cmd) != 0) return 1;
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0)
+        (void)kc_init_write_backend(bmeta, KC_INIT_BACKEND_SYSTEMD);
+
+    const char *user_name = kc_init_detect_user();
+    if (strcmp(user_name, "root") != 0) {
+        char umeta[KC_INIT_PATH];
+        if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta))
+            (void)kc_init_write_user(umeta, user_name);
+    }
+
+    if (!kc_init_is_admin()) return 0;
+
+    if ((size_t)snprintf(service, sizeof(service),
+            "/etc/systemd/system/init-%s.service", key) >= sizeof(service))
+        return 1;
+
+    f = fopen(service, "w");
+    if (!f) return 1;
+    fprintf(f, "[Unit]\nDescription=init.c entry %s\nAfter=network.target\n\n",
+        key);
+    fprintf(f, "[Service]\nType=simple\nRemainAfterExit=yes\n");
+    
+    if (strcmp(user_name, "root") != 0) {
+        fprintf(f, "User=%s\n", user_name);
+        fprintf(f, "Group=%s\n", user_name);
+        fprintf(f, "WorkingDirectory=/home/%s\n", user_name);
+    }
+
+    fprintf(f, "ExecStart=%s\nRestart=on-failure\n\n", cmd);
+    fprintf(f, "[Install]\nWantedBy=multi-user.target\n");
+    fclose(f);
+
+    (void)system("systemctl daemon-reload");
+    snprintf(enable, sizeof(enable),
+        "systemctl enable init-%s.service", key);
+    return system(enable) == 0 ? 0 : 1;
+}
+
+/**
+ * Removes a named startup entry on systemd.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @return 0 always (best-effort cleanup).
+ */
+static int kc_init_run_delete_systemd(
+    const char *dir, const char *key
+) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char service[KC_INIT_PATH];
+    char disable[KC_INIT_PATH];
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0) {
+        (void)remove(meta);
+    }
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0) {
+        (void)remove(bmeta);
+    }
+
+    if (kc_init_is_admin()) {
+        snprintf(disable, sizeof(disable),
+            "systemctl disable --now init-%s.service > /dev/null 2>&1", key);
+        (void)system(disable);
+
+        if ((size_t)snprintf(service, sizeof(service),
+                "/etc/systemd/system/init-%s.service", key) < sizeof(service)) {
+            (void)remove(service);
+        }
+        (void)system("systemctl daemon-reload");
+    }
+
+    return 0;
+}
+
+/**
+ * Registers or replaces a named startup entry on runit.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cmd  Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_update_runit(
+    const char *dir, const char *key, const char *cmd
+) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char sv_dir[KC_INIT_PATH];
+    char run_script[KC_INIT_PATH];
+    char link[KC_INIT_PATH];
+    FILE *f;
+
+    if (kc_init_ensure_dir(dir) != 0) return 1;
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0) return 1;
+    if (kc_init_write_meta(meta, cmd) != 0) return 1;
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0)
+        (void)kc_init_write_backend(bmeta, KC_INIT_BACKEND_RUNIT);
+
+    if (!kc_init_is_admin()) return 0;
+
+    if ((size_t)snprintf(sv_dir, sizeof(sv_dir), "/etc/sv/init-%s", key)
+            >= sizeof(sv_dir))
+        return 1;
+    if (kc_init_ensure_dir(sv_dir) != 0) return 1;
+
+    if ((size_t)snprintf(run_script, sizeof(run_script), "%s/run", sv_dir)
+            >= sizeof(run_script))
+        return 1;
+
+    f = fopen(run_script, "w");
+    if (!f) return 1;
+    fprintf(f, "#!/bin/sh\nexec %s\n", cmd);
+    fclose(f);
+    (void)chmod(run_script, 0755);
+
+    if ((size_t)snprintf(link, sizeof(link), "/etc/service/init-%s", key)
+            < sizeof(link)) {
+        (void)unlink(link);
+        (void)symlink(sv_dir, link);
+    }
+
+    return 0;
+}
+
+/**
+ * Removes a named startup entry on runit.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @return 0 always (best-effort cleanup).
+ */
+static int kc_init_run_delete_runit(
+    const char *dir, const char *key
+) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char sv_dir[KC_INIT_PATH];
+    char link[KC_INIT_PATH];
+    char cmd[KC_INIT_BUF];
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0) {
+        (void)remove(meta);
+    }
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0) {
+        (void)remove(bmeta);
+    }
+
+    if (kc_init_is_admin()) {
+        if ((size_t)snprintf(link, sizeof(link), "/etc/service/init-%s", key)
+                < sizeof(link)) {
+            (void)unlink(link);
+        }
+
+        if ((size_t)snprintf(sv_dir, sizeof(sv_dir), "/etc/sv/init-%s", key)
+                < sizeof(sv_dir)) {
+            struct stat st;
+            if (stat(sv_dir, &st) == 0 && S_ISDIR(st.st_mode)) {
+                snprintf(cmd, sizeof(cmd), "rm -rf %s", sv_dir);
+                (void)system(cmd);
+            }
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Registers or replaces a named startup entry on OpenRC.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cmd  Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_update_openrc(
+    const char *dir, const char *key, const char *cmd
+) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char script[KC_INIT_PATH];
+    char update[KC_INIT_PATH];
+    FILE *f;
+
+    if (kc_init_ensure_dir(dir) != 0) return 1;
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0) return 1;
+    if (kc_init_write_meta(meta, cmd) != 0) return 1;
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0)
+        (void)kc_init_write_backend(bmeta, KC_INIT_BACKEND_OPENRC);
+
+    const char *user_name = kc_init_detect_user();
+    if (strcmp(user_name, "root") != 0) {
+        char umeta[KC_INIT_PATH];
+        if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta))
+            (void)kc_init_write_user(umeta, user_name);
+    }
+
+    if (!kc_init_is_admin()) return 0;
+
+    if ((size_t)snprintf(script, sizeof(script), "/etc/init.d/init-%s", key)
+            >= sizeof(script))
+        return 1;
+
+    f = fopen(script, "w");
+    if (!f) return 1;
+    fprintf(f, "#!/sbin/openrc-run\n");
+    fprintf(f, "description=\"init.c entry %s\"\n", key);
+    fprintf(f, "start() {\n");
+    fprintf(f, "    ebegin \"Starting init-%s\"\n", key);
+    if (strcmp(user_name, "root") != 0) {
+        fputs("    start-stop-daemon --start ", f);
+        fprintf(f, "--user %s ", user_name);
+        fputs("--exec /bin/sh ", f);
+        fprintf(f, "-- -c 'exec %s'\n", cmd);
+    } else {
+        fputs("    start-stop-daemon --start ", f);
+        fputs("--exec /bin/sh ", f);
+        fprintf(f, "-- -c 'exec %s'\n", cmd);
+    }
+    fprintf(f, "    eend $?\n}\n");
+    fprintf(f, "depend() {\n    need net\n}\n");
+    fclose(f);
+    (void)chmod(script, 0755);
+
+    snprintf(update, sizeof(update),
+        "rc-update add init-%s default > /dev/null 2>&1", key);
+    return system(update) == 0 ? 0 : 1;
+}
+
+/**
+ * Removes a named startup entry on OpenRC.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @return 0 always (best-effort cleanup).
+ */
+static int kc_init_run_delete_openrc(
+    const char *dir, const char *key
+) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char script[KC_INIT_PATH];
+    char update[KC_INIT_PATH];
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0) {
+        (void)remove(meta);
+    }
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0) {
+        (void)remove(bmeta);
+    }
+
+    if (kc_init_is_admin()) {
+        snprintf(update, sizeof(update),
+            "rc-update del init-%s default > /dev/null 2>&1", key);
+        (void)system(update);
+
+        if ((size_t)snprintf(script, sizeof(script), "/etc/init.d/init-%s", key)
+                < sizeof(script)) {
+            (void)remove(script);
+        }
+    }
+
+    return 0;
+}
+
+#endif
+
+#ifdef _WIN32
+
+/**
+ * Returns the Windows Startup folder path.
+ * @param out Output buffer.
+ * @param cap Buffer capacity.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_startup_dir(char *out, size_t cap) {
+    char appdata[KC_INIT_PATH];
+    DWORD r;
+
+    if (kc_init_is_admin()) {
+        r = GetEnvironmentVariableA("PROGRAMDATA", appdata,
+            sizeof(appdata));
+        if (r != 0 && r < (DWORD)sizeof(appdata)) {
+            if ((size_t)snprintf(out, cap,
+                    "%s\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
+                    appdata) < cap)
+                return 0;
+        }
+    }
+
+    r = GetEnvironmentVariableA("APPDATA", appdata, sizeof(appdata));
+    if (r == 0 || r >= (DWORD)sizeof(appdata)) return 1;
+    if ((size_t)snprintf(out, cap,
+            "%s\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
+            appdata) >= cap) return 1;
+    return 0;
+}
+
+/**
+ * Composes the .cmd launcher path in the Startup folder.
+ * @param startup Startup folder path.
+ * @param key     Registration key name.
+ * @param out     Output buffer.
+ * @param cap     Buffer capacity.
+ * @return 0 on success, 1 on overflow.
+ */
+static int kc_init_launcher_path(
+    const char *startup, const char *key, char *out, size_t cap
+) {
+    if ((size_t)snprintf(out, cap, "%s\\%s.cmd", startup, key) >= cap)
+        return 1;
+    return 0;
+}
+
+/**
+ * Writes the .cmd startup launcher for a command.
+ * @param path Launcher file path.
+ * @param cmd  Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_write_launcher(const char *path, const char *cmd) {
+    FILE *f = fopen(path, "w");
+    if (!f) return 1;
+    fprintf(f, "@echo off\r\n");
+    fprintf(f, "%s\r\n", cmd);
+    fclose(f);
+    return 0;
+}
+
+/**
+ * Adds the command to the HKCU Run registry key.
+ * @param key Registration key name.
+ * @param cmd Command string.
+ * @return None.
+ */
+static void kc_init_reg_set(const char *key, const char *cmd) {
+    HKEY hk;
+    HKEY root = kc_init_is_admin() ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+
+    if (RegOpenKeyExA(root,
+            "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            0, KEY_SET_VALUE, &hk) != ERROR_SUCCESS)
+        return;
+    RegSetValueExA(hk, key, 0, REG_SZ,
+        (const BYTE *)cmd, (DWORD)(strlen(cmd) + 1));
+    RegCloseKey(hk);
+}
+
+/**
+ * Removes the command from the HKCU Run registry key.
+ * @param key Registration key name.
+ * @return None.
+ */
+static void kc_init_reg_delete(const char *key) {
+    HKEY hk;
+    HKEY root = kc_init_is_admin() ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+
+    if (RegOpenKeyExA(root,
+            "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            0, KEY_SET_VALUE, &hk) != ERROR_SUCCESS)
+        return;
+    RegDeleteValueA(hk, key);
+    RegCloseKey(hk);
+}
+
+/**
+ * Registers or replaces a named startup entry on Windows.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cmd  Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_update_win32(
+    const char *dir, const char *key, const char *cmd
+) {
+    char meta[KC_INIT_PATH];
+    char startup[KC_INIT_PATH];
+    char launcher[KC_INIT_PATH];
+
+    if (kc_init_ensure_dir(dir) != 0) return 1;
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0) return 1;
+    if (kc_init_write_meta(meta, cmd) != 0) return 1;
+
+    const char *user_name = kc_init_detect_user();
+    if (strcmp(user_name, "root") != 0) {
+        char umeta[KC_INIT_PATH];
+        if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta))
+            (void)kc_init_write_user(umeta, user_name);
+    }
+
+    if (kc_init_startup_dir(startup, sizeof(startup)) != 0) {
+        (void)DeleteFileA(meta);
+        return 1;
+    }
+    if (kc_init_ensure_dir(startup) != 0) {
+        (void)DeleteFileA(meta);
+        return 1;
+    }
+    if (kc_init_launcher_path(startup, key, launcher,
+            sizeof(launcher)) != 0) {
+        (void)DeleteFileA(meta);
+        return 1;
+    }
+    if (kc_init_write_launcher(launcher, cmd) != 0) {
+        (void)DeleteFileA(meta);
+        return 1;
+    }
+    kc_init_reg_set(key, cmd);
+    return 0;
+}
+
+/**
+ * Removes a named startup entry on Windows.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @return 0 always (best-effort cleanup).
+ */
+static int kc_init_run_delete_win32(
+    const char *dir, const char *key
+) {
+    char meta[KC_INIT_PATH];
+    char startup[KC_INIT_PATH];
+    char launcher[KC_INIT_PATH];
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0)
+        return 0;
+    (void)DeleteFileA(meta);
+
+    if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
+        if (kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
+                sizeof(meta)) == 0) {
+            (void)DeleteFileA(meta);
+        }
+    }
+
+    if (kc_init_startup_dir(startup, sizeof(startup)) == 0 &&
+            kc_init_launcher_path(startup, key, launcher,
+                sizeof(launcher)) == 0) {
+        (void)DeleteFileA(launcher);
+    }
+    kc_init_reg_delete(key);
+
+    return 0;
+}
+
+/**
+ * Executes the registered command for a key on Windows.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_exec_win32(
+    const char *dir, const char *key
+) {
+    char meta[KC_INIT_PATH];
+    char cmd[KC_INIT_BUF];
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0)
+        return 1;
+    if (kc_init_read_meta(meta, cmd, sizeof(cmd)) != 0) {
+        if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
+            if (kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
+                    sizeof(meta)) == 0 &&
+                    kc_init_read_meta(meta, cmd, sizeof(cmd)) == 0) {
+                goto found;
+            }
+        }
+        return 1;
+    }
+found:
+    return system(cmd) >= 0 ? 0 : 1;
+}
+
+/**
+ * Calls the list callback for one key on Windows.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cb   Callback, or NULL.
+ * @param userdata Opaque pointer.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_ls_row_win32(
+    const char *dir, const char *key, kc_init_list_cb cb, void *userdata
+) {
+    char meta[KC_INIT_PATH];
+    char umeta[KC_INIT_PATH];
+    char cmd[KC_INIT_BUF];
+    char user[64] = "root";
+
+    if (cb) {
+        if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0 &&
+                kc_init_read_meta(meta, cmd, sizeof(cmd)) == 0) {
+            if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta)) {
+                (void)kc_init_read_user(umeta, user, sizeof(user));
+            }
+            cb(key, user, cmd, userdata);
+        } else {
+            cb(key, "", "", userdata);
+        }
+    }
+    return 0;
+}
+
+/**
+ * Lists all registered startup entries on Windows.
+ * @param dir  Metadata directory.
+ * @param cb   Callback, or NULL.
+ * @param userdata Opaque pointer.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_list_win32(const char *dir, kc_init_list_cb cb, void *userdata) {
+    WIN32_FIND_DATAA fd;
+    HANDLE h;
+    char pattern[KC_INIT_PATH];
+
+    if ((size_t)snprintf(pattern, sizeof(pattern),
+            "%s\\*", dir) < sizeof(pattern)) {
+        h = FindFirstFileA(pattern, &fd);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (fd.cFileName[0] == '.') continue;
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                (void)kc_init_ls_row_win32(dir, fd.cFileName, cb, userdata);
+            } while (FindNextFileA(h, &fd));
+            FindClose(h);
+        }
+    }
+
+    if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
+        if ((size_t)snprintf(pattern, sizeof(pattern),
+                "%s\\*", KC_INIT_SYS_DIR) < sizeof(pattern)) {
+            h = FindFirstFileA(pattern, &fd);
+            if (h != INVALID_HANDLE_VALUE) {
+                do {
+                    if (fd.cFileName[0] == '.') continue;
+                    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                        continue;
+                    (void)kc_init_ls_row_win32(KC_INIT_SYS_DIR, fd.cFileName, cb, userdata);
+                } while (FindNextFileA(h, &fd));
+                FindClose(h);
+            }
+        }
+    }
+    return 0;
+}
+
+/**
+ * Lists one registered startup entry on Windows.
+ * @param dir  Metadata directory.
+ * @param key  Registration key name.
+ * @param cb   Callback, or NULL.
+ * @param userdata Opaque pointer.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_list_one_win32(
+    const char *dir, const char *key, kc_init_list_cb cb, void *userdata
+) {
+    char meta[KC_INIT_PATH];
+    DWORD attr;
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0) {
+        attr = GetFileAttributesA(meta);
+        if (attr != INVALID_FILE_ATTRIBUTES)
+            return kc_init_ls_row_win32(dir, key, cb, userdata);
+    }
+    if (strcmp(dir, KC_INIT_SYS_DIR) != 0 &&
+            kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
+                sizeof(meta)) == 0) {
+        attr = GetFileAttributesA(meta);
+        if (attr != INVALID_FILE_ATTRIBUTES)
+            return kc_init_ls_row_win32(KC_INIT_SYS_DIR, key, cb, userdata);
+    }
+    return 1;
+}
+
+#endif
+
+/**
+ * Dispatches update to the platform backend.
+ * @param ctx  Context pointer.
+ * @param key  Registration key name.
+ * @param cmd  Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_update(
+    kc_init_t *ctx, const char *key, const char *cmd
+) {
+#ifdef _WIN32
+    return kc_init_run_update_win32(ctx->dir, key, cmd);
+#else
+    if (!kc_init_is_admin()) {
+        return 1;
+    }
+
+    switch (ctx->backend) {
+        case KC_INIT_BACKEND_SYSTEMD:
+            return kc_init_run_update_systemd(ctx->dir, key, cmd);
+        case KC_INIT_BACKEND_RUNIT:
+            return kc_init_run_update_runit(ctx->dir, key, cmd);
+        case KC_INIT_BACKEND_OPENRC:
+            return kc_init_run_update_openrc(ctx->dir, key, cmd);
+        case KC_INIT_BACKEND_SYSV:
+            return kc_init_run_update_sysv(ctx->dir, key, cmd);
+        default:
+            return 1;
+    }
+#endif
+}
+
+/**
+ * Dispatches delete to the platform backend.
+ * @param ctx  Context pointer.
+ * @param key  Registration key name.
+ * @return 0 always (best-effort cleanup).
+ */
+static int kc_init_run_delete(kc_init_t *ctx, const char *key) {
+#ifdef _WIN32
+    return kc_init_run_delete_win32(ctx->dir, key);
+#else
+    if (!kc_init_is_admin()) {
+        return 1;
+    }
+
+    kc_init_backend_t b = KC_INIT_BACKEND_NONE;
+    char bmeta[KC_INIT_PATH];
+
+    if (kc_init_backend_path(ctx->dir, key, bmeta, sizeof(bmeta)) == 0) {
+        b = kc_init_read_backend(bmeta);
+    }
+    if (b == KC_INIT_BACKEND_NONE) {
+        b = ctx->backend;
+    }
+
+    switch (b) {
+        case KC_INIT_BACKEND_SYSTEMD:
+            return kc_init_run_delete_systemd(ctx->dir, key);
+        case KC_INIT_BACKEND_RUNIT:
+            return kc_init_run_delete_runit(ctx->dir, key);
+        case KC_INIT_BACKEND_OPENRC:
+            return kc_init_run_delete_openrc(ctx->dir, key);
+        case KC_INIT_BACKEND_SYSV:
+            return kc_init_run_delete_sysv(ctx->dir, key);
+        default:
+            return kc_init_run_delete_sysv(ctx->dir, key);
+    }
+#endif
+}
+
+/**
+ * Dispatches exec to the platform backend.
+ * @param ctx  Context pointer.
+ * @param key  Registration key name.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_exec(kc_init_t *ctx, const char *key) {
+#ifdef _WIN32
+    return kc_init_run_exec_win32(ctx->dir, key);
+#else
+    return kc_init_run_exec_sysv(ctx->dir, key);
+#endif
+}
+
+/**
+ * Dispatches list-all to the platform backend.
+ * @param ctx  Context pointer.
+ * @param cb   Callback, or NULL.
+ * @param userdata Opaque pointer.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_list(kc_init_t *ctx, kc_init_list_cb cb, void *userdata) {
+#ifdef _WIN32
+    return kc_init_run_list_win32(ctx->dir, cb, userdata);
+#else
+    return kc_init_run_list_sysv(ctx->dir, cb, userdata);
+#endif
+}
+
+/**
+ * Dispatches list-one to the platform backend.
+ * @param ctx  Context pointer.
+ * @param key  Registration key name.
+ * @param cb   Callback, or NULL.
+ * @param userdata Opaque pointer.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_list_one(kc_init_t *ctx, const char *key, kc_init_list_cb cb, void *userdata) {
+#ifdef _WIN32
+    return kc_init_run_list_one_win32(ctx->dir, key, cb, userdata);
+#else
+    return kc_init_run_list_one_sysv(ctx->dir, key, cb, userdata);
+#endif
+}
+
+/**
+ * Initialize a new init context.
+ * @param options Init context options.
+ * @return Context pointer or NULL on failure.
+ */
+kc_init_t *kc_init_open(const kc_init_options_t *options) {
+    kc_init_t *ctx;
+
+    if (!options || !options->dir) {
+        return NULL;
+    }
+
+    ctx = (kc_init_t *)calloc(1, sizeof(kc_init_t));
+    if (!ctx) {
+        return NULL;
+    }
+
+    if ((size_t)snprintf(ctx->dir, sizeof(ctx->dir), "%s", options->dir)
+            >= sizeof(ctx->dir)) {
+        free(ctx);
+        return NULL;
+    }
+
+#ifndef _WIN32
+    ctx->backend = kc_init_backend_from_string(options->backend);
+    if (ctx->backend == KC_INIT_BACKEND_NONE) {
+        ctx->backend = kc_init_detect_backend();
+    }
+#endif
+
+    return ctx;
+}
+
+/**
+ * Release an init context.
+ * @param ctx Context pointer.
+ * @return None.
+ */
+void kc_init_close(kc_init_t *ctx) {
+    if (!ctx) {
+        return;
+    }
+
+    free(ctx);
+}
+
+/**
+ * Request stop for a specific init context.
+ * @param ctx Context handle.
+ * @return KC_INIT_OK on success, KC_INIT_ERROR on failure.
+ */
+int kc_init_stop(kc_init_t *ctx) {
+    if (!ctx) return KC_INIT_ERROR;
+    ctx->stop_requested = 1;
+    return KC_INIT_OK;
+}
+
+/**
+ * Return the resolved metadata directory for an init context.
+ * @param ctx Context pointer.
+ * @return Metadata directory path, or NULL on invalid input.
+ */
+const char *kc_init_path(kc_init_t *ctx) {
+    if (!ctx) {
+        return NULL;
+    }
+
+    return ctx->dir;
+}
+
+/**
+ * Return the last error message from an init context.
+ * @param ctx Context pointer.
+ * @return Static error string, or NULL if no error.
+ */
+const char *kc_init_error(kc_init_t *ctx) {
+    if (!ctx || !ctx->error[0]) {
+        return NULL;
+    }
+
+    return ctx->error;
+}
+
+/**
+ * Register or replace a named startup command.
+ * @param ctx Context pointer.
+ * @param key Registration key name.
+ * @param cmd Shell command string to run at startup.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ */
+int kc_init_update(kc_init_t *ctx, const char *key, const char *cmd) {
+    if (!ctx || !key || !cmd) {
+        return KC_INIT_ERROR;
+    }
+
+    if (kc_init_run_update(ctx, key, cmd) != 0) {
+        kc_init_set_error(ctx, "update failed");
+        return KC_INIT_ERROR;
+    }
+    return KC_INIT_OK;
+}
+
+/**
+ * Execute the registered command for a key immediately.
+ * @param ctx Context pointer.
+ * @param key Registration key name.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ */
+int kc_init_exec(kc_init_t *ctx, const char *key) {
+    if (!ctx || !key) {
+        return KC_INIT_ERROR;
+    }
+
+    if (kc_init_run_exec(ctx, key) != 0) {
+        kc_init_set_error(ctx, "exec failed");
+        return KC_INIT_ERROR;
+    }
+    return KC_INIT_OK;
+}
+
+/**
+ * List registered startup entries.
+ * Calls cb(key, user, cmd, userdata) per entry.
+ * @param ctx Context pointer.
+ * @param key Optional registration key name, or NULL for all.
+ * @param cb Callback invoked per entry, or NULL.
+ * @param userdata Opaque pointer passed to cb.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ */
+int kc_init_list(kc_init_t *ctx, const char *key, kc_init_list_cb cb, void *userdata) {
+    if (!ctx) {
+        return KC_INIT_ERROR;
+    }
+
+    if (key) {
+        if (kc_init_run_list_one(ctx, key, cb, userdata) != 0) {
+            kc_init_set_error(ctx, "list failed");
+            return KC_INIT_ERROR;
+        }
+        return KC_INIT_OK;
+    }
+
+    if (kc_init_run_list(ctx, cb, userdata) != 0) {
+        kc_init_set_error(ctx, "list failed");
+        return KC_INIT_ERROR;
+    }
+    return KC_INIT_OK;
+}
+
+/**
+ * Remove a named startup registration.
+ * @param ctx Context pointer.
+ * @param key Registration key name.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ */
+int kc_init_delete(kc_init_t *ctx, const char *key) {
+    if (!ctx || !key) {
+        return KC_INIT_ERROR;
+    }
+
+    if (kc_init_run_delete(ctx, key) != 0) {
+        kc_init_set_error(ctx, "delete failed");
+        return KC_INIT_ERROR;
+    }
+    return KC_INIT_OK;
+}
+
+#ifndef KC_INIT_BUILD_VERSION
+#define KC_INIT_BUILD_VERSION 0
+#endif
+
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_init_version(void) {
+    return (uint64_t)KC_INIT_BUILD_VERSION;
+}

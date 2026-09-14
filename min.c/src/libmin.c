@@ -1,0 +1,660 @@
+/**
+ * libmin.c - Asset Minifier
+ * Summary: Core implementation for the min library.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+#endif
+#include "libmin.h"
+#include <ctype.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
+
+typedef enum {
+    KC_ENV_TYPE_INT,
+} kc_env_type_t;
+
+typedef struct {
+    const char *env_var;
+    size_t offset;
+    kc_env_type_t type;
+} kc_env_map_t;
+
+static const kc_env_map_t env_config_table[] = {
+    { "KC_MIN_MODE", offsetof(kc_min_options_t, mode), KC_ENV_TYPE_INT },
+};
+static const int env_config_table_n =
+    sizeof(env_config_table) / sizeof(env_config_table[0]);
+
+struct kc_min {
+    kc_min_options_t opts;
+    volatile sig_atomic_t stop_requested;
+};
+
+int kc_min_stop_requested(kc_min_t *ctx);
+
+/**
+ * Appends a single character to a dynamic output buffer.
+ * @param out Pointer to the buffer pointer.
+ * @param n Pointer to the current used length.
+ * @param cap Pointer to the current buffer capacity.
+ * @param c Character to append.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on allocation failure.
+ */
+static int kc_min_push(char **out, size_t *n, size_t *cap, char c) {
+    char *grown;
+    size_t next_cap;
+
+    if (*n + 1 >= *cap) {
+        next_cap = *cap == 0 ? 4096 : *cap * 2;
+        grown = (char *)realloc(*out, next_cap + 1);
+
+        if (!grown) {
+            return KC_MIN_ERROR;
+        }
+
+        *out = grown;
+        *cap = next_cap;
+    }
+
+    (*out)[(*n)++] = c;
+    (*out)[*n] = '\0';
+    return KC_MIN_OK;
+}
+
+/**
+ * Removes a trailing space from the output buffer.
+ * @param out Output buffer.
+ * @param n Pointer to the current used length.
+ * @return None.
+ */
+static void kc_min_trim_space(char *out, size_t *n) {
+    if (*n > 0 && out[*n - 1] == ' ') {
+        out[--(*n)] = '\0';
+    }
+}
+
+/**
+ * Ensures that empty minification output is represented by an owned string.
+ * @param out Output buffer pointer.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on allocation failure.
+ */
+static int kc_min_finish(char **out) {
+    if (*out) {
+        return KC_MIN_OK;
+    }
+
+    *out = (char *)malloc(1);
+    if (!*out) {
+        return KC_MIN_ERROR;
+    }
+
+    (*out)[0] = '\0';
+    return KC_MIN_OK;
+}
+
+/**
+ * Minifies CSS input conservatively.
+ * @param in Input CSS source.
+ * @param out Receives the allocated minified buffer.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
+ */
+static int kc_min_css(const char *in, char **out) {
+    size_t i = 0;
+    size_t n = 0;
+    size_t cap = 0;
+    int quote = 0;
+    int esc = 0;
+    int space = 0;
+
+    *out = NULL;
+
+    while (in[i]) {
+        if (!quote && in[i] == '/' && in[i + 1] == '*') {
+            i += 2;
+            while (in[i] && !(in[i] == '*' && in[i + 1] == '/')) {
+                i++;
+            }
+            if (in[i]) {
+                i += 2;
+            }
+            continue;
+        }
+
+        if (quote) {
+            if (kc_min_push(out, &n, &cap, in[i]) != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            esc = (!esc && in[i] == '\\');
+            if (!esc && in[i] == quote) {
+                quote = 0;
+            }
+            i++;
+            continue;
+        }
+
+        if (in[i] == '"' || in[i] == '\'') {
+            kc_min_trim_space(*out, &n);
+            quote = in[i];
+            esc = 0;
+            if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            continue;
+        }
+
+        if (isspace((unsigned char)in[i])) {
+            space = 1;
+            i++;
+            continue;
+        }
+
+        if (strchr("{}:;,>~()", in[i])) {
+            kc_min_trim_space(*out, &n);
+            if (in[i] == '}' && n > 0 && (*out)[n - 1] == ';') {
+                (*out)[--n] = '\0';
+            }
+            if (in[i] == '(' && n > 0 && ((*out)[n - 1] == '+' || (*out)[n - 1] == '-')) {
+                if (kc_min_push(out, &n, &cap, ' ') != KC_MIN_OK) {
+                    return KC_MIN_ERROR;
+                }
+            }
+            if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            space = 0;
+            continue;
+        }
+
+        if (
+                space &&
+                n > 0 &&
+                (*out)[n - 1] != '{' &&
+                (*out)[n - 1] != ':' &&
+                (*out)[n - 1] != ',' &&
+                (*out)[n - 1] != ';') {
+            if (kc_min_push(out, &n, &cap, ' ') != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+        }
+
+        space = 0;
+
+        if (
+                in[i] == '0' &&
+                (isalpha((unsigned char)in[i + 1]) || in[i + 1] == '%') &&
+                (i == 0 || (!isdigit((unsigned char)in[i - 1]) && in[i - 1] != '.'))) {
+            if (kc_min_push(out, &n, &cap, '0') != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            i++;
+            while (isalpha((unsigned char)in[i]) || in[i] == '%') {
+                i++;
+            }
+            continue;
+        }
+
+        if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+            return KC_MIN_ERROR;
+        }
+    }
+
+    kc_min_trim_space(*out, &n);
+    return kc_min_finish(out);
+}
+
+/**
+ * Minifies JavaScript input conservatively.
+ * @param in Input JS source.
+ * @param out Receives the allocated minified buffer.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
+ */
+static int kc_min_js(const char *in, char **out) {
+    size_t i = 0;
+    size_t n = 0;
+    size_t cap = 0;
+    int quote = 0;
+    int esc = 0;
+    int space = 0;
+    int regex = 0;
+    int regex_class = 0;
+    char prev_sig = 0;
+
+    *out = NULL;
+
+    while (in[i]) {
+        if (regex) {
+            if (kc_min_push(out, &n, &cap, in[i]) != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            if (!esc && in[i] == '[') {
+                regex_class = 1;
+            } else if (!esc && in[i] == ']' && regex_class) {
+                regex_class = 0;
+            } else if (!esc && in[i] == '/' && !regex_class) {
+                i++;
+                while (isalpha((unsigned char)in[i])) {
+                    if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+                        return KC_MIN_ERROR;
+                    }
+                }
+                regex = 0;
+                prev_sig = '/';
+                continue;
+            }
+            esc = (!esc && in[i] == '\\');
+            i++;
+            continue;
+        }
+
+        if (!quote && in[i] == '/' && in[i + 1] == '*') {
+            i += 2;
+            while (in[i] && !(in[i] == '*' && in[i + 1] == '/')) {
+                i++;
+            }
+            if (in[i]) {
+                i += 2;
+            }
+            continue;
+        }
+
+        if (!quote && in[i] == '/' && in[i + 1] == '/' && (n == 0 || (*out)[n - 1] != ':')) {
+            i += 2;
+            while (in[i] && in[i] != '\n') {
+                i++;
+            }
+            space = 0;
+            continue;
+        }
+
+        if (!quote && in[i] == '/' && in[i + 1] != '/' && in[i + 1] != '*') {
+            if (!prev_sig || strchr("([{:;,=!?&|+-*%^~<>", prev_sig)) {
+                if (
+                        space &&
+                        n > 0 &&
+                        (*out)[n - 1] != '\n' &&
+                        (*out)[n - 1] != ' ' &&
+                        (*out)[n - 1] != ';') {
+                    if (kc_min_push(out, &n, &cap, ' ') != KC_MIN_OK) {
+                        return KC_MIN_ERROR;
+                    }
+                }
+                space = 0;
+                regex = 1;
+                regex_class = 0;
+                esc = 0;
+                if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+                    return KC_MIN_ERROR;
+                }
+                continue;
+            }
+        }
+
+        if (quote) {
+            if (kc_min_push(out, &n, &cap, in[i]) != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            esc = (!esc && in[i] == '\\');
+            if (!esc && in[i] == quote) {
+                quote = 0;
+                prev_sig = '"';
+            }
+            i++;
+            continue;
+        }
+
+        if (in[i] == '"' || in[i] == '\'' || in[i] == '`') {
+            if (
+                    space &&
+                    n > 0 &&
+                    (*out)[n - 1] != '\n' &&
+                    (*out)[n - 1] != ' ' &&
+                    (*out)[n - 1] != ';') {
+                if (kc_min_push(out, &n, &cap, ' ') != KC_MIN_OK) {
+                    return KC_MIN_ERROR;
+                }
+            }
+            quote = in[i];
+            esc = 0;
+            if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            space = 0;
+            continue;
+        }
+
+        if (isspace((unsigned char)in[i])) {
+            space = 1;
+            i++;
+            continue;
+        }
+
+        if (strchr("{}();,[]", in[i])) {
+            kc_min_trim_space(*out, &n);
+            if (kc_min_push(out, &n, &cap, in[i]) != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            prev_sig = in[i];
+            i++;
+            space = 0;
+            continue;
+        }
+
+        if (
+                space &&
+                n > 0 &&
+                (*out)[n - 1] != ' ' &&
+                (*out)[n - 1] != '\n' &&
+                (*out)[n - 1] != '(' &&
+                (*out)[n - 1] != '{' &&
+                (*out)[n - 1] != '[' &&
+                (*out)[n - 1] != ';') {
+            if (kc_min_push(out, &n, &cap, ' ') != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+        }
+
+        if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+            return KC_MIN_ERROR;
+        }
+        if (n > 0 && !isspace((unsigned char)(*out)[n - 1])) {
+            prev_sig = (*out)[n - 1];
+        }
+        space = 0;
+    }
+
+    kc_min_trim_space(*out, &n);
+    return kc_min_finish(out);
+}
+
+/**
+ * Minifies HTML input conservatively.
+ * @param in Input HTML source.
+ * @param out Receives the allocated minified buffer.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
+ */
+static int kc_min_html(const char *in, char **out) {
+    size_t i = 0;
+    size_t n = 0;
+    size_t cap = 0;
+    int keep = 0;
+    int quote = 0;
+    int esc = 0;
+    int space = 0;
+
+    *out = NULL;
+
+    while (in[i]) {
+        if (!keep && !strncmp(in + i, "<!--", 4)) {
+            i += 4;
+            while (in[i] && strncmp(in + i, "-->", 3)) {
+                i++;
+            }
+            if (in[i]) {
+                i += 3;
+            }
+            continue;
+        }
+
+        if (
+                !keep &&
+                in[i] == '<' &&
+                (!strncmp(in + i, "<pre", 4) || !strncmp(in + i, "<textarea", 9))) {
+            keep = 1;
+        }
+
+        if (keep) {
+            if (
+                    in[i] == '<' &&
+                    (!strncmp(in + i, "</pre", 5) || !strncmp(in + i, "</textarea", 10))) {
+                keep = 0;
+            }
+            if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+            continue;
+        }
+
+        if (isspace((unsigned char)in[i])) {
+            space = 1;
+            i++;
+            continue;
+        }
+
+        if (in[i] == '<') {
+            if (space && n > 0 && (*out)[n - 1] != ' ') {
+                if (kc_min_push(out, &n, &cap, ' ') != KC_MIN_OK) {
+                    return KC_MIN_ERROR;
+                }
+            }
+
+            while (in[i]) {
+                if (kc_min_push(out, &n, &cap, in[i]) != KC_MIN_OK) {
+                    return KC_MIN_ERROR;
+                }
+                if (quote) {
+                    esc = (!esc && in[i] == '\\');
+                    if (!esc && in[i] == quote) {
+                        quote = 0;
+                    }
+                } else if (in[i] == '"' || in[i] == '\'') {
+                    quote = in[i];
+                    esc = 0;
+                } else if (in[i] == '>') {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+
+            space = 0;
+            continue;
+        }
+
+        if (space && n > 0 && (*out)[n - 1] != ' ') {
+            if (kc_min_push(out, &n, &cap, ' ') != KC_MIN_OK) {
+                return KC_MIN_ERROR;
+            }
+        }
+
+        if (kc_min_push(out, &n, &cap, in[i++]) != KC_MIN_OK) {
+            return KC_MIN_ERROR;
+        }
+        space = 0;
+    }
+
+    kc_min_trim_space(*out, &n);
+    return kc_min_finish(out);
+}
+
+/**
+ * Create default-initialized min options.
+ * @return Default-initialized options.
+ */
+kc_min_options_t kc_min_options_default(void) {
+    kc_min_options_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.mode = KC_MIN_MODE_CSS;
+    return opts;
+}
+
+/**
+ * Load environment variables into options.
+ * @param opts Options to populate.
+ * @return None.
+ */
+void kc_min_options_load_env(kc_min_options_t *opts) {
+    int i;
+    if (!opts) return;
+    for (i = 0; i < env_config_table_n; i++) {
+        const char *val = getenv(env_config_table[i].env_var);
+        char *end;
+        if (!val) continue;
+        switch (env_config_table[i].type) {
+            case KC_ENV_TYPE_INT: {
+                long v = strtol(val, &end, 10);
+                if (end != val && *end == '\0') {
+                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
+                }
+                break;
+            }
+        }
+    }
+}
+
+/**
+ * Free resources held by options.
+ * @param opts Options to release.
+ * @return None.
+ */
+void kc_min_options_free(kc_min_options_t *opts) {
+    (void)opts;
+}
+
+/**
+ * Request stop for a specific min context.
+ * @param ctx Context pointer.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
+ */
+int kc_min_stop(kc_min_t *ctx) {
+    if (!ctx) return KC_MIN_ERROR;
+    ctx->stop_requested = 1;
+    return KC_MIN_OK;
+}
+
+/**
+ * Initialize a new min context.
+ * @param out Receives the context pointer on success.
+ * @param opts Options for initialization.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
+ */
+int kc_min_open(kc_min_t **out, const kc_min_options_t *opts) {
+    kc_min_t *ctx;
+    if (!out || !opts) return KC_MIN_ERROR;
+    ctx = (kc_min_t *)calloc(1, sizeof(kc_min_t));
+    if (!ctx) return KC_MIN_ERROR;
+    ctx->opts = *opts;
+    *out = ctx;
+    return KC_MIN_OK;
+}
+
+/**
+ * Release a min context.
+ * @param ctx Context pointer.
+ * @return None.
+ */
+void kc_min_close(kc_min_t *ctx) {
+    if (!ctx) return;
+    kc_min_options_free(&ctx->opts);
+    free(ctx);
+}
+
+/**
+ * Select the minification mode for a context.
+ * @param ctx Context pointer.
+ * @param mode Minification mode.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on invalid input.
+ */
+int kc_min_set_mode(kc_min_t *ctx, int mode) {
+    if (!ctx) {
+        return KC_MIN_ERROR;
+    }
+
+    if (mode != KC_MIN_MODE_CSS && mode != KC_MIN_MODE_JS && mode != KC_MIN_MODE_HTML) {
+        return KC_MIN_ERROR;
+    }
+
+    ctx->opts.mode = mode;
+    return KC_MIN_OK;
+}
+
+/**
+ * Convert a mode name to a minification mode.
+ * @param name Mode name.
+ * @return Minification mode, or KC_MIN_MODE_NONE for invalid input.
+ */
+int kc_min_mode(const char *name) {
+    if (!name) {
+        return KC_MIN_MODE_NONE;
+    }
+
+    if (strcmp(name, "css") == 0) {
+        return KC_MIN_MODE_CSS;
+    }
+
+    if (strcmp(name, "js") == 0) {
+        return KC_MIN_MODE_JS;
+    }
+
+    if (strcmp(name, "html") == 0) {
+        return KC_MIN_MODE_HTML;
+    }
+
+    return KC_MIN_MODE_NONE;
+}
+
+/**
+ * Execute minification using the selected context mode.
+ * @param ctx Context pointer.
+ * @param input Null-terminated input source.
+ * @param output Receives the owned minified output string.
+ * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
+ */
+int kc_min_exec(kc_min_t *ctx, const char *input, char **output) {
+    if (!ctx || !input || !output) {
+        return KC_MIN_ERROR;
+    }
+
+    if (ctx->opts.mode == KC_MIN_MODE_CSS) {
+        return kc_min_css(input, output);
+    }
+
+    if (ctx->opts.mode == KC_MIN_MODE_JS) {
+        return kc_min_js(input, output);
+    }
+
+    if (ctx->opts.mode == KC_MIN_MODE_HTML) {
+        return kc_min_html(input, output);
+    }
+
+    return KC_MIN_ERROR;
+}
+
+/**
+ * Release a string allocated by the min library.
+ * @param text Owned string returned by the API.
+ * @return None.
+ */
+void kc_min_free(char *text) {
+    free(text);
+}
+
+#ifndef KC_MIN_BUILD_VERSION
+#define KC_MIN_BUILD_VERSION 0
+#endif
+
+/**
+ * Check whether a stop has been requested on the context.
+ * @param ctx Context pointer.
+ * @return 1 if stop was requested, 0 otherwise.
+ */
+int kc_min_stop_requested(kc_min_t *ctx) {
+    if (!ctx) return 0;
+    return ctx->stop_requested ? 1 : 0;
+}
+
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_min_version(void) {
+    return (uint64_t)KC_MIN_BUILD_VERSION;
+}

@@ -1,0 +1,17 @@
+#if defined(__APPLE__)
+.section __DATA,__data
+#elif defined(_WIN32)
+.section .rdata
+#elif defined(__EMSCRIPTEN__)
+.section .rodata.model,"",@
+.size _binary_model_gguf_start, @MODEL_GGUF_SIZE@
+.size _binary_model_gguf_end, 0
+#else
+.section .rodata
+#endif
+
+.globl _binary_model_gguf_start
+.globl _binary_model_gguf_end
+_binary_model_gguf_start:
+.incbin "@MODEL_GGUF@"
+_binary_model_gguf_end:

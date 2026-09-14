@@ -1,0 +1,874 @@
+/**
+ * libwch.c - File and directory change notification library
+ * Summary: Portable native file watcher - inotify, kqueue, ReadDirectoryChangesW.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+#endif
+
+#include "libwch.h"
+
+#if !defined(KC_WCH_BUILD_VERSION) || KC_WCH_BUILD_VERSION + 0 == 0
+#undef KC_WCH_BUILD_VERSION
+#define KC_WCH_BUILD_VERSION 0ULL
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <limits.h>
+#include <signal.h>
+#include <stddef.h>
+#include <stdarg.h>
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <fcntl.h>
+#endif
+
+#ifdef __linux__
+#include <sys/inotify.h>
+#include <poll.h>
+#endif
+
+#ifdef __APPLE__
+#include <sys/types.h>
+#include <sys/event.h>
+#include <sys/time.h>
+#endif
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+#define KC_WCH_QUEUE_SIZE 256
+
+struct kc_wch {
+    char *root;
+    int recursive;
+
+    char **paths;
+    int path_count;
+    int path_cap;
+
+    char ev_path[PATH_MAX];
+
+    int backend;
+
+    int has_filter;
+    char filter_name[PATH_MAX];
+
+    int q_type[KC_WCH_QUEUE_SIZE];
+    char q_path[KC_WCH_QUEUE_SIZE][PATH_MAX];
+    int q_used;
+
+    volatile sig_atomic_t stop_requested;
+
+#ifdef __linux__
+    int ifd;
+    int *wds;
+    char **wd_paths;
+    int wd_count;
+    int wd_cap;
+    char rbuf[4096];
+    int rbuf_off;
+    int rbuf_len;
+#endif
+
+#ifdef __APPLE__
+    int kq;
+    int *dir_fds;
+    char **dir_paths;
+    int dir_count;
+    int dir_cap;
+#endif
+
+#ifdef _WIN32
+    HANDLE hdir;
+    char win_buf[4096];
+    OVERLAPPED ol;
+    int pending;
+#endif
+};
+
+/**
+ * Find a path in the known-paths set.
+ * @param w Watcher context.
+ * @param p Path to find.
+ * @return Index or -1 if not found.
+ */
+static int path_find(struct kc_wch *w, const char *p) {
+    for (int i = 0; i < w->path_count; i++) {
+        if (strcmp(w->paths[i], p) == 0) return i;
+    }
+    return -1;
+}
+
+/**
+ * Add a path to the known-paths set.
+ * @param w Watcher context.
+ * @param p Path to add.
+ * @return 0 on success, -1 on failure.
+ */
+static int path_add(struct kc_wch *w, const char *p) {
+    if (path_find(w, p) >= 0) return 0;
+    if (w->path_count >= w->path_cap) {
+        int nc = w->path_cap ? w->path_cap * 2 : 128;
+        char **np = realloc(w->paths, nc * sizeof(char *));
+        if (!np) return -1;
+        w->paths = np;
+        w->path_cap = nc;
+    }
+    w->paths[w->path_count] = strdup(p);
+    if (!w->paths[w->path_count]) return -1;
+    w->path_count++;
+    return 0;
+}
+
+/**
+ * Remove a path from the known-paths set.
+ * @param w Watcher context.
+ * @param p Path to remove.
+ * @return None.
+ */
+static void path_remove(struct kc_wch *w, const char *p) {
+    int i = path_find(w, p);
+    if (i < 0) return;
+    free(w->paths[i]);
+    w->paths[i] = w->paths[--w->path_count];
+}
+
+/**
+ * Check if a path passes the optional basename filter.
+ * @param w Watcher context.
+ * @param path Path to check.
+ * @return 1 if path should be reported, 0 if filtered.
+ */
+static int filter_ok(struct kc_wch *w, const char *path) {
+    if (!w->has_filter) return 1;
+    size_t pl = strlen(path);
+    size_t fl = strlen(w->filter_name);
+    if (pl < fl) return 0;
+    return strcmp(path + pl - fl, w->filter_name) == 0;
+}
+
+/**
+ * Push an event onto the internal queue.
+ * @param w Watcher context.
+ * @param type Event type (ADD/UPD/DEL).
+ * @param path Event path.
+ * @return None.
+ */
+static void queue_push(struct kc_wch *w, int type, const char *path) {
+    if (w->q_used >= KC_WCH_QUEUE_SIZE) return;
+    w->q_type[w->q_used] = type;
+    snprintf(w->q_path[w->q_used], PATH_MAX, "%s", path);
+    w->q_used++;
+}
+
+/**
+ * Pop one event from the queue into the output struct.
+ * @param w Watcher context.
+ * @param ev Output event struct.
+ * @return 1 if event returned, 0 if queue empty.
+ */
+static int dequeue(struct kc_wch *w, kc_wch_event_t *ev) {
+    while (w->q_used > 0) {
+        char *p = w->q_path[0];
+        if (!filter_ok(w, p)) {
+            w->q_used--;
+            memmove(w->q_type, w->q_type + 1, w->q_used * sizeof(int));
+            memmove(w->q_path, w->q_path + 1, w->q_used * PATH_MAX);
+            continue;
+        }
+        int t = w->q_type[0];
+        snprintf(w->ev_path, PATH_MAX, "%s", p);
+        ev->type = t;
+        ev->path = w->ev_path;
+        w->q_used--;
+        memmove(w->q_type, w->q_type + 1, w->q_used * sizeof(int));
+        memmove(w->q_path, w->q_path + 1, w->q_used * PATH_MAX);
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Detect and initialize the best native backend for the current platform.
+ * @param w Watcher context.
+ * @return 1 on success, 0 on failure.
+ */
+static int try_backend(struct kc_wch *w) {
+#ifdef __linux__
+    int ifd = inotify_init();
+    if (ifd < 0) return 0;
+    int wd = inotify_add_watch(ifd, w->root,
+        IN_CREATE | IN_CLOSE_WRITE | IN_DELETE |
+        IN_MOVED_TO | IN_MOVED_FROM);
+    if (wd < 0) { close(ifd); return 0; }
+    w->ifd = ifd;
+    w->wds = calloc(64, sizeof(int));
+    w->wd_paths = calloc(64, sizeof(char *));
+    if (!w->wds || !w->wd_paths) { close(ifd); return 0; }
+    w->wd_cap = 64;
+    w->wds[0] = wd;
+    w->wd_paths[0] = strdup(w->root);
+    w->wd_count = 1;
+    w->backend = 1;
+    return 1;
+#endif
+
+#ifdef __APPLE__
+    int kq = kqueue();
+    if (kq < 0) return 0;
+    int fd = open(w->root, O_RDONLY | O_EVTONLY);
+    if (fd < 0) { close(kq); return 0; }
+    struct kevent ch;
+    EV_SET(&ch, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+        NOTE_WRITE | NOTE_DELETE | NOTE_RENAME, 0, 0);
+    if (kevent(kq, &ch, 1, NULL, 0, NULL) < 0) {
+        close(fd); close(kq); return 0;
+    }
+    w->kq = kq;
+    w->dir_fds = calloc(64, sizeof(int));
+    w->dir_paths = calloc(64, sizeof(char *));
+    if (!w->dir_fds || !w->dir_paths) { close(fd); close(kq); return 0; }
+    w->dir_fds[0] = fd;
+    w->dir_paths[0] = strdup(w->root);
+    w->dir_count = 1;
+    w->dir_cap = 64;
+    w->backend = 2;
+    return 1;
+#endif
+
+#ifdef _WIN32
+    w->hdir = CreateFileA(w->root, FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS |
+        FILE_FLAG_OVERLAPPED, NULL);
+    if (w->hdir == INVALID_HANDLE_VALUE) return 0;
+    memset(&w->ol, 0, sizeof(w->ol));
+    w->ol.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+    if (!w->ol.hEvent) { CloseHandle(w->hdir); return 0; }
+    w->backend = 3;
+    return 1;
+#endif
+
+    return 0;
+}
+
+#ifdef __linux__
+/**
+ * Look up a watched directory by its inotify watch descriptor.
+ * @param w Watcher context.
+ * @param wd Watch descriptor.
+ * @return Index into wd arrays, or -1.
+ */
+static int wd_lookup(struct kc_wch *w, int wd) {
+    for (int i = 0; i < w->wd_count; i++)
+        if (w->wds[i] == wd) return i;
+    return -1;
+}
+
+/**
+ * Add an inotify watch on a directory.
+ * @param w Watcher context.
+ * @param dir Directory path.
+ * @return Watch descriptor, or -1 on failure.
+ */
+static int wd_add(struct kc_wch *w, const char *dir) {
+    int wd = inotify_add_watch(w->ifd, dir,
+        IN_CREATE | IN_CLOSE_WRITE | IN_DELETE |
+        IN_MOVED_TO | IN_MOVED_FROM);
+    if (wd < 0) return -1;
+    for (int i = 0; i < w->wd_count; i++) {
+        if (w->wds[i] == wd) {
+            free(w->wd_paths[i]);
+            w->wd_paths[i] = strdup(dir);
+            return wd;
+        }
+    }
+    if (w->wd_count >= w->wd_cap) {
+        int nc = w->wd_cap * 2;
+        int *nw = realloc(w->wds, nc * sizeof(int));
+        char **np = realloc(w->wd_paths, nc * sizeof(char *));
+        if (!nw || !np) return -1;
+        w->wds = nw; w->wd_paths = np; w->wd_cap = nc;
+    }
+    w->wds[w->wd_count] = wd;
+    w->wd_paths[w->wd_count] = strdup(dir);
+    w->wd_count++;
+    return wd;
+}
+
+/**
+ * Remove an inotify watch and its path mapping.
+ * @param w Watcher context.
+ * @param wd Watch descriptor to remove.
+ * @return None.
+ */
+static void wd_remove(struct kc_wch *w, int wd) {
+    int i = wd_lookup(w, wd);
+    if (i < 0) return;
+    free(w->wd_paths[i]);
+    if (i < --w->wd_count) {
+        w->wds[i] = w->wds[w->wd_count];
+        w->wd_paths[i] = w->wd_paths[w->wd_count];
+    }
+}
+
+/**
+ * Recursively scan and add inotify watches to all subdirectories.
+ * Also populates the known-paths set.
+ * @param w Watcher context.
+ * @param dir Directory to scan.
+ * @return None.
+ */
+static void scan_watch_dir(struct kc_wch *w, const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char fp[PATH_MAX];
+        snprintf(fp, PATH_MAX, "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (stat(fp, &st)) continue;
+        path_add(w, fp);
+        if (S_ISDIR(st.st_mode) && w->recursive) {
+            wd_add(w, fp);
+            scan_watch_dir(w, fp);
+        }
+    }
+    closedir(d);
+}
+
+/**
+ * Read raw events from the inotify fd with an optional timeout.
+ * Buffers multiple events for per-event consumption.
+ * @param w Watcher context.
+ * @param tmo Timeout in milliseconds (-1 = infinite).
+ * @return 0 on data available, 1 on timeout, -1 on error.
+ */
+static int read_inotify(struct kc_wch *w, int tmo) {
+    if (w->rbuf_off < w->rbuf_len) return 0;
+    struct pollfd pfd = { .fd = w->ifd, .events = POLLIN };
+    int pr = poll(&pfd, 1, tmo);
+    if (pr < 0) return -1;
+    if (pr == 0) return 1;
+    ssize_t n = read(w->ifd, w->rbuf, sizeof(w->rbuf));
+    if (n <= 0) return -1;
+    w->rbuf_off = 0;
+    w->rbuf_len = n;
+    return 0;
+}
+
+/**
+ * Parse buffered inotify events and push them into the event queue.
+ * @param w Watcher context.
+ * @return None.
+ */
+static void fill_inotify(struct kc_wch *w) {
+    while (w->rbuf_off < w->rbuf_len) {
+        struct inotify_event *iev =
+            (struct inotify_event *)(w->rbuf + w->rbuf_off);
+        size_t sz = sizeof(struct inotify_event) + iev->len;
+        w->rbuf_off += sz;
+        int idx = wd_lookup(w, iev->wd);
+        if (idx < 0) continue;
+        char fp[PATH_MAX];
+        if (iev->len && iev->name[0])
+            snprintf(fp, PATH_MAX, "%s/%s", w->wd_paths[idx], iev->name);
+        else
+            snprintf(fp, PATH_MAX, "%s", w->wd_paths[idx]);
+        if (iev->mask & (IN_DELETE | IN_MOVED_FROM)) {
+            queue_push(w, KC_WCH_DEL, fp);
+            path_remove(w, fp);
+        } else if (iev->mask & IN_MOVED_TO) {
+            if (iev->mask & IN_ISDIR && w->recursive)
+                scan_watch_dir(w, fp);
+            queue_push(w, KC_WCH_ADD, fp);
+            path_add(w, fp);
+        } else if (iev->mask & IN_CLOSE_WRITE) {
+            queue_push(w, KC_WCH_UPD, fp);
+            path_add(w, fp);
+        } else if (iev->mask & IN_CREATE) {
+            if (iev->mask & IN_ISDIR && w->recursive)
+                scan_watch_dir(w, fp);
+            queue_push(w, KC_WCH_ADD, fp);
+            path_add(w, fp);
+        } else if (iev->mask & IN_IGNORED) {
+            wd_remove(w, iev->wd);
+        }
+    }
+}
+#endif
+
+#ifdef __APPLE__
+/**
+ * Look up a directory path by its kqueue fd.
+ * @param w Watcher context.
+ * @param fd Open fd for a watched directory.
+ * @return Index into kqueue dir arrays, or -1.
+ */
+static int kq_lookup(struct kc_wch *w, int fd) {
+    for (int i = 0; i < w->dir_count; i++)
+        if (w->dir_fds[i] == fd) return i;
+    return -1;
+}
+
+/**
+ * Add a kqueue vnode watch on a directory.
+ * @param w Watcher context.
+ * @param dir Directory path.
+ * @return None.
+ */
+static void kq_add_dir(struct kc_wch *w, const char *dir) {
+    int fd = open(dir, O_RDONLY | O_EVTONLY);
+    if (fd < 0) return;
+    struct kevent ch;
+    EV_SET(&ch, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+        NOTE_WRITE | NOTE_DELETE | NOTE_RENAME, 0, 0);
+    if (kevent(w->kq, &ch, 1, NULL, 0, NULL) < 0) {
+        close(fd); return;
+    }
+    if (w->dir_count >= w->dir_cap) {
+        int nc = w->dir_cap * 2;
+        int *nf = realloc(w->dir_fds, nc * sizeof(int));
+        char **np = realloc(w->dir_paths, nc * sizeof(char *));
+        if (!nf || !np) { close(fd); return; }
+        w->dir_fds = nf; w->dir_paths = np; w->dir_cap = nc;
+    }
+    w->dir_fds[w->dir_count] = fd;
+    w->dir_paths[w->dir_count] = strdup(dir);
+    w->dir_count++;
+}
+
+/**
+ * Remove a kqueue dir watch and close its fd.
+ * @param w Watcher context.
+ * @param fd Open fd to remove.
+ * @return None.
+ */
+static void kq_dir_remove(struct kc_wch *w, int fd) {
+    int i = kq_lookup(w, fd);
+    if (i < 0) return;
+    close(w->dir_fds[i]);
+    free(w->dir_paths[i]);
+    if (i < --w->dir_count) {
+        w->dir_fds[i] = w->dir_fds[w->dir_count];
+        w->dir_paths[i] = w->dir_paths[w->dir_count];
+    }
+}
+
+/**
+ * Comparison function for qsort on path strings.
+ * @param a First entry.
+ * @param b Second entry.
+ * @return strcmp result.
+ */
+static int scan_entry_cmp(const void *a, const void *b) {
+    return strcmp(((const char **)a)[0], ((const char **)b)[0]);
+}
+
+/**
+ * Scan the watched directory tree, compare with previous state,
+ * and push all detected changes into the event queue.
+ * @param w Watcher context.
+ * @return None.
+ */
+static void kq_scan_diff(struct kc_wch *w) {
+    int stack_cap = 1024, stack_cnt = 0;
+    char **stack = malloc(stack_cap * sizeof(char *));
+    int ent_cap = 1024, ent_cnt = 0;
+    char **ents = malloc(ent_cap * sizeof(char *));
+    time_t *mtimes = malloc(ent_cap * sizeof(time_t));
+    off_t *sizes = malloc(ent_cap * sizeof(off_t));
+    if (!stack || !ents || !mtimes || !sizes) {
+        free(stack); free(ents); free(mtimes); free(sizes);
+        return;
+    }
+    stack[stack_cnt++] = strdup(w->root);
+    while (stack_cnt > 0) {
+        char *dp = stack[--stack_cnt];
+        DIR *d = opendir(dp);
+        if (!d) { free(dp); continue; }
+        struct dirent *e;
+        while ((e = readdir(d)) != NULL) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            char fp[PATH_MAX];
+            snprintf(fp, PATH_MAX, "%s/%s", dp, e->d_name);
+            struct stat st;
+            if (stat(fp, &st)) continue;
+            if (S_ISDIR(st.st_mode) && w->recursive) {
+                if (stack_cnt >= stack_cap) {
+                    stack_cap *= 2;
+                    char **ns = realloc(stack, stack_cap * sizeof(char *));
+                    if (!ns) { free(dp); closedir(d); goto cleanup; }
+                    stack = ns;
+                }
+                stack[stack_cnt++] = strdup(fp);
+            }
+            if (ent_cnt >= ent_cap) {
+                ent_cap *= 2;
+                char **ne = realloc(ents, ent_cap * sizeof(char *));
+                time_t *nm = realloc(mtimes, ent_cap * sizeof(time_t));
+                off_t *nz = realloc(sizes, ent_cap * sizeof(off_t));
+                if (!ne || !nm || !nz) { free(dp); closedir(d); goto cleanup; }
+                ents = ne; mtimes = nm; sizes = nz;
+            }
+            ents[ent_cnt] = strdup(fp);
+            mtimes[ent_cnt] = st.st_mtime;
+            sizes[ent_cnt] = st.st_size;
+            ent_cnt++;
+        }
+        closedir(d);
+        free(dp);
+    }
+    if (ent_cnt > 1)
+        qsort(ents, ent_cnt, sizeof(char *), scan_entry_cmp);
+
+    char **old = malloc(w->path_count * sizeof(char *));
+    time_t *om = malloc(w->path_count * sizeof(time_t));
+    off_t *oz = malloc(w->path_count * sizeof(off_t));
+    if (!old || !om || !oz) { free(old); free(om); free(oz); goto cleanup; }
+    for (int i = 0; i < w->path_count; i++) {
+        old[i] = strdup(w->paths[i]);
+        if (stat(w->paths[i], &(struct stat){0}) == 0) {
+            struct stat st;
+            stat(w->paths[i], &st);
+            om[i] = st.st_mtime; oz[i] = st.st_size;
+        } else {
+            om[i] = 0; oz[i] = 0;
+        }
+    }
+    if (w->path_count > 1)
+        qsort(old, w->path_count, sizeof(char *), scan_entry_cmp);
+
+    int ci = 0, oi = 0;
+    while (ci < ent_cnt || oi < w->path_count) {
+        int cmp;
+        if (ci >= ent_cnt) cmp = 1;
+        else if (oi >= w->path_count) cmp = -1;
+        else cmp = strcmp(ents[ci], old[oi]);
+        if (cmp < 0) {
+            queue_push(w, KC_WCH_ADD, ents[ci]);
+            ci++;
+        } else if (cmp > 0) {
+            queue_push(w, KC_WCH_DEL, old[oi]);
+            oi++;
+        } else {
+            if (mtimes[ci] != om[oi] || sizes[ci] != oz[oi])
+                queue_push(w, KC_WCH_UPD, ents[ci]);
+            ci++; oi++;
+        }
+    }
+
+    for (int i = 0; i < w->path_count; i++) free(old[i]);
+    free(old); free(om); free(oz);
+
+    for (int i = 0; i < w->path_count; i++) free(w->paths[i]);
+    free(w->paths);
+    w->paths = ents;
+    w->path_count = ent_cnt;
+    w->path_cap = ent_cap;
+    ents = NULL;
+    ent_cnt = 0;
+
+cleanup:
+    for (int i = 0; i < stack_cnt; i++) free(stack[i]);
+    free(stack);
+    free(ents);
+    for (int i = 0; i < ent_cnt; i++) free(ents[i]);
+    free(mtimes);
+    free(sizes);
+}
+
+/**
+ * Wait for a kqueue event and process it into the event queue.
+ * Blocks in kevent(). On NOTE_WRITE triggers a full scan+diff.
+ * @param w Watcher context.
+ * @param tmo Timeout in milliseconds (-1 = infinite).
+ * @return 1 if events queued, 0 on timeout, -1 on error.
+ */
+static int fill_kqueue(struct kc_wch *w, int tmo) {
+    struct timespec ts = { .tv_sec = tmo / 1000,
+        .tv_nsec = (tmo % 1000) * 1000000L };
+    struct timespec *tsp = (tmo < 0) ? NULL : &ts;
+    struct kevent ev;
+    int n = kevent(w->kq, NULL, 0, &ev, 1, tsp);
+    if (n < 0) return -1;
+    if (n == 0) return 0;
+    int idx = kq_lookup(w, (int)ev.ident);
+    if (idx < 0) return 0;
+    if (ev.fflags & NOTE_DELETE) {
+        queue_push(w, KC_WCH_DEL, w->dir_paths[idx]);
+        kq_dir_remove(w, (int)ev.ident);
+    } else if (ev.fflags & NOTE_RENAME) {
+        queue_push(w, KC_WCH_DEL, w->dir_paths[idx]);
+        kq_dir_remove(w, (int)ev.ident);
+    } else if (ev.fflags & NOTE_WRITE) {
+        kq_scan_diff(w);
+    }
+    return (w->q_used > 0) ? 1 : 0;
+}
+#endif
+
+#ifdef _WIN32
+/**
+ * Issue a ReadDirectoryChangesW request and process the results
+ * into the event queue.
+ * @param w Watcher context.
+ * @param tmo Timeout in milliseconds.
+ * @return None.
+ */
+static void fill_windows(struct kc_wch *w, int tmo) {
+    if (!w->pending) {
+        DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME |
+            FILE_NOTIFY_CHANGE_DIR_NAME |
+            FILE_NOTIFY_CHANGE_LAST_WRITE |
+            FILE_NOTIFY_CHANGE_SIZE;
+        ResetEvent(w->ol.hEvent);
+        memset(&w->ol, 0, sizeof(w->ol));
+        w->ol.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+        if (!w->ol.hEvent) return;
+        if (!ReadDirectoryChangesW(w->hdir, w->win_buf, sizeof(w->win_buf),
+                w->recursive ? TRUE : FALSE,
+                filter, NULL, &w->ol, NULL)) {
+            return;
+        }
+        w->pending = 1;
+    }
+    DWORD wtmo = tmo < 0 ? INFINITE : (DWORD)tmo;
+    if (WaitForSingleObject(w->ol.hEvent, wtmo) != WAIT_OBJECT_0) {
+        return;
+    }
+    DWORD got;
+    if (!GetOverlappedResult(w->hdir, &w->ol, &got, FALSE)) return;
+    w->pending = 0;
+
+    char *base = w->root;
+
+    FILE_NOTIFY_INFORMATION *fni = (FILE_NOTIFY_INFORMATION *)w->win_buf;
+    while (1) {
+        int len = fni->FileNameLength / sizeof(WCHAR);
+        int mb_len = WideCharToMultiByte(CP_UTF8, 0, fni->FileName, len,
+            NULL, 0, NULL, NULL);
+        char *name = malloc(mb_len + 1);
+        if (name) {
+            WideCharToMultiByte(CP_UTF8, 0, fni->FileName, len,
+                name, mb_len, NULL, NULL);
+            name[mb_len] = '\0';
+            char fp[PATH_MAX];
+            snprintf(fp, PATH_MAX, "%s/%s", base, name);
+            free(name);
+            switch (fni->Action) {
+            case FILE_ACTION_ADDED:
+            case FILE_ACTION_RENAMED_NEW_NAME:
+                queue_push(w, KC_WCH_ADD, fp);
+                path_add(w, fp);
+                break;
+            case FILE_ACTION_MODIFIED:
+                queue_push(w, KC_WCH_UPD, fp);
+                path_add(w, fp);
+                break;
+            case FILE_ACTION_REMOVED:
+            case FILE_ACTION_RENAMED_OLD_NAME:
+                queue_push(w, KC_WCH_DEL, fp);
+                path_remove(w, fp);
+                break;
+            }
+        }
+        if (!fni->NextEntryOffset) break;
+        fni = (FILE_NOTIFY_INFORMATION *)((char *)fni + fni->NextEntryOffset);
+    }
+}
+#endif
+
+/**
+ * Open a file watcher on the given path.
+ * @param out Output pointer for watcher context.
+ * @param path File or directory to watch.
+ * @param opts Watcher options.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_open(kc_wch_t **out, const char *path, const kc_wch_options_t *opts) {
+    if (!out || !path || !*path || !opts) return KC_WCH_ERROR;
+    int exists = 0;
+#ifndef _WIN32
+    struct stat st;
+    exists = (stat(path, &st) == 0);
+#endif
+    struct kc_wch *w = calloc(1, sizeof(*w));
+    if (!w) return KC_WCH_ERROR;
+    if (exists) {
+        w->root = strdup(path);
+    } else {
+        char parent[PATH_MAX];
+        snprintf(parent, PATH_MAX, "%s", path);
+        char *slash = strrchr(parent, '/');
+        if (slash) {
+            w->filter_name[0] = '/';
+            size_t fn_off = 1;
+            size_t fn_len = strlen(slash + 1);
+            if (fn_len >= PATH_MAX - 1) fn_len = PATH_MAX - 2;
+            memcpy(w->filter_name + fn_off, slash + 1, fn_len);
+            w->filter_name[fn_off + fn_len] = '\0';
+            *slash = '\0';
+            if (!parent[0]) snprintf(parent, PATH_MAX, ".");
+#ifndef _WIN32
+            if (stat(parent, &st) != 0) { free(w); return KC_WCH_ERROR; }
+#endif
+            w->has_filter = 1;
+        } else {
+            w->filter_name[0] = '/';
+            size_t fn_len = strlen(path);
+            if (fn_len >= PATH_MAX - 1) fn_len = PATH_MAX - 2;
+            memcpy(w->filter_name + 1, path, fn_len);
+            w->filter_name[fn_len + 1] = '\0';
+            snprintf(parent, PATH_MAX, ".");
+            w->has_filter = 1;
+        }
+        w->root = strdup(parent);
+    }
+    if (!w->root) { free(w); return KC_WCH_ERROR; }
+    w->recursive = opts->recursive;
+    if (!try_backend(w)) { free(w->root); free(w); return KC_WCH_ERROR; }
+    if (w->backend == 1) {
+#ifdef __linux__
+        scan_watch_dir(w, w->root);
+#endif
+    }
+    *out = w;
+    return KC_WCH_OK;
+}
+
+/**
+ * Poll for the next file change event.
+ * @param w Watcher context.
+ * @param ev Output event structure.
+ * @param timeout_ms Max wait in milliseconds (-1 = infinite, 0 = no wait).
+ * @return 1 on event, 0 on timeout, -1 on error.
+ */
+int kc_wch_poll(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms) {
+    if (!w || !ev) return -1;
+    if (w->stop_requested) return -1;
+    if (dequeue(w, ev)) return 1;
+    ev->type = -1;
+    ev->path = NULL;
+#ifdef __linux__
+    if (w->backend == 1) {
+        int rc = read_inotify(w, timeout_ms);
+        if (rc < 0) return -1;
+        if (rc > 0) return 0;
+        fill_inotify(w);
+        return dequeue(w, ev) ? 1 : 0;
+    }
+#endif
+#ifdef __APPLE__
+    if (w->backend == 2) {
+        return fill_kqueue(w, timeout_ms);
+    }
+#endif
+#ifdef _WIN32
+    if (w->backend == 3) {
+        fill_windows(w, timeout_ms);
+        return dequeue(w, ev) ? 1 : 0;
+    }
+#endif
+    return -1;
+}
+
+/**
+ * Close a file watcher and release all resources.
+ * @param w Watcher context (NULL safe).
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_close(kc_wch_t *w) {
+    int i;
+    if (!w) return KC_WCH_OK;
+    for (i = 0; i < w->path_count; i++) free(w->paths[i]);
+    free(w->paths);
+#ifdef __linux__
+    if (w->backend == 1) {
+        for (int i = 0; i < w->wd_count; i++) free(w->wd_paths[i]);
+        free(w->wds); free(w->wd_paths);
+        close(w->ifd);
+    }
+#endif
+#ifdef __APPLE__
+    if (w->backend == 2) {
+        for (int i = 0; i < w->dir_count; i++) {
+            close(w->dir_fds[i]);
+            free(w->dir_paths[i]);
+        }
+        free(w->dir_fds); free(w->dir_paths);
+        close(w->kq);
+    }
+#endif
+#ifdef _WIN32
+    if (w->backend == 3) {
+        CloseHandle(w->ol.hEvent);
+        CloseHandle(w->hdir);
+    }
+#endif
+    free(w->root);
+    free(w);
+    return KC_WCH_OK;
+}
+
+/**
+ * Create an options struct initialized with default values.
+ * @return Default-initialized options.
+ */
+kc_wch_options_t kc_wch_options_default(void) {
+    kc_wch_options_t opts;
+    memset(&opts, 0, sizeof(opts));
+    return opts;
+}
+
+/**
+ * Load configuration from environment variables.
+ * @param opts Options to update.
+ * @return None.
+ */
+void kc_wch_options_load_env(kc_wch_options_t *opts) {
+    (void)opts;
+}
+
+/**
+ * Free dynamically allocated resources within an options struct.
+ * @param opts Options to clean up.
+ * @return None.
+ */
+void kc_wch_options_free(kc_wch_options_t *opts) {
+    (void)opts;
+}
+
+/**
+ * Request stop for a specific wch context.
+ * @param w Watcher context.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_stop(kc_wch_t *w) {
+    if (!w) return KC_WCH_ERROR;
+    w->stop_requested = 1;
+    return KC_WCH_OK;
+}
+
+/**
+ * Retrieves the library build version as a Unix timestamp.
+ * @return Build version timestamp.
+ */
+uint64_t kc_wch_version(void) {
+    return (uint64_t)KC_WCH_BUILD_VERSION;
+}
