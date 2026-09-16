@@ -83,14 +83,14 @@ textually match the blueprint.
 In particular:
 
 * do not replace `kc_wvw_options_t` with opaque blueprint-style options merely
-  for consistency;
+    for consistency;
 * do not invent `kc_wvw_exec()` or a generic core operation merely because the
-  blueprint has one;
+    blueprint has one;
 * do not add resident stdin framing where the window/event-loop model does not
-  require it;
+    require it;
 * do not turn the blueprint into a shared dependency or common ABI;
 * do not generalize behavior into another repository before there is a concrete
-  cross-project requirement.
+    cross-project requirement.
 
 The blueprint demonstrates project form.
 
@@ -107,13 +107,13 @@ The blueprint demonstrates project form.
 * NativeBridge is disabled by default.
 * Bridge methods are copied from a fixed explicit whitelist.
 * Parson (`lib/parson/`) remains the authoritative JSON parser and serializer
-  for bridge values.
+    for bridge values.
 * Bridge navigation is confined to trusted origins and explicit scheme
-  allowances.
+    allowances.
 * Bridge requests and responses remain serialized JSON values.
 * Browser installation and application packaging remain outside the library.
 * No hosted control plane, user account, shared kclib runtime, or network
-  service is required by `wvw`.
+    service is required by `wvw`.
 
 ## Browser Boundary
 
@@ -242,7 +242,7 @@ For trusted HTTP/HTTPS origins:
 
 * path, query, and fragment must not broaden trust;
 * explicit ports remain significant unless existing documented behavior states
-  otherwise;
+    otherwise;
 * comparison must not rely on suffix or wildcard rules.
 
 Keep URL trust parsing small.
@@ -321,15 +321,15 @@ Keep dangerous authority explicit, opt-in, and bounded. In particular:
 
 * do not expose arbitrary shell command strings;
 * do not execute through a shell merely for convenience when direct process
-  execution is sufficient;
+    execution is sufficient;
 * do not permit process execution outside an explicit executable whitelist;
 * do not silently broaden an executable whitelist through environment,
-  navigation, remote content, or fallback behavior;
+    navigation, remote content, or fallback behavior;
 * keep executable identity and arguments distinct when process execution is
-  implemented;
+    implemented;
 * keep filesystem access, clipboard access, screen capture, input injection,
-  window enumeration, external-window control, and dynamic native invocation
-  behind explicit application-controlled capabilities when they are needed.
+    window enumeration, external-window control, and dynamic native invocation
+    behind explicit application-controlled capabilities when they are needed.
 
 Process execution is a legitimate bridge capability when the project owner
 chooses to expose it and the authority is concrete and inspectable. A command
@@ -536,10 +536,10 @@ Preserve the existing source set:
 
 * `src/wvw.c` for CLI parsing and bridge initialization;
 * `src/libwvw.c` for the Windows, Linux, and macOS backends plus shared
-  behavior, using platform guards;
+    behavior, using platform guards;
 * `src/libwvw.h` for the public API;
 * `src/test.c` for all tests, including bridge, lifecycle, platform, and
-  integration cases;
+    integration cases;
 * `lib/parson/` for the vendored Parson JSON library and its license.
 
 Do not create additional:
@@ -749,7 +749,7 @@ When such behavior cannot be exercised in the current environment:
 * use static review where appropriate;
 * do not mark it runtime-verified;
 * do not block unrelated completion unless the untested behavior is the concrete
-  change being delivered on an available target.
+    change being delivered on an available target.
 
 Headless argument tests do not establish WebView runtime correctness.
 
@@ -764,7 +764,7 @@ Where locally available:
 * build natively;
 * run the existing tests;
 * perform operator-visible WebView checks for changed runtime behavior when
-  practical.
+    practical.
 
 ### Windows
 
@@ -847,9 +847,9 @@ Keep documentation operational and truthful.
 Use:
 
 * `README.md` for effective CLI, API, runtime requirements, behavior, build,
-  test, status, and license information;
+    test, status, and license information;
 * `AGENTS.md` for implementation constraints, architecture boundaries, security
-  rules, and agent behavior.
+    rules, and agent behavior.
 
 Documentation must describe actual implemented behavior.
 

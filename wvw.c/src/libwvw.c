@@ -5313,7 +5313,6 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
         return KC_WVW_ERROR;
     }
 
-    gtk_window_set_type_hint(GTK_WINDOW(ctx->window), GDK_WINDOW_TYPE_HINT_UTILITY);
     gtk_window_set_default_size(GTK_WINDOW(ctx->window), ctx->opts.width, ctx->opts.height);
     gtk_window_set_title(GTK_WINDOW(ctx->window), ctx->opts.title ? ctx->opts.title : "wvw");
     if (ctx->opts.posx != KC_WVW_POSITION_AUTO || ctx->opts.posy != KC_WVW_POSITION_AUTO) {
