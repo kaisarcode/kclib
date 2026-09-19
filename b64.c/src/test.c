@@ -252,7 +252,7 @@ static int case_null_args(void) {
 }
 
 /**
- * Tests version function.
+ * Tests kc_b64_free.
  * @return 0 on success, 1 on failure.
  */
 static int case_free(void) {

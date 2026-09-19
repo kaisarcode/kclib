@@ -41,21 +41,22 @@ echo "aGVsbG8=" | b64 decode
 // Encode binary data
 char *encoded = kc_b64_encode(data, data_size);
 // Use encoded string
-free(encoded);
+kc_b64_free(encoded);
 
 // Decode base64 string
 size_t decoded_size;
 void *decoded = kc_b64_decode(encoded_str, &decoded_size);
 // Use decoded binary data
-free(decoded);
+kc_b64_free(decoded);
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_b64_encode()` - encodes binary data into a malloc'd base64 string.
-- `kc_b64_decode()` - decodes a base64 string into malloc'd binary data.
+- `kc_b64_encode()` returns caller-owned encoded output that must be released with `kc_b64_free()`.
+- `kc_b64_decode()` returns caller-owned decoded output that must be released with `kc_b64_free()`.
+- `kc_b64_free()` releases memory returned by the b64 library.
 
 ## Build
 
