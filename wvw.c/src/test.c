@@ -455,6 +455,37 @@ static int case_kc_wvw_post_bridge_event(void) {
 }
 
 /**
+ * Tests host-side document-start script registration.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_wvw_add_init_script(void) {
+    const char *name = "kc_wvw_add_init_script";
+    const char *detail = "registers host-provided document-start source";
+    int fail = 0;
+    kc_wvw_options_t opts;
+    kc_wvw_t *ctx = NULL;
+
+    fail += expect_int("add_init_script(NULL) returns ERROR", KC_WVW_ERROR,
+        kc_wvw_add_init_script(NULL, "window.__kcWvwInitScript=true;"));
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = make_test_url();
+    if (!open_webview(&ctx, &opts)) {
+        kc_wvw_options_free(&opts);
+        case_result(1, name, detail);
+        return 1;
+    }
+    fail += expect_int("add_init_script(NULL source) returns ERROR", KC_WVW_ERROR,
+        kc_wvw_add_init_script(ctx, NULL));
+    fail += expect_int("add_init_script returns OK", KC_WVW_OK,
+        kc_wvw_add_init_script(ctx, "window.__kcWvwInitScript=true;"));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Tests kc_wvw_hide.
  * @return 0 on success, 1 on failure.
  */
@@ -1195,6 +1226,7 @@ static int case_kc_wvw_bridge(void) {
     fail += case_kc_wvw_bridge_positive_without_methods();
     fail += case_kc_wvw_bridge_positive_without_callback();
     fail += case_kc_wvw_post_bridge_event();
+    fail += case_kc_wvw_add_init_script();
     fail += case_kc_wvw_bridge_empty_registry_method_count();
     fail += case_kc_wvw_bridge_custom_options();
     fail += case_kc_wvw_bridge_reserved_methods();
