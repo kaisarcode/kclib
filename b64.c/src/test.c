@@ -262,6 +262,10 @@ static int case_free(void) {
     return 0;
 }
 
+/**
+ * Tests version function.
+ * @return 0 on success, 1 on failure.
+ */
 static int case_version(void) {
     const char *name = "version returns non-zero";
     int fail = 0;
