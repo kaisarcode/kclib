@@ -90,7 +90,7 @@ static int cmd_encode(void) {
 
     fwrite(encoded, 1, strlen(encoded), stdout);
     fputc('\n', stdout);
-    free(encoded);
+    kc_b64_free(encoded);
     return 0;
 }
 
@@ -123,7 +123,7 @@ static int cmd_decode(void) {
     }
 
     fwrite(decoded, 1, decoded_size, stdout);
-    free(decoded);
+    kc_b64_free(decoded);
     return 0;
 }
 

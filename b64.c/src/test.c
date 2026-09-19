@@ -95,7 +95,7 @@ static int case_encode_empty(void) {
     fail += expect_true("encode empty returns non-NULL", encoded != NULL);
     if (encoded) {
         fail += expect_str("encode empty returns empty string", "", encoded);
-        free(encoded);
+        kc_b64_free(encoded);
     }
     case_result(fail, name);
     return fail == 0 ? 0 : 1;
@@ -113,7 +113,7 @@ static int case_encode_hello(void) {
     fail += expect_true("encode hello returns non-NULL", encoded != NULL);
     if (encoded) {
         fail += expect_str("encode hello matches expected", "aGVsbG8=", encoded);
-        free(encoded);
+        kc_b64_free(encoded);
     }
     case_result(fail, name);
     return fail == 0 ? 0 : 1;
@@ -137,9 +137,9 @@ static int case_encode_binary(void) {
         if (decoded) {
             fail += expect_int("round-trip length", (int)sizeof(data), (int)decoded_len);
             fail += expect_true("round-trip data matches", memcmp(data, decoded, sizeof(data)) == 0);
-            free(decoded);
+            kc_b64_free(decoded);
         }
-        free(encoded);
+        kc_b64_free(encoded);
     }
     case_result(fail, name);
     return fail == 0 ? 0 : 1;
@@ -156,7 +156,7 @@ static int case_decode_empty(void) {
     int fail = 0;
     fail += expect_true("decode empty returns non-NULL", decoded != NULL);
     fail += expect_int("decode empty size", 0, (int)out_size);
-    free(decoded);
+    kc_b64_free(decoded);
     case_result(fail, name);
     return fail == 0 ? 0 : 1;
 }
@@ -174,7 +174,7 @@ static int case_decode_hello(void) {
     if (decoded) {
         fail += expect_int("decode hello length", 5, (int)out_size);
         fail += expect_true("decode hello matches", memcmp(decoded, "hello", 5) == 0);
-        free(decoded);
+        kc_b64_free(decoded);
     }
     case_result(fail, name);
     return fail == 0 ? 0 : 1;
@@ -203,9 +203,9 @@ static int case_roundtrip(void) {
         if (decoded != NULL) {
             fail += expect_true("roundtrip data matches", memcmp(data, decoded, data_len) == 0);
         }
-        free(decoded);
+        kc_b64_free(decoded);
     }
-    free(encoded);
+    kc_b64_free(encoded);
     case_result(fail, name);
     return fail == 0 ? 0 : 1;
 }
@@ -255,6 +255,13 @@ static int case_null_args(void) {
  * Tests version function.
  * @return 0 on success, 1 on failure.
  */
+static int case_free(void) {
+    const char *name = "library free";
+    kc_b64_free(NULL);
+    case_result(0, name);
+    return 0;
+}
+
 static int case_version(void) {
     const char *name = "version returns non-zero";
     int fail = 0;
@@ -269,7 +276,7 @@ static int case_version(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 10;
+    test_case_total = 11;
     test_case_current = 0;
     run_case(&rc, case_encode_empty);
     run_case(&rc, case_encode_hello);
@@ -280,6 +287,7 @@ static int case_all(void) {
     run_case(&rc, case_decode_invalid);
     run_case(&rc, case_decode_bad_length);
     run_case(&rc, case_null_args);
+    run_case(&rc, case_free);
     run_case(&rc, case_version);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -306,6 +314,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "decode-invalid") == 0) return case_decode_invalid();
     if (strcmp(argv[1], "decode-bad-length") == 0) return case_decode_bad_length();
     if (strcmp(argv[1], "null-args") == 0) return case_null_args();
+    if (strcmp(argv[1], "free") == 0) return case_free();
     if (strcmp(argv[1], "version") == 0) return case_version();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
