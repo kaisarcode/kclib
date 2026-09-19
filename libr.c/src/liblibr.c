@@ -125,6 +125,7 @@ int kc_libr_open(
 /**
  * Release a libr context.
  * @param ctx Context pointer.
+ * @return None.
  */
 void kc_libr_close(kc_libr_t *ctx) {
     if (!ctx) return;
