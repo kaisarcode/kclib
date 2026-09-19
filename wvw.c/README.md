@@ -197,6 +197,7 @@ typedef struct {
 
 int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts);
 int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json);
+int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript);
 ```
 
 Callback contract:
@@ -216,6 +217,10 @@ into a JSON string. On success, a `NULL` result means JSON `null`. On failure,
 a `NULL` result produces the built-in `OPERATION_FAILED` error.
 
 `kc_wvw_post_bridge_event()` sends one serialized JSON payload to the current page as the `nativebridge` event detail.
+
+`kc_wvw_add_init_script()` installs trusted host-provided JavaScript for the
+start of documents in the specified WebView. It is a native host API and is
+not exposed through `NativeBridge`.
 
 ### Window State
 
@@ -310,6 +315,7 @@ var ver = await NativeBridge.GetVersion();
 - `kc_wvw_navigate()` loads a new URL.
 - `kc_wvw_enable_bridge()` injects `window.NativeBridge` into trusted pages.
 - `kc_wvw_post_bridge_event()` emits one `nativebridge` event into the page.
+- `kc_wvw_add_init_script()` installs trusted host JavaScript at document start.
 - `kc_wvw_hide(ctx)` hides the native window.
 - `kc_wvw_show(ctx)` shows and brings the native window to front.
 - `kc_wvw_minimize(ctx)` minimizes (iconifies) the native window.

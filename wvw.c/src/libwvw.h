@@ -141,6 +141,14 @@ int kc_wvw_loop(kc_wvw_t *ctx);
 int kc_wvw_navigate(kc_wvw_t *ctx, const char *url);
 
 /**
+ * Add trusted JavaScript for document-start execution in one WebView.
+ * @param ctx Window context.
+ * @param javascript Source text to install.
+ * @return KC_WVW_OK on installation or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript);
+
+/**
  * Enable one native bridge with a fixed method whitelist.
  * @param ctx Window context.
  * @param opts Bridge configuration options.

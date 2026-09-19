@@ -2396,6 +2396,36 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
 }
 
 /**
+ * Add trusted JavaScript for document-start execution in one WebView.
+ * @param ctx Window context.
+ * @param javascript Source text to install.
+ * @return KC_WVW_OK on installation or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
+    wchar_t *wide;
+    HRESULT hr;
+    kc_wvw_script_handler_t *handler;
+
+    if (!ctx || !ctx->webview || !javascript) {
+        return KC_WVW_ERROR;
+    }
+
+    wide = kc_wvw_utf16_from_utf8(javascript);
+    if (!wide) {
+        return KC_WVW_ERROR;
+    }
+    handler = kc_wvw_script_handler_new();
+    if (!handler) {
+        free(wide);
+        return KC_WVW_ERROR;
+    }
+    hr = ICoreWebView2_AddScriptToExecuteOnDocumentCreated(ctx->webview, wide, (ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *)handler);
+    ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler_Release((ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *)handler);
+    free(wide);
+    return FAILED(hr) ? KC_WVW_ERROR : KC_WVW_OK;
+}
+
+/**
  * Enable one native bridge with a fixed method whitelist.
  * @param ctx Window context.
  * @param opts Bridge configuration options.
@@ -4537,23 +4567,32 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
 }
 
 /**
- * Execute one JavaScript expression in the macOS WebView.
+ * Add trusted JavaScript for document-start execution in one WebView.
  * @param ctx Window context.
- * @param js JavaScript expression.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ * @param javascript Source text to install.
+ * @return KC_WVW_OK on installation or KC_WVW_ERROR on failure.
  */
-int kc_wvw_exec(kc_wvw_t *ctx, const char *js) {
-    if (!ctx || !js) {
+int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
+    if (!ctx || !javascript) {
         return KC_WVW_ERROR;
     }
 
     @autoreleasepool {
         WKWebView *webView = (__bridge WKWebView *)ctx->ns_webview;
+        WKUserContentController *manager;
+        WKUserScript *script;
         if (!webView) {
             return KC_WVW_ERROR;
         }
-        NSString *nsJs = [NSString stringWithUTF8String:js];
-        [webView evaluateJavaScript:nsJs completionHandler:nil];
+        manager = webView.configuration.userContentController;
+        script = [[WKUserScript alloc] initWithSource:[NSString stringWithUTF8String:javascript]
+            injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+            forMainFrameOnly:YES];
+        if (!manager || !script) {
+            return KC_WVW_ERROR;
+        }
+        [manager addUserScript:script];
+        [script release];
     }
     return KC_WVW_OK;
 }
@@ -5481,6 +5520,27 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
     }
 
     webkit_web_view_load_uri(ctx->web_view, url);
+    return KC_WVW_OK;
+}
+
+/**
+ * Add trusted JavaScript for document-start execution in one WebView.
+ * @param ctx Window context.
+ * @param javascript Source text to install.
+ * @return KC_WVW_OK on installation or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
+    WebKitUserContentManager *manager;
+
+    if (!ctx || !ctx->web_view || !javascript) {
+        return KC_WVW_ERROR;
+    }
+
+    manager = webkit_web_view_get_user_content_manager(ctx->web_view);
+    if (!manager) {
+        return KC_WVW_ERROR;
+    }
+    webkit_user_content_manager_add_script(manager, webkit_user_script_new(javascript, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL));
     return KC_WVW_OK;
 }
 
