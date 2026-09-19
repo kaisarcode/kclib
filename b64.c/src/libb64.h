@@ -26,10 +26,13 @@ uint64_t kc_b64_version(void);
 /**
  * Base64-encodes binary data into a malloc'd string.
  * @param data Input data.
- * @param size Input size.
+ * @param data_size Input size.
  * @return malloc'd base64 string, or NULL on allocation failure.
  */
-char *kc_b64_encode(const void *data, size_t size);
+char *kc_b64_encode(
+    const void *data,
+    size_t data_size
+);
 
 /**
  * Base64-decodes a string into malloc'd binary data.
@@ -38,6 +41,13 @@ char *kc_b64_encode(const void *data, size_t size);
  * @return malloc'd data, or NULL on failure.
  */
 void *kc_b64_decode(const char *str, size_t *out_size);
+
+/**
+ * Release memory returned by the b64 library.
+ * @param ptr Library-owned allocation, or NULL.
+ * @return No return value.
+ */
+void kc_b64_free(void *ptr);
 
 #ifdef __cplusplus
 }

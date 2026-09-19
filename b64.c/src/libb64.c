@@ -26,10 +26,10 @@ uint64_t kc_b64_version(void) {
 /**
  * Base64-encodes binary data into a malloc'd string.
  * @param data Input data.
- * @param size Input size.
+ * @param data_size Input size.
  * @return malloc'd base64 string, or NULL on failure.
  */
-char *kc_b64_encode(const void *data, size_t size) {
+char *kc_b64_encode(const void *data, size_t data_size) {
     static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const unsigned char *in;
     size_t out_len;
@@ -37,17 +37,17 @@ char *kc_b64_encode(const void *data, size_t size) {
     if (data == NULL) return NULL;
 
     in = (const unsigned char *)data;
-    out_len = 4 * ((size + 2) / 3);
+    out_len = 4 * ((data_size + 2) / 3);
     char *out = (char *)malloc(out_len + 1);
     size_t i, j;
 
     if (out == NULL) return NULL;
 
-    for (i = 0, j = 0; i < size;) {
+    for (i = 0, j = 0; i < data_size;) {
         size_t start = i;
-        unsigned int a = i < size ? in[i++] : 0;
-        unsigned int b = i < size ? in[i++] : 0;
-        unsigned int c = i < size ? in[i++] : 0;
+        unsigned int a = i < data_size ? in[i++] : 0;
+        unsigned int b = i < data_size ? in[i++] : 0;
+        unsigned int c = i < data_size ? in[i++] : 0;
         unsigned int triple = (a << 16) | (b << 8) | c;
         size_t n = i - start;
 
@@ -106,4 +106,13 @@ void *kc_b64_decode(const char *str, size_t *out_size) {
     }
     *out_size = j;
     return out;
+}
+
+/**
+ * Release memory returned by the b64 library.
+ * @param ptr Library-owned allocation, or NULL.
+ * @return No return value.
+ */
+void kc_b64_free(void *ptr) {
+    free(ptr);
 }
