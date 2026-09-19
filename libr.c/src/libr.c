@@ -134,7 +134,7 @@ static void kc_print_version(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    kc_libr_options_t opts = kc_libr_options_default();
+    kc_libr_options_t *opts = kc_libr_options_default();
     if (!opts) {
         fprintf(stderr, "libr: failed to allocate options\n");
         return 1;
@@ -189,7 +189,7 @@ int main(int argc, char **argv) {
         i++;
     }
 
-    void *ctx = NULL;
+    kc_libr_t *ctx = NULL;
     if (kc_libr_open(&ctx, opts) != KC_LIBR_OK) {
         fprintf(stderr, "libr: open failed\n");
         kc_libr_options_free(opts);

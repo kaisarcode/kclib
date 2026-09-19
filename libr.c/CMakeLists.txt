@@ -57,7 +57,7 @@ if(EMSCRIPTEN)
     target_link_options(libr_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_libr_options_default,_kc_libr_options_set,_kc_libr_options_free,_kc_libr_version,_kc_libr_open,_kc_libr_close,_kc_libr_exec,_kc_libr_stop,_kc_libr_get_error
+        -sEXPORTED_FUNCTIONS=_kc_libr_options_default,_kc_libr_options_set,_kc_libr_options_free,_kc_libr_version,_kc_libr_open,_kc_libr_close,_kc_libr_exec,_kc_libr_stop,_kc_libr_stop_requested,_kc_libr_get_error
     )
 endif()
 

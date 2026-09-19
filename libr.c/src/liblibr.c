@@ -51,9 +51,10 @@ uint64_t kc_libr_version(void) {
  * Return default options for the library (caller owns, must free).
  * @return Opaque options handle, or NULL on failure.
  */
-kc_libr_options_t kc_libr_options_default(void) {
+kc_libr_options_t *
+kc_libr_options_default(void) {
     struct kc_libr_options *opts = (struct kc_libr_options *)calloc(1, sizeof(struct kc_libr_options));
-    return (kc_libr_options_t)opts;
+    return opts;
 }
 
 /**
@@ -63,13 +64,21 @@ kc_libr_options_t kc_libr_options_default(void) {
  * @param value Option value, or NULL to clear.
  * @return KC_LIBR_OK on success, KC_LIBR_ERROR on unknown key.
  */
-int kc_libr_options_set(kc_libr_options_t opts, const char *key, const char *value) {
-    struct kc_libr_options *o = (struct kc_libr_options *)opts;
-    if (!o || !key) return KC_LIBR_ERROR;
+int kc_libr_options_set(kc_libr_options_t *opts, const char *key, const char *value) {
+    if (!opts || !key) return KC_LIBR_ERROR;
 
     if (strcmp(key, "param") == 0) {
-        free(o->param);
-        o->param = value ? strdup(value) : NULL;
+        if (value == NULL) {
+            free(opts->param);
+            opts->param = NULL;
+            return KC_LIBR_OK;
+        }
+        char *new_param = strdup(value);
+        if (!new_param) {
+            return KC_LIBR_ERROR;
+        }
+        free(opts->param);
+        opts->param = new_param;
         return KC_LIBR_OK;
     }
     return KC_LIBR_ERROR;
@@ -80,52 +89,48 @@ int kc_libr_options_set(kc_libr_options_t opts, const char *key, const char *val
  * @param opts Options handle from kc_libr_options_default.
  * @return None.
  */
-void kc_libr_options_free(kc_libr_options_t opts) {
-    struct kc_libr_options *o = (struct kc_libr_options *)opts;
-    if (!o) return;
-    free(o->param);
-    free(o);
+void kc_libr_options_free(kc_libr_options_t *opts) {
+    if (!opts) return;
+    free(opts->param);
+    free(opts);
 }
 
 /**
  * Initialize a new libr context.
- * @param ctx_out Destination context pointer.
+ * @param out Destination context pointer.
  * @param opts Opaque options handle from kc_libr_options_default.
  * @return KC_LIBR_OK on success, KC_LIBR_ERROR on failure.
  */
-int kc_libr_open(void **ctx_out, kc_libr_options_t opts) {
-    if (!ctx_out || !opts) return KC_LIBR_ERROR;
-    *ctx_out = NULL;
-
-    struct kc_libr_options *o = (struct kc_libr_options *)opts;
+int kc_libr_open(
+    kc_libr_t **out,
+    const kc_libr_options_t *opts
+) {
+    if (!out || !opts) return KC_LIBR_ERROR;
+    *out = NULL;
 
     kc_libr_t *ctx = (kc_libr_t *)calloc(1, sizeof(kc_libr_t));
     if (!ctx) return KC_LIBR_ERROR;
 
-    ctx->opts = *o;
-    ctx->opts.param = o->param ? strdup(o->param) : NULL;
-    if (o->param && !ctx->opts.param) {
+    ctx->opts.param = opts->param ? strdup(opts->param) : NULL;
+    if (opts->param && !ctx->opts.param) {
         kc_libr_set_error(ctx, "out of memory");
         free(ctx);
         return KC_LIBR_ERROR;
     }
 
-    *ctx_out = ctx;
+    *out = ctx;
     return KC_LIBR_OK;
 }
 
 /**
  * Release a libr context.
  * @param ctx Context pointer.
- * @return KC_LIBR_OK.
  */
-int kc_libr_close(void *ctx) {
-    if (!ctx) return KC_LIBR_OK;
+void kc_libr_close(kc_libr_t *ctx) {
+    if (!ctx) return;
 
-    kc_libr_t *c = (kc_libr_t *)ctx;
-    free(c->opts.param);
-    free(c);
-    return KC_LIBR_OK;
+    free(ctx->opts.param);
+    free(ctx);
 }
 
 /**
@@ -149,10 +154,9 @@ static void kc_libr_set_error(kc_libr_t *ctx, const char *fmt, ...) {
  * @param input Operation input.
  * @return Status code.
  */
-int kc_libr_exec(void *ctx, const char *input) {
-    kc_libr_t *c = (kc_libr_t *)ctx;
-    if (!c || !input) {
-        kc_libr_set_error(c, "invalid argument");
+int kc_libr_exec(kc_libr_t *ctx, const char *input) {
+    if (!ctx || !input) {
+        kc_libr_set_error(ctx, "invalid argument");
         return KC_LIBR_ERROR;
     }
     return KC_LIBR_OK;
@@ -163,11 +167,20 @@ int kc_libr_exec(void *ctx, const char *input) {
  * @param ctx Context handle.
  * @return KC_LIBR_OK on success, KC_LIBR_ERROR on failure.
  */
-int kc_libr_stop(void *ctx) {
-    kc_libr_t *c = (kc_libr_t *)ctx;
-    if (!c) return KC_LIBR_ERROR;
-    c->stop_requested = 1;
+int kc_libr_stop(kc_libr_t *ctx) {
+    if (!ctx) return KC_LIBR_ERROR;
+    ctx->stop_requested = 1;
     return KC_LIBR_OK;
+}
+
+/**
+ * Check if stop was requested for a context.
+ * @param ctx Context pointer.
+ * @return 1 if stop was requested, 0 otherwise.
+ */
+int kc_libr_stop_requested(const kc_libr_t *ctx) {
+    if (!ctx) return 0;
+    return ctx->stop_requested ? 1 : 0;
 }
 
 /**
@@ -175,8 +188,7 @@ int kc_libr_stop(void *ctx) {
  * @param ctx Context pointer.
  * @return Error string, or NULL if no error.
  */
-const char *kc_libr_get_error(const void *ctx) {
-    const kc_libr_t *c = (const kc_libr_t *)ctx;
-    if (!c || !c->error[0]) return NULL;
-    return c->error;
+const char *kc_libr_get_error(const kc_libr_t *ctx) {
+    if (!ctx || !ctx->error[0]) return NULL;
+    return ctx->error;
 }

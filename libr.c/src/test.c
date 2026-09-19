@@ -79,8 +79,8 @@ static int expect_true(const char *name, int condition) {
  * @param out Destination context pointer.
  * @return 0 on success, 1 on failure.
  */
-static int open_context(void **out) {
-    kc_libr_options_t opts = kc_libr_options_default();
+static int open_context(kc_libr_t **out) {
+    kc_libr_options_t *opts = kc_libr_options_default();
     if (!opts) return 1;
     if (kc_libr_open(out, opts) != KC_LIBR_OK) {
         kc_libr_options_free(opts);
@@ -97,7 +97,7 @@ static int open_context(void **out) {
 static int case_kc_libr_options_default(void) {
     const char *name = "kc_libr_options_default";
     const char *detail = "default options initialize correctly";
-    kc_libr_options_t opts;
+    kc_libr_options_t *opts;
 
     opts = kc_libr_options_default();
     int fail = expect_true("default options returns non-NULL", opts != NULL);
@@ -113,7 +113,7 @@ static int case_kc_libr_options_default(void) {
 static int case_kc_libr_options_set(void) {
     const char *name = "kc_libr_options_set";
     const char *detail = "options set works correctly";
-    kc_libr_options_t opts = kc_libr_options_default();
+    kc_libr_options_t *opts = kc_libr_options_default();
     int fail = 0;
 
     if (!opts) return 1;
@@ -137,7 +137,7 @@ static int case_kc_libr_options_set(void) {
 static int case_kc_libr_options_free(void) {
     const char *name = "kc_libr_options_free";
     const char *detail = "options free clears resources";
-    kc_libr_options_t opts;
+    kc_libr_options_t *opts;
     int fail = 0;
 
     fail += expect_true("options_free accepts NULL", 1);
@@ -170,8 +170,8 @@ static int case_kc_libr_version(void) {
 static int case_kc_libr_open(void) {
     const char *name = "kc_libr_open";
     const char *detail = "open validates and allocates context";
-    kc_libr_options_t opts;
-    void *ctx = NULL;
+    kc_libr_options_t *opts;
+    kc_libr_t *ctx = NULL;
     int fail = 0;
 
     fail += expect_int("open rejects NULL out", KC_LIBR_ERROR,
@@ -188,7 +188,7 @@ static int case_kc_libr_open(void) {
 
     fail += expect_int("opened context still executes", KC_LIBR_OK,
         kc_libr_exec(ctx, "input"));
-    fail += expect_int("close opened context", KC_LIBR_OK, kc_libr_close(ctx));
+    kc_libr_close(ctx);
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -201,12 +201,12 @@ static int case_kc_libr_open(void) {
 static int case_kc_libr_close(void) {
     const char *name = "kc_libr_close";
     const char *detail = "close releases context";
-    void *ctx;
+    kc_libr_t *ctx;
     int fail = 0;
 
-    fail += expect_int("close accepts NULL", KC_LIBR_OK, kc_libr_close(NULL));
+    kc_libr_close(NULL);
     if (open_context(&ctx) != 0) return 1;
-    fail += expect_int("close releases context", KC_LIBR_OK, kc_libr_close(ctx));
+    kc_libr_close(ctx);
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -219,7 +219,7 @@ static int case_kc_libr_close(void) {
 static int case_kc_libr_exec(void) {
     const char *name = "kc_libr_exec";
     const char *detail = "exec validates and processes input";
-    void *ctx;
+    kc_libr_t *ctx;
     int fail = 0;
 
     fail += expect_int("exec rejects NULL ctx", KC_LIBR_ERROR,
@@ -235,7 +235,7 @@ static int case_kc_libr_exec(void) {
         kc_libr_stop(ctx));
     fail += expect_int("exec after stop returns OK", KC_LIBR_OK,
         kc_libr_exec(ctx, "post-stop"));
-    fail += expect_int("close context", KC_LIBR_OK, kc_libr_close(ctx));
+    kc_libr_close(ctx);
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -248,8 +248,8 @@ static int case_kc_libr_exec(void) {
 static int case_kc_libr_stop(void) {
     const char *name = "kc_libr_stop";
     const char *detail = "stop sets flag on context";
-    void *ctx;
-    void *other;
+    kc_libr_t *ctx;
+    kc_libr_t *other;
     int fail = 0;
 
     fail += expect_int("stop rejects NULL", KC_LIBR_ERROR, kc_libr_stop(NULL));
@@ -262,8 +262,39 @@ static int case_kc_libr_stop(void) {
     fail += expect_int("stop is idempotent", KC_LIBR_OK, kc_libr_stop(ctx));
     fail += expect_int("other context still executes", KC_LIBR_OK,
         kc_libr_exec(other, "input"));
-    fail += expect_int("close stopped context", KC_LIBR_OK, kc_libr_close(ctx));
-    fail += expect_int("close other context", KC_LIBR_OK, kc_libr_close(other));
+    kc_libr_close(ctx);
+    kc_libr_close(other);
+
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_libr_stop_requested.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_libr_stop_requested(void) {
+    const char *name = "kc_libr_stop_requested";
+    const char *detail = "stop state is context-local and observable";
+    kc_libr_t *ctx;
+    kc_libr_t *other;
+    int fail = 0;
+
+    fail += expect_int("stop_requested rejects NULL", 0, kc_libr_stop_requested(NULL));
+    if (open_context(&ctx) != 0) return 1;
+    if (open_context(&other) != 0) {
+        kc_libr_close(ctx);
+        return 1;
+    }
+    fail += expect_int("fresh ctx returns 0", 0, kc_libr_stop_requested(ctx));
+    fail += expect_int("fresh other returns 0", 0, kc_libr_stop_requested(other));
+    fail += expect_int("stop context succeeds", KC_LIBR_OK, kc_libr_stop(ctx));
+    fail += expect_int("stopped ctx returns 1", 1, kc_libr_stop_requested(ctx));
+    fail += expect_int("other context still returns 0", 0, kc_libr_stop_requested(other));
+    fail += expect_int("stop is idempotent", KC_LIBR_OK, kc_libr_stop(ctx));
+    fail += expect_int("stopped ctx still returns 1", 1, kc_libr_stop_requested(ctx));
+    kc_libr_close(ctx);
+    kc_libr_close(other);
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -276,7 +307,7 @@ static int case_kc_libr_stop(void) {
 static int case_kc_libr_get_error(void) {
     const char *name = "kc_libr_get_error";
     const char *detail = "get_error returns NULL when no error";
-    void *ctx;
+    kc_libr_t *ctx;
     int fail = 0;
 
     fail += expect_true("get_error returns NULL for NULL ctx",
@@ -296,7 +327,7 @@ static int case_kc_libr_get_error(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 9;
+    test_case_total = 10;
     test_case_current = 0;
     run_case(&rc, case_kc_libr_options_default);
     run_case(&rc, case_kc_libr_options_set);
@@ -306,6 +337,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_libr_close);
     run_case(&rc, case_kc_libr_exec);
     run_case(&rc, case_kc_libr_stop);
+    run_case(&rc, case_kc_libr_stop_requested);
     run_case(&rc, case_kc_libr_get_error);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -331,6 +363,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_libr_close") == 0) return case_kc_libr_close();
     if (strcmp(argv[1], "kc_libr_exec") == 0) return case_kc_libr_exec();
     if (strcmp(argv[1], "kc_libr_stop") == 0) return case_kc_libr_stop();
+    if (strcmp(argv[1], "kc_libr_stop_requested") == 0) return case_kc_libr_stop_requested();
     if (strcmp(argv[1], "kc_libr_get_error") == 0) return case_kc_libr_get_error();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
