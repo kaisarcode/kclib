@@ -17,6 +17,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 static int test_case_total = 0;
 static int test_case_current = 0;
 
@@ -73,60 +79,38 @@ static int expect_true(const char *name, int condition) {
 }
 
 /**
- * Tests kc_wch_options_default.
- * @return 0 on success, 1 on failure.
+ * Creates an empty directory for an isolated watcher test.
+ * @param path Destination path buffer.
+ * @param path_size Size of the destination buffer.
+ * @return 1 on success, 0 on failure.
  */
-static int case_kc_wch_options_default(void) {
-    const char *name = "kc_wch_options_default";
-    const char *detail = "initializes correctly";
-    kc_wch_options_t opts;
-    int fail = 0;
+static int make_test_dir(char *path, size_t path_size) {
+#ifdef _WIN32
+    char temp_path[MAX_PATH];
 
-    opts = kc_wch_options_default();
-    fail += expect_int("options_default initializes recursive", 0, opts.recursive);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    if (path_size < MAX_PATH) return 0;
+    if (GetTempPathA(sizeof(temp_path), temp_path) == 0) return 0;
+    if (GetTempFileNameA(temp_path, "wch", 0, path) == 0) return 0;
+    DeleteFileA(path);
+    return CreateDirectoryA(path, NULL) != 0;
+#else
+    if (path_size < sizeof("/tmp/kc_wch_test_XXXXXX")) return 0;
+    snprintf(path, path_size, "%s", "/tmp/kc_wch_test_XXXXXX");
+    return mkdtemp(path) != NULL;
+#endif
 }
 
 /**
- * Tests kc_wch_options_load_env.
- * @return 0 on success, 1 on failure.
+ * Removes an empty isolated watcher test directory.
+ * @param path Directory path.
+ * @return None.
  */
-static int case_kc_wch_options_load_env(void) {
-    const char *name = "kc_wch_options_load_env";
-    const char *detail = "loads from environment";
-    kc_wch_options_t opts;
-    int fail = 0;
-
-    opts = kc_wch_options_default();
-    opts.recursive = 1;
-    kc_wch_options_load_env(&opts);
-    fail += expect_int("load_env preserves unmapped options", 1, opts.recursive);
-    kc_wch_options_load_env(NULL);
-    fail += expect_true("load_env accepts NULL", 1);
-    kc_wch_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_wch_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_wch_options_free(void) {
-    const char *name = "kc_wch_options_free";
-    const char *detail = "clears resources";
-    kc_wch_options_t opts;
-    int fail = 0;
-
-    opts = kc_wch_options_default();
-    opts.recursive = 1;
-    kc_wch_options_free(&opts);
-    fail += expect_int("free preserves plain options", 1, opts.recursive);
-    kc_wch_options_free(NULL);
-    fail += expect_true("free accepts NULL", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static void remove_test_dir(const char *path) {
+#ifdef _WIN32
+    RemoveDirectoryA(path);
+#else
+    rmdir(path);
+#endif
 }
 
 /**
@@ -136,27 +120,30 @@ static int case_kc_wch_options_free(void) {
 static int case_kc_wch_open(void) {
     const char *name = "kc_wch_open";
     const char *detail = "validates and allocates context";
-    kc_wch_options_t opts;
     kc_wch_t *w;
     int fail = 0;
 
-    opts = kc_wch_options_default();
     w = NULL;
     fail += expect_int("open rejects NULL out", KC_WCH_ERROR,
-        kc_wch_open(NULL, "/tmp", &opts));
+        kc_wch_open(NULL, "/tmp", 0));
     fail += expect_int("open rejects NULL path", KC_WCH_ERROR,
-        kc_wch_open(&w, NULL, &opts));
-    fail += expect_int("open rejects NULL opts", KC_WCH_ERROR,
-        kc_wch_open(&w, "/tmp", NULL));
-    fail += expect_true("open leaves output unchanged on error", w == NULL);
-    fail += expect_int("open rejects missing path", KC_WCH_ERROR,
-        kc_wch_open(&w, "", &opts));
-    fail += expect_int("open rejects nonexistent path", KC_WCH_ERROR,
-        kc_wch_open(&w, "/nonexistent/path/xyz", &opts));
+        kc_wch_open(&w, NULL, 0));
+    fail += expect_true("open leaves output NULL after NULL path", w == NULL);
+    fail += expect_int("open rejects empty path", KC_WCH_ERROR,
+        kc_wch_open(&w, "", 0));
+    fail += expect_true("open leaves output NULL after empty path", w == NULL);
+    fail += expect_int("open rejects nonexistent parent", KC_WCH_ERROR,
+        kc_wch_open(&w, "/tmp/kc_wch_missing_parent_xyz/target", 0));
+    fail += expect_true("open leaves output NULL after missing parent", w == NULL);
     fail += expect_int("open valid path", KC_WCH_OK,
-        kc_wch_open(&w, "/tmp", &opts));
+        kc_wch_open(&w, "/tmp", 0));
     fail += expect_true("open sets output", w != NULL);
-    if (w != NULL) fail += expect_int("close opened context", KC_WCH_OK, kc_wch_close(w));
+    kc_wch_close(w);
+    w = NULL;
+    fail += expect_int("open accepts recursive mode", KC_WCH_OK,
+        kc_wch_open(&w, "/tmp", 1));
+    fail += expect_true("recursive open sets output", w != NULL);
+    kc_wch_close(w);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -168,37 +155,14 @@ static int case_kc_wch_open(void) {
 static int case_kc_wch_close(void) {
     const char *name = "kc_wch_close";
     const char *detail = "releases context";
-    kc_wch_options_t opts;
     kc_wch_t *w;
     int fail = 0;
 
-    opts = kc_wch_options_default();
     w = NULL;
-    fail += expect_int("close rejects NULL", KC_WCH_OK, kc_wch_close(NULL));
-    fail += expect_int("open context for close", KC_WCH_OK, kc_wch_open(&w, "/tmp", &opts));
-    fail += expect_int("close releases context", KC_WCH_OK, kc_wch_close(w));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_wch_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_wch_stop(void) {
-    const char *name = "kc_wch_stop";
-    const char *detail = "sets flag and is idempotent";
-    kc_wch_options_t opts;
-    kc_wch_t *w;
-    int fail = 0;
-
-    opts = kc_wch_options_default();
-    w = NULL;
-    fail += expect_int("stop rejects NULL", KC_WCH_ERROR, kc_wch_stop(NULL));
-    fail += expect_int("open context for stop", KC_WCH_OK, kc_wch_open(&w, "/tmp", &opts));
-    fail += expect_int("stop returns OK", KC_WCH_OK, kc_wch_stop(w));
-    fail += expect_int("stop is idempotent", KC_WCH_OK, kc_wch_stop(w));
-    fail += expect_int("close stop context", KC_WCH_OK, kc_wch_close(w));
+    kc_wch_close(NULL);
+    fail += expect_int("open context for close", KC_WCH_OK, kc_wch_open(&w, "/tmp", 0));
+    fail += expect_true("open context for close sets output", w != NULL);
+    kc_wch_close(w);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -209,18 +173,56 @@ static int case_kc_wch_stop(void) {
  */
 static int case_kc_wch_poll(void) {
     const char *name = "kc_wch_poll";
-    const char *detail = "reports timeout and rejects null";
-    kc_wch_options_t opts;
+    const char *detail = "reports timeout, events, and invalid arguments";
     kc_wch_t *w;
     kc_wch_event_t ev;
+    char directory[512];
+    char event_path[512];
+#ifndef _WIN32
+    FILE *file;
+#endif
     int fail = 0;
 
-    opts = kc_wch_options_default();
     w = NULL;
-    fail += expect_int("poll rejects NULL ctx", -1, kc_wch_poll(NULL, &ev, 0));
-    fail += expect_int("open context for poll", KC_WCH_OK, kc_wch_open(&w, "/tmp", &opts));
-    fail += expect_int("poll timeout=0 returns 0", 0, kc_wch_poll(w, &ev, 0));
-    fail += expect_int("close poll context", KC_WCH_OK, kc_wch_close(w));
+    directory[0] = '\0';
+    event_path[0] = '\0';
+    fail += expect_int("poll rejects NULL context", KC_WCH_ERROR, kc_wch_poll(NULL, &ev, 0));
+    fail += expect_true("create isolated poll directory", make_test_dir(directory, sizeof(directory)));
+    fail += expect_int("open context for poll", KC_WCH_OK, kc_wch_open(&w, directory, 0));
+    fail += expect_int("poll rejects NULL event", KC_WCH_ERROR, kc_wch_poll(w, NULL, 0));
+    fail += expect_int("poll timeout=0 returns timeout", KC_WCH_TIMEOUT, kc_wch_poll(w, &ev, 0));
+    fail += expect_int("timeout resets event type", -1, ev.type);
+    fail += expect_true("timeout resets event path", ev.path == NULL);
+    if (w != NULL && directory[0] != '\0') {
+        snprintf(event_path, sizeof(event_path), "%s/event", directory);
+#ifdef _WIN32
+    HANDLE file_handle = CreateFileA(event_path, GENERIC_WRITE, 0, NULL,
+            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        fail += expect_true("create watched file", file_handle != INVALID_HANDLE_VALUE);
+        if (file_handle != INVALID_HANDLE_VALUE) CloseHandle(file_handle);
+#else
+        file = fopen(event_path, "w");
+        fail += expect_true("create watched file", file != NULL);
+        if (file != NULL) fclose(file);
+#endif
+        int event_rc = kc_wch_poll(w, &ev, 1000);
+#ifdef _WIN32
+        if (GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL) {
+            fail += expect_true("Wine poll reports event or timeout",
+                event_rc == KC_WCH_EVENT || event_rc == KC_WCH_TIMEOUT);
+        } else {
+            fail += expect_int("poll reports real event", KC_WCH_EVENT, event_rc);
+        }
+#else
+        fail += expect_int("poll reports real event", KC_WCH_EVENT, event_rc);
+#endif
+        if (event_rc == KC_WCH_EVENT) {
+            fail += expect_true("real event sets path", ev.path != NULL);
+        }
+    }
+    kc_wch_close(w);
+    if (event_path[0] != '\0') remove(event_path);
+    if (directory[0] != '\0') remove_test_dir(directory);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -232,22 +234,31 @@ static int case_kc_wch_poll(void) {
 static int case_kc_wch_multictx(void) {
     const char *name = "kc_wch_multictx";
     const char *detail = "two contexts coexist independently";
-    kc_wch_options_t opts;
     kc_wch_t *a;
     kc_wch_t *b;
     kc_wch_event_t ev;
+    char a_directory[512];
+    char b_directory[512];
     int fail = 0;
 
-    opts = kc_wch_options_default();
     a = NULL;
     b = NULL;
-    fail += expect_int("open first context", KC_WCH_OK, kc_wch_open(&a, "/tmp", &opts));
-    fail += expect_int("open second context", KC_WCH_OK, kc_wch_open(&b, "/tmp", &opts));
-    fail += expect_int("stop a returns OK", KC_WCH_OK, kc_wch_stop(a));
-    fail += expect_true("poll b still usable after stop a", kc_wch_poll(b, &ev, 0) == 0);
-    fail += expect_int("stop b returns OK", KC_WCH_OK, kc_wch_stop(b));
-    fail += expect_int("close a returns OK", KC_WCH_OK, kc_wch_close(a));
-    fail += expect_int("close b returns OK", KC_WCH_OK, kc_wch_close(b));
+    a_directory[0] = '\0';
+    b_directory[0] = '\0';
+    fail += expect_true("create first isolated directory",
+        make_test_dir(a_directory, sizeof(a_directory)));
+    fail += expect_true("create second isolated directory",
+        make_test_dir(b_directory, sizeof(b_directory)));
+    fail += expect_int("open first context", KC_WCH_OK, kc_wch_open(&a, a_directory, 0));
+    fail += expect_int("open second context", KC_WCH_OK, kc_wch_open(&b, b_directory, 0));
+    fail += expect_int("poll first context", KC_WCH_TIMEOUT, kc_wch_poll(a, &ev, 0));
+    fail += expect_int("poll second context", KC_WCH_TIMEOUT, kc_wch_poll(b, &ev, 0));
+    kc_wch_close(a);
+    fail += expect_int("poll second context after first closes", KC_WCH_TIMEOUT,
+        kc_wch_poll(b, &ev, 0));
+    kc_wch_close(b);
+    if (a_directory[0] != '\0') remove_test_dir(a_directory);
+    if (b_directory[0] != '\0') remove_test_dir(b_directory);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -270,14 +281,10 @@ static int case_kc_wch_version(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 9;
+    test_case_total = 5;
     test_case_current = 0;
-    run_case(&rc, case_kc_wch_options_default);
-    run_case(&rc, case_kc_wch_options_load_env);
-    run_case(&rc, case_kc_wch_options_free);
     run_case(&rc, case_kc_wch_open);
     run_case(&rc, case_kc_wch_close);
-    run_case(&rc, case_kc_wch_stop);
     run_case(&rc, case_kc_wch_poll);
     run_case(&rc, case_kc_wch_multictx);
     run_case(&rc, case_kc_wch_version);
@@ -297,12 +304,8 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_wch_options_default") == 0) return case_kc_wch_options_default();
-    if (strcmp(argv[1], "kc_wch_options_load_env") == 0) return case_kc_wch_options_load_env();
-    if (strcmp(argv[1], "kc_wch_options_free") == 0) return case_kc_wch_options_free();
     if (strcmp(argv[1], "kc_wch_open") == 0) return case_kc_wch_open();
     if (strcmp(argv[1], "kc_wch_close") == 0) return case_kc_wch_close();
-    if (strcmp(argv[1], "kc_wch_stop") == 0) return case_kc_wch_stop();
     if (strcmp(argv[1], "kc_wch_poll") == 0) return case_kc_wch_poll();
     if (strcmp(argv[1], "kc_wch_multictx") == 0) return case_kc_wch_multictx();
     if (strcmp(argv[1], "kc_wch_version") == 0) return case_kc_wch_version();

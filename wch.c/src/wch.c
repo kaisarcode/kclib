@@ -10,7 +10,6 @@
 #include "libwch.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 /**
@@ -91,29 +90,22 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    kc_wch_options_t opts = kc_wch_options_default();
-    opts.recursive = recursive;
-    kc_wch_options_load_env(&opts);
-
     kc_wch_t *w = NULL;
-    if (kc_wch_open(&w, path, &opts) != KC_WCH_OK) {
+    if (kc_wch_open(&w, path, recursive) != KC_WCH_OK) {
         fprintf(stderr, "wch: failed to open watcher\n");
-        kc_wch_options_free(&opts);
         return 1;
     }
-    kc_wch_options_free(&opts);
 
     for (;;) {
         kc_wch_event_t ev;
         int rc = kc_wch_poll(w, &ev, -1);
-        if (rc < 0) break;
-        if (rc == 1 && ev.path) {
+        if (rc == KC_WCH_ERROR) break;
+        if (rc == KC_WCH_EVENT && ev.path != NULL) {
             printf("%s:%s\n", kc_wch_event_label(ev.type), ev.path);
             fflush(stdout);
         }
     }
 
-    kc_wch_stop(w);
     kc_wch_close(w);
     return 0;
 }

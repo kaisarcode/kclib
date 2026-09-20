@@ -61,109 +61,28 @@ del:/tmp/dir/oldfile.txt
 ```c
 #include "libwch.h"
 
-kc_wch_options_t opts = kc_wch_options_default();
-opts.recursive = 1;
-
 kc_wch_t *w = NULL;
-kc_wch_open(&w, "/path/to/watch", &opts);
-
-kc_wch_event_t ev;
-while (kc_wch_poll(w, &ev, -1) > 0) {
-    switch (ev.type) {
-    case KC_WCH_ADD: /* add */ break;
-    case KC_WCH_UPD: /* update */ break;
-    case KC_WCH_DEL: /* delete */ break;
+if (kc_wch_open(&w, "/path/to/watch", 1) == KC_WCH_OK) {
+    kc_wch_event_t ev;
+    while (kc_wch_poll(w, &ev, -1) == KC_WCH_EVENT) {
+        switch (ev.type) {
+        case KC_WCH_ADD: /* add */ break;
+        case KC_WCH_UPD: /* update */ break;
+        case KC_WCH_DEL: /* delete */ break;
+        }
     }
-}
-
-kc_wch_close(w);
-kc_wch_options_free(&opts);
-```
-
----
-
-## Runner
-
-The library does not ship its own runner. Programmatic and bridge composition
-use the generic `kcrun` runner, which auto-discovers the standard C API symbols
-via `dlsym` and dispatches JSON commands to them. Bridges load `libwch.so` in
-solitude through the `kcrun` host face (`kcr_load` + `kcr_call`).
-
-```c
-#include "libwch.h"
-
-char *err = NULL;
-char *result = kcr_call(kcr_load("wch", NULL, 0), "wch",
-    "{\"cmd\":\"open\",\"args\":{\"path\":\"/tmp\"}}", &err);
-if (result) {
-    // Parse result for handle
-    free(result);
-}
-free(err);
-```
-
-The CLI does not invoke the runner; it calls the public C API directly.
-
-### JSON Contract
-
-Request:
-```json
-{
-  "cmd": "open|poll|stop|close|version",
-  "args": {
-    "path": "/path/to/watch",
-    "recursive": true,
-    "handle": 1,
-    "timeout_ms": -1
-  },
-  "handle": 1
+    kc_wch_close(w);
 }
 ```
-
-Success response:
-```json
-{
-  "result": {
-    "status": "ok",
-    "handle": 1
-  },
-  "handle": 1
-}
-```
-
-Poll response with event:
-```json
-{
-  "result": {
-    "has_event": true,
-    "event": {
-      "type": "add|upd|del",
-      "path": "/tmp/file.txt"
-    }
-  },
-  "handle": 1
-}
-```
-
-Poll response without event (timeout):
-```json
-{
-  "result": {
-    "has_event": false
-  },
-  "handle": 1
-}
-```
-
-Error: Returns `NULL`, sets `*out_err` to malloc'd message.
 
 ---
 
 ## Lifecycle
 
-- `kc_wch_open()` - Opens a watcher on the given path via `kc_wch_options_t`. Returns KC_WCH_OK on success. If the path doesn't exist, watches the parent directory instead and filters for the target filename. Set `opts.recursive` for recursive directory watching.
-- `kc_wch_poll()` - Blocks until a change event occurs. Returns 1 on event, 0 on timeout, -1 on error. The `timeout_ms` parameter controls blocking behavior (-1 = infinite, 0 = no wait).
-- `kc_wch_close()` - Releases the watcher and all associated resources. Returns KC_WCH_OK. Safe to call with NULL.
+- `kc_wch_open()` - Opens a watcher on the given path. Its third argument is `recursive`: `0` watches non-recursively and any nonzero value watches directories recursively. Returns `KC_WCH_OK` on success or `KC_WCH_ERROR` on failure. If the path does not exist, it watches the parent directory and filters for the target filename.
+- `kc_wch_poll()` - Waits for the next file-change event. It returns `KC_WCH_EVENT` on an event, `KC_WCH_TIMEOUT` on timeout, or `KC_WCH_ERROR` on error. `timeout_ms` is `-1` to wait indefinitely, `0` for no wait, or a positive number of milliseconds to wait.
+- `ev.path` is context-owned. Do not free or modify it; it is valid only after `kc_wch_poll()` returns `KC_WCH_EVENT`, until the next event from the same watcher or `kc_wch_close()`. Copy it for longer use.
+- `kc_wch_close()` - Releases the watcher and all associated resources. Safe to call with `NULL`.
 
 ---
 

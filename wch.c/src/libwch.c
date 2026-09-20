@@ -24,7 +24,6 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
-#include <signal.h>
 #include <stddef.h>
 #include <stdarg.h>
 
@@ -70,8 +69,6 @@ struct kc_wch {
     int q_type[KC_WCH_QUEUE_SIZE];
     char q_path[KC_WCH_QUEUE_SIZE][PATH_MAX];
     int q_used;
-
-    volatile sig_atomic_t stop_requested;
 
 #ifdef __linux__
     int ifd;
@@ -637,10 +634,10 @@ static void fill_windows(struct kc_wch *w, int tmo) {
             FILE_NOTIFY_CHANGE_DIR_NAME |
             FILE_NOTIFY_CHANGE_LAST_WRITE |
             FILE_NOTIFY_CHANGE_SIZE;
-        ResetEvent(w->ol.hEvent);
+        HANDLE event = w->ol.hEvent;
+        ResetEvent(event);
         memset(&w->ol, 0, sizeof(w->ol));
-        w->ol.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
-        if (!w->ol.hEvent) return;
+        w->ol.hEvent = event;
         if (!ReadDirectoryChangesW(w->hdir, w->win_buf, sizeof(w->win_buf),
                 w->recursive ? TRUE : FALSE,
                 filter, NULL, &w->ol, NULL)) {
@@ -698,11 +695,13 @@ static void fill_windows(struct kc_wch *w, int tmo) {
  * Open a file watcher on the given path.
  * @param out Output pointer for watcher context.
  * @param path File or directory to watch.
- * @param opts Watcher options.
+ * @param recursive Non-zero to watch directories recursively.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
-int kc_wch_open(kc_wch_t **out, const char *path, const kc_wch_options_t *opts) {
-    if (!out || !path || !*path || !opts) return KC_WCH_ERROR;
+int kc_wch_open(kc_wch_t **out, const char *path, int recursive) {
+    if (out == NULL) return KC_WCH_ERROR;
+    *out = NULL;
+    if (path == NULL || path[0] == '\0') return KC_WCH_ERROR;
     int exists = 0;
 #ifndef _WIN32
     struct stat st;
@@ -741,7 +740,7 @@ int kc_wch_open(kc_wch_t **out, const char *path, const kc_wch_options_t *opts) 
         w->root = strdup(parent);
     }
     if (!w->root) { free(w); return KC_WCH_ERROR; }
-    w->recursive = opts->recursive;
+    w->recursive = recursive ? 1 : 0;
     if (!try_backend(w)) { free(w->root); free(w); return KC_WCH_ERROR; }
     if (w->backend == 1) {
 #ifdef __linux__
@@ -757,21 +756,21 @@ int kc_wch_open(kc_wch_t **out, const char *path, const kc_wch_options_t *opts) 
  * @param w Watcher context.
  * @param ev Output event structure.
  * @param timeout_ms Max wait in milliseconds (-1 = infinite, 0 = no wait).
- * @return 1 on event, 0 on timeout, -1 on error.
+ * @return KC_WCH_EVENT on event, KC_WCH_TIMEOUT on timeout, or KC_WCH_ERROR
+ * on error.
  */
 int kc_wch_poll(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms) {
-    if (!w || !ev) return -1;
-    if (w->stop_requested) return -1;
-    if (dequeue(w, ev)) return 1;
+    if (w == NULL || ev == NULL) return KC_WCH_ERROR;
+    if (dequeue(w, ev)) return KC_WCH_EVENT;
     ev->type = -1;
     ev->path = NULL;
 #ifdef __linux__
     if (w->backend == 1) {
         int rc = read_inotify(w, timeout_ms);
-        if (rc < 0) return -1;
-        if (rc > 0) return 0;
+        if (rc < 0) return KC_WCH_ERROR;
+        if (rc > 0) return KC_WCH_TIMEOUT;
         fill_inotify(w);
-        return dequeue(w, ev) ? 1 : 0;
+        return dequeue(w, ev) ? KC_WCH_EVENT : KC_WCH_TIMEOUT;
     }
 #endif
 #ifdef __APPLE__
@@ -782,20 +781,20 @@ int kc_wch_poll(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms) {
 #ifdef _WIN32
     if (w->backend == 3) {
         fill_windows(w, timeout_ms);
-        return dequeue(w, ev) ? 1 : 0;
+        return dequeue(w, ev) ? KC_WCH_EVENT : KC_WCH_TIMEOUT;
     }
 #endif
-    return -1;
+    return KC_WCH_ERROR;
 }
 
 /**
  * Close a file watcher and release all resources.
  * @param w Watcher context (NULL safe).
- * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ * @return None.
  */
-int kc_wch_close(kc_wch_t *w) {
+void kc_wch_close(kc_wch_t *w) {
     int i;
-    if (!w) return KC_WCH_OK;
+    if (!w) return;
     for (i = 0; i < w->path_count; i++) free(w->paths[i]);
     free(w->paths);
 #ifdef __linux__
@@ -823,46 +822,6 @@ int kc_wch_close(kc_wch_t *w) {
 #endif
     free(w->root);
     free(w);
-    return KC_WCH_OK;
-}
-
-/**
- * Create an options struct initialized with default values.
- * @return Default-initialized options.
- */
-kc_wch_options_t kc_wch_options_default(void) {
-    kc_wch_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    return opts;
-}
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_wch_options_load_env(kc_wch_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_wch_options_free(kc_wch_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Request stop for a specific wch context.
- * @param w Watcher context.
- * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
- */
-int kc_wch_stop(kc_wch_t *w) {
-    if (!w) return KC_WCH_ERROR;
-    w->stop_requested = 1;
-    return KC_WCH_OK;
 }
 
 /**
