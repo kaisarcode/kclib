@@ -93,7 +93,6 @@ static int expect_not_null(const char *name, const void *ptr) {
     return 0;
 }
 
-
 /**
  * Creates an isolated metadata directory for list tests.
  * @param out Output directory buffer.
