@@ -13,33 +13,12 @@
 #endif
 #include "libmin.h"
 #include <ctype.h>
-#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
-
-typedef enum {
-    KC_ENV_TYPE_INT,
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_MIN_MODE", offsetof(kc_min_options_t, mode), KC_ENV_TYPE_INT },
-};
-static const int env_config_table_n =
-    sizeof(env_config_table) / sizeof(env_config_table[0]);
 
 struct kc_min {
-    kc_min_options_t opts;
-    volatile sig_atomic_t stop_requested;
+    int mode;
 };
-
-int kc_min_stop_requested(kc_min_t *ctx);
 
 /**
  * Appends a single character to a dynamic output buffer.
@@ -476,72 +455,23 @@ static int kc_min_html(const char *in, char **out) {
 }
 
 /**
- * Create default-initialized min options.
- * @return Default-initialized options.
- */
-kc_min_options_t kc_min_options_default(void) {
-    kc_min_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.mode = KC_MIN_MODE_CSS;
-    return opts;
-}
-
-/**
- * Load environment variables into options.
- * @param opts Options to populate.
- * @return None.
- */
-void kc_min_options_load_env(kc_min_options_t *opts) {
-    int i;
-    if (!opts) return;
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        char *end;
-        if (!val) continue;
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-        }
-    }
-}
-
-/**
- * Free resources held by options.
- * @param opts Options to release.
- * @return None.
- */
-void kc_min_options_free(kc_min_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Request stop for a specific min context.
- * @param ctx Context pointer.
- * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
- */
-int kc_min_stop(kc_min_t *ctx) {
-    if (!ctx) return KC_MIN_ERROR;
-    ctx->stop_requested = 1;
-    return KC_MIN_OK;
-}
-
-/**
  * Initialize a new min context.
  * @param out Receives the context pointer on success.
- * @param opts Options for initialization.
  * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
  */
-int kc_min_open(kc_min_t **out, const kc_min_options_t *opts) {
+int kc_min_open(kc_min_t **out) {
     kc_min_t *ctx;
-    if (!out || !opts) return KC_MIN_ERROR;
+
+    if (!out) {
+        return KC_MIN_ERROR;
+    }
+
     ctx = (kc_min_t *)calloc(1, sizeof(kc_min_t));
-    if (!ctx) return KC_MIN_ERROR;
-    ctx->opts = *opts;
+    if (!ctx) {
+        return KC_MIN_ERROR;
+    }
+
+    ctx->mode = KC_MIN_MODE_CSS;
     *out = ctx;
     return KC_MIN_OK;
 }
@@ -552,8 +482,6 @@ int kc_min_open(kc_min_t **out, const kc_min_options_t *opts) {
  * @return None.
  */
 void kc_min_close(kc_min_t *ctx) {
-    if (!ctx) return;
-    kc_min_options_free(&ctx->opts);
     free(ctx);
 }
 
@@ -572,7 +500,7 @@ int kc_min_set_mode(kc_min_t *ctx, int mode) {
         return KC_MIN_ERROR;
     }
 
-    ctx->opts.mode = mode;
+    ctx->mode = mode;
     return KC_MIN_OK;
 }
 
@@ -613,15 +541,15 @@ int kc_min_exec(kc_min_t *ctx, const char *input, char **output) {
         return KC_MIN_ERROR;
     }
 
-    if (ctx->opts.mode == KC_MIN_MODE_CSS) {
+    if (ctx->mode == KC_MIN_MODE_CSS) {
         return kc_min_css(input, output);
     }
 
-    if (ctx->opts.mode == KC_MIN_MODE_JS) {
+    if (ctx->mode == KC_MIN_MODE_JS) {
         return kc_min_js(input, output);
     }
 
-    if (ctx->opts.mode == KC_MIN_MODE_HTML) {
+    if (ctx->mode == KC_MIN_MODE_HTML) {
         return kc_min_html(input, output);
     }
 
@@ -640,16 +568,6 @@ void kc_min_free(char *text) {
 #ifndef KC_MIN_BUILD_VERSION
 #define KC_MIN_BUILD_VERSION 0
 #endif
-
-/**
- * Check whether a stop has been requested on the context.
- * @param ctx Context pointer.
- * @return 1 if stop was requested, 0 otherwise.
- */
-int kc_min_stop_requested(kc_min_t *ctx) {
-    if (!ctx) return 0;
-    return ctx->stop_requested ? 1 : 0;
-}
 
 /**
  * Returns the build version generated at compile time.

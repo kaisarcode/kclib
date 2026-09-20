@@ -44,7 +44,7 @@ if(EMSCRIPTEN)
     target_link_options(min_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_min_options_default,_kc_min_options_load_env,_kc_min_options_free,_kc_min_stop,_kc_min_open,_kc_min_close,_kc_min_set_mode,_kc_min_mode,_kc_min_exec,_kc_min_free,_kc_min_version,_kc_min_stop_requested
+        -sEXPORTED_FUNCTIONS=_kc_min_open,_kc_min_close,_kc_min_set_mode,_kc_min_mode,_kc_min_exec,_kc_min_free,_kc_min_version
     )
 endif()
 

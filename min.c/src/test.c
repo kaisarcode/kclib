@@ -101,56 +101,6 @@ static int case_kc_min_version(void) {
 }
 
 /**
- * Tests kc_min_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_min_options_default(void) {
-    const char *name = "kc_min_options_default";
-    const char *detail = "returns default CSS mode";
-    kc_min_options_t opts = kc_min_options_default();
-    int fail;
-
-    fail = expect_int("options_default.mode", KC_MIN_MODE_CSS, opts.mode);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_min_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_min_options_load_env(void) {
-    const char *name = "kc_min_options_load_env";
-    const char *detail = "loads environment overrides";
-    kc_min_options_t opts;
-    int fail;
-
-    kc_min_options_load_env(NULL);
-    opts = kc_min_options_default();
-    kc_min_options_load_env(&opts);
-    fail = expect_int("env absent keeps default", KC_MIN_MODE_CSS, opts.mode);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_min_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_min_options_free(void) {
-    const char *name = "kc_min_options_free";
-    const char *detail = "clears resources";
-    kc_min_options_t opts = {0};
-    int fail;
-
-    kc_min_options_free(&opts);
-    kc_min_options_free(NULL);
-    fail = expect_true("options_free does not crash", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_min_open.
  * @return 0 on success, 1 on failure.
  */
@@ -158,14 +108,11 @@ static int case_kc_min_open(void) {
     const char *name = "kc_min_open";
     const char *detail = "validates arguments and allocates context";
     kc_min_t *ctx = NULL;
-    kc_min_options_t opts;
     int fail;
 
     fail = 0;
-    opts = kc_min_options_default();
-    fail += expect_int("open(NULL out) ERROR", KC_MIN_ERROR, kc_min_open(NULL, &opts));
-    fail += expect_int("open(NULL opts) ERROR", KC_MIN_ERROR, kc_min_open(&ctx, NULL));
-    fail += expect_int("open valid OK", KC_MIN_OK, kc_min_open(&ctx, &opts));
+    fail += expect_int("open(NULL out) ERROR", KC_MIN_ERROR, kc_min_open(NULL));
+    fail += expect_int("open valid OK", KC_MIN_OK, kc_min_open(&ctx));
     fail += expect_true("open sets context", ctx != NULL);
     kc_min_close(ctx);
     case_result(fail, name, detail);
@@ -180,60 +127,13 @@ static int case_kc_min_close(void) {
     const char *name = "kc_min_close";
     const char *detail = "releases context";
     kc_min_t *ctx = NULL;
-    kc_min_options_t opts;
     int fail;
 
     fail = 0;
-    opts = kc_min_options_default();
-    if (kc_min_open(&ctx, &opts) != KC_MIN_OK) return 1;
+    if (kc_min_open(&ctx) != KC_MIN_OK) return 1;
     kc_min_close(ctx);
     kc_min_close(NULL);
     fail = expect_true("close does not crash", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_min_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_min_stop(void) {
-    const char *name = "kc_min_stop";
-    const char *detail = "is idempotent on context";
-    kc_min_t *ctx = NULL;
-    kc_min_options_t opts;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("stop(NULL) ERROR", KC_MIN_ERROR, kc_min_stop(NULL));
-    opts = kc_min_options_default();
-    if (kc_min_open(&ctx, &opts) != KC_MIN_OK) return 1;
-    fail += expect_int("stop returns OK", KC_MIN_OK, kc_min_stop(ctx));
-    fail += expect_int("stop is idempotent", KC_MIN_OK, kc_min_stop(ctx));
-    kc_min_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_min_stop_requested.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_min_stop_requested(void) {
-    const char *name = "kc_min_stop_requested";
-    const char *detail = "reports stop state";
-    kc_min_t *ctx = NULL;
-    kc_min_options_t opts;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("stop_requested(NULL) is 0", 0, kc_min_stop_requested(NULL));
-    opts = kc_min_options_default();
-    if (kc_min_open(&ctx, &opts) != KC_MIN_OK) return 1;
-    fail += expect_int("fresh ctx is 0", 0, kc_min_stop_requested(ctx));
-    kc_min_stop(ctx);
-    fail += expect_int("after stop is 1", 1, kc_min_stop_requested(ctx));
-    kc_min_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -246,13 +146,11 @@ static int case_kc_min_set_mode(void) {
     const char *name = "kc_min_set_mode";
     const char *detail = "accepts all render modes";
     kc_min_t *ctx = NULL;
-    kc_min_options_t opts;
     int fail;
 
     fail = 0;
     fail += expect_int("set_mode(NULL) ERROR", KC_MIN_ERROR, kc_min_set_mode(NULL, KC_MIN_MODE_CSS));
-    opts = kc_min_options_default();
-    if (kc_min_open(&ctx, &opts) != KC_MIN_OK) return 1;
+    if (kc_min_open(&ctx) != KC_MIN_OK) return 1;
     fail += expect_int("set_mode CSS OK", KC_MIN_OK, kc_min_set_mode(ctx, KC_MIN_MODE_CSS));
     fail += expect_int("set_mode JS OK", KC_MIN_OK, kc_min_set_mode(ctx, KC_MIN_MODE_JS));
     fail += expect_int("set_mode HTML OK", KC_MIN_OK, kc_min_set_mode(ctx, KC_MIN_MODE_HTML));
@@ -290,14 +188,12 @@ static int case_kc_min_exec(void) {
     const char *name = "kc_min_exec";
     const char *detail = "minifies in all modes";
     kc_min_t *ctx = NULL;
-    kc_min_options_t opts;
     char *out = NULL;
     int fail;
 
     fail = 0;
     fail += expect_int("exec(NULL ctx) ERROR", KC_MIN_ERROR, kc_min_exec(NULL, "x", &out));
-    opts = kc_min_options_default();
-    if (kc_min_open(&ctx, &opts) != KC_MIN_OK) return 1;
+    if (kc_min_open(&ctx) != KC_MIN_OK) return 1;
     fail += expect_int("exec(NULL input) ERROR", KC_MIN_ERROR, kc_min_exec(ctx, NULL, &out));
     fail += expect_int("exec(NULL output) ERROR", KC_MIN_ERROR, kc_min_exec(ctx, "x", NULL));
 
@@ -390,15 +286,13 @@ static int case_kc_min_multictx(void) {
     const char *detail = "contexts coexist independently";
     kc_min_t *a = NULL;
     kc_min_t *b = NULL;
-    kc_min_options_t opts;
     char *out_a = NULL;
     char *out_b = NULL;
     int fail;
 
     fail = 0;
-    opts = kc_min_options_default();
-    if (kc_min_open(&a, &opts) != KC_MIN_OK) return 1;
-    if (kc_min_open(&b, &opts) != KC_MIN_OK) {
+    if (kc_min_open(&a) != KC_MIN_OK) return 1;
+    if (kc_min_open(&b) != KC_MIN_OK) {
         kc_min_close(a);
         return 1;
     }
@@ -410,9 +304,6 @@ static int case_kc_min_multictx(void) {
     fail += expect_string("ctx b mode isolated", "var x = 1;", out_b);
     kc_min_free(out_a);
     kc_min_free(out_b);
-    kc_min_stop(a);
-    fail += expect_int("ctx a stopped", 1, kc_min_stop_requested(a));
-    fail += expect_int("ctx b untouched", 0, kc_min_stop_requested(b));
     kc_min_close(a);
     kc_min_close(b);
     case_result(fail, name, detail);
@@ -425,16 +316,11 @@ static int case_kc_min_multictx(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 13;
+    test_case_total = 8;
     test_case_current = 0;
     run_case(&rc, case_kc_min_version);
-    run_case(&rc, case_kc_min_options_default);
-    run_case(&rc, case_kc_min_options_load_env);
-    run_case(&rc, case_kc_min_options_free);
     run_case(&rc, case_kc_min_open);
     run_case(&rc, case_kc_min_close);
-    run_case(&rc, case_kc_min_stop);
-    run_case(&rc, case_kc_min_stop_requested);
     run_case(&rc, case_kc_min_set_mode);
     run_case(&rc, case_kc_min_mode);
     run_case(&rc, case_kc_min_exec);
@@ -457,13 +343,8 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_min_version") == 0) return case_kc_min_version();
-    if (strcmp(argv[1], "kc_min_options_default") == 0) return case_kc_min_options_default();
-    if (strcmp(argv[1], "kc_min_options_load_env") == 0) return case_kc_min_options_load_env();
-    if (strcmp(argv[1], "kc_min_options_free") == 0) return case_kc_min_options_free();
     if (strcmp(argv[1], "kc_min_open") == 0) return case_kc_min_open();
     if (strcmp(argv[1], "kc_min_close") == 0) return case_kc_min_close();
-    if (strcmp(argv[1], "kc_min_stop") == 0) return case_kc_min_stop();
-    if (strcmp(argv[1], "kc_min_stop_requested") == 0) return case_kc_min_stop_requested();
     if (strcmp(argv[1], "kc_min_set_mode") == 0) return case_kc_min_set_mode();
     if (strcmp(argv[1], "kc_min_mode") == 0) return case_kc_min_mode();
     if (strcmp(argv[1], "kc_min_exec") == 0) return case_kc_min_exec();

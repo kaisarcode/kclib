@@ -55,26 +55,33 @@ echo '<div>  hello  </div>' | ./bin/x86_64/linux/min html
 ```c
 #include "libmin.h"
 
-kc_min_t *ctx = kc_min_open();
+kc_min_t *ctx = NULL;
 char *output = NULL;
 
-kc_min_set_mode(ctx, KC_MIN_MODE_CSS);
-kc_min_exec(ctx, "body { color: red; }", &output);
+if (kc_min_open(&ctx) == KC_MIN_OK) {
+    kc_min_set_mode(ctx, KC_MIN_MODE_CSS);
 
-kc_min_free(output);
-kc_min_close(ctx);
+    if (kc_min_exec(ctx, "body { color: red; }", &output) == KC_MIN_OK) {
+        /* use output */
+        kc_min_free(output);
+    }
+
+    kc_min_close(ctx);
+}
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_min_open()` - allocates and returns a new context owned by the caller.
-- `kc_min_set_mode()` - selects CSS, JavaScript, or HTML minification.
+- `kc_min_open()` - allocates a new context in `KC_MIN_MODE_CSS`; the caller owns it after success.
+- `kc_min_set_mode()` - optionally selects CSS, JavaScript, or HTML minification for a context.
 - `kc_min_mode()` - converts a CLI mode name to an API mode constant.
-- `kc_min_exec()` - minifies a null-terminated input string and returns an owned output string.
-- `kc_min_free()` - releases output strings allocated by the library.
+- `kc_min_exec()` - minifies a null-terminated input string and returns an owned, NUL-terminated output string.
+- `kc_min_free()` - releases output strings returned by `kc_min_exec()`.
 - `kc_min_close()` - releases the context.
+
+The lifecycle is: open a context, optionally select its mode, execute, free the returned output, then close the context.
 
 ---
 

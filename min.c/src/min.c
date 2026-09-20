@@ -127,7 +127,6 @@ int main(int argc, char **argv) {
     char *input = NULL;
     char *output = NULL;
     kc_min_t *ctx = NULL;
-    kc_min_options_t opts;
     int mode;
     int i;
 
@@ -173,8 +172,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    opts = kc_min_options_default();
-    if (kc_min_open(&ctx, &opts) != KC_MIN_OK) {
+    if (kc_min_open(&ctx) != KC_MIN_OK) {
         fprintf(stderr, "min: out of memory\n");
         free(input);
         return 1;
