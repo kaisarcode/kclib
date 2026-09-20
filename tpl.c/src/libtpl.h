@@ -20,38 +20,6 @@ typedef struct kc_tpl kc_tpl_t;
 
 #define KC_TPL_OK      0
 #define KC_TPL_ERROR  -1
-#define KC_TPL_ESTOP  -3
-
-typedef struct {
-    char *root;
-} kc_tpl_options_t;
-
-/**
- * Create an options struct initialized with default values.
- * @return Default-initialized options.
- */
-kc_tpl_options_t kc_tpl_options_default(void);
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_tpl_options_load_env(kc_tpl_options_t *opts);
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_tpl_options_free(kc_tpl_options_t *opts);
-
-/**
- * Request stop for a specific tpl context.
- * @param ctx Context pointer.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_stop(kc_tpl_t *ctx);
 
 /**
  * Return the build version for the library artifact.
@@ -60,19 +28,17 @@ int kc_tpl_stop(kc_tpl_t *ctx);
 uint64_t kc_tpl_version(void);
 
 /**
- * Initialize a renderer context with provided options.
+ * Initialize a renderer context.
  * @param out Pointer to receive the context pointer.
- * @param opts Options.
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
-int kc_tpl_open(kc_tpl_t **out, const kc_tpl_options_t *opts);
+int kc_tpl_open(kc_tpl_t **out);
 
 /**
  * Release a renderer context and its owned data.
  * @param ctx Context pointer.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
-int kc_tpl_close(kc_tpl_t *ctx);
+void kc_tpl_close(kc_tpl_t *ctx);
 
 /**
  * Sets the include root used by include directives.
@@ -92,7 +58,8 @@ int kc_tpl_set_root(kc_tpl_t *ctx, const char *root);
 int kc_tpl_set_var(kc_tpl_t *ctx, const char *key, const char *value);
 
 /**
- * Renders one template string into an owned output buffer.
+ * Renders one template string into a caller-owned output allocation that must
+ * be released with kc_tpl_free.
  * @param ctx Context pointer.
  * @param input Template input.
  * @param output Destination pointer for owned output.
@@ -101,11 +68,18 @@ int kc_tpl_set_var(kc_tpl_t *ctx, const char *key, const char *value);
 int kc_tpl_render_string(kc_tpl_t *ctx, const char *input, char **output);
 
 /**
- * Returns the latest context error.
+ * Returns the latest context error, or "invalid context" when ctx is NULL.
  * @param ctx Context pointer.
  * @return Static or context-owned error text.
  */
-const char *kc_tpl_strerror(const kc_tpl_t *ctx);
+const char *kc_tpl_get_error(const kc_tpl_t *ctx);
+
+/**
+ * Releases output returned by kc_tpl_render_string. Passing NULL is valid.
+ * @param text Output allocation to release.
+ * @return None.
+ */
+void kc_tpl_free(char *text);
 
 #ifdef __cplusplus
 }

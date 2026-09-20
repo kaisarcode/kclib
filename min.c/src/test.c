@@ -263,16 +263,20 @@ static int case_kc_min_exec(void) {
 static int case_kc_min_free(void) {
     const char *name = "kc_min_free";
     const char *detail = "releases library output";
-    char *s;
+    kc_min_t *ctx = NULL;
+    char *out = NULL;
     int fail;
 
-    s = (char *)malloc(5);
-    if (s) {
-        strcpy(s, "test");
+    fail = 0;
+    fail += expect_int("open valid OK", KC_MIN_OK, kc_min_open(&ctx));
+    if (ctx != NULL) {
+        fail += expect_int("exec CSS OK", KC_MIN_OK,
+            kc_min_exec(ctx, "body { color: red; }", &out));
+        fail += expect_true("exec returns owned output", out != NULL);
+        kc_min_free(out);
     }
-    kc_min_free(s);
     kc_min_free(NULL);
-    fail = expect_true("free does not crash", 1);
+    kc_min_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
