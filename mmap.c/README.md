@@ -13,23 +13,23 @@ Command line interface for the mmap tool.
 Read standard input and write to file:
 
 ```bash
-echo -n "example input" | ./bin/x86_64/linux/mmap set file.bin
+echo -n "example input" | ./bin/x86_64/linux/mmap --set file.bin
 ```
 
 Map file and print to standard output:
 
 ```bash
-./bin/x86_64/linux/mmap get file.bin
+./bin/x86_64/linux/mmap --get file.bin
 ```
 
 ---
 
 ### Parameters
 
-| Command/Flag | Description |
+| Flag | Description |
 | :--- | :--- |
-| `set` | Read stdin, replace file with exact bytes |
-| `get` | Map file, write exact bytes to stdout |
+| `--set`, `-set` | Read stdin, replace file with exact bytes |
+| `--get`, `-get` | Map file, write exact bytes to stdout |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 

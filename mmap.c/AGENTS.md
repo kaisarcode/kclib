@@ -12,8 +12,8 @@ Read `README.md` before modifying the project.
 
 ## Core Invariants
 
-- `mmap set <file>` copies stdin bytes directly into a truncated file.
-- `mmap get <file>` writes the mapped bytes exactly to stdout.
+- `mmap --set|-set <file>` copies stdin bytes directly into a truncated file.
+- `mmap --get|-get <file>` writes the mapped bytes exactly to stdout.
 - The library opens existing files read-only.
 - POSIX mappings use `PROT_READ` and `MAP_PRIVATE`.
 - Windows mappings use `PAGE_READONLY` and `FILE_MAP_READ`.
@@ -31,14 +31,14 @@ mapping, exposing its address and size, and releasing all resources.
 
 The source files have fixed responsibilities:
 
-- `src/mmap.c` owns `set` and `get` CLI behavior;
+- `src/mmap.c` owns `--set|-set` and `--get|-get` CLI behavior;
 - `src/libmmap.c` owns portable mapping behavior;
 - `src/libmmap.h` defines the public context and API;
 - `src/test.c` contains all tests.
 
 ## Set Operation
 
-`mmap set <file>` opens the destination with binary write and truncation
+`mmap --set|-set <file>` opens the destination with binary write and truncation
 semantics. It reads stdin in 8,192-byte chunks and writes each chunk exactly.
 No bytes are interpreted and no newline is added.
 
@@ -53,7 +53,7 @@ failure, and cleanup. Do not add hidden journals or databases.
 
 ## Get Operation
 
-`mmap get <file>` opens a mapping context, obtains its borrowed address and
+`mmap --get|-get <file>` opens a mapping context, obtains its borrowed address and
 size, and writes exactly that byte range to stdout with one `fwrite()`. Empty
 files produce no output and are represented by size zero with a NULL address.
 
@@ -123,7 +123,7 @@ remote dependencies.
 
 ## Composition
 
-`mmap set` and `mmap get` are binary Unix filters around a named file. Other
+`mmap --set|-set` and `mmap --get|-get` are binary Unix filters around a named file. Other
 tools own data formats, checksums, locking, atomic publication, compression,
 encryption, and interpretation.
 

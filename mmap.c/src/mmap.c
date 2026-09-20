@@ -22,8 +22,8 @@
  */
 static void print_help(void) {
     printf("Usage:\n");
-    printf("  mmap set <file>    Read stdin, replace file with bytes\n");
-    printf("  mmap get <file>    Map file, write bytes to stdout\n");
+    printf("  mmap --set|-set <file> Read stdin, replace file with bytes\n");
+    printf("  mmap --get|-get <file> Map file, write bytes to stdout\n");
     printf("  mmap -h, --help    Show this help\n");
     printf("  mmap -v, --version Show version\n");
 }
@@ -38,7 +38,7 @@ static void print_version(void) {
 }
 
 /**
- * Executes the set subcommand.
+ * Executes the set operation.
  * @param path Destination file path.
  * @return 0 on success, 1 on error.
  */
@@ -72,7 +72,7 @@ static int kc_mmap_cmd_set(const char *path) {
 }
 
 /**
- * Executes the get subcommand.
+ * Executes the get operation.
  * @param path Source file path.
  * @return 0 on success, 1 on error.
  */
@@ -129,12 +129,12 @@ int main(int argc, char **argv) {
         const char *path = argv[2];
         int rc;
 
-        if (strcmp(cmd, "set") == 0) {
+        if (strcmp(cmd, "-set") == 0 || strcmp(cmd, "--set") == 0) {
             rc = kc_mmap_cmd_set(path);
-        } else if (strcmp(cmd, "get") == 0) {
+        } else if (strcmp(cmd, "-get") == 0 || strcmp(cmd, "--get") == 0) {
             rc = kc_mmap_cmd_get(path);
         } else {
-            fprintf(stderr, "mmap: unknown command '%s'\n", cmd);
+            fprintf(stderr, "mmap: unknown option '%s'\n", cmd);
             return 1;
         }
 
