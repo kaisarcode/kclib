@@ -89,137 +89,25 @@ static char *repeat_byte(char byte, size_t count) {
 }
 
 /**
- * Tests kc_tpm_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpm_options_default(void) {
-    const char *name = "kc_tpm_options_default";
-    const char *detail = "initializes correctly";
-    kc_tpm_options_t opts;
-    int fail = 0;
-
-    opts = kc_tpm_options_default();
-    fail = 0;
-    fail += expect_int("options_default initializes reserved", 0, opts.reserved);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpm_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpm_options_load_env(void) {
-    const char *name = "kc_tpm_options_load_env";
-    const char *detail = "loads from environment";
-    kc_tpm_options_t opts;
-    int fail = 0;
-
-    opts = kc_tpm_options_default();
-    opts.reserved = 9;
-    kc_tpm_options_load_env(&opts);
-    fail += expect_int("load_env preserves unmapped options", 9, opts.reserved);
-    kc_tpm_options_load_env(NULL);
-    fail += expect_true("load_env accepts NULL", 1);
-    kc_tpm_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpm_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpm_options_free(void) {
-    const char *name = "kc_tpm_options_free";
-    const char *detail = "clears resources";
-    kc_tpm_options_t opts;
-    int fail = 0;
-
-    opts = kc_tpm_options_default();
-    opts.reserved = 11;
-    kc_tpm_options_free(&opts);
-    fail += expect_int("free preserves plain options", 11, opts.reserved);
-    kc_tpm_options_free(NULL);
-    fail += expect_true("free accepts NULL", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpm_stop_requested.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpm_stop_requested(void) {
-    const char *name = "kc_tpm_stop_requested";
-    const char *detail = "reports flag";
-    kc_tpm_options_t opts;
-    kc_tpm_t *tpm;
-    int fail = 0;
-
-    opts = kc_tpm_options_default();
-    tpm = NULL;
-    fail = 0;
-    fail += expect_int("stop_requested(NULL) returns zero", 0, kc_tpm_stop_requested(NULL));
-    fail += expect_int("open returns OK", KC_TPM_OK, kc_tpm_open(&tpm, &opts));
-    fail += expect_int("stop_requested starts clear", 0, kc_tpm_stop_requested(tpm));
-    fail += expect_int("stop(ctx) returns OK", KC_TPM_OK, kc_tpm_stop(tpm));
-    fail += expect_int("stop_requested becomes set", 1, kc_tpm_stop_requested(tpm));
-    fail += expect_int("close(ctx) returns OK", KC_TPM_OK, kc_tpm_close(tpm));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpm_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpm_stop(void) {
-    const char *name = "kc_tpm_stop";
-    const char *detail = "sets flag and allows continued use";
-    kc_tpm_options_t opts;
-    kc_tpm_t *tpm;
-    int fail = 0;
-
-    opts = kc_tpm_options_default();
-    tpm = NULL;
-    fail = 0;
-    fail += expect_int("stop(NULL) returns ERROR", KC_TPM_ERROR, kc_tpm_stop(NULL));
-    fail += expect_int("open returns OK", KC_TPM_OK, kc_tpm_open(&tpm, &opts));
-    fail += expect_int("stop(ctx) returns OK", KC_TPM_OK, kc_tpm_stop(tpm));
-    fail += expect_int("stop(ctx) second call returns OK", KC_TPM_OK, kc_tpm_stop(tpm));
-    fail += expect_int("build after stop returns OK", KC_TPM_OK,
-        kc_tpm_build(tpm, "test data", 2));
-    fail += expect_true("score after stop remains valid",
-        kc_tpm_score(tpm, "test") >= 0.0 && kc_tpm_score(tpm, "test") <= 1.0);
-    fail += expect_int("close(ctx) returns OK", KC_TPM_OK, kc_tpm_close(tpm));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_tpm_open.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_tpm_open(void) {
     const char *name = "kc_tpm_open";
     const char *detail = "validates and allocates context";
-    kc_tpm_options_t opts;
     kc_tpm_t *tpm;
     int fail = 0;
 
-    opts = kc_tpm_options_default();
     tpm = NULL;
     fail = 0;
     fail += expect_int("open rejects NULL out", KC_TPM_ERROR,
-        kc_tpm_open(NULL, &opts));
-    fail += expect_int("open rejects NULL opts", KC_TPM_ERROR,
-        kc_tpm_open(&tpm, NULL));
-    fail += expect_true("open leaves output unchanged on error", tpm == NULL);
+        kc_tpm_open(NULL));
     fail += expect_int("open creates context", KC_TPM_OK,
-        kc_tpm_open(&tpm, &opts));
+        kc_tpm_open(&tpm));
     fail += expect_true("open sets output", tpm != NULL);
-    if (tpm != NULL) fail += expect_int("close opened context", KC_TPM_OK, kc_tpm_close(tpm));
+    if (tpm != NULL) {
+        kc_tpm_close(tpm);
+    }
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -231,18 +119,16 @@ static int case_kc_tpm_open(void) {
 static int case_kc_tpm_build(void) {
     const char *name = "kc_tpm_build";
     const char *detail = "constructs profile";
-    kc_tpm_options_t opts;
     kc_tpm_t *tpm;
     char *large_text;
     int fail = 0;
 
-    opts = kc_tpm_options_default();
     tpm = NULL;
     large_text = NULL;
     fail = 0;
     fail += expect_int("build rejects NULL ctx", KC_TPM_ERROR,
         kc_tpm_build(NULL, "abc", 2));
-    fail += expect_int("open context for build", KC_TPM_OK, kc_tpm_open(&tpm, &opts));
+    fail += expect_int("open context for build", KC_TPM_OK, kc_tpm_open(&tpm));
     fail += expect_int("build rejects NULL text", KC_TPM_ERROR,
         kc_tpm_build(tpm, NULL, 2));
     fail += expect_int("build rejects n below range", KC_TPM_ERROR,
@@ -262,7 +148,7 @@ static int case_kc_tpm_build(void) {
             kc_tpm_build(tpm, large_text, 1));
     }
     free(large_text);
-    fail += expect_int("close build context", KC_TPM_OK, kc_tpm_close(tpm));
+    kc_tpm_close(tpm);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -274,7 +160,6 @@ static int case_kc_tpm_build(void) {
 static int case_kc_tpm_score(void) {
     const char *name = "kc_tpm_score";
     const char *detail = "ranks matching text higher";
-    kc_tpm_options_t opts;
     kc_tpm_t *tpm;
     double matching_score;
     double mismatching_score;
@@ -282,11 +167,10 @@ static int case_kc_tpm_score(void) {
     double plain_score;
     int fail = 0;
 
-    opts = kc_tpm_options_default();
     tpm = NULL;
     fail = 0;
     fail += expect_true("score NULL ctx returns zero", kc_tpm_score(NULL, "abc") == 0.0);
-    fail += expect_int("open context for score", KC_TPM_OK, kc_tpm_open(&tpm, &opts));
+    fail += expect_int("open context for score", KC_TPM_OK, kc_tpm_open(&tpm));
     fail += expect_true("score before build returns zero", kc_tpm_score(tpm, "abc") == 0.0);
     fail += expect_int("build scoring profile", KC_TPM_OK,
         kc_tpm_build(tpm, "hello world hello world english text", 3));
@@ -301,28 +185,27 @@ static int case_kc_tpm_score(void) {
     normalized_score = kc_tpm_score(tpm, "hello world");
     plain_score = kc_tpm_score(tpm, "HELLO\tWORLD");
     fail += expect_true("score normalizes case and whitespace", plain_score == normalized_score);
-    fail += expect_int("close score context", KC_TPM_OK, kc_tpm_close(tpm));
+    kc_tpm_close(tpm);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
  * Tests kc_tpm_close.
+ * Validates that the function properly releases context and handles NULL input.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_tpm_close(void) {
     const char *name = "kc_tpm_close";
     const char *detail = "releases context";
-    kc_tpm_options_t opts;
     kc_tpm_t *tpm;
     int fail = 0;
 
-    opts = kc_tpm_options_default();
     tpm = NULL;
     fail = 0;
-    fail += expect_int("close rejects NULL", KC_TPM_ERROR, kc_tpm_close(NULL));
-    fail += expect_int("open context for close", KC_TPM_OK, kc_tpm_open(&tpm, &opts));
-    fail += expect_int("close releases context", KC_TPM_OK, kc_tpm_close(tpm));
+    kc_tpm_close(NULL);
+    fail += expect_int("open context for close", KC_TPM_OK, kc_tpm_open(&tpm));
+    kc_tpm_close(tpm);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -345,13 +228,8 @@ static int case_kc_tpm_version(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 10;
+    test_case_total = 5;
     test_case_current = 0;
-    run_case(&rc, case_kc_tpm_options_default);
-    run_case(&rc, case_kc_tpm_options_load_env);
-    run_case(&rc, case_kc_tpm_options_free);
-    run_case(&rc, case_kc_tpm_stop_requested);
-    run_case(&rc, case_kc_tpm_stop);
     run_case(&rc, case_kc_tpm_open);
     run_case(&rc, case_kc_tpm_build);
     run_case(&rc, case_kc_tpm_score);
@@ -373,12 +251,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_tpm_options_default") == 0) return case_kc_tpm_options_default();
-    if (strcmp(argv[1], "kc_tpm_options_load_env") == 0) return case_kc_tpm_options_load_env();
-    if (strcmp(argv[1], "kc_tpm_options_free") == 0) return case_kc_tpm_options_free();
-    if (strcmp(argv[1], "kc_tpm_stop_requested") == 0) return case_kc_tpm_stop_requested();
-    if (strcmp(argv[1], "kc_tpm_stop") == 0) return case_kc_tpm_stop();
-    if (strcmp(argv[1], "kc_tpm_open") == 0) return case_kc_tpm_open();
+        if (strcmp(argv[1], "kc_tpm_open") == 0) return case_kc_tpm_open();
     if (strcmp(argv[1], "kc_tpm_build") == 0) return case_kc_tpm_build();
     if (strcmp(argv[1], "kc_tpm_score") == 0) return case_kc_tpm_score();
     if (strcmp(argv[1], "kc_tpm_close") == 0) return case_kc_tpm_close();

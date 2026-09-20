@@ -46,7 +46,7 @@ if(EMSCRIPTEN)
         --no-entry
         -sSTANDALONE_WASM=1
         -sSTACK_SIZE=1048576
-        -sEXPORTED_FUNCTIONS=_kc_tpm_options_default,_kc_tpm_options_load_env,_kc_tpm_options_free,_kc_tpm_stop,_kc_tpm_stop_requested,_kc_tpm_open,_kc_tpm_build,_kc_tpm_score,_kc_tpm_close,_kc_tpm_version
+        -sEXPORTED_FUNCTIONS=_kc_tpm_open,_kc_tpm_build,_kc_tpm_score,_kc_tpm_close,_kc_tpm_version
     )
 endif()
 

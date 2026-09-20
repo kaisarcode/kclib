@@ -182,24 +182,19 @@ int main(int argc, char **argv) {
     char *stdin_text;
     int ngram_size;
     int i;
-    kc_tpm_options_t opts;
 
     map_path = NULL;
     map_text = NULL;
     stdin_text = NULL;
     ngram_size = 3;
-    opts = kc_tpm_options_default();
-    kc_tpm_options_load_env(&opts);
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             kc_tpm_help();
-            kc_tpm_options_free(&opts);
             return 0;
         }
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             kc_tpm_print_version();
-            kc_tpm_options_free(&opts);
             return 0;
         }
         if (strcmp(argv[i], "-n") == 0) {
@@ -208,14 +203,12 @@ int main(int argc, char **argv) {
 
             if (++i >= argc) {
                 fprintf(stderr, "tpm: missing value for -n\n");
-                kc_tpm_options_free(&opts);
                 return 1;
             }
 
             val = strtol(argv[i], &end, 10);
             if (*end != '\0' || val < 1 || val > 8) {
                 fprintf(stderr, "tpm: invalid n-gram size\n");
-                kc_tpm_options_free(&opts);
                 return 1;
             }
 
@@ -224,12 +217,10 @@ int main(int argc, char **argv) {
         }
         if (argv[i][0] == '-') {
             fprintf(stderr, "tpm: unknown option '%s'\n", argv[i]);
-            kc_tpm_options_free(&opts);
             return 1;
         }
         if (map_path) {
             fprintf(stderr, "tpm: too many arguments\n");
-            kc_tpm_options_free(&opts);
             return 1;
         }
         map_path = argv[i];
@@ -237,26 +228,22 @@ int main(int argc, char **argv) {
 
     if (!map_path) {
         fprintf(stderr, "tpm: missing map file\n");
-        kc_tpm_options_free(&opts);
         return 1;
     }
 
     if (kc_tpm_read_file(map_path, &map_text) != 0) {
         fprintf(stderr, "tpm: failed to read map file\n");
-        kc_tpm_options_free(&opts);
         return 1;
     }
 
     if (kc_tpm_read_stdin(&stdin_text) != 0) {
         fprintf(stderr, "tpm: failed to read stdin\n");
-        kc_tpm_options_free(&opts);
         free(map_text);
         return 1;
     }
 
     if (!stdin_text || !*stdin_text) {
         puts("0.000000");
-        kc_tpm_options_free(&opts);
         free(map_text);
         free(stdin_text);
         return 0;
@@ -266,9 +253,8 @@ int main(int argc, char **argv) {
         kc_tpm_t *tpm = NULL;
         int rc = 1;
 
-        if (kc_tpm_open(&tpm, &opts) != KC_TPM_OK) {
+        if (kc_tpm_open(&tpm) != KC_TPM_OK) {
             fprintf(stderr, "tpm: open failed\n");
-            kc_tpm_options_free(&opts);
             free(map_text);
             free(stdin_text);
             return 1;
@@ -277,7 +263,6 @@ int main(int argc, char **argv) {
         if (kc_tpm_build(tpm, map_text, ngram_size) != KC_TPM_OK) {
             fprintf(stderr, "tpm: build failed\n");
             kc_tpm_close(tpm);
-            kc_tpm_options_free(&opts);
             free(map_text);
             free(stdin_text);
             return 1;
@@ -289,7 +274,6 @@ int main(int argc, char **argv) {
         printf("%.6f\n", score);
         rc = 0;
 
-        kc_tpm_options_free(&opts);
         free(map_text);
         free(stdin_text);
         return rc;

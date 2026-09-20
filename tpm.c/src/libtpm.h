@@ -21,38 +21,14 @@ typedef struct kc_tpm kc_tpm_t;
 
 #define KC_TPM_OK      0
 #define KC_TPM_ERROR  -1
-#define KC_TPM_ESTOP  -3
-
-typedef struct {
-    int reserved;
-} kc_tpm_options_t;
-
-kc_tpm_options_t kc_tpm_options_default(void);
-void kc_tpm_options_load_env(kc_tpm_options_t *opts);
-void kc_tpm_options_free(kc_tpm_options_t *opts);
-
-/**
- * Request stop for a specific tpm context.
- * @param tpm Context pointer.
- * @return KC_TPM_OK on success, or KC_TPM_ERROR on failure.
- */
-int kc_tpm_stop(kc_tpm_t *tpm);
-
-/**
- * Returns whether stop was requested on a specific tpm context.
- * @param tpm Context pointer.
- * @return 1 if stop was requested, or 0 otherwise.
- */
-int kc_tpm_stop_requested(kc_tpm_t *tpm);
 
 /**
  * Allocate and initialize a new tpm context.
  * Prepares one inference context. Must be paired with kc_tpm_close().
  * @param out Pointer to receive the context pointer.
- * @param opts Options.
- * @return KC_TPM_OK on success, or KC_TPM_ERROR on failure.
+ * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
  */
-int kc_tpm_open(kc_tpm_t **out, const kc_tpm_options_t *opts);
+int kc_tpm_open(kc_tpm_t **out);
 
 /**
  * Build an n-gram profile from map text.
@@ -74,9 +50,9 @@ double kc_tpm_score(kc_tpm_t *tpm, const char *input_text);
 /**
  * Release a tpm context.
  * @param tpm Context pointer.
- * @return KC_TPM_OK on success, or KC_TPM_ERROR on failure.
+ * @return None.
  */
-int kc_tpm_close(kc_tpm_t *tpm);
+void kc_tpm_close(kc_tpm_t *tpm);
 
 /**
  * Retrieves the library build version as a Unix timestamp.

@@ -11,8 +11,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include <unistd.h>
 #endif
-#include <signal.h>
-
 #include "libtpm.h"
 
 #if !defined(KC_TPM_BUILD_VERSION) || KC_TPM_BUILD_VERSION + 0 == 0
@@ -40,9 +38,6 @@ struct kc_tpm {
     int profile_size;
     long total;
     int ngram_size;
-
-    kc_tpm_options_t opts;
-    volatile sig_atomic_t stop_requested;
 };
 
 /**
@@ -208,15 +203,13 @@ static int kc_tpm_grams(
  * Allocate and initialize a new tpm context.
  * Prepares one inference context.
  * @param out Pointer to receive the context pointer.
- * @param opts Options.
  * @return KC_TPM_OK on success, or KC_TPM_ERROR on failure.
  */
-int kc_tpm_open(kc_tpm_t **out, const kc_tpm_options_t *opts) {
+int kc_tpm_open(kc_tpm_t **out) {
     kc_tpm_t *tpm;
-    if (!out || !opts) return KC_TPM_ERROR;
+    if (!out) return KC_TPM_ERROR;
     tpm = (kc_tpm_t *)calloc(1, sizeof(kc_tpm_t));
     if (!tpm) return KC_TPM_ERROR;
-    tpm->opts = *opts;
     *out = tpm;
     return KC_TPM_OK;
 }
@@ -328,63 +321,11 @@ double kc_tpm_score(kc_tpm_t *tpm, const char *input_text) {
 /**
  * Release a tpm context.
  * @param tpm Context pointer.
- * @return KC_TPM_OK on success, or KC_TPM_ERROR on failure.
+ * @return None.
  */
-int kc_tpm_close(kc_tpm_t *tpm) {
-    if (!tpm) return KC_TPM_ERROR;
-    kc_tpm_options_free(&tpm->opts);
+void kc_tpm_close(kc_tpm_t *tpm) {
+    if (!tpm) return;
     free(tpm);
-    return KC_TPM_OK;
-}
-
-/**
- * Create an options struct initialized with default values.
- * @param none Unused.
- * @return Default-initialized options.
- */
-kc_tpm_options_t kc_tpm_options_default(void) {
-    kc_tpm_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    return opts;
-}
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_tpm_options_load_env(kc_tpm_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_tpm_options_free(kc_tpm_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Request stop for a specific tpm context.
- * @param tpm Context pointer.
- * @return KC_TPM_OK on success, or KC_TPM_ERROR on failure.
- */
-int kc_tpm_stop(kc_tpm_t *tpm) {
-    if (!tpm) return KC_TPM_ERROR;
-    tpm->stop_requested = 1;
-    return KC_TPM_OK;
-}
-
-/**
- * Returns whether stop was requested on a specific tpm context.
- * @param tpm Context pointer.
- * @return 1 if stop was requested, or 0 otherwise.
- */
-int kc_tpm_stop_requested(kc_tpm_t *tpm) {
-    if (!tpm) return 0;
-    return tpm->stop_requested ? 1 : 0;
 }
 
 /**

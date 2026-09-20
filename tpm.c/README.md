@@ -113,36 +113,27 @@ typedef struct kc_tpm kc_tpm_t;
 | :----- | :---- |
 | `KC_TPM_OK` | 0 |
 | `KC_TPM_ERROR` | -1 |
-| `KC_TPM_ESTOP` | -3 |
 
 ### Functions
 
 | Function | Returns | Description |
 | :------- | :------ | :---------- |
-| `kc_tpm_options_default(void)` | `kc_tpm_options_t` | Return default options. |
-| `kc_tpm_options_load_env(opts)` | `void` | Load supported environment options. |
-| `kc_tpm_options_free(opts)` | `void` | Release resources owned by options. |
-| `kc_tpm_open(out, opts)` | `int` | Allocate a new context into `out`. |
+| `kc_tpm_open(out)` | `int` | Allocate a new context into `out`. |
 | `kc_tpm_build(tpm, map_text, ngram_size)` | `int` | Build an n-gram profile from map text. `ngram_size` must be 1–8. |
 | `kc_tpm_score(tpm, input_text)` | `double` | Score input text against the built profile. Returns 0.0–1.0. |
-| `kc_tpm_stop(tpm)` | `int` | Request stop for a context. |
-| `kc_tpm_stop_requested(tpm)` | `int` | Return whether stop was requested on the context. |
-| `kc_tpm_close(tpm)` | `int` | Free the context. |
+| `kc_tpm_close(tpm)` | `void` | Free the context. |
 | `kc_tpm_version(void)` | `uint64_t` | Return the build version timestamp. |
 
 ### Lifecycle
 
 ```c
-kc_tpm_options_t opts = kc_tpm_options_default();
 kc_tpm_t *t = NULL;
 
-if (kc_tpm_open(&t, &opts) == KC_TPM_OK) {
+if (kc_tpm_open(&t) == KC_TPM_OK) {
     kc_tpm_build(t, map_text, 3);
     double score = kc_tpm_score(t, input_text);
     kc_tpm_close(t);
 }
-
-kc_tpm_options_free(&opts);
 ```
 
 ---
