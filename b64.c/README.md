@@ -11,25 +11,39 @@
 Encode stdin to base64:
 
 ```bash
-echo "hello" | b64 encode
+echo "hello" | b64 --encode
+```
+
+Encode text passed as an argument:
+
+```bash
+b64 --encode "Hello"
 ```
 
 Decode base64 to binary:
 
 ```bash
-echo "aGVsbG8=" | b64 decode
+echo "aGVsbG8=" | b64 --decode
 ```
+
+Decode text passed as an argument:
+
+```bash
+b64 --decode "SGVsbG8K"
+```
+
+When supplied, the text argument takes precedence over stdin.
 
 ---
 
 ### Commands
 
-| Command | Description |
-| :--- | :--- |
-| `encode` | Read stdin, write base64 to stdout |
-| `decode` | Read base64 from stdin, write binary to stdout |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
+| Command | Alias | Description |
+| :--- | :--- | :--- |
+| `encode` | `-e`, `--encode` | Encode an optional text argument, or stdin, to base64 |
+| `decode` | `-d`, `--decode` | Decode an optional text argument, or stdin, to binary |
+| `-h`, `--help` | | Show help and usage |
+| `-v`, `--version` | | Show version |
 
 ---
 
