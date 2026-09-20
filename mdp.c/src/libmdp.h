@@ -21,51 +21,18 @@ typedef struct kc_mdp kc_mdp_t;
 
 #define KC_MDP_OK          0
 #define KC_MDP_ERROR      -1
-#define KC_MDP_ESTOP      -3
 
 #define KC_MDP_MODE_NONE   0
 #define KC_MDP_MODE_HTML   1
 #define KC_MDP_MODE_BODY   2
 #define KC_MDP_MODE_META   3
 
-typedef struct kc_mdp_options {
-    int mode;
-} kc_mdp_options_t;
-
-/**
- * Create an options struct initialized with default values.
- * @return Default-initialized options.
- */
-kc_mdp_options_t kc_mdp_options_default(void);
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_mdp_options_load_env(kc_mdp_options_t *opts);
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_mdp_options_free(kc_mdp_options_t *opts);
-
-/**
- * Request stop for a specific mdp context.
- * @param ctx Context pointer.
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on failure.
- */
-int kc_mdp_stop(kc_mdp_t *ctx);
-
 /**
  * Initialize a new mdp context.
  * @param out Pointer to receive the context pointer.
- * @param opts Options (pass NULL for defaults).
  * @return KC_MDP_OK on success, or KC_MDP_ERROR on failure.
  */
-int kc_mdp_open(kc_mdp_t **out, const kc_mdp_options_t *opts);
+int kc_mdp_open(kc_mdp_t **out);
 
 /**
  * Release a mdp context.
@@ -93,13 +60,20 @@ int kc_mdp_mode(const char *name);
  * Execute Markdown processing using the selected context mode.
  * @param ctx Context pointer.
  * @param input Null-terminated Markdown input.
- * @param out Receives a malloc'd NUL-terminated output buffer owned by the
- *     caller, or NULL on failure. Free it with free().
+ * @param out Receives a NUL-terminated output buffer owned by the caller, or
+ *     NULL on failure. Release it with kc_mdp_free(), never raw free().
  * @param out_len Receives the output byte count excluding the terminator.
  * @return KC_MDP_OK on success, or KC_MDP_ERROR on failure.
  */
 int kc_mdp_exec(kc_mdp_t *ctx, const char *input, unsigned char **out,
     size_t *out_len);
+
+/**
+ * Release an allocation returned by mdp. Accepts NULL.
+ * @param ptr Allocation to release, or NULL.
+ * @return None.
+ */
+void kc_mdp_free(void *ptr);
 
 /**
  * Returns the build version generated at compile time.

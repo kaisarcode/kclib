@@ -44,7 +44,7 @@ if(EMSCRIPTEN)
     target_link_options(mdp_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_mdp_options_default,_kc_mdp_options_load_env,_kc_mdp_options_free,_kc_mdp_stop,_kc_mdp_open,_kc_mdp_close,_kc_mdp_set_mode,_kc_mdp_mode,_kc_mdp_exec,_kc_mdp_version
+        -sEXPORTED_FUNCTIONS=_kc_mdp_open,_kc_mdp_close,_kc_mdp_set_mode,_kc_mdp_mode,_kc_mdp_exec,_kc_mdp_free,_kc_mdp_version
     )
 endif()
 

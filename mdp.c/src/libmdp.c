@@ -16,8 +16,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
-#include <signal.h>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -26,27 +24,8 @@
 #  include <windows.h>
 #endif
 
-typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_FLOAT,
-    KC_ENV_TYPE_STR,
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_MDP_MODE", offsetof(kc_mdp_options_t, mode), KC_ENV_TYPE_INT },
-};
-static const int env_config_table_n =
-    sizeof(env_config_table) / sizeof(env_config_table[0]);
-
 struct kc_mdp {
-    kc_mdp_options_t opts;
-    volatile sig_atomic_t stop_requested;
+    int mode;
 };
 
 /**
@@ -1000,90 +979,21 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
 }
 
 /**
- * Create an options struct initialized with default values.
- * @return Default-initialized options.
- */
-kc_mdp_options_t kc_mdp_options_default(void) {
-    kc_mdp_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.mode = KC_MDP_MODE_HTML;
-    return opts;
-}
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_mdp_options_load_env(kc_mdp_options_t *opts) {
-    int i;
-    if (!opts) return;
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        char *end;
-        if (!val) continue;
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_FLOAT: {
-                float v = strtof(val, &end);
-                if (end != val && *end == '\0') {
-                    *(float *)((char *)opts + env_config_table[i].offset) = v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_STR: {
-                char **p = (char **)((char *)opts + env_config_table[i].offset);
-                free(*p);
-                *p = strdup(val);
-                break;
-            }
-        }
-    }
-}
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_mdp_options_free(kc_mdp_options_t *opts) {
-    if (!opts) return;
-}
-
-/**
- * Request stop for a specific mdp context.
- * @param ctx Context pointer.
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on failure.
- */
-int kc_mdp_stop(kc_mdp_t *ctx) {
-    if (!ctx) return KC_MDP_ERROR;
-    ctx->stop_requested = 1;
-    return KC_MDP_OK;
-}
-
-/**
  * Initialize a new mdp context.
  * @param out Pointer to receive the context pointer.
- * @param opts Options (pass NULL for defaults).
  * @return KC_MDP_OK on success, or KC_MDP_ERROR on failure.
  */
-int kc_mdp_open(kc_mdp_t **out, const kc_mdp_options_t *opts) {
+int kc_mdp_open(kc_mdp_t **out) {
     kc_mdp_t *ctx;
 
-    if (!out || !opts) return KC_MDP_ERROR;
+    if (!out) return KC_MDP_ERROR;
 
     ctx = (kc_mdp_t *)calloc(1, sizeof(kc_mdp_t));
     if (!ctx) {
         return KC_MDP_ERROR;
     }
 
-    ctx->opts = *opts;
+    ctx->mode = KC_MDP_MODE_HTML;
 
     *out = ctx;
     return KC_MDP_OK;
@@ -1095,12 +1005,16 @@ int kc_mdp_open(kc_mdp_t **out, const kc_mdp_options_t *opts) {
  * @return None.
  */
 void kc_mdp_close(kc_mdp_t *ctx) {
-    if (!ctx) {
-        return;
-    }
-
-    kc_mdp_options_free(&ctx->opts);
     free(ctx);
+}
+
+/**
+ * Releases an mdp allocation. The pointer may be NULL.
+ * @param ptr Allocation to release.
+ * @return None.
+ */
+void kc_mdp_free(void *ptr) {
+    free(ptr);
 }
 
 /**
@@ -1118,7 +1032,7 @@ int kc_mdp_set_mode(kc_mdp_t *ctx, int mode) {
         return KC_MDP_ERROR;
     }
 
-    ctx->opts.mode = mode;
+    ctx->mode = mode;
     return KC_MDP_OK;
 }
 
@@ -1151,8 +1065,8 @@ int kc_mdp_mode(const char *name) {
  * Execute Markdown processing using the selected context mode.
  * @param ctx Context pointer.
  * @param input Null-terminated Markdown input.
- * @param out Receives a malloc'd NUL-terminated output buffer owned by the
- *     caller, or NULL on failure.
+ * @param out Receives a NUL-terminated output buffer owned by the caller, or
+ *     NULL on failure. Release it with kc_mdp_free(), never raw free().
  * @param out_len Receives the output byte count excluding the terminator.
  * @return KC_MDP_OK on success, or KC_MDP_ERROR on failure.
  */
@@ -1175,11 +1089,11 @@ int kc_mdp_exec(kc_mdp_t *ctx, const char *input, unsigned char **out,
         return KC_MDP_ERROR;
     }
 
-    if (ctx->opts.mode == KC_MDP_MODE_META) {
+    if (ctx->mode == KC_MDP_MODE_META) {
         mdp_buf_puts(&buf, meta);
-    } else if (ctx->opts.mode == KC_MDP_MODE_BODY) {
+    } else if (ctx->mode == KC_MDP_MODE_BODY) {
         mdp_buf_puts(&buf, body);
-    } else if (ctx->opts.mode == KC_MDP_MODE_HTML) {
+    } else if (ctx->mode == KC_MDP_MODE_HTML) {
         rc = kc_mdp_render(&buf, body);
     } else {
         rc = KC_MDP_ERROR;

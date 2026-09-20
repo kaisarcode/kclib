@@ -14,7 +14,6 @@
 #include "libmdp.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 static int test_case_total = 0;
@@ -41,21 +40,6 @@ static void case_result(int fail, const char *name, const char *detail) {
 static void run_case(int *rc, int (*fn)(void)) {
     test_case_current++;
     *rc += fn();
-}
-
-/**
- * Sets or clears one environment variable.
- * @param name Variable name.
- * @param value Variable value, or NULL to clear.
- * @return 0 on success, 1 on failure.
- */
-static int set_env_value(const char *name, const char *value) {
-#ifdef _WIN32
-    return _putenv_s(name, value != NULL ? value : "") == 0 ? 0 : 1;
-#else
-    if (value == NULL) return unsetenv(name) == 0 ? 0 : 1;
-    return setenv(name, value, 1) == 0 ? 0 : 1;
-#endif
 }
 
 /**
@@ -117,74 +101,18 @@ static int case_kc_mdp_version(void) {
 }
 
 /**
- * Tests kc_mdp_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_mdp_options_default(void) {
-    const char *name = "kc_mdp_options_default";
-    const char *detail = "returns default HTML mode";
-    kc_mdp_options_t opts = kc_mdp_options_default();
-    int fail = expect_int("default mode is HTML", KC_MDP_MODE_HTML, opts.mode);
-    kc_mdp_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_mdp_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_mdp_options_load_env(void) {
-    const char *name = "kc_mdp_options_load_env";
-    const char *detail = "loads environment overrides";
-    kc_mdp_options_t opts = kc_mdp_options_default();
-    int fail = expect_int("set mode env", 0,
-        set_env_value("KC_MDP_MODE", "2"));
-    kc_mdp_options_load_env(&opts);
-    fail += expect_int("env mode applied", 2, opts.mode);
-    fail += expect_int("set bad mode env", 0,
-        set_env_value("KC_MDP_MODE", "bad"));
-    kc_mdp_options_load_env(&opts);
-    fail += expect_int("bad mode ignored", 2, opts.mode);
-    kc_mdp_options_load_env(NULL);
-    set_env_value("KC_MDP_MODE", NULL);
-    kc_mdp_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_mdp_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_mdp_options_free(void) {
-    const char *name = "kc_mdp_options_free";
-    const char *detail = "clears resources";
-    kc_mdp_options_t opts = kc_mdp_options_default();
-    kc_mdp_options_free(&opts);
-    kc_mdp_options_free(NULL);
-    int fail = 0;
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_mdp_open.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_mdp_open(void) {
     const char *name = "kc_mdp_open";
     const char *detail = "validates arguments and allocates context";
-    kc_mdp_options_t opts = kc_mdp_options_default();
     kc_mdp_t *ctx = NULL;
     int fail = expect_int("open NULL out returns ERROR",
-        KC_MDP_ERROR, kc_mdp_open(NULL, &opts));
-    fail += expect_int("open NULL opts returns ERROR",
-        KC_MDP_ERROR, kc_mdp_open(&ctx, NULL));
-    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx, &opts));
+        KC_MDP_ERROR, kc_mdp_open(NULL));
+    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx));
     fail += expect_true("open creates context", ctx != NULL);
     kc_mdp_close(ctx);
-    kc_mdp_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -196,35 +124,13 @@ static int case_kc_mdp_open(void) {
 static int case_kc_mdp_close(void) {
     const char *name = "kc_mdp_close";
     const char *detail = "releases context";
-    kc_mdp_options_t opts = kc_mdp_options_default();
     kc_mdp_t *ctx = NULL;
     int fail = 0;
     kc_mdp_close(NULL);
     fail += expect_true("close NULL returns OK", 1);
-    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx, &opts));
+    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx));
     kc_mdp_close(ctx);
     fail += expect_true("close released context", 1);
-    kc_mdp_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_mdp_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_mdp_stop(void) {
-    const char *name = "kc_mdp_stop";
-    const char *detail = "is idempotent on context";
-    kc_mdp_options_t opts = kc_mdp_options_default();
-    kc_mdp_t *ctx = NULL;
-    int fail = expect_int("stop NULL returns ERROR",
-        KC_MDP_ERROR, kc_mdp_stop(NULL));
-    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx, &opts));
-    fail += expect_int("stop returns OK", KC_MDP_OK, kc_mdp_stop(ctx));
-    fail += expect_int("stop is idempotent", KC_MDP_OK, kc_mdp_stop(ctx));
-    kc_mdp_close(ctx);
-    kc_mdp_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -236,11 +142,10 @@ static int case_kc_mdp_stop(void) {
 static int case_kc_mdp_set_mode(void) {
     const char *name = "kc_mdp_set_mode";
     const char *detail = "accepts all render modes";
-    kc_mdp_options_t opts = kc_mdp_options_default();
     kc_mdp_t *ctx = NULL;
     int fail = expect_int("set_mode NULL returns ERROR", KC_MDP_ERROR,
         kc_mdp_set_mode(NULL, KC_MDP_MODE_HTML));
-    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx, &opts));
+    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx));
     fail += expect_int("set_mode HTML returns OK", KC_MDP_OK,
         kc_mdp_set_mode(ctx, KC_MDP_MODE_HTML));
     fail += expect_int("set_mode BODY returns OK", KC_MDP_OK,
@@ -250,7 +155,6 @@ static int case_kc_mdp_set_mode(void) {
     fail += expect_int("set_mode invalid returns ERROR", KC_MDP_ERROR,
         kc_mdp_set_mode(ctx, 99));
     kc_mdp_close(ctx);
-    kc_mdp_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -289,13 +193,12 @@ static int case_kc_mdp_mode(void) {
 static int case_kc_mdp_exec(void) {
     const char *name = "kc_mdp_exec";
     const char *detail = "renders and extracts in all modes";
-    kc_mdp_options_t opts = kc_mdp_options_default();
     kc_mdp_t *ctx = NULL;
     unsigned char *out = NULL;
     size_t out_len = 0;
     int fail = expect_int("exec NULL ctx returns ERROR", KC_MDP_ERROR,
         kc_mdp_exec(NULL, "# Hello", &out, &out_len));
-    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx, &opts));
+    fail += expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx));
     fail += expect_int("exec NULL input returns ERROR", KC_MDP_ERROR,
         kc_mdp_exec(ctx, NULL, &out, &out_len));
     fail += expect_int("exec NULL out returns ERROR", KC_MDP_ERROR,
@@ -307,7 +210,7 @@ static int case_kc_mdp_exec(void) {
         kc_mdp_exec(ctx, "# Hello", &out, &out_len));
     fail += expect_string("exec html renders heading",
         "<h1>Hello</h1>\n", (const char *)out);
-    free(out);
+    kc_mdp_free(out);
     out = NULL;
 
     fail += expect_int("set body returns OK", KC_MDP_OK,
@@ -316,7 +219,7 @@ static int case_kc_mdp_exec(void) {
         kc_mdp_exec(ctx, "---\ntitle: Home\n---\n# Hello", &out, &out_len));
     fail += expect_string("exec body strips frontmatter",
         "# Hello", (const char *)out);
-    free(out);
+    kc_mdp_free(out);
     out = NULL;
 
     fail += expect_int("set meta returns OK", KC_MDP_OK,
@@ -325,11 +228,31 @@ static int case_kc_mdp_exec(void) {
         kc_mdp_exec(ctx, "---\ntitle: Home\n---\n# Hello", &out, &out_len));
     fail += expect_string("exec meta returns frontmatter",
         "title: Home", (const char *)out);
-    free(out);
+    kc_mdp_free(out);
     out = NULL;
 
     kc_mdp_close(ctx);
-    kc_mdp_options_free(&opts);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_mdp_free.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_mdp_free(void) {
+    const char *name = "kc_mdp_free";
+    const char *detail = "releases mdp output and accepts NULL";
+    kc_mdp_t *ctx = NULL;
+    unsigned char *out = NULL;
+    size_t out_len = 0;
+    int fail = expect_int("open returns OK", KC_MDP_OK, kc_mdp_open(&ctx));
+    fail += expect_int("exec returns OK", KC_MDP_OK,
+        kc_mdp_exec(ctx, "# Hello", &out, &out_len));
+    fail += expect_true("exec returns output", out != NULL);
+    kc_mdp_free(out);
+    kc_mdp_free(NULL);
+    kc_mdp_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -340,19 +263,31 @@ static int case_kc_mdp_exec(void) {
  */
 static int case_kc_mdp_multictx(void) {
     const char *name = "kc_mdp_multictx";
-    const char *detail = "multiple contexts coexist";
-    kc_mdp_options_t opts = kc_mdp_options_default();
+    const char *detail = "contexts keep independent modes";
     kc_mdp_t *a = NULL;
     kc_mdp_t *b = NULL;
+    unsigned char *out_a = NULL;
+    unsigned char *out_b = NULL;
+    size_t out_a_len = 0;
+    size_t out_b_len = 0;
     int fail = expect_int("open a returns OK", KC_MDP_OK,
-        kc_mdp_open(&a, &opts));
+        kc_mdp_open(&a));
     fail += expect_int("open b returns OK", KC_MDP_OK,
-        kc_mdp_open(&b, &opts));
-    fail += expect_int("stop a returns OK", KC_MDP_OK, kc_mdp_stop(a));
-    fail += expect_int("stop b returns OK", KC_MDP_OK, kc_mdp_stop(b));
+        kc_mdp_open(&b));
+    fail += expect_int("set a BODY returns OK", KC_MDP_OK,
+        kc_mdp_set_mode(a, KC_MDP_MODE_BODY));
+    fail += expect_int("set b META returns OK", KC_MDP_OK,
+        kc_mdp_set_mode(b, KC_MDP_MODE_META));
+    fail += expect_int("exec a returns OK", KC_MDP_OK,
+        kc_mdp_exec(a, "---\ntitle: Home\n---\n# Hello", &out_a, &out_a_len));
+    fail += expect_int("exec b returns OK", KC_MDP_OK,
+        kc_mdp_exec(b, "---\ntitle: Home\n---\n# Hello", &out_b, &out_b_len));
+    fail += expect_string("a keeps BODY mode", "# Hello", (const char *)out_a);
+    fail += expect_string("b keeps META mode", "title: Home", (const char *)out_b);
+    kc_mdp_free(out_a);
+    kc_mdp_free(out_b);
     kc_mdp_close(a);
     kc_mdp_close(b);
-    kc_mdp_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -363,18 +298,15 @@ static int case_kc_mdp_multictx(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 11;
+    test_case_total = 8;
     test_case_current = 0;
     run_case(&rc, case_kc_mdp_version);
-    run_case(&rc, case_kc_mdp_options_default);
-    run_case(&rc, case_kc_mdp_options_load_env);
-    run_case(&rc, case_kc_mdp_options_free);
     run_case(&rc, case_kc_mdp_open);
     run_case(&rc, case_kc_mdp_close);
-    run_case(&rc, case_kc_mdp_stop);
     run_case(&rc, case_kc_mdp_set_mode);
     run_case(&rc, case_kc_mdp_mode);
     run_case(&rc, case_kc_mdp_exec);
+    run_case(&rc, case_kc_mdp_free);
     run_case(&rc, case_kc_mdp_multictx);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -393,15 +325,12 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_mdp_version") == 0) return case_kc_mdp_version();
-    if (strcmp(argv[1], "kc_mdp_options_default") == 0) return case_kc_mdp_options_default();
-    if (strcmp(argv[1], "kc_mdp_options_load_env") == 0) return case_kc_mdp_options_load_env();
-    if (strcmp(argv[1], "kc_mdp_options_free") == 0) return case_kc_mdp_options_free();
     if (strcmp(argv[1], "kc_mdp_open") == 0) return case_kc_mdp_open();
     if (strcmp(argv[1], "kc_mdp_close") == 0) return case_kc_mdp_close();
-    if (strcmp(argv[1], "kc_mdp_stop") == 0) return case_kc_mdp_stop();
     if (strcmp(argv[1], "kc_mdp_set_mode") == 0) return case_kc_mdp_set_mode();
     if (strcmp(argv[1], "kc_mdp_mode") == 0) return case_kc_mdp_mode();
     if (strcmp(argv[1], "kc_mdp_exec") == 0) return case_kc_mdp_exec();
+    if (strcmp(argv[1], "kc_mdp_free") == 0) return case_kc_mdp_free();
     if (strcmp(argv[1], "kc_mdp_multictx") == 0) return case_kc_mdp_multictx();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;

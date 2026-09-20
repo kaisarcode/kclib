@@ -80,7 +80,6 @@ static void kc_print_version(void) {
 int main(int argc, char **argv) {
     int mode = KC_MDP_MODE_HTML;
     char *src = NULL;
-    kc_mdp_options_t opts;
     kc_mdp_t *ctx = NULL;
     unsigned char *out = NULL;
     size_t out_len = 0;
@@ -112,8 +111,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    opts = kc_mdp_options_default();
-    if (kc_mdp_open(&ctx, &opts) != KC_MDP_OK) {
+    if (kc_mdp_open(&ctx) != KC_MDP_OK) {
         fprintf(stderr, "mdp: out of memory\n");
         kc_mdp_close(ctx);
         free(src);
@@ -123,7 +121,7 @@ int main(int argc, char **argv) {
 
     if (kc_mdp_exec(ctx, src, &out, &out_len) != KC_MDP_OK) {
         fprintf(stderr, "mdp: execution failed\n");
-        free(out);
+        kc_mdp_free(out);
         kc_mdp_close(ctx);
         free(src);
         return 1;
@@ -133,7 +131,7 @@ int main(int argc, char **argv) {
         fputs((const char *)out, stdout);
     }
 
-    free(out);
+    kc_mdp_free(out);
     kc_mdp_close(ctx);
     free(src);
     return 0;

@@ -89,23 +89,40 @@ HTML, such as `2 < 3` or `<3`, stays escaped.
 ```c
 #include "libmdp.h"
 
-kc_mdp_t *ctx = kc_mdp_open();
+kc_mdp_t *ctx = NULL;
 
-kc_mdp_set_mode(ctx, KC_MDP_MODE_HTML);
-kc_mdp_exec(ctx, "# Hello", stdout);
+if (kc_mdp_open(&ctx) == KC_MDP_OK) {
+    kc_mdp_set_mode(ctx, KC_MDP_MODE_HTML);
 
-kc_mdp_close(ctx);
+    unsigned char *out = NULL;
+    size_t out_len = 0;
+
+    if (kc_mdp_exec(ctx, "# Hello", &out, &out_len) == KC_MDP_OK) {
+        /* Use out and out_len. */
+        kc_mdp_free(out);
+    }
+    kc_mdp_close(ctx);
+}
 ```
+
+New contexts default to `KC_MDP_MODE_HTML`; call `kc_mdp_set_mode()` to select
+body or metadata output. `kc_mdp_exec()` allocates the output buffer. The
+caller owns that returned buffer and must release it with `kc_mdp_free()`,
+never raw `free()`.
 
 ---
 
 ## Lifecycle
 
-- `kc_mdp_open()` - allocates and returns a new context owned by the caller.
-- `kc_mdp_set_mode()` - selects HTML, body, or metadata output.
-- `kc_mdp_mode()` - converts a CLI mode name to an API mode constant.
-- `kc_mdp_exec()` - parses a null-terminated Markdown string and returns a malloc'd NUL-terminated output buffer owned by the caller.
-- `kc_mdp_close()` - releases the context.
+- `kc_mdp_open()` - creates a context with `KC_MDP_MODE_HTML` selected by default.
+- `kc_mdp_set_mode()` - optionally selects HTML, body, or metadata output for that context.
+- `kc_mdp_mode()` - converts a CLI mode name or flag to an API mode constant.
+- `kc_mdp_exec()` - parses a null-terminated Markdown string and returns a NUL-terminated output buffer allocated by `mdp.c`.
+- `kc_mdp_free()` - releases an output buffer returned by `kc_mdp_exec()`; never use raw `free()` for that buffer.
+- `kc_mdp_close()` - releases the context after all returned output has been freed.
+
+The lifecycle is: open a context, optionally set its mode, execute, free every
+returned output buffer with `kc_mdp_free()`, then close the context.
 
 ---
 
