@@ -180,57 +180,6 @@ static int case_kc_mmap_version(void) {
 }
 
 /**
- * Tests kc_mmap_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_mmap_options_default(void) {
-    const char *name = "kc_mmap_options_default";
-    const char *detail = "returns zeroed options";
-    kc_mmap_options_t opts = kc_mmap_options_default();
-    int fail = expect_int("kc_mmap_options_default returns zeroed reserved field",
-        0, opts.reserved);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_mmap_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_mmap_options_load_env(void) {
-    const char *name = "kc_mmap_options_load_env";
-    const char *detail = "is safe and side-effect free";
-    kc_mmap_options_t opts = kc_mmap_options_default();
-    int fail = 0;
-
-    kc_mmap_options_load_env(&opts);
-    fail += expect_int("kc_mmap_options_load_env keeps options unchanged", 0,
-        opts.reserved);
-    kc_mmap_options_load_env(NULL);
-    fail += expect_true("kc_mmap_options_load_env(NULL) does not crash", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_mmap_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_mmap_options_free(void) {
-    const char *name = "kc_mmap_options_free";
-    const char *detail = "is safe on any options";
-    kc_mmap_options_t opts = kc_mmap_options_default();
-    int fail = 0;
-
-    kc_mmap_options_free(&opts);
-    fail += expect_true("kc_mmap_options_free does not crash", 1);
-    kc_mmap_options_free(NULL);
-    fail += expect_true("kc_mmap_options_free(NULL) does not crash", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_mmap_open.
  * @return 0 on success, 1 on failure.
  */
@@ -241,25 +190,25 @@ static int case_kc_mmap_open(void) {
     char path[512];
     int fail = 0;
 
-    fail += expect_int("open(NULL, path, opts) returns ERROR", KC_MMAP_ERROR,
-        kc_mmap_open(NULL, "nonexistent", NULL));
-    fail += expect_int("open(out, NULL, opts) returns ERROR", KC_MMAP_ERROR,
-        kc_mmap_open(&ctx, NULL, NULL));
+    fail += expect_int("open(NULL, path) returns ERROR", KC_MMAP_ERROR,
+        kc_mmap_open(NULL, "nonexistent"));
+    fail += expect_int("open(out, NULL) returns ERROR", KC_MMAP_ERROR,
+        kc_mmap_open(&ctx, NULL));
     fail += expect_true("open validation leaves output NULL", ctx == NULL);
     fail += expect_int("open nonexistent file returns ERROR", KC_MMAP_ERROR,
-        kc_mmap_open(&ctx, "/tmp/kc-mmap-nonexistent-xyz", NULL));
+        kc_mmap_open(&ctx, "/tmp/kc-mmap-nonexistent-xyz"));
     fail += expect_true("open failure leaves output NULL", ctx == NULL);
     if (temp_path(path, sizeof(path), "open") != 0) return 1;
     if (write_file(path, "hello", 5) != 0) return 1;
-    fail += expect_int("open valid file with NULL opts returns OK", KC_MMAP_OK,
-        kc_mmap_open(&ctx, path, NULL));
+    fail += expect_int("open valid file returns OK", KC_MMAP_OK,
+        kc_mmap_open(&ctx, path));
     fail += expect_true("open creates valid context", ctx != NULL);
-    fail += expect_int("close opened context returns OK", KC_MMAP_OK,
-        kc_mmap_close(ctx));
+    kc_mmap_close(ctx);
     ctx = NULL;
-    fail += expect_int("open valid file with opts returns OK", KC_MMAP_OK,
-        kc_mmap_open(&ctx, path, &(kc_mmap_options_t){0}));
-    fail += expect_true("open with opts creates valid context", ctx != NULL);
+    if (write_file(path, "", 0) != 0) return 1;
+    fail += expect_int("open empty file returns OK", KC_MMAP_OK,
+        kc_mmap_open(&ctx, path));
+    fail += expect_true("open empty file creates valid context", ctx != NULL);
     kc_mmap_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -279,7 +228,7 @@ static int case_kc_mmap_data(void) {
     fail += expect_true("data(NULL) returns NULL", kc_mmap_data(NULL) == NULL);
     if (temp_path(path, sizeof(path), "data") != 0) return 1;
     if (write_file(path, "content", 7) != 0) return 1;
-    if (kc_mmap_open(&ctx, path, NULL) != KC_MMAP_OK) return 1;
+    if (kc_mmap_open(&ctx, path) != KC_MMAP_OK) return 1;
     fail += expect_true("data returns non-NULL pointer",
         kc_mmap_data(ctx) != NULL);
     fail += expect_true("data content matches written bytes",
@@ -287,7 +236,7 @@ static int case_kc_mmap_data(void) {
     kc_mmap_close(ctx);
     if (temp_path(path, sizeof(path), "data-empty") != 0) return 1;
     if (write_file(path, "", 0) != 0) return 1;
-    if (kc_mmap_open(&ctx, path, NULL) != KC_MMAP_OK) return 1;
+    if (kc_mmap_open(&ctx, path) != KC_MMAP_OK) return 1;
     fail += expect_true("data on empty file returns NULL",
         kc_mmap_data(ctx) == NULL);
     kc_mmap_close(ctx);
@@ -309,12 +258,12 @@ static int case_kc_mmap_size(void) {
     fail += expect_size("size(NULL) returns 0", 0, kc_mmap_size(NULL));
     if (temp_path(path, sizeof(path), "size") != 0) return 1;
     if (write_file(path, "12345", 5) != 0) return 1;
-    if (kc_mmap_open(&ctx, path, NULL) != KC_MMAP_OK) return 1;
+    if (kc_mmap_open(&ctx, path) != KC_MMAP_OK) return 1;
     fail += expect_size("size returns file length", 5, kc_mmap_size(ctx));
     kc_mmap_close(ctx);
     if (temp_path(path, sizeof(path), "size-empty") != 0) return 1;
     if (write_file(path, "", 0) != 0) return 1;
-    if (kc_mmap_open(&ctx, path, NULL) != KC_MMAP_OK) return 1;
+    if (kc_mmap_open(&ctx, path) != KC_MMAP_OK) return 1;
     fail += expect_size("size empty file returns 0", 0, kc_mmap_size(ctx));
     kc_mmap_close(ctx);
     case_result(fail, name, detail);
@@ -332,40 +281,13 @@ static int case_kc_mmap_close(void) {
     char path[512];
     int fail = 0;
 
-    fail += expect_int("close(NULL) returns ERROR", KC_MMAP_ERROR,
-        kc_mmap_close(NULL));
+    kc_mmap_close(NULL);
+    fail += expect_true("close(NULL) does not crash", 1);
     if (temp_path(path, sizeof(path), "close") != 0) return 1;
     if (write_file(path, "close-test", 10) != 0) return 1;
-    if (kc_mmap_open(&ctx, path, NULL) != KC_MMAP_OK) return 1;
-    fail += expect_int("close releases context", KC_MMAP_OK,
-        kc_mmap_close(ctx));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_mmap_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_mmap_stop(void) {
-    const char *name = "kc_mmap_stop";
-    const char *detail = "is idempotent without interrupting mapping";
-    kc_mmap_t *ctx = NULL;
-    char path[512];
-    int fail = 0;
-
-    fail += expect_int("stop(NULL) returns ERROR", KC_MMAP_ERROR,
-        kc_mmap_stop(NULL));
-    if (temp_path(path, sizeof(path), "stop") != 0) return 1;
-    if (write_file(path, "stop-test", 9) != 0) return 1;
-    if (kc_mmap_open(&ctx, path, NULL) != KC_MMAP_OK) return 1;
-    fail += expect_int("stop context succeeds", KC_MMAP_OK, kc_mmap_stop(ctx));
-    fail += expect_int("stop is idempotent", KC_MMAP_OK, kc_mmap_stop(ctx));
-    fail += expect_size("mapped size still accessible after stop", 9,
-        kc_mmap_size(ctx));
-    fail += expect_true("mapped data still accessible after stop",
-        kc_mmap_data(ctx) != NULL);
+    if (kc_mmap_open(&ctx, path) != KC_MMAP_OK) return 1;
     kc_mmap_close(ctx);
+    fail += expect_true("close releases context", 1);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -379,25 +301,33 @@ static int case_kc_mmap_multictx(void) {
     const char *detail = "contexts stay independent";
     kc_mmap_t *a = NULL;
     kc_mmap_t *b = NULL;
-    char path[512];
+    char path_a[512];
+    char path_b[512];
     int fail = 0;
 
-    if (temp_path(path, sizeof(path), "multi") != 0) return 1;
-    if (write_file(path, "multi-context", 13) != 0) return 1;
-    if (kc_mmap_open(&a, path, NULL) != KC_MMAP_OK) return 1;
-    if (kc_mmap_open(&b, path, NULL) != KC_MMAP_OK) {
+    if (temp_path(path_a, sizeof(path_a), "multi-a") != 0) return 1;
+    if (temp_path(path_b, sizeof(path_b), "multi-b") != 0) return 1;
+    if (write_file(path_a, "alpha", 5) != 0) return 1;
+    if (write_file(path_b, "beta-data", 9) != 0) return 1;
+    if (kc_mmap_open(&a, path_a) != KC_MMAP_OK) return 1;
+    if (kc_mmap_open(&b, path_b) != KC_MMAP_OK) {
         kc_mmap_close(a);
         return 1;
     }
-    fail += expect_int("stop a returns OK", KC_MMAP_OK, kc_mmap_stop(a));
-    fail += expect_int("stop b returns OK", KC_MMAP_OK, kc_mmap_stop(b));
-    fail += expect_int("stop a again returns OK", KC_MMAP_OK, kc_mmap_stop(a));
-    fail += expect_true("a data still valid", kc_mmap_data(a) != NULL);
-    fail += expect_true("b data still valid", kc_mmap_data(b) != NULL);
-    fail += expect_size("a size still valid", 13, kc_mmap_size(a));
-    fail += expect_size("b size still valid", 13, kc_mmap_size(b));
-    fail += expect_int("close a returns OK", KC_MMAP_OK, kc_mmap_close(a));
-    fail += expect_int("close b returns OK", KC_MMAP_OK, kc_mmap_close(b));
+    fail += expect_size("a size matches its file", 5, kc_mmap_size(a));
+    fail += expect_true("a data matches its file",
+        memcmp(kc_mmap_data(a), "alpha", 5) == 0);
+    fail += expect_size("b size matches its file", 9, kc_mmap_size(b));
+    fail += expect_true("b data matches its file",
+        memcmp(kc_mmap_data(b), "beta-data", 9) == 0);
+    kc_mmap_close(a);
+    fail += expect_true("b data remains available after closing a",
+        kc_mmap_data(b) != NULL);
+    fail += expect_true("b bytes remain valid after closing a",
+        memcmp(kc_mmap_data(b), "beta-data", 9) == 0);
+    fail += expect_size("b size remains valid after closing a", 9,
+        kc_mmap_size(b));
+    kc_mmap_close(b);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -408,17 +338,13 @@ static int case_kc_mmap_multictx(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 10;
+    test_case_total = 6;
     test_case_current = 0;
     run_case(&rc, case_kc_mmap_version);
-    run_case(&rc, case_kc_mmap_options_default);
-    run_case(&rc, case_kc_mmap_options_load_env);
-    run_case(&rc, case_kc_mmap_options_free);
     run_case(&rc, case_kc_mmap_open);
     run_case(&rc, case_kc_mmap_data);
     run_case(&rc, case_kc_mmap_size);
     run_case(&rc, case_kc_mmap_close);
-    run_case(&rc, case_kc_mmap_stop);
     run_case(&rc, case_kc_mmap_multictx);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -437,14 +363,10 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_mmap_version") == 0) return case_kc_mmap_version();
-    if (strcmp(argv[1], "kc_mmap_options_default") == 0) return case_kc_mmap_options_default();
-    if (strcmp(argv[1], "kc_mmap_options_load_env") == 0) return case_kc_mmap_options_load_env();
-    if (strcmp(argv[1], "kc_mmap_options_free") == 0) return case_kc_mmap_options_free();
     if (strcmp(argv[1], "kc_mmap_open") == 0) return case_kc_mmap_open();
     if (strcmp(argv[1], "kc_mmap_data") == 0) return case_kc_mmap_data();
     if (strcmp(argv[1], "kc_mmap_size") == 0) return case_kc_mmap_size();
     if (strcmp(argv[1], "kc_mmap_close") == 0) return case_kc_mmap_close();
-    if (strcmp(argv[1], "kc_mmap_stop") == 0) return case_kc_mmap_stop();
     if (strcmp(argv[1], "kc_mmap_multictx") == 0) return case_kc_mmap_multictx();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;

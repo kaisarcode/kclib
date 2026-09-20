@@ -81,7 +81,7 @@ static int kc_mmap_cmd_get(const char *path) {
     const void *data;
     size_t size;
 
-    if (kc_mmap_open(&mf, path, NULL) != KC_MMAP_OK) {
+    if (kc_mmap_open(&mf, path) != KC_MMAP_OK) {
         fprintf(stderr, "mmap: failed to open file for mapping\n");
         return 1;
     }
@@ -108,25 +108,19 @@ static int kc_mmap_cmd_get(const char *path) {
  * @return Exit status code.
  */
 int main(int argc, char **argv) {
-    kc_mmap_options_t opts = kc_mmap_options_default();
-    kc_mmap_options_load_env(&opts);
-
     if (argc >= 2) {
         if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
             print_help();
-            kc_mmap_options_free(&opts);
             return 0;
         }
         if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
             print_version();
-            kc_mmap_options_free(&opts);
             return 0;
         }
     }
 
     if (argc != 3) {
         fprintf(stderr, "mmap: invalid arguments\n");
-        kc_mmap_options_free(&opts);
         return 1;
     }
 
@@ -141,11 +135,9 @@ int main(int argc, char **argv) {
             rc = kc_mmap_cmd_get(path);
         } else {
             fprintf(stderr, "mmap: unknown command '%s'\n", cmd);
-            kc_mmap_options_free(&opts);
             return 1;
         }
 
-        kc_mmap_options_free(&opts);
         return rc;
     }
 }

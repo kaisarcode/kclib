@@ -11,7 +11,6 @@
 
 #include <stddef.h>
 #include <stdlib.h>
-#include <string.h>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -19,7 +18,6 @@
 #  endif
 #  include <windows.h>
 #endif
-#include <signal.h>
 #ifndef _WIN32
 #  include <sys/mman.h>
 #  include <sys/stat.h>
@@ -33,74 +31,18 @@ struct kc_mmap {
     int fd;
     void *priv1;
     void *priv2;
-    volatile sig_atomic_t stop_requested;
 };
-
-typedef enum {
-    KC_ENV_TYPE_INT,
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-};
-static const int env_config_table_n = 0;
-
-/**
- * Initialize default mmap options.
- * @return Default-initialized options.
- */
-kc_mmap_options_t kc_mmap_options_default(void) {
-    kc_mmap_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    return opts;
-}
-
-/**
- * Load mmap options from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_mmap_options_load_env(kc_mmap_options_t *opts) {
-    (void)opts;
-    (void)env_config_table;
-    (void)env_config_table_n;
-}
-
-/**
- * Free mmap options.
- * @param opts Options to free.
- * @return None.
- */
-void kc_mmap_options_free(kc_mmap_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Request stop for a specific mmap context.
- * @param mf Map context pointer.
- * @return KC_MMAP_OK on success, KC_MMAP_ERROR on failure.
- */
-int kc_mmap_stop(kc_mmap_t *mf) {
-    if (!mf) return KC_MMAP_ERROR;
-    mf->stop_requested = 1;
-    return KC_MMAP_OK;
-}
 
 /**
  * Initialize a new mmap context and map a file.
  * @param out Output pointer for the new context.
  * @param path File path.
- * @param opts Options, or NULL for defaults.
  * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
  */
-int kc_mmap_open(kc_mmap_t **out, const char *path, const kc_mmap_options_t *opts) {
-    if (!out || !path) return KC_MMAP_ERROR;
-    (void)opts;
+int kc_mmap_open(kc_mmap_t **out, const char *path) {
+    if (!out) return KC_MMAP_ERROR;
+    *out = NULL;
+    if (!path) return KC_MMAP_ERROR;
 
     kc_mmap_t *map = calloc(1, sizeof(kc_mmap_t));
     if (!map) return KC_MMAP_ERROR;
@@ -208,41 +150,40 @@ size_t kc_mmap_size(const kc_mmap_t *map) {
 
 /**
  * Release a mmap context.
- * @param mf Map context pointer.
- * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
+ * @param map Map context pointer.
+ * @return None.
  */
-int kc_mmap_close(kc_mmap_t *mf) {
-    if (!mf) return KC_MMAP_ERROR;
+void kc_mmap_close(kc_mmap_t *map) {
+    if (!map) return;
 
 #ifdef _WIN32
-    if (mf->data) {
-        UnmapViewOfFile(mf->data);
+    if (map->data) {
+        UnmapViewOfFile(map->data);
     }
-    if (mf->priv2) {
-        CloseHandle((HANDLE)mf->priv2);
+    if (map->priv2) {
+        CloseHandle((HANDLE)map->priv2);
     }
-    if (mf->priv1) {
-        CloseHandle((HANDLE)mf->priv1);
+    if (map->priv1) {
+        CloseHandle((HANDLE)map->priv1);
     }
 #else
-    if (mf->data && mf->data != MAP_FAILED) {
-        munmap(mf->data, mf->size);
+    if (map->data && map->data != MAP_FAILED) {
+        munmap(map->data, map->size);
     }
-    if (mf->fd >= 0) {
-        close(mf->fd);
+    if (map->fd >= 0) {
+        close(map->fd);
     }
 #endif
 
-    mf->data = NULL;
-    mf->size = 0;
-    mf->fd = -1;
+    map->data = NULL;
+    map->size = 0;
+    map->fd = -1;
 #ifdef _WIN32
-    mf->priv1 = NULL;
-    mf->priv2 = NULL;
+    map->priv1 = NULL;
+    map->priv2 = NULL;
 #endif
 
-    free(mf);
-    return KC_MMAP_OK;
+    free(map);
 }
 
 #ifndef KC_MMAP_BUILD_VERSION

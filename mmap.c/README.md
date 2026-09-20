@@ -40,26 +40,32 @@ Map file and print to standard output:
 ```c
 #include "libmmap.h"
 
-kc_mmap_t map = {0};
+kc_mmap_t *map = NULL;
 
 if (kc_mmap_open(&map, "file.bin") == KC_MMAP_OK) {
-    const void *data = kc_mmap_data(&map);
-    size_t size = kc_mmap_size(&map);
+    const void *data = kc_mmap_data(map);
+    size_t size = kc_mmap_size(map);
 
-    // ...
+    /* use data[0..size) only while map remains open */
+
+    kc_mmap_close(map);
 }
-
-kc_mmap_close(&map);
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_mmap_open()` - initialize a new mmap context and map a file.
-- `kc_mmap_data()` - get pointer to mapped data.
-- `kc_mmap_size()` - get mapped data size.
-- `kc_mmap_close()` - release a mmap context. Safe on a zero-initialized object.
+- `kc_mmap_open()` allocates a mapping context and maps a file. The caller owns
+    that context and must eventually call `kc_mmap_close()`.
+- `kc_mmap_data()` returns a borrowed, read-only pointer to context-owned mapped
+    bytes. The caller must not free it or write through it; no copy is implied.
+    It remains valid only while that exact context is open, and
+    `kc_mmap_close()` invalidates it.
+- `kc_mmap_size()` returns the mapped byte length.
+- Empty files open successfully with a size of zero and a NULL data pointer.
+- The lifecycle is: open, obtain data and size, consume the borrowed bytes, then
+    close the context.
 
 ---
 
