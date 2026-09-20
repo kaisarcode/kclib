@@ -146,18 +146,18 @@ static void kc_init_elevate(int argc, char **argv) {
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_cli_list(const kc_init_options_t *opts, const char *name) {
-    kc_init_t *ctx;
+    kc_init_t *ctx = NULL;
     int rc;
 
-    ctx = kc_init_open(opts);
-    if (!ctx) {
+    rc = kc_init_open(&ctx, opts);
+    if (rc != KC_INIT_OK) {
         fprintf(stderr, "init: cannot resolve metadata directory\n");
         return 1;
     }
 
     rc = kc_init_list(ctx, name, kc_init_print_entry, NULL);
     if (rc != KC_INIT_OK) {
-        const char *err = kc_init_error(ctx);
+        const char *err = kc_init_get_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
         kc_init_close(ctx);
         return 1;
@@ -174,18 +174,18 @@ static int kc_init_cli_list(const kc_init_options_t *opts, const char *name) {
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_cli_delete(const kc_init_options_t *opts, const char *name) {
-    kc_init_t *ctx;
+    kc_init_t *ctx = NULL;
     int rc;
 
-    ctx = kc_init_open(opts);
-    if (!ctx) {
+    rc = kc_init_open(&ctx, opts);
+    if (rc != KC_INIT_OK) {
         fprintf(stderr, "init: cannot resolve metadata directory\n");
         return 1;
     }
 
     rc = kc_init_delete(ctx, name);
     if (rc != KC_INIT_OK) {
-        const char *err = kc_init_error(ctx);
+        const char *err = kc_init_get_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
         kc_init_close(ctx);
         return 1;
@@ -203,18 +203,18 @@ static int kc_init_cli_delete(const kc_init_options_t *opts, const char *name) {
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_cli_update(const kc_init_options_t *opts, const char *name, const char *cmd) {
-    kc_init_t *ctx;
+    kc_init_t *ctx = NULL;
     int rc;
 
-    ctx = kc_init_open(opts);
-    if (!ctx) {
+    rc = kc_init_open(&ctx, opts);
+    if (rc != KC_INIT_OK) {
         fprintf(stderr, "init: cannot resolve metadata directory\n");
         return 1;
     }
 
     rc = kc_init_update(ctx, name, cmd);
     if (rc != KC_INIT_OK) {
-        const char *err = kc_init_error(ctx);
+        const char *err = kc_init_get_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
         kc_init_close(ctx);
         return 1;
@@ -231,18 +231,18 @@ static int kc_init_cli_update(const kc_init_options_t *opts, const char *name, c
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_cli_exec(const kc_init_options_t *opts, const char *name) {
-    kc_init_t *ctx;
+    kc_init_t *ctx = NULL;
     int rc;
 
-    ctx = kc_init_open(opts);
-    if (!ctx) {
+    rc = kc_init_open(&ctx, opts);
+    if (rc != KC_INIT_OK) {
         fprintf(stderr, "init: cannot resolve metadata directory\n");
         return 1;
     }
 
     rc = kc_init_exec(ctx, name);
     if (rc != KC_INIT_OK) {
-        const char *err = kc_init_error(ctx);
+        const char *err = kc_init_get_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
         kc_init_close(ctx);
         return 1;
@@ -259,12 +259,30 @@ static int kc_init_cli_exec(const kc_init_options_t *opts, const char *name) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    kc_init_options_t opts;
+    kc_init_options_t *opts = NULL;
+    const char *env_value;
     int i = 1;
     int status = 1;
 
     opts = kc_init_options_default();
-    kc_init_options_load_env(&opts);
+    if (!opts) {
+        fprintf(stderr, "init: memory allocation failed\n");
+        return 1;
+    }
+
+    env_value = getenv("KC_INIT_DIR");
+    if (env_value &&
+        kc_init_options_set(opts, "dir", env_value) != KC_INIT_OK) {
+        fprintf(stderr, "init: memory allocation failed\n");
+        goto cleanup_options;
+    }
+
+    env_value = getenv("KC_INIT_BACKEND");
+    if (env_value &&
+        kc_init_options_set(opts, "backend", env_value) != KC_INIT_OK) {
+        fprintf(stderr, "init: memory allocation failed\n");
+        goto cleanup_options;
+    }
 
     if (i >= argc) {
         kc_init_help();
@@ -287,9 +305,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "init: missing value for --dir\n");
                 goto cleanup_options;
             }
-            free(opts.dir);
-            opts.dir = strdup(argv[i + 1]);
-            if (!opts.dir) {
+            if (kc_init_options_set(opts, "dir", argv[i + 1]) != KC_INIT_OK) {
                 fprintf(stderr, "init: memory allocation failed\n");
                 goto cleanup_options;
             }
@@ -301,9 +317,7 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "init: missing value for --backend\n");
                 goto cleanup_options;
             }
-            free(opts.backend);
-            opts.backend = strdup(argv[i + 1]);
-            if (!opts.backend) {
+            if (kc_init_options_set(opts, "backend", argv[i + 1]) != KC_INIT_OK) {
                 fprintf(stderr, "init: memory allocation failed\n");
                 goto cleanup_options;
             }
@@ -320,9 +334,9 @@ int main(int argc, char **argv) {
 
     if (strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "--list") == 0) {
         if (i + 1 == argc) {
-            status = kc_init_cli_list(&opts, NULL);
+            status = kc_init_cli_list(opts, NULL);
         } else if (i + 2 == argc) {
-            status = kc_init_cli_list(&opts, argv[i + 1]);
+            status = kc_init_cli_list(opts, argv[i + 1]);
         } else {
             fprintf(stderr, "init: --list accepts at most one name\n");
         }
@@ -337,7 +351,7 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
         kc_init_elevate(argc, argv);
 #endif
-        status = kc_init_cli_delete(&opts, argv[i + 1]);
+        status = kc_init_cli_delete(opts, argv[i + 1]);
         goto cleanup_options;
     }
 
@@ -355,7 +369,7 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
             kc_init_elevate(argc, argv);
 #endif
-            status = kc_init_cli_delete(&opts, argv[i]);
+            status = kc_init_cli_delete(opts, argv[i]);
             goto cleanup_options;
         }
 
@@ -364,7 +378,7 @@ int main(int argc, char **argv) {
             if (i + 2 != argc) {
                 goto cleanup_options;
             }
-            status = kc_init_cli_list(&opts, argv[i]);
+            status = kc_init_cli_list(opts, argv[i]);
             goto cleanup_options;
         }
 
@@ -374,7 +388,7 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
             kc_init_elevate(argc, argv);
 #endif
-            status = kc_init_cli_update(&opts, argv[i], cmd);
+            status = kc_init_cli_update(opts, argv[i], cmd);
             goto cleanup_options;
         }
     }
@@ -382,9 +396,9 @@ int main(int argc, char **argv) {
 #ifndef _WIN32
     kc_init_elevate(argc, argv);
 #endif
-    status = kc_init_cli_exec(&opts, argv[i]);
+    status = kc_init_cli_exec(opts, argv[i]);
 
 cleanup_options:
-    kc_init_options_free(&opts);
+    kc_init_options_free(opts);
     return status;
 }

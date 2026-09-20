@@ -2,7 +2,7 @@
 
 `init.c` provides a small C library and CLI for registering named commands as persistent startup entries using only classic OS startup filesystem primitives. Applications can register a command under a name, execute it immediately, list registrations, and remove them.
 
-On POSIX, `init.c` writes executable scripts to `/etc/init.d/` and creates `S99` symlinks in `/etc/rc{2,3,4,5}.d/`. On Windows, it creates `.cmd` launchers in the user Startup folder and optionally adds a `HKCU\...\Run` registry entry. Registration metadata is stored under `~/.local/share/init/` on Linux and `%APPDATA%\init\` on Windows. The CLI is implemented on top of `libinit`.
+On POSIX, `init.c` writes executable scripts to `/etc/init.d/` and creates `S99` symlinks in `/etc/rc{2,3,4,5}.d/`. On Windows, it creates `.cmd` launchers in the user Startup folder and optionally adds a `HKCU\...\Run` registry entry. Registration metadata is stored under `/etc/kaisarcode/init.c` on Linux and `C:\ProgramData\kaisarcode\init.c` on Windows. The CLI is implemented on top of `libinit`.
 
 ---
 
@@ -71,42 +71,67 @@ init --delete myapp
 ```c
 #include "libinit.h"
 
-void on_entry(const char *key, const char *user, const char *cmd, void *userdata) {
-    printf("%s\t[%s]\t%s\n", key, user, cmd);
+void on_entry(
+    const char *key,
+    const char *user,
+    const char *cmd,
+    void *userdata
+) {
+    /* key/user/cmd are borrowed for this callback invocation */
 }
 
-kc_init_options_t opts = kc_init_options_default();
-kc_init_options_load_env(&opts);
+kc_init_options_t *opts = kc_init_options_default();
 
-kc_init_t *ctx = kc_init_open(&opts);
+if (opts != NULL) {
+    kc_init_options_set(opts, "dir", "/custom/path");
+    kc_init_options_set(opts, "backend", "systemd");
 
-kc_init_update(ctx, "app", "/usr/local/bin/app --daemon");
-kc_init_list(ctx, "app", on_entry, NULL);
-kc_init_exec(ctx, "app");
-kc_init_delete(ctx, "app");
+    kc_init_t *ctx = NULL;
 
-kc_init_close(ctx);
-kc_init_options_free(&opts);
+    if (kc_init_open(&ctx, opts) == KC_INIT_OK) {
+        kc_init_update(ctx, "app", "/usr/local/bin/app --daemon");
+        kc_init_list(ctx, "app", on_entry, NULL);
+        kc_init_exec(ctx, "app");
+        kc_init_delete(ctx, "app");
+
+        kc_init_close(ctx);
+    }
+
+    kc_init_options_free(opts);
+}
 ```
+
+`kc_init_options_t` is opaque. `kc_init_options_set()` supports exactly the
+`dir` and `backend` keys. Passing `NULL` options to `kc_init_open()` selects the
+defaults. A successfully opened context copies its configuration, so the
+options may be freed immediately after `kc_init_open()` returns.
 
 ---
 
 ## Lifecycle
 
-- `kc_init_options_default()` - creates default init options.
-- `kc_init_options_load_env()` - applies `KC_INIT_*` environment overrides.
+- `kc_init_options_default()` - allocates default opaque init options.
+- `kc_init_options_set()` - sets the `dir` or `backend` option.
 - `kc_init_options_free()` - releases option resources.
-- `kc_init_open()` - resolves metadata state and returns a context owned by the caller.
+- `kc_init_open()` - resolves metadata state into a context owned by the caller; `NULL` options select defaults.
 - `kc_init_update()` - registers or replaces a named startup command.
 - `kc_init_exec()` - executes the registered command immediately.
-- `kc_init_list()` - lists all registrations or one named registration.
+- `kc_init_list()` - synchronously lists all registrations or one named registration.
 - `kc_init_delete()` - removes a named registration and its startup artifacts.
-- `kc_init_path()` - returns the resolved metadata directory for diagnostics.
+- `kc_init_path()` - returns the resolved metadata directory as context-owned storage borrowed until close.
+- `kc_init_get_error()` - returns context-owned error text borrowed until close; a later operation may replace it.
 - `kc_init_close()` - releases the context.
+
+The list callback runs synchronously. Its `userdata` pointer is not retained,
+and its `key`, `user`, and `cmd` strings are borrowed only for the duration of
+each callback invocation.
 
 ---
 
 ## Environment
+
+Environment variables are CLI policy, not part of the library API. The CLI
+continues to support:
 
 | Variable | Description |
 | :--- | :--- |

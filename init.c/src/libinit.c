@@ -18,7 +18,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -26,7 +25,6 @@
 #  endif
 #  include <windows.h>
 #endif
-#include <signal.h>
 #ifndef _WIN32
 #  include <dirent.h>
 #  include <sys/stat.h>
@@ -53,13 +51,17 @@ typedef enum {
     KC_INIT_BACKEND_SYSV
 } kc_init_backend_t;
 
+struct kc_init_options {
+    char *dir;
+    char *backend;
+};
+
 struct kc_init {
     char error[256];
     char dir[KC_INIT_PATH];
 #ifndef _WIN32
     kc_init_backend_t backend;
 #endif
-    volatile sig_atomic_t stop_requested;
 };
 
 /**
@@ -76,22 +78,6 @@ static void kc_init_set_error(kc_init_t *ctx, const char *fmt, ...) {
     va_end(ap);
     ctx->error[sizeof(ctx->error) - 1] = '\0';
 }
-
-typedef enum {
-    KC_ENV_TYPE_STR
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_INIT_DIR",     offsetof(kc_init_options_t, dir),     KC_ENV_TYPE_STR },
-    { "KC_INIT_BACKEND", offsetof(kc_init_options_t, backend), KC_ENV_TYPE_STR }
-};
-static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
 
 /**
  * Duplicates one string.
@@ -134,52 +120,72 @@ static kc_init_backend_t kc_init_backend_from_string(const char *name) {
 
 /**
  * Create default init options.
- * @return Default-initialized options.
+ * @return Caller-owned default options, or NULL on allocation failure.
  */
-kc_init_options_t kc_init_options_default(void) {
-    kc_init_options_t opts;
+kc_init_options_t *kc_init_options_default(void) {
+    kc_init_options_t *opts;
 
-    memset(&opts, 0, sizeof(opts));
-    opts.dir = kc_init_strdup(KC_INIT_SYS_DIR);
+    opts = (kc_init_options_t *)malloc(sizeof(*opts));
+    if (!opts) {
+        return NULL;
+    }
+
+    opts->dir = kc_init_strdup(KC_INIT_SYS_DIR);
+    opts->backend = NULL;
+    if (!opts->dir) {
+        free(opts);
+        return NULL;
+    }
     return opts;
 }
 
 /**
- * Load init options from environment variables.
+ * Set one init option.
  * @param opts Options to update.
- * @return None.
+ * @param key Option key.
+ * @param value Option value, or NULL to reset it.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-void kc_init_options_load_env(kc_init_options_t *opts) {
-    int i;
+int kc_init_options_set(
+    kc_init_options_t *opts,
+    const char *key,
+    const char *value
+) {
+    char *copy;
 
-    if (!opts) {
-        return;
+    if (!opts || !key) {
+        return KC_INIT_ERROR;
     }
 
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val;
-
-        val = getenv(env_config_table[i].env_var);
-        if (!val) {
-            continue;
+    if (strcmp(key, "dir") == 0) {
+        copy = kc_init_strdup(value ? value : KC_INIT_SYS_DIR);
+        if (!copy) {
+            return KC_INIT_ERROR;
         }
+        free(opts->dir);
+        opts->dir = copy;
+        return KC_INIT_OK;
+    }
 
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_STR: {
-                char **p;
-
-                p = (char **)((char *)opts + env_config_table[i].offset);
-                free(*p);
-                *p = kc_init_strdup(val);
-                break;
+    if (strcmp(key, "backend") == 0) {
+        copy = NULL;
+        if (value) {
+            copy = kc_init_strdup(value);
+            if (!copy) {
+                return KC_INIT_ERROR;
             }
         }
+        free(opts->backend);
+        opts->backend = copy;
+        return KC_INIT_OK;
     }
+
+    return KC_INIT_ERROR;
 }
 
 /**
- * Free dynamically allocated resources within init options.
- * @param opts Options to clean up.
+ * Free init options.
+ * @param opts Options to free, or NULL.
  * @return None.
  */
 void kc_init_options_free(kc_init_options_t *opts) {
@@ -187,9 +193,8 @@ void kc_init_options_free(kc_init_options_t *opts) {
         return;
     }
     free(opts->dir);
-    opts->dir = NULL;
     free(opts->backend);
-    opts->backend = NULL;
+    free(opts);
 }
 
 /**
@@ -1552,35 +1557,41 @@ static int kc_init_run_list_one(kc_init_t *ctx, const char *key, kc_init_list_cb
 
 /**
  * Initialize a new init context.
- * @param options Init context options.
- * @return Context pointer or NULL on failure.
+ * @param out Output context pointer.
+ * @param opts Init context options, or NULL for defaults.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-kc_init_t *kc_init_open(const kc_init_options_t *options) {
+int kc_init_open(kc_init_t **out, const kc_init_options_t *opts) {
     kc_init_t *ctx;
+    const char *dir;
 
-    if (!options || !options->dir) {
-        return NULL;
+    if (!out) {
+        return KC_INIT_ERROR;
     }
+    *out = NULL;
+
+    dir = opts && opts->dir ? opts->dir : KC_INIT_SYS_DIR;
 
     ctx = (kc_init_t *)calloc(1, sizeof(kc_init_t));
     if (!ctx) {
-        return NULL;
+        return KC_INIT_ERROR;
     }
 
-    if ((size_t)snprintf(ctx->dir, sizeof(ctx->dir), "%s", options->dir)
+    if ((size_t)snprintf(ctx->dir, sizeof(ctx->dir), "%s", dir)
             >= sizeof(ctx->dir)) {
         free(ctx);
-        return NULL;
+        return KC_INIT_ERROR;
     }
 
 #ifndef _WIN32
-    ctx->backend = kc_init_backend_from_string(options->backend);
+    ctx->backend = kc_init_backend_from_string(opts ? opts->backend : NULL);
     if (ctx->backend == KC_INIT_BACKEND_NONE) {
         ctx->backend = kc_init_detect_backend();
     }
 #endif
 
-    return ctx;
+    *out = ctx;
+    return KC_INIT_OK;
 }
 
 /**
@@ -1597,22 +1608,13 @@ void kc_init_close(kc_init_t *ctx) {
 }
 
 /**
- * Request stop for a specific init context.
- * @param ctx Context handle.
- * @return KC_INIT_OK on success, KC_INIT_ERROR on failure.
- */
-int kc_init_stop(kc_init_t *ctx) {
-    if (!ctx) return KC_INIT_ERROR;
-    ctx->stop_requested = 1;
-    return KC_INIT_OK;
-}
-
-/**
  * Return the resolved metadata directory for an init context.
+ * The returned string is borrowed context-owned storage. The caller must not
+ * free or modify it, and it remains valid until the context is closed.
  * @param ctx Context pointer.
- * @return Metadata directory path, or NULL on invalid input.
+ * @return Borrowed metadata directory path, or NULL on invalid input.
  */
-const char *kc_init_path(kc_init_t *ctx) {
+const char *kc_init_path(const kc_init_t *ctx) {
     if (!ctx) {
         return NULL;
     }
@@ -1622,10 +1624,13 @@ const char *kc_init_path(kc_init_t *ctx) {
 
 /**
  * Return the last error message from an init context.
+ * The returned string is borrowed context-owned storage. The caller must not
+ * free or modify it, and it remains valid until the context is closed. A later
+ * operation on the same context may replace its contents.
  * @param ctx Context pointer.
- * @return Static error string, or NULL if no error.
+ * @return Borrowed error string, or NULL if there is no current error text.
  */
-const char *kc_init_error(kc_init_t *ctx) {
+const char *kc_init_get_error(const kc_init_t *ctx) {
     if (!ctx || !ctx->error[0]) {
         return NULL;
     }
@@ -1672,11 +1677,14 @@ int kc_init_exec(kc_init_t *ctx, const char *key) {
 
 /**
  * List registered startup entries.
- * Calls cb(key, user, cmd, userdata) per entry.
+ * Invokes cb synchronously only while this function is running. The callback
+ * and userdata are not stored or retained, and userdata is passed unchanged.
+ * The key, user, and cmd strings are borrowed and valid only during each
+ * callback invocation; the caller must copy them for a longer lifetime.
  * @param ctx Context pointer.
  * @param key Optional registration key name, or NULL for all.
  * @param cb Callback invoked per entry, or NULL.
- * @param userdata Opaque pointer passed to cb.
+ * @param userdata Opaque pointer passed unchanged to cb and not retained.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
 int kc_init_list(kc_init_t *ctx, const char *key, kc_init_list_cb cb, void *userdata) {
