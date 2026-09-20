@@ -16,6 +16,14 @@
 #include <string.h>
 #include <stdbool.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 static int test_case_total = 0;
 static int test_case_current = 0;
 
@@ -83,6 +91,88 @@ static int expect_not_null(const char *name, const void *ptr) {
         return 1;
     }
     return 0;
+}
+
+
+/**
+ * Creates an isolated metadata directory for list tests.
+ * @param out Output directory buffer.
+ * @param cap Output buffer capacity.
+ * @return 0 on success, 1 on failure.
+ */
+static int create_list_fixture(char *out, size_t cap) {
+    char entry[1024];
+    FILE *fp;
+#ifdef _WIN32
+    char temp[MAX_PATH];
+    DWORD n;
+
+    n = GetTempPathA((DWORD)sizeof(temp), temp);
+    if (n == 0 || n >= (DWORD)sizeof(temp)) return 1;
+    if ((size_t)snprintf(out, cap, "%skc-init-test-%lu",
+            temp, (unsigned long)GetCurrentProcessId()) >= cap) return 1;
+    (void)RemoveDirectoryA(out);
+    if (!CreateDirectoryA(out, NULL)) return 1;
+    if ((size_t)snprintf(entry, sizeof(entry), "%s\\test-entry", out)
+            >= sizeof(entry)) {
+        (void)RemoveDirectoryA(out);
+        return 1;
+    }
+#else
+    if ((size_t)snprintf(out, cap, "/tmp/kc-init-test-%lu",
+            (unsigned long)getpid()) >= cap) return 1;
+    (void)rmdir(out);
+    if (mkdir(out, 0700) != 0) return 1;
+    if ((size_t)snprintf(entry, sizeof(entry), "%s/test-entry", out)
+            >= sizeof(entry)) {
+        (void)rmdir(out);
+        return 1;
+    }
+#endif
+
+    fp = fopen(entry, "w");
+    if (!fp) {
+#ifdef _WIN32
+        (void)RemoveDirectoryA(out);
+#else
+        (void)rmdir(out);
+#endif
+        return 1;
+    }
+    if (fputs("echo init-test", fp) == EOF || fclose(fp) != 0) {
+        (void)remove(entry);
+#ifdef _WIN32
+        (void)RemoveDirectoryA(out);
+#else
+        (void)rmdir(out);
+#endif
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Removes the isolated metadata directory used by list tests.
+ * @param dir Fixture directory.
+ * @return None.
+ */
+static void remove_list_fixture(const char *dir) {
+    char entry[1024];
+
+    if (!dir || !dir[0]) return;
+#ifdef _WIN32
+    if ((size_t)snprintf(entry, sizeof(entry), "%s\\test-entry", dir)
+            < sizeof(entry)) {
+        (void)DeleteFileA(entry);
+    }
+    (void)RemoveDirectoryA(dir);
+#else
+    if ((size_t)snprintf(entry, sizeof(entry), "%s/test-entry", dir)
+            < sizeof(entry)) {
+        (void)remove(entry);
+    }
+    (void)rmdir(dir);
+#endif
 }
 
 typedef struct {
@@ -340,11 +430,19 @@ static int case_kc_init_list(void) {
     kc_init_options_t *opts = kc_init_options_default();
     kc_init_t *ctx = NULL;
     list_callback_state_t state = {0};
+    char fixture_dir[1024] = {0};
+    int fixture_ready = 0;
     int fail = expect_not_null("options are non-NULL", opts);
 
-    if (opts) {
+    if (create_list_fixture(fixture_dir, sizeof(fixture_dir)) == 0) {
+        fixture_ready = 1;
+    } else {
+        fail += expect_true("list fixture created", 0);
+    }
+
+    if (opts && fixture_ready) {
         fail += expect_int("set local dir succeeds", KC_INIT_OK,
-            kc_init_options_set(opts, "dir", "/tmp/tmp.wg2fMbTBE8"));
+            kc_init_options_set(opts, "dir", fixture_dir));
         fail += expect_int("open succeeds", KC_INIT_OK,
             kc_init_open(&ctx, opts));
     }
@@ -372,6 +470,7 @@ static int case_kc_init_list(void) {
     fail += expect_int("list(NULL) returns ERROR",
         KC_INIT_ERROR, kc_init_list(NULL, NULL, NULL, NULL));
     kc_init_options_free(opts);
+    if (fixture_ready) remove_list_fixture(fixture_dir);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
