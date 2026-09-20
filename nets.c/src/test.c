@@ -35,6 +35,10 @@
 
 #define TEST_HOST "127.0.0.1"
 
+#ifndef _WIN32
+static const unsigned char test_response[] = {'n', 'e', 't', 's', 0, 'o', 'k'};
+#endif
+
 #ifdef _WIN32
 typedef SOCKET test_socket_t;
 typedef HANDLE test_thread_t;
@@ -300,13 +304,23 @@ static void *server_main(void *arg)
         socket_timeout(client, 5000U);
         n = (int)recv(client, server->received, (int)sizeof(server->received), 0);
         if (n > 0) server->received_size = (size_t)n;
+        if (server->received_size > 0) {
+#ifdef _WIN32
+            server->result = 0;
+#else
+            n = (int)send(client, (const char *)test_response,
+                (int)sizeof(test_response), 0);
+            server->result = n == (int)sizeof(test_response) ? 0 : 1;
+#endif
+        }
         socket_close(client);
     } else {
         n = (int)recv(fd, server->received, (int)sizeof(server->received), 0);
         if (n > 0) server->received_size = (size_t)n;
     }
     socket_close(fd);
-    server->result = server->received_size > 0 ? 0 : 1;
+    if (server->received_size == 0) server->result = 1;
+    else if (server->proto == KC_NETS_UDP) server->result = 0;
 #ifdef _WIN32
     return 0;
 #else
@@ -352,79 +366,19 @@ static int server_join(test_server_t *server) {
 }
 
 /**
- * Tests kc_nets_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_options_default(void) {
-    const char *name = "kc_nets_options_default";
-    const char *detail = "initializes default options";
-    kc_nets_options_t opts;
-    int fail;
-
-    opts = kc_nets_options_default();
-    fail = expect_int("default reserved is zero", 0, opts.reserved);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_options_load_env(void) {
-    const char *name = "kc_nets_options_load_env";
-    const char *detail = "loads environment without changing options";
-    kc_nets_options_t opts;
-    int fail;
-
-    opts = kc_nets_options_default();
-    opts.reserved = 7;
-    fail = 0;
-    kc_nets_options_load_env(&opts);
-    kc_nets_options_load_env(NULL);
-    fail += expect_int("load_env keeps reserved unchanged", 7, opts.reserved);
-    kc_nets_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_options_free(void) {
-    const char *name = "kc_nets_options_free";
-    const char *detail = "releases options safely";
-    kc_nets_options_t opts;
-    int fail;
-
-    opts = kc_nets_options_default();
-    opts.reserved = 9;
-    fail = 0;
-    kc_nets_options_free(&opts);
-    kc_nets_options_free(NULL);
-    fail += expect_int("options remain reusable after free", 9, opts.reserved);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_nets_open.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_nets_open(void) {
     const char *name = "kc_nets_open";
     const char *detail = "validates and allocates context";
-    kc_nets_options_t opts;
     kc_nets_t *ctx;
     int fail;
 
-    opts = kc_nets_options_default();
     ctx = NULL;
     fail = 0;
-    fail += expect_int("open NULL out", KC_NETS_EINVAL, kc_nets_open(NULL, &opts));
-    fail += expect_int("open NULL opts", KC_NETS_EINVAL, kc_nets_open(&ctx, NULL));
-    fail += expect_int("open valid context", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    fail += expect_int("open NULL out", KC_NETS_EINVAL, kc_nets_open(NULL));
+    fail += expect_int("open valid context", KC_NETS_OK, kc_nets_open(&ctx));
     fail += expect_true("open sets context", ctx != NULL);
     kc_nets_close(ctx);
     case_result(fail, name, detail);
@@ -438,16 +392,14 @@ static int case_kc_nets_open(void) {
 static int case_kc_nets_close(void) {
     const char *name = "kc_nets_close";
     const char *detail = "releases a context";
-    kc_nets_options_t opts;
     kc_nets_t *ctx;
     int fail;
 
-    opts = kc_nets_options_default();
     ctx = NULL;
     fail = 0;
-    fail += expect_int("open before close", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    fail += expect_int("close NULL", KC_NETS_OK, kc_nets_close(NULL));
-    fail += expect_int("close context", KC_NETS_OK, kc_nets_close(ctx));
+    fail += expect_int("open before close", KC_NETS_OK, kc_nets_open(&ctx));
+    kc_nets_close(NULL);
+    kc_nets_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -459,15 +411,13 @@ static int case_kc_nets_close(void) {
 static int case_kc_nets_stop(void) {
     const char *name = "kc_nets_stop";
     const char *detail = "is idempotent on a context";
-    kc_nets_options_t opts;
     kc_nets_t *ctx;
     int fail;
 
-    opts = kc_nets_options_default();
     ctx = NULL;
     fail = 0;
     fail += expect_int("stop NULL", KC_NETS_EINVAL, kc_nets_stop(NULL));
-    fail += expect_int("open before stop", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    fail += expect_int("open before stop", KC_NETS_OK, kc_nets_open(&ctx));
     fail += expect_int("stop context", KC_NETS_OK, kc_nets_stop(ctx));
     fail += expect_int("stop context repeated", KC_NETS_OK, kc_nets_stop(ctx));
     kc_nets_close(ctx);
@@ -482,126 +432,17 @@ static int case_kc_nets_stop(void) {
 static int case_kc_nets_stop_requested(void) {
     const char *name = "kc_nets_stop_requested";
     const char *detail = "tracks stop state on a context";
-    kc_nets_options_t opts;
     kc_nets_t *ctx;
     int fail;
 
-    opts = kc_nets_options_default();
     ctx = NULL;
     fail = 0;
     fail += expect_int("stop_requested NULL is 0", 0, kc_nets_stop_requested(NULL));
-    fail += expect_int("open before stop", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    fail += expect_int("open before stop", KC_NETS_OK, kc_nets_open(&ctx));
     fail += expect_int("fresh context not stopped", 0, kc_nets_stop_requested(ctx));
     fail += expect_int("stop context", KC_NETS_OK, kc_nets_stop(ctx));
     fail += expect_int("stopped context reported", 1, kc_nets_stop_requested(ctx));
     kc_nets_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_parse_target.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_parse_target(void) {
-    const char *name = "kc_nets_parse_target";
-    const char *detail = "parses hosts ports and URL schemes";
-    char host[64];
-    unsigned short port;
-    int proto;
-    int fail;
-
-    fail = 0;
-    port = 0;
-    proto = KC_NETS_TCP;
-    fail += expect_int("plain host parses", 0,
-        kc_nets_parse_target("example.com", host, sizeof(host), &port, &proto));
-    fail += expect_int("plain host default port", 80, port);
-    fail += expect_int("plain host preserves proto", KC_NETS_TCP, proto);
-    fail += expect_string("plain host copied", "example.com", host);
-
-    port = 0;
-    proto = KC_NETS_UDP;
-    fail += expect_int("host:port parses", 0,
-        kc_nets_parse_target("example.com:8080", host, sizeof(host), &port, &proto));
-    fail += expect_int("host:port value used", 8080, port);
-    fail += expect_int("no scheme preserves proto", KC_NETS_UDP, proto);
-
-    port = 0;
-    proto = 0;
-    fail += expect_int("bracketed ipv6 parses", 0,
-        kc_nets_parse_target("[::1]:9090", host, sizeof(host), &port, &proto));
-    fail += expect_int("ipv6 port used", 9090, port);
-    fail += expect_string("ipv6 host copied", "::1", host);
-
-    port = 0;
-    proto = 0;
-    fail += expect_int("http scheme parses", 0,
-        kc_nets_parse_target("http://x", host, sizeof(host), &port, &proto));
-    fail += expect_int("http default port", 80, port);
-    fail += expect_int("http defaults to tcp", KC_NETS_TCP, proto);
-    fail += expect_string("http host copied", "x", host);
-
-    port = 0;
-    proto = 0;
-    fail += expect_int("https scheme parses", 0,
-        kc_nets_parse_target("https://x", host, sizeof(host), &port, &proto));
-    fail += expect_int("https default port", 443, port);
-    fail += expect_int("https defaults to tls", KC_NETS_TLS, proto);
-
-    port = 0;
-    proto = 0;
-    fail += expect_int("tcp scheme parses", 0,
-        kc_nets_parse_target("tcp://x", host, sizeof(host), &port, &proto));
-    fail += expect_int("tcp scheme default port", 80, port);
-    fail += expect_int("tcp scheme keeps tcp", KC_NETS_TCP, proto);
-
-    port = 0;
-    proto = 0;
-    fail += expect_int("udp scheme parses", 0,
-        kc_nets_parse_target("udp://x", host, sizeof(host), &port, &proto));
-    fail += expect_int("udp scheme default port", 80, port);
-    fail += expect_int("udp scheme defaults to udp", KC_NETS_UDP, proto);
-
-    port = 0;
-    proto = 0;
-    fail += expect_int("path and query stripped", 0,
-        kc_nets_parse_target("tcp://x:7000/base?q=1", host, sizeof(host), &port, &proto));
-    fail += expect_int("explicit scheme port used", 7000, port);
-    fail += expect_string("scheme host copied", "x", host);
-
-    fail += expect_int("NULL rejected", 1,
-        kc_nets_parse_target(NULL, host, sizeof(host), &port, &proto));
-    fail += expect_int("empty rejected", 1,
-        kc_nets_parse_target("", host, sizeof(host), &port, &proto));
-    fail += expect_int("zero host capacity rejected", 1,
-        kc_nets_parse_target("x", host, 0, &port, &proto));
-    fail += expect_int("NULL host rejected", 1,
-        kc_nets_parse_target("x", NULL, 0, &port, &proto));
-    fail += expect_int("NULL port rejected", 1,
-        kc_nets_parse_target("x", host, sizeof(host), NULL, &proto));
-    fail += expect_int("NULL proto rejected", 1,
-        kc_nets_parse_target("x", host, sizeof(host), &port, NULL));
-    fail += expect_int("oversize port rejected", 1,
-        kc_nets_parse_target("x:70000", host, sizeof(host), &port, &proto));
-    fail += expect_int("zero port rejected", 1,
-        kc_nets_parse_target("x:0", host, sizeof(host), &port, &proto));
-    fail += expect_int("non-numeric port rejected", 1,
-        kc_nets_parse_target("x:abc", host, sizeof(host), &port, &proto));
-    fail += expect_int("unknown scheme rejected", 1,
-        kc_nets_parse_target("ftp://x", host, sizeof(host), &port, &proto));
-    fail += expect_int("userinfo rejected", 1,
-        kc_nets_parse_target("http://u@x", host, sizeof(host), &port, &proto));
-    fail += expect_int("empty authority rejected", 1,
-        kc_nets_parse_target("http://", host, sizeof(host), &port, &proto));
-    fail += expect_int("empty host rejected", 1,
-        kc_nets_parse_target(":80", host, sizeof(host), &port, &proto));
-    fail += expect_int("double colon rejected", 1,
-        kc_nets_parse_target("a::80", host, sizeof(host), &port, &proto));
-    fail += expect_int("unbracketed ipv6 rejected", 1,
-        kc_nets_parse_target("::1", host, sizeof(host), &port, &proto));
-    fail += expect_int("empty bracket host rejected", 1,
-        kc_nets_parse_target("[]:80", host, sizeof(host), &port, &proto));
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -613,17 +454,15 @@ static int case_kc_nets_parse_target(void) {
 static int case_kc_nets_send(void) {
     const char *name = "kc_nets_send";
     const char *detail = "delivers tcp and udp payloads";
-    kc_nets_options_t opts;
     kc_nets_t *ctx;
     kc_nets_t *stopped;
     test_server_t server;
     unsigned short tcp_port;
     unsigned short udp_port;
-    char *resp = NULL;
+    void *resp = NULL;
     size_t resp_size = 0;
     int fail;
 
-    opts = kc_nets_options_default();
     ctx = NULL;
     stopped = NULL;
     tcp_port = (unsigned short)(port_base() + 1U);
@@ -637,7 +476,7 @@ static int case_kc_nets_send(void) {
 
     fail += expect_int("send NULL ctx", KC_NETS_EINVAL,
         kc_nets_send(NULL, TEST_HOST, 9, KC_NETS_TCP, "x", 1, NULL, NULL));
-    fail += expect_int("open for send", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    fail += expect_int("open for send", KC_NETS_OK, kc_nets_open(&ctx));
     fail += expect_int("send NULL host", KC_NETS_EINVAL,
         kc_nets_send(ctx, NULL, 9, KC_NETS_TCP, "x", 1, NULL, NULL));
     fail += expect_int("send empty host", KC_NETS_EINVAL,
@@ -649,7 +488,7 @@ static int case_kc_nets_send(void) {
     fail += expect_int("send unresolvable host", KC_NETS_ENET,
         kc_nets_send(ctx, "invalid.invalid", 9, KC_NETS_TCP, "x", 1, NULL, NULL));
     fail += expect_int("open stopped context", KC_NETS_OK,
-        kc_nets_open(&stopped, &opts));
+        kc_nets_open(&stopped));
     fail += expect_int("stop context", KC_NETS_OK, kc_nets_stop(stopped));
     fail += expect_int("send stopped context", KC_NETS_ESTOP,
         kc_nets_send(stopped, TEST_HOST, 9, KC_NETS_TCP, "x", 1, NULL, NULL));
@@ -666,7 +505,17 @@ static int case_kc_nets_send(void) {
         fail += expect_true("tcp payload size", server.received_size == 9U);
         fail += expect_true("tcp payload bytes",
             memcmp(server.received, "hello tcp", 9) == 0);
-        free(resp);
+#ifdef _WIN32
+        fail += expect_true("tcp response empty", resp == NULL && resp_size == 0U);
+#else
+        fail += expect_true("tcp response allocated", resp != NULL);
+        fail += expect_true("tcp response size", resp_size == sizeof(test_response));
+        if (resp != NULL && resp_size == sizeof(test_response)) {
+            fail += expect_true("tcp response bytes",
+                memcmp(resp, test_response, sizeof(test_response)) == 0);
+        }
+#endif
+        kc_nets_free(resp);
     }
 
     if (server_start(&server, KC_NETS_UDP, udp_port) != 0) {
@@ -680,9 +529,64 @@ static int case_kc_nets_send(void) {
         fail += expect_true("udp payload size", server.received_size == 9U);
         fail += expect_true("udp payload bytes",
             memcmp(server.received, "hello udp", 9) == 0);
-        free(resp);
+        fail += expect_true("udp response empty", resp == NULL && resp_size == 0U);
+        kc_nets_free(resp);
     }
 
+    kc_nets_close(ctx);
+    socket_stop();
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_free.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_free(void) {
+    const char *name = "kc_nets_free";
+    const char *detail = "releases returned response and accepts NULL";
+    kc_nets_t *ctx;
+    test_server_t server;
+    unsigned short port;
+    void *response;
+    size_t response_size;
+    int fail;
+
+    ctx = NULL;
+    port = (unsigned short)(port_base() + 2U);
+    response = NULL;
+    response_size = 0;
+    fail = 0;
+
+    if (socket_start() != 0) {
+        case_result(1, name, detail);
+        return 1;
+    }
+
+    fail += expect_int("open for free", KC_NETS_OK, kc_nets_open(&ctx));
+    if (server_start(&server, KC_NETS_TCP, port) != 0) {
+        fail += 1;
+    } else {
+        fail += expect_int("send for free", KC_NETS_OK,
+            kc_nets_send(ctx, TEST_HOST, port, KC_NETS_TCP, "free", 4,
+                &response, &response_size));
+        fail += expect_int("free server join", 0, server_join(&server));
+#ifdef _WIN32
+        fail += expect_true("free response empty",
+            response == NULL && response_size == 0U);
+#else
+        fail += expect_true("free response allocated", response != NULL);
+        fail += expect_true("free response size",
+            response_size == sizeof(test_response));
+        if (response != NULL && response_size == sizeof(test_response)) {
+            fail += expect_true("free response bytes",
+                memcmp(response, test_response, sizeof(test_response)) == 0);
+        }
+#endif
+    }
+    kc_nets_free(response);
+    kc_nets_free(NULL);
     kc_nets_close(ctx);
     socket_stop();
     case_result(fail, name, detail);
@@ -752,17 +656,14 @@ static int case_kc_nets_tls_available(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 12;
+    test_case_total = 9;
     test_case_current = 0;
-    run_case(&rc, case_kc_nets_options_default);
-    run_case(&rc, case_kc_nets_options_load_env);
-    run_case(&rc, case_kc_nets_options_free);
     run_case(&rc, case_kc_nets_open);
     run_case(&rc, case_kc_nets_close);
     run_case(&rc, case_kc_nets_stop);
     run_case(&rc, case_kc_nets_stop_requested);
-    run_case(&rc, case_kc_nets_parse_target);
     run_case(&rc, case_kc_nets_send);
+    run_case(&rc, case_kc_nets_free);
     run_case(&rc, case_kc_nets_strerror);
     run_case(&rc, case_kc_nets_version);
     run_case(&rc, case_kc_nets_tls_available);
@@ -782,15 +683,12 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_nets_options_default") == 0) return case_kc_nets_options_default();
-    if (strcmp(argv[1], "kc_nets_options_load_env") == 0) return case_kc_nets_options_load_env();
-    if (strcmp(argv[1], "kc_nets_options_free") == 0) return case_kc_nets_options_free();
     if (strcmp(argv[1], "kc_nets_open") == 0) return case_kc_nets_open();
     if (strcmp(argv[1], "kc_nets_close") == 0) return case_kc_nets_close();
     if (strcmp(argv[1], "kc_nets_stop") == 0) return case_kc_nets_stop();
     if (strcmp(argv[1], "kc_nets_stop_requested") == 0) return case_kc_nets_stop_requested();
-    if (strcmp(argv[1], "kc_nets_parse_target") == 0) return case_kc_nets_parse_target();
     if (strcmp(argv[1], "kc_nets_send") == 0) return case_kc_nets_send();
+    if (strcmp(argv[1], "kc_nets_free") == 0) return case_kc_nets_free();
     if (strcmp(argv[1], "kc_nets_strerror") == 0) return case_kc_nets_strerror();
     if (strcmp(argv[1], "kc_nets_version") == 0) return case_kc_nets_version();
     if (strcmp(argv[1], "kc_nets_tls_available") == 0) return case_kc_nets_tls_available();

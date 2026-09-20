@@ -28,7 +28,7 @@ Pass a URL-shaped target:
 nets https://example.com <<< 'payload'
 ```
 
-URL schemes select transport defaults only: `http://` uses TCP port `80`, `https://` uses TCP port `443`, `tcp://` uses TCP, and `udp://` uses UDP. `nets` remains a raw byte sender; `https://` does **not** add TLS encryption or HTTP framing.
+URL-shaped targets select transport and authority defaults only: `http://` uses TCP port `80`, `https://` uses TLS and port `443`, `tcp://` uses TCP, and `udp://` uses UDP. `nets` remains a raw byte sender; `https://` does not create an HTTP request or add HTTP framing. TLS encryption is available only when TLS support is compiled in. The current TLS path does not verify the server certificate or hostname and must not be treated as authenticated.
 
 Send a UDP datagram:
 
@@ -56,30 +56,45 @@ echo 'hello' | nets 127.0.0.1:8080 --udp
 ```c
 #include "libnets.h"
 
-const char msg[] = "hello\n";
-kc_nets_options_t opts = kc_nets_options_default();
+const unsigned char msg[] = "hello\n";
 kc_nets_t *ctx = NULL;
+void *response = NULL;
+size_t response_size = 0;
 
-kc_nets_open(&ctx, &opts);
-kc_nets_send(ctx, "127.0.0.1", 8080, KC_NETS_TCP, msg, sizeof(msg) - 1);
-kc_nets_close(ctx);
-kc_nets_options_free(&opts);
+if (kc_nets_open(&ctx) == KC_NETS_OK) {
+    int rc = kc_nets_send(
+        ctx,
+        "127.0.0.1",
+        8080,
+        KC_NETS_TCP,
+        msg,
+        sizeof(msg) - 1,
+        &response,
+        &response_size
+    );
+
+    if (rc == KC_NETS_OK) {
+        /* response[0..response_size) is binary data */
+    }
+
+    kc_nets_free(response);
+    kc_nets_close(ctx);
+}
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_nets_options_default()` creates a default options struct.
-- `kc_nets_options_load_env()` overlays supported options from environment variables.
-- `kc_nets_options_free()` releases resources owned by options.
 - `kc_nets_open()` allocates a sender context.
-- `kc_nets_send()` opens a socket, sends the provided bytes, reads the response into the output buffer, and closes the socket before returning.
+- `kc_nets_send()` borrows the input bytes for the duration of the call and never retains them. It opens a socket, sends the bytes, returns any response through the output parameters, and closes the socket before returning.
+- A returned response is owned binary memory. `response_size` is authoritative, and no NUL terminator is promised.
+- Release response memory with `kc_nets_free()`. Calling `kc_nets_free(NULL)` is valid.
 - TCP sends all bytes over one connection, then reads the response until EOF.
-- UDP sends the provided bytes as one datagram.
-- The caller owns the input buffer before and after the call.
-- `kc_nets_stop()` requests stop for one context.
-- `kc_nets_strerror()` returns a static status message.
+- UDP sends the provided bytes as one datagram and normally returns no response data.
+- `kc_nets_stop()` requests a cooperative stop for one context. DNS resolution, connection attempts, and some reads may not be interrupted, and TCP or TLS response reads may wait for peer EOF.
+- `kc_nets_strerror()` maps categorical status codes to static messages.
+- TLS is optional and available only when compiled with OpenSSL.
 - `kc_nets_version()` returns the build version.
 - `kc_nets_close()` releases the context.
 

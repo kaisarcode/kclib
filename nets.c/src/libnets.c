@@ -47,67 +47,41 @@
 #endif
 
 struct kc_nets {
-    kc_nets_options_t opts;
     volatile sig_atomic_t stop_requested;
 };
 
 /**
- * Returns default-initialized options.
- * @return Default-initialized options.
- */
-kc_nets_options_t kc_nets_options_default(void) {
-    kc_nets_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    return opts;
-}
-
-/**
- * Loads environment variables into options.
- * @param opts Options to update.
- * @return None.
- */
-void kc_nets_options_load_env(kc_nets_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Frees options resources.
- * @param opts Options to free.
- * @return None.
- */
-void kc_nets_options_free(kc_nets_options_t *opts) {
-    (void)opts;
-}
-
-/**
  * Initialize a new nets context.
- * @param ctx_out Destination context pointer.
- * @param opts    Configuration options.
+ * @param out Destination context pointer.
  * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
  */
-int kc_nets_open(kc_nets_t **ctx_out, kc_nets_options_t *opts) {
+int kc_nets_open(kc_nets_t **out) {
     kc_nets_t *ctx;
 
-    if (!ctx_out || !opts) return KC_NETS_EINVAL;
-    *ctx_out = NULL;
+    if (!out) return KC_NETS_EINVAL;
+    *out = NULL;
     ctx = (kc_nets_t *)calloc(1, sizeof(kc_nets_t));
     if (!ctx) return KC_NETS_EINVAL;
-    ctx->opts = *opts;
-    *ctx_out = ctx;
+    *out = ctx;
     return KC_NETS_OK;
 }
 
 /**
  * Release a nets context.
  * @param ctx Context pointer.
- * @return KC_NETS_OK.
+ * @return None.
  */
-int kc_nets_close(kc_nets_t *ctx) {
-    if (!ctx) return KC_NETS_OK;
-    kc_nets_options_free(&ctx->opts);
+void kc_nets_close(kc_nets_t *ctx) {
+    if (!ctx) return;
     free(ctx);
-    return KC_NETS_OK;
 }
+
+/**
+ * Release response memory returned by nets. Accepts NULL.
+ * @param ptr Response allocation to release, or NULL.
+ * @return None.
+ */
+void kc_nets_free(void *ptr) { free(ptr); }
 
 /**
  * Request stop for a specific nets context.
@@ -125,7 +99,7 @@ int kc_nets_stop(kc_nets_t *ctx) {
  * @param ctx Context pointer.
  * @return 1 if stop was requested, 0 otherwise.
  */
-int kc_nets_stop_requested(kc_nets_t *ctx) {
+int kc_nets_stop_requested(const kc_nets_t *ctx) {
     if (!ctx) {
         return 0;
     }
@@ -237,7 +211,7 @@ int proto,
 const void *data,
 size_t size,
 const char *host,
-char **out_data,
+void **out_data,
 size_t *out_size
 ) {
     kc_nets_socket_t sock;
@@ -385,7 +359,9 @@ resp_cap = next;
  * @param port Destination port.
  * @param proto KC_NETS_TCP or KC_NETS_UDP.
  * @param data Buffer to send.
- * @param size Buffer size in bytes.
+ * @param data_size Buffer size in bytes.
+ * @param out_data Receives malloc'd response bytes.
+ * @param out_size Receives response size.
  * @return KC_NETS_OK on success, or a negative error code.
  */
 int kc_nets_send(
@@ -394,8 +370,8 @@ const char *host,
 unsigned short port,
 int proto,
 const void *data,
-size_t size,
-char **out_data,
+size_t data_size,
+void **out_data,
 size_t *out_size
 ) {
     struct addrinfo hints;
@@ -403,6 +379,9 @@ size_t *out_size
     struct addrinfo *ai;
     char port_text[16];
     int rc;
+
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
 
     if (!ctx || !host || !host[0] || !data ||
         (proto != KC_NETS_TCP && proto != KC_NETS_UDP && proto != KC_NETS_TLS)) {
@@ -427,7 +406,7 @@ size_t *out_size
 
     rc = KC_NETS_ENET;
     for (ai = res; ai; ai = ai->ai_next) {
-        rc = kc_nets_send_addr(ctx, ai, proto, data, size, host, out_data, out_size);
+        rc = kc_nets_send_addr(ctx, ai, proto, data, data_size, host, out_data, out_size);
         if (rc == KC_NETS_OK) break;
     }
 
@@ -473,117 +452,4 @@ int kc_nets_tls_available(void) {
 #else
     return 0;
 #endif
-}
-
-/**
- * Parses a host, host:port, bracketed IPv6, or URL-shaped target.
- * URL schemes select transport defaults only.
- * @param text      Input target text.
- * @param host      Output host buffer.
- * @param host_cap  Output host capacity.
- * @param port      Output port pointer.
- * @param proto     Output protocol pointer.
- * @return 0 on success, or 1 on failure.
- */
-int kc_nets_parse_target(
-const char *text,
-char *host,
-size_t host_cap,
-unsigned short *port,
-int *proto
-) {
-    const char *authority;
-    const char *authority_end;
-    const char *scheme_end;
-    const char *host_begin;
-    const char *host_end;
-    const char *port_begin;
-    char *end;
-    unsigned long value;
-    size_t n;
-
-    if (!text || !text[0] || !host || host_cap == 0 || !port || !proto) return 1;
-
-    authority = text;
-    authority_end = text + strlen(text);
-    *port = 80;
-
-    scheme_end = strstr(text, "://");
-    if (scheme_end) {
-        n = (size_t)(scheme_end - text);
-        if (n == 4 && strncmp(text, "http", 4) == 0) {
-            *port = 80;
-            *proto = KC_NETS_TCP;
-        } else if (n == 5 && strncmp(text, "https", 5) == 0) {
-            *port = 443;
-            *proto = KC_NETS_TLS;
-        } else if (n == 3 && strncmp(text, "tcp", 3) == 0) {
-            *port = 80;
-            *proto = KC_NETS_TCP;
-        } else if (n == 3 && strncmp(text, "udp", 3) == 0) {
-            *port = 80;
-            *proto = KC_NETS_UDP;
-        } else {
-            return 1;
-        }
-        authority = scheme_end + 3;
-        authority_end = authority + strcspn(authority, "/?#");
-    }
-
-    if (authority == authority_end) return 1;
-    if (memchr(authority, '@', (size_t)(authority_end - authority)) != NULL) return 1;
-
-    port_begin = NULL;
-    if (*authority == '[') {
-        host_begin = authority + 1;
-        host_end = memchr(host_begin, ']', (size_t)(authority_end - host_begin));
-        if (!host_end || host_end == host_begin) return 1;
-        if (host_end + 1 < authority_end) {
-            if (host_end[1] != ':') return 1;
-            port_begin = host_end + 2;
-            if (port_begin == authority_end) return 1;
-        } else if (host_end + 1 != authority_end) {
-            return 1;
-        }
-    } else {
-        const char *colon;
-        const char *pcur;
-        int colon_count;
-
-        colon = NULL;
-        colon_count = 0;
-        for (pcur = authority; pcur < authority_end; pcur++) {
-            if (*pcur == ':') {
-                colon = pcur;
-                colon_count++;
-            }
-        }
-        if (colon_count > 1) return 1;
-        host_begin = authority;
-        host_end = colon ? colon : authority_end;
-        if (colon) {
-            port_begin = colon + 1;
-            if (port_begin == authority_end) return 1;
-        }
-    }
-
-    n = (size_t)(host_end - host_begin);
-    if (n == 0 || n >= host_cap) return 1;
-    memcpy(host, host_begin, n);
-    host[n] = '\0';
-
-    if (port_begin) {
-        char port_text[6];
-        size_t port_len;
-
-        port_len = (size_t)(authority_end - port_begin);
-        if (port_len == 0 || port_len >= sizeof(port_text)) return 1;
-        memcpy(port_text, port_begin, port_len);
-        port_text[port_len] = '\0';
-        value = strtoul(port_text, &end, 10);
-        if (*end != '\0' || value == 0 || value > 65535) return 1;
-        *port = (unsigned short)value;
-    }
-
-    return 0;
 }
