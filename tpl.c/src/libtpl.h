@@ -37,6 +37,7 @@ int kc_tpl_open(kc_tpl_t **out);
 /**
  * Release a renderer context and its owned data.
  * @param ctx Context pointer.
+ * @return None.
  */
 void kc_tpl_close(kc_tpl_t *ctx);
 
@@ -58,8 +59,8 @@ int kc_tpl_set_root(kc_tpl_t *ctx, const char *root);
 int kc_tpl_set_var(kc_tpl_t *ctx, const char *key, const char *value);
 
 /**
- * Renders one template string into a caller-owned output allocation that must
- * be released with kc_tpl_free.
+ * Renders one template string into a caller-owned output allocation. Release
+ * the output with kc_tpl_free.
  * @param ctx Context pointer.
  * @param input Template input.
  * @param output Destination pointer for owned output.

@@ -32,7 +32,7 @@ Render a file with includes:
 
 | Flag | Description |
 | :--- | :--- |
-| `--root <dir>` | Base directory for `{{@include ...}}` path resolution (default: cwd) |
+| `--root <dir>` | Base directory for `{{@include ...}}` path resolution (default: `.`) |
 | `--var <key=value>` | Inject a template variable (repeatable) |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
@@ -64,68 +64,38 @@ Variables are string-based. Lists are passed as CSV or `[a,b,c]`. Truthy values 
 ```c
 #include "libtpl.h"
 
-kc_tpl_t *ctx = kc_tpl_open();
+kc_tpl_t *ctx = NULL;
 char *output = NULL;
 
-kc_tpl_set_root(ctx, ".");
-kc_tpl_set_var(ctx, "title", "Home");
-kc_tpl_render_string(ctx, "<h1>{{ title }}</h1>", &output);
+if (kc_tpl_open(&ctx) == KC_TPL_OK) {
+    kc_tpl_set_root(ctx, ".");
+    kc_tpl_set_var(ctx, "title", "Home");
 
-free(output);
-kc_tpl_close(ctx);
+    if (kc_tpl_render_string(
+            ctx,
+            "<h1>{{ title }}</h1>",
+            &output
+        ) == KC_TPL_OK) {
+        /* use output */
+        kc_tpl_free(output);
+    }
+
+    kc_tpl_close(ctx);
+}
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_tpl_open()` - allocates and returns a new renderer context owned by the caller.
-- `kc_tpl_set_root()` - configures include path resolution for the context.
+- `kc_tpl_version()` - returns the build version for the library artifact.
+- `kc_tpl_open()` - initializes a new renderer context through its output pointer. Its default include root is `"."`.
+- `kc_tpl_set_root()` - changes the context's include root used to resolve include paths.
 - `kc_tpl_set_var()` - stores string variables in the context scope.
-- `kc_tpl_render_string()` - renders one template into a caller-owned output buffer.
+- `kc_tpl_render_string()` - renders one template into a caller-owned, NUL-terminated output string. Release it with `kc_tpl_free()`.
+- `kc_tpl_free()` - releases a rendered output string.
+- `kc_tpl_get_error()` - returns the latest context error.
 - `kc_tpl_close()` - releases the context and all associated variable storage.
-
----
-
-## Runner Interface
-
-`tpl.c` exports a standard in-process entry point for bridge composition:
-
-```c
-char *kc_tpl_run(const char *payload_json, char **out_err);
-```
-
-This is the canonical implementation of the CLI's functionality. The CLI builds a JSON payload from argv, calls the runner, and formats the JSON result back to stdout.
-
-### JSON Contract
-
-**Request:**
-```json
-{ "cmd": "exec", "args": { "template": "...", "root": ".", "vars": { "key": "value" } } }
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `cmd` | string | yes | Subcommand: `"exec"` or `"version"` |
-| `args.template` | string | yes (for exec) | Template string to render |
-| `args.root` | string | no | Include root directory (default: cwd) |
-| `args.vars` | object | no | Template variables as key-value pairs |
-
-**Success (exec):**
-```json
-{ "result": { "output": "rendered template text" }, "handle": 0 }
-```
-
-**Success (version):**
-```json
-{ "result": { "version": 1234567890 }, "handle": 0 }
-```
-
-**Error:**
-- Returns `NULL` and sets `*out_err` to a malloc'd error message.
-- Caller must free both the result string and `*out_err` (when set).
-
-The runner is stateless; `handle` is always `0`.
 
 ---
 

@@ -12,8 +12,6 @@
 #define _XOPEN_SOURCE 700
 #include <unistd.h>
 #endif
-#include <signal.h>
-
 #include "libtpl.h"
 
 #include <ctype.h>
@@ -25,23 +23,6 @@
 #define KC_TPL_EVAL_CAP 2048
 #define KC_TPL_ROOT_CAP 4096
 #define KC_TPL_OUTPUT_CAP 262144
-
-typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_FLOAT,
-    KC_ENV_TYPE_STR
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_TPL_ROOT", offsetof(kc_tpl_options_t, root), KC_ENV_TYPE_STR },
-};
-static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
 
 typedef struct {
     char key[64];
@@ -64,13 +45,11 @@ typedef struct kc_tpl_scope {
 } kc_tpl_scope_t;
 
 struct kc_tpl {
-    kc_tpl_options_t opts;
     char root[KC_TPL_ROOT_CAP];
     char out[KC_TPL_OUTPUT_CAP];
     size_t out_n;
     char error[256];
     kc_tpl_scope_t scope;
-    volatile sig_atomic_t stop_requested;
 };
 
 static const char *kc_tpl_comment_open = "{{/" "*";
@@ -1240,15 +1219,14 @@ static int kc_tpl_render_internal(kc_tpl_t *ctx, kc_tpl_scope_t *scope, char *tp
 }
 
 /**
- * Initialize a renderer context with provided options.
+ * Initialize a renderer context.
  * @param out Pointer to receive the context pointer.
- * @param opts Options.
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
-int kc_tpl_open(kc_tpl_t **out, const kc_tpl_options_t *opts) {
+int kc_tpl_open(kc_tpl_t **out) {
     kc_tpl_t *ctx;
 
-    if (out == NULL || opts == NULL) {
+    if (out == NULL) {
         return KC_TPL_ERROR;
     }
 
@@ -1257,19 +1235,7 @@ int kc_tpl_open(kc_tpl_t **out, const kc_tpl_options_t *opts) {
         return KC_TPL_ERROR;
     }
 
-    ctx->opts = *opts;
-    if (opts->root != NULL) {
-        ctx->opts.root = kc_tpl_dup(opts->root);
-        if (ctx->opts.root == NULL) {
-            free(ctx);
-            return KC_TPL_ERROR;
-        }
-    }
-    if (opts->root != NULL) {
-        snprintf(ctx->root, sizeof(ctx->root), "%s", opts->root);
-    } else {
-        snprintf(ctx->root, sizeof(ctx->root), ".");
-    }
+    snprintf(ctx->root, sizeof(ctx->root), ".");
     snprintf(ctx->error, sizeof(ctx->error), "ok");
     *out = ctx;
     return KC_TPL_OK;
@@ -1278,17 +1244,15 @@ int kc_tpl_open(kc_tpl_t **out, const kc_tpl_options_t *opts) {
 /**
  * Release a renderer context and its owned data.
  * @param ctx Context pointer.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
+ * @return None.
  */
-int kc_tpl_close(kc_tpl_t *ctx) {
+void kc_tpl_close(kc_tpl_t *ctx) {
     if (ctx == NULL) {
-        return KC_TPL_OK;
+        return;
     }
 
     kc_tpl_scope_clear(&ctx->scope);
-    kc_tpl_options_free(&ctx->opts);
     free(ctx);
-    return KC_TPL_OK;
 }
 
 /**
@@ -1369,7 +1333,7 @@ int kc_tpl_render_string(kc_tpl_t *ctx, const char *input, char **output) {
  * @param ctx Context pointer.
  * @return Static or context-owned error text.
  */
-const char *kc_tpl_strerror(const kc_tpl_t *ctx) {
+const char *kc_tpl_get_error(const kc_tpl_t *ctx) {
     if (ctx == NULL) {
         return "invalid context";
     }
@@ -1378,70 +1342,10 @@ const char *kc_tpl_strerror(const kc_tpl_t *ctx) {
 }
 
 /**
- * Create an options struct initialized with default values.
- * @return Default-initialized options.
- */
-kc_tpl_options_t kc_tpl_options_default(void) {
-    kc_tpl_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    return opts;
-}
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
+ * Releases output returned by kc_tpl_render_string.
+ * @param text Output allocation to release.
  * @return None.
  */
-void kc_tpl_options_load_env(kc_tpl_options_t *opts) {
-    int i;
-    if (!opts) return;
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        char *end;
-        if (!val) continue;
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_FLOAT: {
-                float v = strtof(val, &end);
-                if (end != val && *end == '\0') {
-                    *(float *)((char *)opts + env_config_table[i].offset) = v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_STR: {
-                char **p = (char **)((char *)opts + env_config_table[i].offset);
-                free(*p);
-                *p = strdup(val);
-                break;
-            }
-        }
-    }
-}
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_tpl_options_free(kc_tpl_options_t *opts) {
-    if (!opts) return;
-    free(opts->root);
-    opts->root = NULL;
-}
-
-/**
- * Request stop for a specific tpl context.
- * @param ctx Context pointer.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_stop(kc_tpl_t *ctx) {
-    if (!ctx) return KC_TPL_ERROR;
-    ctx->stop_requested = 1;
-    return KC_TPL_OK;
+void kc_tpl_free(char *text) {
+    free(text);
 }

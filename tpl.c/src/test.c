@@ -44,21 +44,6 @@ static void run_case(int *rc, int (*fn)(void)) {
 }
 
 /**
- * Sets or clears one environment variable.
- * @param name Variable name.
- * @param value Variable value, or NULL to clear.
- * @return 0 on success, 1 on failure.
- */
-static int set_env_value(const char *name, const char *value) {
-#ifdef _WIN32
-    return _putenv_s(name, value != NULL ? value : "") == 0 ? 0 : 1;
-#else
-    if (value == NULL) return unsetenv(name) == 0 ? 0 : 1;
-    return setenv(name, value, 1) == 0 ? 0 : 1;
-#endif
-}
-
-/**
  * Verifies an integer result.
  * @param name Check name.
  * @param expected Expected value.
@@ -114,86 +99,6 @@ static int expect_string(const char *name, const char *expected, const char *act
 static int render_expect(const char *name, kc_tpl_t *ctx, const char *input, const char *expected);
 
 /**
- * Tests kc_tpl_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_options_default(void) {
-    const char *name = "kc_tpl_options_default";
-    const char *detail = "initializes correctly";
-    kc_tpl_options_t opts;
-    int fail = 0;
-
-    opts = kc_tpl_options_default();
-    fail += expect_true("default root", opts.root == NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpl_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_options_load_env(void) {
-    const char *name = "kc_tpl_options_load_env";
-    const char *detail = "loads from environment";
-    kc_tpl_options_t opts;
-    int fail = 0;
-
-    opts = kc_tpl_options_default();
-    fail += expect_int("set root env", 0, set_env_value("KC_TPL_ROOT", "env-root"));
-    kc_tpl_options_load_env(&opts);
-    fail += expect_string("env root", "env-root", opts.root);
-    fail += expect_int("replace root env", 0, set_env_value("KC_TPL_ROOT", "env-root-2"));
-    kc_tpl_options_load_env(&opts);
-    fail += expect_string("replaced env root", "env-root-2", opts.root);
-    kc_tpl_options_load_env(NULL);
-    kc_tpl_options_free(&opts);
-    set_env_value("KC_TPL_ROOT", NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpl_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_options_free(void) {
-    const char *name = "kc_tpl_options_free";
-    const char *detail = "clears resources";
-    kc_tpl_options_t opts;
-    int fail = 0;
-
-    opts = kc_tpl_options_default();
-    kc_tpl_options_free(&opts);
-    kc_tpl_options_free(NULL);
-    fail += expect_true("free clears root", opts.root == NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpl_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_stop(void) {
-    const char *name = "kc_tpl_stop";
-    const char *detail = "sets flag on context";
-    kc_tpl_options_t opts;
-    kc_tpl_t *ctx;
-    int fail = 0;
-
-    opts = kc_tpl_options_default();
-    ctx = NULL;
-    fail += expect_int("stop NULL", KC_TPL_ERROR, kc_tpl_stop(NULL));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    fail += expect_int("stop context", KC_TPL_OK, kc_tpl_stop(ctx));
-    fail += expect_int("stop context again", KC_TPL_OK, kc_tpl_stop(ctx));
-    kc_tpl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_tpl_version.
  * @return 0 on success, 1 on failure.
  */
@@ -212,18 +117,14 @@ static int case_kc_tpl_version(void) {
 static int case_kc_tpl_open(void) {
     const char *name = "kc_tpl_open";
     const char *detail = "validates and allocates context";
-    kc_tpl_options_t opts;
     kc_tpl_t *ctx;
     int fail = 0;
 
-    opts = kc_tpl_options_default();
     ctx = NULL;
-    fail += expect_int("open NULL out", KC_TPL_ERROR, kc_tpl_open(NULL, &opts));
-    fail += expect_int("open NULL opts", KC_TPL_ERROR, kc_tpl_open(&ctx, NULL));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    fail += expect_int("open NULL out", KC_TPL_ERROR, kc_tpl_open(NULL));
+    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
     fail += expect_true("open sets context", ctx != NULL);
     kc_tpl_close(ctx);
-    kc_tpl_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -235,18 +136,17 @@ static int case_kc_tpl_open(void) {
 static int case_kc_tpl_close(void) {
     const char *name = "kc_tpl_close";
     const char *detail = "releases context";
-    kc_tpl_options_t opts;
     kc_tpl_t *ctx;
-    int fail = 0;
 
-    opts = kc_tpl_options_default();
     ctx = NULL;
-    fail += expect_int("close NULL", KC_TPL_OK, kc_tpl_close(NULL));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    fail += expect_int("close context", KC_TPL_OK, kc_tpl_close(ctx));
-    kc_tpl_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    kc_tpl_close(NULL);
+    if (kc_tpl_open(&ctx) != KC_TPL_OK) {
+        case_result(1, name, detail);
+        return 1;
+    }
+    kc_tpl_close(ctx);
+    case_result(0, name, detail);
+    return 0;
 }
 
 /**
@@ -256,19 +156,16 @@ static int case_kc_tpl_close(void) {
 static int case_kc_tpl_set_root(void) {
     const char *name = "kc_tpl_set_root";
     const char *detail = "validates input";
-    kc_tpl_options_t opts;
     kc_tpl_t *ctx;
     int fail = 0;
 
-    opts = kc_tpl_options_default();
     ctx = NULL;
     fail += expect_int("set root NULL ctx", KC_TPL_ERROR, kc_tpl_set_root(NULL, "."));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
     fail += expect_int("set root NULL value", KC_TPL_ERROR, kc_tpl_set_root(ctx, NULL));
     fail += expect_int("set root empty", KC_TPL_ERROR, kc_tpl_set_root(ctx, ""));
     fail += expect_int("set root valid", KC_TPL_OK, kc_tpl_set_root(ctx, "."));
     kc_tpl_close(ctx);
-    kc_tpl_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -280,15 +177,13 @@ static int case_kc_tpl_set_root(void) {
 static int case_kc_tpl_set_var(void) {
     const char *name = "kc_tpl_set_var";
     const char *detail = "validates and stores";
-    kc_tpl_options_t opts;
     kc_tpl_t *ctx;
     int fail = 0;
 
-    opts = kc_tpl_options_default();
     ctx = NULL;
     fail += expect_int("set var NULL ctx", KC_TPL_ERROR,
         kc_tpl_set_var(NULL, "k", "v"));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
     fail += expect_int("set var empty key", KC_TPL_ERROR,
         kc_tpl_set_var(ctx, "", "v"));
     fail += expect_int("set var NULL key", KC_TPL_ERROR,
@@ -297,7 +192,6 @@ static int case_kc_tpl_set_var(void) {
         kc_tpl_set_var(ctx, "k", NULL));
     fail += expect_int("set title", KC_TPL_OK, kc_tpl_set_var(ctx, "title", "A&B"));
     kc_tpl_close(ctx);
-    kc_tpl_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -309,17 +203,15 @@ static int case_kc_tpl_set_var(void) {
 static int case_kc_tpl_render_string(void) {
     const char *name = "kc_tpl_render_string";
     const char *detail = "handles all directives";
-    kc_tpl_options_t opts;
     kc_tpl_t *ctx;
     char *output;
     int fail = 0;
 
-    opts = kc_tpl_options_default();
     ctx = NULL;
     output = NULL;
     fail += expect_int("render NULL ctx", KC_TPL_ERROR,
         kc_tpl_render_string(NULL, "x", &output));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
+    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
     fail += expect_int("render NULL input", KC_TPL_ERROR,
         kc_tpl_render_string(ctx, NULL, &output));
     fail += expect_int("render NULL output", KC_TPL_ERROR,
@@ -381,35 +273,55 @@ static int case_kc_tpl_render_string(void) {
     fail += render_expect("comment in html comment", ctx, "<div><!-- {{@if title}}x{{@endif}} --></div>",
         "<div><!-- {{@if title}}x{{@endif}} --></div>");
     kc_tpl_close(ctx);
-    kc_tpl_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_tpl_strerror.
+ * Tests kc_tpl_free.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_tpl_strerror(void) {
-    const char *name = "kc_tpl_strerror";
-    const char *detail = "returns error details";
-    kc_tpl_options_t opts;
+static int case_kc_tpl_free(void) {
+    const char *name = "kc_tpl_free";
+    const char *detail = "releases render output";
     kc_tpl_t *ctx;
     char *output;
     int fail = 0;
 
-    opts = kc_tpl_options_default();
     ctx = NULL;
     output = NULL;
-    fail += expect_string("NULL strerror", "invalid context", kc_tpl_strerror(NULL));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx, &opts));
-    fail += expect_string("initial strerror", "ok", kc_tpl_strerror(ctx));
+    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
+    fail += expect_int("render output", KC_TPL_OK,
+        kc_tpl_render_string(ctx, "output", &output));
+    fail += expect_string("rendered output", "output", output);
+    kc_tpl_free(output);
+    kc_tpl_free(NULL);
+    kc_tpl_close(ctx);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_tpl_get_error.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_tpl_get_error(void) {
+    const char *name = "kc_tpl_get_error";
+    const char *detail = "returns error details";
+    kc_tpl_t *ctx;
+    char *output;
+    int fail = 0;
+
+    ctx = NULL;
+    output = NULL;
+    fail += expect_string("NULL error", "invalid context", kc_tpl_get_error(NULL));
+    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
+    fail += expect_string("initial error", "ok", kc_tpl_get_error(ctx));
     fail += expect_int("missing include", KC_TPL_ERROR,
         kc_tpl_render_string(ctx, "{{@include \"missing.html\"}}", &output));
-    free(output);
-    fail += expect_true("error string set", strcmp(kc_tpl_strerror(ctx), "ok") != 0);
+    kc_tpl_free(output);
+    fail += expect_true("error string set", strcmp(kc_tpl_get_error(ctx), "ok") != 0);
     kc_tpl_close(ctx);
-    kc_tpl_options_free(&opts);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -430,12 +342,12 @@ static int render_expect(const char *name, kc_tpl_t *ctx, const char *input, con
     rc = kc_tpl_render_string(ctx, input, &output);
     if (rc != KC_TPL_OK) {
         printf("[FAIL] %s: expected KC_TPL_OK, got %d: %s\n", name, rc,
-            kc_tpl_strerror(ctx));
-        free(output);
+            kc_tpl_get_error(ctx));
+        kc_tpl_free(output);
         return 1;
     }
     rc = expect_string(name, expected, output);
-    free(output);
+    kc_tpl_free(output);
     return rc;
 }
 
@@ -445,19 +357,16 @@ static int render_expect(const char *name, kc_tpl_t *ctx, const char *input, con
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 11;
+    test_case_total = 8;
     test_case_current = 0;
-    run_case(&rc, case_kc_tpl_options_default);
-    run_case(&rc, case_kc_tpl_options_load_env);
-    run_case(&rc, case_kc_tpl_options_free);
-    run_case(&rc, case_kc_tpl_stop);
     run_case(&rc, case_kc_tpl_version);
     run_case(&rc, case_kc_tpl_open);
     run_case(&rc, case_kc_tpl_close);
     run_case(&rc, case_kc_tpl_set_root);
     run_case(&rc, case_kc_tpl_set_var);
     run_case(&rc, case_kc_tpl_render_string);
-    run_case(&rc, case_kc_tpl_strerror);
+    run_case(&rc, case_kc_tpl_free);
+    run_case(&rc, case_kc_tpl_get_error);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -474,17 +383,14 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_tpl_options_default") == 0) return case_kc_tpl_options_default();
-    if (strcmp(argv[1], "kc_tpl_options_load_env") == 0) return case_kc_tpl_options_load_env();
-    if (strcmp(argv[1], "kc_tpl_options_free") == 0) return case_kc_tpl_options_free();
-    if (strcmp(argv[1], "kc_tpl_stop") == 0) return case_kc_tpl_stop();
     if (strcmp(argv[1], "kc_tpl_version") == 0) return case_kc_tpl_version();
     if (strcmp(argv[1], "kc_tpl_open") == 0) return case_kc_tpl_open();
     if (strcmp(argv[1], "kc_tpl_close") == 0) return case_kc_tpl_close();
     if (strcmp(argv[1], "kc_tpl_set_root") == 0) return case_kc_tpl_set_root();
     if (strcmp(argv[1], "kc_tpl_set_var") == 0) return case_kc_tpl_set_var();
     if (strcmp(argv[1], "kc_tpl_render_string") == 0) return case_kc_tpl_render_string();
-    if (strcmp(argv[1], "kc_tpl_strerror") == 0) return case_kc_tpl_strerror();
+    if (strcmp(argv[1], "kc_tpl_free") == 0) return case_kc_tpl_free();
+    if (strcmp(argv[1], "kc_tpl_get_error") == 0) return case_kc_tpl_get_error();
     fprintf(stderr, "unknown case: %s\n", argv[1]);
     return 2;
 }

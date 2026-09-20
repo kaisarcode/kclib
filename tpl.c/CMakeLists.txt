@@ -46,7 +46,7 @@ if(EMSCRIPTEN)
         --no-entry
         -sSTANDALONE_WASM=1
         -sSTACK_SIZE=4194304
-        -sEXPORTED_FUNCTIONS=_kc_tpl_options_default,_kc_tpl_options_load_env,_kc_tpl_options_free,_kc_tpl_stop,_kc_tpl_version,_kc_tpl_open,_kc_tpl_close,_kc_tpl_set_root,_kc_tpl_set_var,_kc_tpl_render_string,_kc_tpl_strerror
+        -sEXPORTED_FUNCTIONS=_kc_tpl_version,_kc_tpl_open,_kc_tpl_close,_kc_tpl_set_root,_kc_tpl_set_var,_kc_tpl_render_string,_kc_tpl_free,_kc_tpl_get_error
     )
 endif()
 

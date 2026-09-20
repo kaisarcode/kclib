@@ -120,7 +120,6 @@ static void kc_print_version(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    kc_tpl_options_t opts = kc_tpl_options_default();
     char *input = NULL;
     char *root = NULL;
     kc_tpl_t *ctx = NULL;
@@ -128,22 +127,17 @@ int main(int argc, char **argv) {
     int i;
     int rc = 0;
 
-    kc_tpl_options_load_env(&opts);
-
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             kc_print_help(argv[0]);
-            kc_tpl_options_free(&opts);
             return 0;
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             kc_print_version();
-            kc_tpl_options_free(&opts);
             return 0;
         } else if (strcmp(argv[i], "--root") == 0) {
             i++;
             if (i >= argc) {
                 fprintf(stderr, "tpl: missing value for --root\n");
-                kc_tpl_options_free(&opts);
                 return 1;
             }
             root = argv[i];
@@ -151,12 +145,10 @@ int main(int argc, char **argv) {
             i++;
             if (i >= argc) {
                 fprintf(stderr, "tpl: missing value for --var\n");
-                kc_tpl_options_free(&opts);
                 return 1;
             }
         } else {
             fprintf(stderr, "tpl: unknown option '%s'\n", argv[i]);
-            kc_tpl_options_free(&opts);
             return 1;
         }
     }
@@ -164,30 +156,29 @@ int main(int argc, char **argv) {
     if (kc_tpl_read_all(KC_TPL_STDIN_FD, &input) != KC_TPL_OK) {
         fprintf(stderr, "tpl: failed to read input\n");
         free(input);
-        kc_tpl_options_free(&opts);
         return 1;
     }
 
     if (!input || input[0] == '\0') {
         free(input);
-        kc_tpl_options_free(&opts);
         return 0;
     }
 
-    if (opts.root) {
-        root = opts.root;
-    }
-
-    if (root) {
-        opts.root = root;
-    }
-
-    rc = kc_tpl_open(&ctx, &opts);
+    rc = kc_tpl_open(&ctx);
     if (rc != KC_TPL_OK) {
         fprintf(stderr, "tpl: failed to open context\n");
         free(input);
-        kc_tpl_options_free(&opts);
         return 1;
+    }
+
+    if (root) {
+        rc = kc_tpl_set_root(ctx, root);
+        if (rc != KC_TPL_OK) {
+            fprintf(stderr, "tpl: failed to open context\n");
+            free(input);
+            kc_tpl_close(ctx);
+            return 1;
+        }
     }
 
     for (i = 1; i < argc; i++) {
@@ -208,16 +199,15 @@ int main(int argc, char **argv) {
     rc = kc_tpl_render_string(ctx, input, &output);
     free(input);
     kc_tpl_close(ctx);
-    kc_tpl_options_free(&opts);
 
     if (rc != KC_TPL_OK) {
-        if (output) free(output);
+        if (output) kc_tpl_free(output);
         return 1;
     }
 
     if (output) {
         rc = printf("%s", output);
-        free(output);
+        kc_tpl_free(output);
         if (rc < 0) {
             return 1;
         }
