@@ -479,8 +479,11 @@ unsigned char public_key[KC_TRUST_PK_SIZE]) {
     if (!secret_key || !public_key) return KC_TRUST_ERROR;
     memset(secret_key, 0, KC_TRUST_SK_SIZE);
     memset(public_key, 0, KC_TRUST_PK_SIZE);
-    if (kc_trust_read_random(secret_key, KC_TRUST_SK_SIZE) != 0)
+    if (kc_trust_read_random(secret_key, KC_TRUST_SK_SIZE) != 0) {
+        memset(secret_key, 0, KC_TRUST_SK_SIZE);
+        memset(public_key, 0, KC_TRUST_PK_SIZE);
         return KC_TRUST_ERROR;
+    }
     crypto_x25519_public_key(public_key, secret_key);
     return KC_TRUST_OK;
 }

@@ -270,27 +270,39 @@ Builds a single target only. Cross-compilation verifies compilation only; runtim
 
 ### WebAssembly
 
-A JS-hosted WebAssembly build of the library can be produced with the
-Emscripten SDK:
+The `wasm32/wasm` target builds a reusable `libtrust` WebAssembly module
+using the Emscripten SDK. It does not include the CLI. `src/trust.c` is not
+part of the WASM module.
 
 ```bash
 make wasm32/wasm
 ```
 
-This builds the library to `bin/wasm32/wasm/trust.js` and
-`bin/wasm32/wasm/trust.wasm`. The CLI is not part of the WASM build. The
-library exports `_kc_trust_generate`, `_kc_trust_create`, `_kc_trust_close`,
+This produces `bin/wasm32/wasm/trust.js` and `bin/wasm32/wasm/trust.wasm`.
+The module exports `_kc_trust_generate`, `_kc_trust_create`, `_kc_trust_close`,
 `_kc_trust_public_key`, `_kc_trust_seal`, `_kc_trust_open`, `_kc_trust_free`,
 `_kc_trust_result_free`, `_kc_trust_trust`, `_kc_trust_forget`, and
 `_kc_trust_version` through the generated `trust.js` glue. The toolchain is
 selected via `WASM_EMCMAKE`, `WASM_EMCC`, and `WASM_NODE` (defaults `emcmake`,
 `emcc`, and `node`).
 
-To run the same portable `src/test.c` contract suite under Node.js:
+The reusable library has no identity or trust filesystem persistence dependency.
+Host/application code owns any desired identity persistence.
 
-```bash
-make test wasm
-```
+Secure entropy is mandatory. The Emscripten backend uses `getentropy()`.
+Secure entropy ultimately depends on the Emscripten host environment.
+`kc_trust_generate()` fails if secure entropy cannot be obtained.
+`kc_trust_seal()` also requires secure entropy for its fresh ephemeral key and
+fails if entropy is unavailable. There is no weak or deterministic fallback.
+
+This is a normal JS-hosted Emscripten module suitable for browser and Node-style
+Emscripten environments. It is not built with `STANDALONE_WASM`. Memory growth
+is enabled so the module can support the public large-message contract
+(64 MiB messages).
+
+`make wasm32/wasm` builds the individual WASM target.
+`make test wasm` executes the portable contract suite under Node.
+`wasm32/wasm` is also part of the complete `make all` target matrix.
 
 ---
 

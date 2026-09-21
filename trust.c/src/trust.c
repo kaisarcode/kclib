@@ -792,20 +792,22 @@ static int cmd_init(const char *key_path) {
         return 1;
     }
     {
-        FILE *f = fopen(identity_path, "wb");
-        size_t written;
-        int failed;
-        if (!f) {
+        HANDLE file = CreateFileA(identity_path, GENERIC_WRITE, 0, NULL,
+            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        DWORD written = 0;
+        int failed = 0;
+        if (file == INVALID_HANDLE_VALUE) {
             crypto_wipe(identity, sizeof(identity));
             fprintf(stderr, "trust: failed to generate identity\n");
             return 1;
         }
-        written = fwrite(identity, 1, sizeof(identity), f);
-        failed = written != sizeof(identity);
-        if (fclose(f) != 0) failed = 1;
+        failed = !WriteFile(file, identity, KC_TRUST_CLI_IDENTITY_SIZE, &written,
+            NULL) || written != KC_TRUST_CLI_IDENTITY_SIZE ||
+            !FlushFileBuffers(file);
+        if (!CloseHandle(file)) failed = 1;
         crypto_wipe(identity, sizeof(identity));
         if (failed) {
-            remove(identity_path);
+            DeleteFileA(identity_path);
             fprintf(stderr, "trust: failed to generate identity\n");
             return 1;
         }

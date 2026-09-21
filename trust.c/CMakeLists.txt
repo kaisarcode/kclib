@@ -41,6 +41,11 @@ set_source_files_properties(src/libtrust.c PROPERTIES
     COMPILE_DEFINITIONS KC_TRUST_BUILD_VERSION=${TRUST_BUILD_VERSION}
 )
 
+set(TRUST_WASM_MEMORY_FLAGS
+    -sALLOW_MEMORY_GROWTH=1
+    -sMAXIMUM_MEMORY=536870912
+)
+
 if(EMSCRIPTEN)
     add_executable(trust_wasm ${TRUST_SOURCES})
     target_include_directories(trust_wasm PRIVATE src lib/monocypher)
@@ -51,6 +56,7 @@ if(EMSCRIPTEN)
     target_link_options(trust_wasm PRIVATE
         --no-entry
         -sEXPORTED_FUNCTIONS=_kc_trust_generate,_kc_trust_create,_kc_trust_close,_kc_trust_public_key,_kc_trust_seal,_kc_trust_open,_kc_trust_free,_kc_trust_result_free,_kc_trust_trust,_kc_trust_forget,_kc_trust_version
+        ${TRUST_WASM_MEMORY_FLAGS}
     )
 endif()
 
@@ -84,9 +90,8 @@ if(TRUST_BUILD_TESTS)
         add_executable(trust_contract_test src/test.c ${TRUST_SOURCES})
         target_include_directories(trust_contract_test PRIVATE src lib/monocypher)
         target_link_options(trust_contract_test PRIVATE
-            -sALLOW_MEMORY_GROWTH=1
             -sINITIAL_MEMORY=134217728
-            -sMAXIMUM_MEMORY=536870912
+            ${TRUST_WASM_MEMORY_FLAGS}
         )
     elseif(TRUST_TEST_SHARED_LIBRARY)
         add_library(trust_test_shared SHARED IMPORTED)
