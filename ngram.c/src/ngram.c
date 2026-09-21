@@ -25,7 +25,6 @@
 #endif
 
 typedef struct {
-    kc_ngram_t *ngram;
     const char *command;
 } kc_ngram_cli_context_t;
 
@@ -582,31 +581,44 @@ static int kc_ngram_read_stdin(char **out_text) {
 }
 
 /**
- * Parses one integer CLI value.
+ * Parses one size_t CLI value.
  * @param text Input text.
- * @param out Output integer pointer.
+ * @param out Output size_t pointer.
  * @return 1 on success, or 0 on failure.
  */
-static int kc_ngram_parse_int(const char *text, int *out) {
+static int kc_ngram_parse_sizet(const char *text, size_t *out) {
+    const unsigned char *cursor;
+    unsigned long long value;
     char *end;
-    long value;
 
     if (text == NULL || out == NULL) {
         return 0;
     }
 
+    cursor = (const unsigned char *)text;
+    while (
+        *cursor == ' ' || *cursor == '\t' || *cursor == '\n' ||
+        *cursor == '\r' || *cursor == '\v' || *cursor == '\f'
+    ) {
+        cursor++;
+    }
+
+    if (*cursor == '-') {
+        return 0;
+    }
+
     errno = 0;
-    value = strtol(text, &end, 10);
+    value = strtoull(text, &end, 10);
 
     if (errno != 0 || end == text || *end != '\0') {
         return 0;
     }
 
-    if (value < -2147483647L - 1L || value > 2147483647L) {
+    if (value > (unsigned long long)SIZE_MAX) {
         return 0;
     }
 
-    *out = (int)value;
+    *out = (size_t)value;
     return 1;
 }
 
@@ -1011,8 +1023,7 @@ static int kc_ngram_run_command(
  * Visitor for CLI that prints chunk and optionally runs command.
  * @param chunk Current chunk.
  * @param context CLI context with command.
- * @return Visitor decision: 0 continue, 1 close span, -1 abort,
- *     KC_NGRAM_ESTOP stop.
+ * @return Visitor decision: 0 continue, 1 close span, -1 abort.
  */
 static int kc_ngram_cli_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     kc_ngram_cli_context_t *cli = (kc_ngram_cli_context_t *)context;
@@ -1033,21 +1044,16 @@ static int kc_ngram_cli_visitor(const kc_ngram_chunk_t *chunk, void *context) {
         return -1;
     }
 
-    if (cli->command != NULL && *cli->command != '\0') {
-        if (kc_ngram_stop_requested(cli->ngram)) {
-            return KC_NGRAM_ESTOP;
-        }
+    if (cli->command == NULL || *cli->command == '\0') {
+        return 0;
+    }
 
-        cmd_result = kc_ngram_run_command(cli->command, chunk);
-        if (cmd_result < 0) {
-            return -1;
-        }
-        if (cmd_result == KC_NGRAM_ESTOP) {
-            return KC_NGRAM_ESTOP;
-        }
-        if (cmd_result == 1) {
-            return 1;
-        }
+    cmd_result = kc_ngram_run_command(cli->command, chunk);
+    if (cmd_result < 0) {
+        return -1;
+    }
+    if (cmd_result == 1) {
+        return 1;
     }
 
     return 0;
@@ -1069,28 +1075,18 @@ static int kc_ngram_cli_version(void) {
  * @return Exit status.
  */
 int main(int argc, char **argv) {
-    kc_ngram_options_t options;
+    kc_ngram_options_t options = kc_ngram_options_default();
     kc_ngram_cli_context_t context;
-    kc_ngram_t *ngram_ctx;
     const char *text;
     char *stdin_text;
+    size_t emitted;
     int result;
     int i;
 
-    if (kc_ngram_options_default(&options) != 0) {
-        return 1;
-    }
-
-    kc_ngram_options_load_env(&options);
-
-    ngram_ctx = NULL;
-    if (kc_ngram_open(&ngram_ctx) != KC_NGRAM_OK) {
-        return 1;
-    }
-    context.ngram = ngram_ctx;
     context.command = NULL;
     text = NULL;
     stdin_text = NULL;
+    emitted = 0U;
     result = 0;
 
     for (i = 1; i < argc; i++) {
@@ -1120,7 +1116,7 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
 
-            if (!kc_ngram_parse_int(argv[i + 1], &options.max_tokens)) {
+            if (!kc_ngram_parse_sizet(argv[i + 1], &options.max_tokens)) {
                 result = kc_ngram_fail_usage("Invalid value for --max.");
                 goto cleanup;
             }
@@ -1138,7 +1134,10 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
 
-            if (!kc_ngram_parse_int(argv[i + 1], &options.min_tokens)) {
+            if (
+                !kc_ngram_parse_sizet(argv[i + 1], &options.min_tokens) ||
+                options.min_tokens == 0U
+            ) {
                 result = kc_ngram_fail_usage("Invalid value for --min.");
                 goto cleanup;
             }
@@ -1188,11 +1187,6 @@ int main(int argc, char **argv) {
         text = argv[i];
     }
 
-    if (kc_ngram_configure(ngram_ctx, &options) != KC_NGRAM_OK) {
-        result = 1;
-        goto cleanup;
-    }
-
     if (text == NULL) {
         if (kc_ngram_read_stdin(&stdin_text) != 0) {
             result = 1;
@@ -1206,11 +1200,13 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    if (kc_ngram_stop_requested(ngram_ctx)) {
-        goto cleanup;
-    }
-
-    result = kc_ngram_execute(text, &options, kc_ngram_cli_visitor, &context);
+    result = kc_ngram_execute(
+        text,
+        &options,
+        kc_ngram_cli_visitor,
+        &context,
+        &emitted
+    );
     if (result < 0) {
         result = 1;
     } else {
@@ -1219,7 +1215,5 @@ int main(int argc, char **argv) {
 
 cleanup:
     free(stdin_text);
-    kc_ngram_options_free(&options);
-    kc_ngram_close(ngram_ctx);
     return result;
 }

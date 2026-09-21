@@ -7,8 +7,6 @@
  * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
-#define _POSIX_C_SOURCE 200809L
-
 #include "libngram.h"
 
 #if !defined(KC_NGRAM_BUILD_VERSION) || KC_NGRAM_BUILD_VERSION + 0 == 0
@@ -17,41 +15,8 @@
 #endif
 
 #include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
-
-#ifdef _WIN32
-#  ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#  endif
-#  include <windows.h>
-#endif
-#include <signal.h>
-
-typedef enum {
-    KC_ENV_TYPE_INT
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_NGRAM_MAX", offsetof(kc_ngram_options_t, max_tokens), KC_ENV_TYPE_INT },
-    { "KC_NGRAM_MIN", offsetof(kc_ngram_options_t, min_tokens), KC_ENV_TYPE_INT },
-};
-static const int env_config_table_n =
-    sizeof(env_config_table) / sizeof(env_config_table[0]);
-
-struct kc_ngram {
-    kc_ngram_options_t owned_options;
-    kc_ngram_options_t *options;
-    volatile sig_atomic_t stop_requested;
-};
 
 typedef struct {
     size_t byte_start;
@@ -60,13 +25,13 @@ typedef struct {
 
 typedef struct {
     kc_ngram_token_t *items;
-    int count;
-    int cap;
+    size_t count;
+    size_t cap;
 } kc_ngram_token_list_t;
 
 typedef struct {
-    int start;
-    int end;
+    size_t start;
+    size_t end;
 } kc_ngram_span_t;
 
 /**
@@ -106,7 +71,7 @@ static void kc_ngram_free_tokens(kc_ngram_token_list_t *tokens) {
  */
 static int kc_ngram_reserve_token_slot(kc_ngram_token_list_t *tokens) {
     kc_ngram_token_t *next_items;
-    int next_cap;
+    size_t next_cap;
 
     if (tokens == NULL) {
         return -1;
@@ -116,11 +81,22 @@ static int kc_ngram_reserve_token_slot(kc_ngram_token_list_t *tokens) {
         return 0;
     }
 
-    next_cap = tokens->cap > 0 ? tokens->cap * 2 : 16;
+    if (tokens->cap > 0) {
+        if (tokens->cap > SIZE_MAX / 2) {
+            return -1;
+        }
+        next_cap = tokens->cap * 2;
+    } else {
+        next_cap = 16;
+    }
+
+    if (next_cap > SIZE_MAX / sizeof(kc_ngram_token_t)) {
+        return -1;
+    }
 
     next_items = (kc_ngram_token_t *)realloc(
         tokens->items,
-        (size_t)next_cap * sizeof(kc_ngram_token_t)
+        next_cap * sizeof(kc_ngram_token_t)
     );
     if (next_items == NULL) {
         return -1;
@@ -144,6 +120,10 @@ static int kc_ngram_push_token(
     size_t byte_end
 ) {
     if (tokens == NULL || byte_end <= byte_start) {
+        return -1;
+    }
+
+    if (tokens->count == SIZE_MAX) {
         return -1;
     }
 
@@ -224,19 +204,19 @@ static int kc_ngram_split_tokens(
  * @param start Inclusive candidate start index.
  * @return Insertion index.
  */
-static int kc_ngram_find_span_insert_index(
+static size_t kc_ngram_find_span_insert_index(
     const kc_ngram_span_t *spans,
-    int count,
-    int start
+    size_t count,
+    size_t start
 ) {
-    int left;
-    int right;
+    size_t left;
+    size_t right;
 
     left = 0;
     right = count;
 
     while (left < right) {
-        int mid;
+        size_t mid;
 
         mid = left + (right - left) / 2;
         if (spans[mid].start < start) {
@@ -258,14 +238,14 @@ static int kc_ngram_find_span_insert_index(
  * @return 1 when the span is closed, or 0 otherwise.
  */
 static int kc_ngram_span_is_closed(
-    int start,
-    int end,
+    size_t start,
+    size_t end,
     const kc_ngram_span_t *closed_spans,
-    int closed_count
+    size_t closed_count
 ) {
-    int left;
-    int right;
-    int index;
+    size_t left;
+    size_t right;
+    size_t index;
 
     if (closed_spans == NULL || closed_count < 1) {
         return 0;
@@ -275,7 +255,7 @@ static int kc_ngram_span_is_closed(
     right = closed_count;
 
     while (left < right) {
-        int mid;
+        size_t mid;
 
         mid = left + (right - left) / 2;
         if (closed_spans[mid].start <= start) {
@@ -285,11 +265,11 @@ static int kc_ngram_span_is_closed(
         }
     }
 
-    index = left - 1;
-    if (index < 0) {
+    if (left == 0) {
         return 0;
     }
 
+    index = left - 1;
     return start >= closed_spans[index].start && end <= closed_spans[index].end;
 }
 
@@ -302,11 +282,11 @@ static int kc_ngram_span_is_closed(
  */
 static int kc_ngram_reserve_span_slot(
     kc_ngram_span_t **spans,
-    int count,
-    int *cap
+    size_t count,
+    size_t *cap
 ) {
     kc_ngram_span_t *next_spans;
-    int next_cap;
+    size_t next_cap;
 
     if (spans == NULL || cap == NULL) {
         return -1;
@@ -316,11 +296,22 @@ static int kc_ngram_reserve_span_slot(
         return 0;
     }
 
-    next_cap = *cap > 0 ? (*cap * 2) : 16;
+    if (*cap > 0) {
+        if (*cap > SIZE_MAX / 2) {
+            return -1;
+        }
+        next_cap = *cap * 2;
+    } else {
+        next_cap = 16;
+    }
+
+    if (next_cap > SIZE_MAX / sizeof(kc_ngram_span_t)) {
+        return -1;
+    }
 
     next_spans = (kc_ngram_span_t *)realloc(
         *spans,
-        (size_t)next_cap * sizeof(kc_ngram_span_t)
+        next_cap * sizeof(kc_ngram_span_t)
     );
     if (next_spans == NULL) {
         return -1;
@@ -342,14 +333,14 @@ static int kc_ngram_reserve_span_slot(
  */
 static int kc_ngram_add_closed_span(
     kc_ngram_span_t **spans,
-    int *count,
-    int *cap,
-    int start,
-    int end
+    size_t *count,
+    size_t *cap,
+    size_t start,
+    size_t end
 ) {
-    int insert_at;
-    int remove_end;
-    int tail_count;
+    size_t insert_at;
+    size_t remove_end;
+    size_t tail_count;
 
     if (spans == NULL || count == NULL || cap == NULL) {
         return -1;
@@ -404,7 +395,7 @@ static int kc_ngram_add_closed_span(
         memmove(
             *spans + insert_at + 1,
             *spans + insert_at,
-            (size_t)tail_count * sizeof(kc_ngram_span_t)
+            tail_count * sizeof(kc_ngram_span_t)
         );
     }
 
@@ -415,177 +406,74 @@ static int kc_ngram_add_closed_span(
 }
 
 /**
- * Loads environment variables into an options structure.
- * Reads KC_NGRAM_MAX and KC_NGRAM_MIN from the environment.
- * @param opts Destination options structure.
- * @return No return value.
+ * Returns the default traversal options by value.
+ * The separators pointer borrows a string literal.
+ * @return Default options structure.
  */
-void kc_ngram_options_load_env(kc_ngram_options_t *opts) {
-    int i;
-    if (!opts) return;
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        char *end;
-        if (!val) continue;
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-        }
-    }
-}
+kc_ngram_options_t kc_ngram_options_default(void) {
+    kc_ngram_options_t options;
 
-/**
- * Frees resources held by an options structure.
- * Currently a no-op placeholder for API symmetry.
- * @param opts Options structure to release.
- * @return No return value.
- */
-void kc_ngram_options_free(kc_ngram_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Initialize a new ngram context.
- * @param out Pointer to receive the context pointer.
- * @return KC_NGRAM_OK on success, or KC_NGRAM_ERROR on failure.
- */
-int kc_ngram_open(kc_ngram_t **out) {
-    kc_ngram_t *ctx;
-    if (!out) return KC_NGRAM_ERROR;
-    ctx = (kc_ngram_t *)calloc(1, sizeof(kc_ngram_t));
-    if (!ctx) return KC_NGRAM_ERROR;
-    if (kc_ngram_options_default(&ctx->owned_options) != 0) {
-        free(ctx);
-        return KC_NGRAM_ERROR;
-    }
-    ctx->options = &ctx->owned_options;
-    *out = ctx;
-    return KC_NGRAM_OK;
-}
-
-/**
- * Release an ngram context.
- * @param ctx Context pointer.
- * @return None.
- */
-void kc_ngram_close(kc_ngram_t *ctx) {
-    if (!ctx) return;
-    kc_ngram_options_free(&ctx->owned_options);
-    free(ctx);
-}
-
-/**
- * Request stop for a specific ngram context.
- * @param ctx Context pointer.
- * @return KC_NGRAM_OK on success, or KC_NGRAM_ERROR on failure.
- */
-int kc_ngram_stop(kc_ngram_t *ctx) {
-    if (!ctx) return KC_NGRAM_ERROR;
-    ctx->stop_requested = 1;
-    return KC_NGRAM_OK;
-}
-
-/**
- * Checks whether a stop request has been raised on the context.
- * @param ctx Context pointer.
- * @return 1 when stop was requested, or 0 otherwise.
- */
-int kc_ngram_stop_requested(kc_ngram_t *ctx) {
-    if (ctx == NULL) {
-        return 0;
-    }
-
-    return ctx->stop_requested ? 1 : 0;
-}
-
-/**
- * Attach one mutable options struct to the context runtime.
- * @param ctx Context pointer.
- * @param options Runtime options, or NULL to restore internal defaults.
- * @return KC_NGRAM_OK on success, or KC_NGRAM_ERROR on failure.
- */
-int kc_ngram_configure(kc_ngram_t *ctx, kc_ngram_options_t *options) {
-    if (ctx == NULL) {
-        return KC_NGRAM_ERROR;
-    }
-
-    if (options == NULL) {
-        ctx->options = &ctx->owned_options;
-        return KC_NGRAM_OK;
-    }
-
-    ctx->options = options;
-    return KC_NGRAM_OK;
-}
-
-/**
- * Fills one options structure with default traversal values.
- * @param options Destination options structure.
- * @return 0 on success, or -1 on invalid input.
- */
-int kc_ngram_options_default(kc_ngram_options_t *options) {
-    if (options == NULL) {
-        return -1;
-    }
-
-    options->max_tokens = 10;
-    options->min_tokens = 1;
-    options->separators = " \t\r\n";
-    return 0;
+    options.max_tokens = 10;
+    options.min_tokens = 1;
+    options.separators = " \t\r\n";
+    return options;
 }
 
 /**
  * Executes descending sliding-window traversal for the input text.
+ * This function is reentrant and uses only per-call traversal state.
  * @param input Input text to tokenize and traverse.
  * @param options Traversal options, or NULL to use defaults.
- * @param visit Callback invoked for each emitted chunk.
- * @param context Caller-provided opaque context.
- * @return Number of emitted chunks, or -1 on failure.
+ * @param visit Callback invoked for each chunk.
+ * @param userdata Caller-provided opaque user data.
+ * @param out_count Receives the number of emitted chunks.
+ * @return KC_NGRAM_OK on success, KC_NGRAM_EABORT on visitor abort,
+ *         or KC_NGRAM_ERROR on failure.
  */
 int kc_ngram_execute(
     const char *input,
     const kc_ngram_options_t *options,
     kc_ngram_visit_fn visit,
-    void *context
+    void *userdata,
+    size_t *out_count
 ) {
-    kc_ngram_options_t local_options;
+    kc_ngram_options_t default_options;
     kc_ngram_token_list_t tokens;
     kc_ngram_span_t *closed_spans;
-    int closed_count;
-    int closed_cap;
-    int loop_max;
-    int window_size;
-    int start;
-    int emitted;
+    size_t closed_count;
+    size_t closed_cap;
+    size_t loop_max;
+    size_t window_size;
+    size_t start;
+    size_t emitted;
 
-    if (input == NULL || visit == NULL) {
-        return -1;
+    if (out_count != NULL) {
+        *out_count = 0;
+    }
+
+    if (input == NULL || visit == NULL || out_count == NULL) {
+        return KC_NGRAM_ERROR;
     }
 
     if (options == NULL) {
-        if (kc_ngram_options_default(&local_options) != 0) {
-            return -1;
-        }
-
-        options = &local_options;
+        default_options = kc_ngram_options_default();
+        options = &default_options;
     }
 
-    if (options->min_tokens < 1 || (options->max_tokens > 0 && options->max_tokens < options->min_tokens)) {
-        return -1;
+    if (
+        options->min_tokens < 1 ||
+        (options->max_tokens != 0 && options->max_tokens < options->min_tokens)
+    ) {
+        return KC_NGRAM_ERROR;
     }
 
     if (kc_ngram_split_tokens(input, options->separators, &tokens) != 0) {
-        return -1;
+        return KC_NGRAM_ERROR;
     }
 
     if (tokens.count == 0) {
         kc_ngram_free_tokens(&tokens);
-        return 0;
+        return KC_NGRAM_OK;
     }
 
     closed_spans = NULL;
@@ -599,10 +487,11 @@ int kc_ngram_execute(
 
     emitted = 0;
 
-    for (window_size = loop_max; window_size >= options->min_tokens; window_size--) {
+    window_size = loop_max;
+    while (window_size >= options->min_tokens) {
         for (start = 0; start <= tokens.count - window_size; start++) {
             kc_ngram_chunk_t chunk;
-            int end;
+            size_t end;
             int decision;
 
             end = start + window_size - 1;
@@ -617,16 +506,12 @@ int kc_ngram_execute(
             chunk.end = end;
             chunk.size = window_size;
 
-            decision = visit(&chunk, context);
-            if (decision == KC_NGRAM_ESTOP) {
-                free(closed_spans);
-                kc_ngram_free_tokens(&tokens);
-                return KC_NGRAM_ESTOP;
-            }
+            decision = visit(&chunk, userdata);
             if (decision < 0) {
+                *out_count = emitted;
                 free(closed_spans);
                 kc_ngram_free_tokens(&tokens);
-                return -1;
+                return KC_NGRAM_EABORT;
             }
 
             emitted++;
@@ -643,15 +528,21 @@ int kc_ngram_execute(
                 ) {
                     free(closed_spans);
                     kc_ngram_free_tokens(&tokens);
-                    return -1;
+                    return KC_NGRAM_ERROR;
                 }
             }
         }
+
+        if (window_size == options->min_tokens) {
+            break;
+        }
+        window_size--;
     }
 
     free(closed_spans);
     kc_ngram_free_tokens(&tokens);
-    return emitted;
+    *out_count = emitted;
+    return KC_NGRAM_OK;
 }
 
 /**

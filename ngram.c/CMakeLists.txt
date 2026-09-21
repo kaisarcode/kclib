@@ -28,7 +28,6 @@ else()
 endif()
 
 set(NGRAM_SOURCES src/libngram.c)
-set(NGRAM_HEADERS src/ngram.h)
 
 set_source_files_properties(src/libngram.c PROPERTIES
     COMPILE_DEFINITIONS KC_NGRAM_BUILD_VERSION=${KC_NGRAM_BUILD_VERSION}
@@ -44,7 +43,7 @@ if(EMSCRIPTEN)
     target_link_options(ngram_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_ngram_open,_kc_ngram_close,_kc_ngram_stop,_kc_ngram_stop_requested,_kc_ngram_options_default,_kc_ngram_configure,_kc_ngram_execute,_kc_ngram_options_load_env,_kc_ngram_options_free,_kc_ngram_version
+        -sEXPORTED_FUNCTIONS=_kc_ngram_options_default,_kc_ngram_execute,_kc_ngram_version
     )
 endif()
 

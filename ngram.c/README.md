@@ -10,7 +10,7 @@ Traverse text and emit n-gram chunks based on token window constraints.
 
 ### Examples
 
-Basic n-gram extraction (default 1-5 tokens):
+Basic n-gram extraction (default 1-10 tokens):
 
 ```bash
 ./bin/x86_64/linux/ngram "The quick brown fox"
@@ -64,20 +64,54 @@ brown fox
 
 ## Public API
 
+The library is stateless and reusable. Input and separator strings are caller-owned and borrowed; chunks reference byte offsets in the original input during the synchronous traversal only.
+
 ```c
 #include "libngram.h"
 
-int my_visitor(const kc_ngram_chunk_t *chunk, void *context) {
+int my_visitor(const kc_ngram_chunk_t *chunk, void *userdata) {
     printf("%.*s\n", (int)(chunk->byte_end - chunk->byte_start), chunk->input + chunk->byte_start);
-    return 0; // 1 to close span, -1 to abort
+    return 0; // 0 continue, 1 close this span, negative abort
 }
 
-kc_ngram_options_t options;
-kc_ngram_options_default(&options);
+kc_ngram_options_t options = kc_ngram_options_default();
 options.max_tokens = 3;
 
-kc_ngram_execute("The quick brown fox", &options, my_visitor, NULL);
+size_t out_count;
+int rc = kc_ngram_execute("The quick brown fox", &options, my_visitor, NULL, &out_count);
+if (rc == KC_NGRAM_ERROR) {
+    // handle error
+}
 ```
+
+### `kc_ngram_options_default()`
+
+Returns a `kc_ngram_options_t` by value with the built-in defaults: `max_tokens = 10`, `min_tokens = 1`, and `separators = " \t\r\n"` (borrowed, byte-oriented). Configure fields before calling `kc_ngram_execute`.
+
+### `kc_ngram_execute(input, options, visit, userdata, out_count)`
+
+```c
+int kc_ngram_execute(const char *input, const kc_ngram_options_t *options,
+    kc_ngram_visit_fn visit, void *userdata, size_t *out_count);
+```
+
+Descending sliding-window traversal over byte-delimited tokens. Emitted chunks borrow `input` and reference its byte offsets: `byte_start`/`byte_end` delimit the chunk in the input, `start`/`end` are the 0-based inclusive token indexes, and `size` is the number of tokens. Separators are byte-oriented.
+
+- Returns `KC_NGRAM_OK`, or `KC_NGRAM_ERROR`, or `KC_NGRAM_EABORT` when a visitor aborts traversal (the aborting chunk is not counted).
+- Stores the number of emitted chunks in `*out_count`.
+- Empty input returns `KC_NGRAM_OK` with `*out_count == 0`; the visitor is not called.
+- `max_tokens == 0` uses all available tokens.
+- `min_tokens == 0` is not a valid configuration; use `kc_ngram_options_default()`.
+
+### Visitor return values
+
+- `0` - keep traversal open.
+- `1` - close this span; contained (shorter) windows are skipped. The closing chunk counts as emitted.
+- negative - abort traversal with `KC_NGRAM_EABORT`; the aborting chunk is not counted.
+
+Status codes are `KC_NGRAM_OK` (0), `KC_NGRAM_ERROR` (-1), and `KC_NGRAM_EABORT` (-2).
+
+`kc_ngram_version()` returns the library version as an unsigned 64-bit integer.
 
 ---
 
@@ -86,7 +120,7 @@ kc_ngram_execute("The quick brown fox", &options, my_visitor, NULL);
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests
@@ -120,7 +154,7 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/ngram.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_ngram_*` API with its existing signatures, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `ngram` CLI: `src/ngram.c` is not compiled into the module.
+- The module exports the stateless reusable API (`kc_ngram_options_default`, `kc_ngram_execute`, `kc_ngram_version`) with status codes `KC_NGRAM_OK`, `KC_NGRAM_ERROR`, and `KC_NGRAM_EABORT`. Input and separator strings are caller-owned. It contains the reusable library capability, not the `ngram` CLI: `src/ngram.c` is not compiled into the module.
 
 `make test wasm` compiles `src/test.c` with Emscripten and runs the same public-contract tests under Node.js. It requires `bin/wasm32/wasm/ngram.wasm` and reports how to build it when it is absent.
 
