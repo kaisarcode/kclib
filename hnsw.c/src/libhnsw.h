@@ -115,8 +115,8 @@ int kc_hnsw_build(kc_hnsw_t *ctx);
  * @return Status code.
  */
 int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
-                   double threshold, kc_hnsw_result_t **out_results,
-                   size_t *out_count);
+    double threshold, kc_hnsw_result_t **out_results,
+    size_t *out_count);
 
 /**
  * Releases memory returned by this library.

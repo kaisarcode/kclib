@@ -105,7 +105,9 @@ static int score_better(int metric, double a, double b);
 static int score_worse(int metric, double a, double b);
 static int kc_hnsw_heap_has_priority(int metric, double s1, double s2, int worst_first);
 
-static int kc_hnsw_search_level(const kc_hnsw_t *hnsw, const float *query, double query_norm, size_t entry_idx, int level, int ef, kc_hnsw_heap_t *results);
+static int kc_hnsw_search_level(const kc_hnsw_t *graph_hnsw, const kc_hnsw_t *stop_hnsw,
+    const float *query, double query_norm, size_t entry_idx, int level, int ef,
+    kc_hnsw_heap_t *results);
 static int kc_hnsw_add_edge(kc_hnsw_t *hnsw, size_t src_idx, size_t dst_idx, int level);
 static void kc_hnsw_neighbor_list_init(kc_hnsw_neighbor_list_t *list);
 static void kc_hnsw_neighbor_list_free(kc_hnsw_neighbor_list_t *list);
@@ -476,8 +478,8 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
                 rc = KC_HNSW_ENOMEM;
                 goto fail;
             }
-            if (kc_hnsw_search_level(&tmp_hnsw, tmp_items[i].values, tmp_items[i].norm, curr_idx, l,
-                    tmp_hnsw.ef_construction, candidates) != KC_HNSW_OK) {
+            if (kc_hnsw_search_level(&tmp_hnsw, hnsw, tmp_items[i].values, tmp_items[i].norm,
+                    curr_idx, l, tmp_hnsw.ef_construction, candidates) != KC_HNSW_OK) {
                 kc_hnsw_heap_destroy(candidates);
                 rc = kc_hnsw_is_stopped(hnsw) ? KC_HNSW_ESTOP : KC_HNSW_ENOMEM;
                 goto fail;
@@ -575,8 +577,8 @@ fail:
  * @return Status code.
  */
 int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
-                   double threshold, kc_hnsw_result_t **out_results,
-                   size_t *out_count) {
+    double threshold, kc_hnsw_result_t **out_results,
+    size_t *out_count) {
     const kc_hnsw_t *hnsw = ctx;
     kc_hnsw_t *mhnsw = (kc_hnsw_t *)(uintptr_t)ctx;
     kc_hnsw_result_t *out;
@@ -659,7 +661,7 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
             kc_hnsw_runlock(mhnsw);
             return KC_HNSW_ENOMEM;
         }
-        if (kc_hnsw_search_level(hnsw, query, q_norm, curr_idx, 0, ef, top_k) != KC_HNSW_OK) {
+        if (kc_hnsw_search_level(hnsw, hnsw, query, q_norm, curr_idx, 0, ef, top_k) != KC_HNSW_OK) {
             kc_hnsw_heap_destroy(top_k);
             kc_hnsw_runlock(mhnsw);
             return kc_hnsw_is_stopped(mhnsw) ? KC_HNSW_ESTOP : KC_HNSW_ENOMEM;
@@ -745,7 +747,8 @@ void kc_hnsw_free(void *ptr) {
 
 /**
  * Performs a search at a specific HNSW level.
- * @param hnsw Index pointer.
+ * @param graph_hnsw Index pointer used for graph access.
+ * @param stop_hnsw Index pointer used for cancellation checks.
  * @param query Query vector.
  * @param query_norm Precomputed query norm.
  * @param entry_idx Starting node index.
@@ -754,17 +757,20 @@ void kc_hnsw_free(void *ptr) {
  * @param results Output heap to store found nodes.
  * @return Status code.
  */
-static int kc_hnsw_search_level(const kc_hnsw_t *hnsw, const float *query, double query_norm, size_t entry_idx, int level, int ef, kc_hnsw_heap_t *results) {
-    kc_hnsw_heap_t *candidates = kc_hnsw_heap_create(ef * 2, hnsw->metric, 0);
+static int kc_hnsw_search_level(const kc_hnsw_t *graph_hnsw, const kc_hnsw_t *stop_hnsw,
+    const float *query, double query_norm, size_t entry_idx, int level, int ef,
+    kc_hnsw_heap_t *results) {
+    kc_hnsw_heap_t *candidates = kc_hnsw_heap_create(ef * 2, graph_hnsw->metric, 0);
     if (!candidates) return KC_HNSW_ENOMEM;
     
-    char *visited = (char *)calloc(hnsw->count, 1);
+    char *visited = (char *)calloc(graph_hnsw->count, 1);
     if (!visited) {
         kc_hnsw_heap_destroy(candidates);
         return KC_HNSW_ENOMEM;
     }
 
-    double d = kc_hnsw_dist(hnsw, query, query_norm, hnsw->items[entry_idx].values, hnsw->items[entry_idx].norm);
+    double d = kc_hnsw_dist(graph_hnsw, query, query_norm,
+            graph_hnsw->items[entry_idx].values, graph_hnsw->items[entry_idx].norm);
     if (kc_hnsw_heap_push(candidates, entry_idx, d) != KC_HNSW_OK ||
         kc_hnsw_heap_push(results, entry_idx, d) != KC_HNSW_OK) {
         free(visited);
@@ -774,7 +780,7 @@ static int kc_hnsw_search_level(const kc_hnsw_t *hnsw, const float *query, doubl
     visited[entry_idx] = 1;
 
     while (candidates->size > 0) {
-        if (kc_hnsw_is_stopped(hnsw)) {
+        if (kc_hnsw_is_stopped(stop_hnsw)) {
             free(visited);
             kc_hnsw_heap_destroy(candidates);
             return KC_HNSW_ESTOP;
@@ -783,13 +789,13 @@ static int kc_hnsw_search_level(const kc_hnsw_t *hnsw, const float *query, doubl
         
         kc_hnsw_node_score_t worst_res = results->data[0];
         if (results->size >= (size_t)ef &&
-            score_worse(hnsw->metric, c.score, worst_res.score)) {
+            score_worse(graph_hnsw->metric, c.score, worst_res.score)) {
             break;
         }
 
-        kc_hnsw_neighbor_list_t *neighbors = &hnsw->items[c.idx].neighbors[level];
+        kc_hnsw_neighbor_list_t *neighbors = &graph_hnsw->items[c.idx].neighbors[level];
         for (size_t n = 0; n < neighbors->count; n++) {
-            if (kc_hnsw_is_stopped(hnsw)) {
+            if (kc_hnsw_is_stopped(stop_hnsw)) {
                 free(visited);
                 kc_hnsw_heap_destroy(candidates);
                 return KC_HNSW_ESTOP;
@@ -797,10 +803,11 @@ static int kc_hnsw_search_level(const kc_hnsw_t *hnsw, const float *query, doubl
             size_t v_idx = neighbors->edges[n].target_idx;
             if (!visited[v_idx]) {
                 visited[v_idx] = 1;
-                double v_dist = kc_hnsw_dist(hnsw, query, query_norm, hnsw->items[v_idx].values, hnsw->items[v_idx].norm);
+                double v_dist = kc_hnsw_dist(graph_hnsw, query, query_norm,
+                        graph_hnsw->items[v_idx].values, graph_hnsw->items[v_idx].norm);
                 
                 worst_res = results->data[0];
-                if (results->size < (size_t)ef || score_better(hnsw->metric, v_dist, worst_res.score)) {
+                if (results->size < (size_t)ef || score_better(graph_hnsw->metric, v_dist, worst_res.score)) {
                     if (kc_hnsw_heap_push(candidates, v_idx, v_dist) != KC_HNSW_OK ||
                         kc_hnsw_heap_push(results, v_idx, v_dist) != KC_HNSW_OK) {
                         free(visited);

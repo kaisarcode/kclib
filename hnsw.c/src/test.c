@@ -3,12 +3,36 @@
  * Summary: Exercises the normalized HNSW lifecycle and search contract.
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "libhnsw.h"
 
 #include <stdio.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
+
 typedef int (*case_fn)(void);
+
+#ifdef _WIN32
+typedef HANDLE test_thread_t;
+#else
+typedef pthread_t test_thread_t;
+#endif
+
+typedef struct {
+    const kc_hnsw_t *ctx;
+    const float *query;
+    kc_hnsw_result_t *results;
+    size_t count;
+    int rc;
+} test_search_worker_t;
 
 static int test_case_total = 0;
 static int test_case_current = 0;
@@ -20,6 +44,41 @@ static void case_result(int fail, const char *name, const char *detail) {
 
 static int expect(int condition) {
     return condition ? 0 : 1;
+}
+
+#ifdef _WIN32
+static DWORD WINAPI test_search_worker_main(void *arg) {
+#else
+static void *test_search_worker_main(void *arg) {
+#endif
+    test_search_worker_t *worker = (test_search_worker_t *)arg;
+
+    worker->rc = kc_hnsw_search(worker->ctx, worker->query, 1, -1.0,
+        &worker->results, &worker->count);
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+static int test_thread_start(test_thread_t *thread, test_search_worker_t *worker) {
+#ifdef _WIN32
+    *thread = CreateThread(NULL, 0, test_search_worker_main, worker, 0, NULL);
+    return *thread != NULL ? 0 : 1;
+#else
+    return pthread_create(thread, NULL, test_search_worker_main, worker) == 0 ? 0 : 1;
+#endif
+}
+
+static int test_thread_join(test_thread_t thread) {
+#ifdef _WIN32
+    if (WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) return 1;
+    CloseHandle(thread);
+    return 0;
+#else
+    return pthread_join(thread, NULL) == 0 ? 0 : 1;
+#endif
 }
 
 static int run_case(case_fn fn) {
@@ -81,15 +140,21 @@ static int case_kc_hnsw_build(void) {
     const char *detail = "enforces mutation and build state";
     const float first[] = {1.0f, 0.0f};
     const float second[] = {0.0f, 1.0f};
-    kc_hnsw_result_t *results = NULL;
+    const float third[] = {1.0f, 1.0f};
+    kc_hnsw_result_t *results = (kc_hnsw_result_t *)1;
     kc_hnsw_t *ctx = open_index(2, KC_HNSW_METRIC_COSINE);
-    size_t count = 0;
+    test_search_worker_t workers[2];
+    test_thread_t threads[2];
+    size_t count = 99;
+    int first_started;
+    int second_started;
     int fail = 0;
 
     if (ctx == NULL) {
         case_result(1, name, detail);
         return 1;
     }
+    fail |= expect(kc_hnsw_build(ctx) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_reserve(ctx, 4) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_add(ctx, "first", first) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_add(ctx, "second", second) == KC_HNSW_OK);
@@ -99,6 +164,30 @@ static int case_kc_hnsw_build(void) {
     fail |= expect(kc_hnsw_search(ctx, first, 1, -1.0, &results, &count) == KC_HNSW_ESTATE);
     fail |= expect(results == NULL && count == 0);
     fail |= expect(kc_hnsw_build(ctx) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(ctx, "third", third) == KC_HNSW_OK);
+    results = (kc_hnsw_result_t *)1;
+    count = 99;
+    fail |= expect(kc_hnsw_search(ctx, first, 1, -1.0, &results, &count) == KC_HNSW_ESTATE);
+    fail |= expect(results == NULL && count == 0);
+    fail |= expect(kc_hnsw_build(ctx) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_search(ctx, first, 1, -1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(results != NULL && count == 1 && strcmp(results[0].id, "first") == 0);
+    kc_hnsw_free(results);
+    memset(workers, 0, sizeof(workers));
+    workers[0].ctx = ctx;
+    workers[0].query = first;
+    workers[1].ctx = ctx;
+    workers[1].query = first;
+    first_started = test_thread_start(&threads[0], &workers[0]) == 0;
+    second_started = test_thread_start(&threads[1], &workers[1]) == 0;
+    fail |= expect(first_started);
+    fail |= expect(second_started);
+    if (first_started) fail |= expect(test_thread_join(threads[0]) == 0);
+    if (second_started) fail |= expect(test_thread_join(threads[1]) == 0);
+    fail |= expect(workers[0].rc == KC_HNSW_OK && workers[0].results != NULL && workers[0].count == 1);
+    fail |= expect(workers[1].rc == KC_HNSW_OK && workers[1].results != NULL && workers[1].count == 1);
+    kc_hnsw_free(workers[0].results);
+    kc_hnsw_free(workers[1].results);
     kc_hnsw_close(ctx);
     case_result(fail, name, detail);
     return fail;
@@ -135,7 +224,14 @@ static int case_kc_hnsw_search(void) {
     const char *name = "kc_hnsw_search";
     const char *detail = "applies L2 thresholds and clears invalid outputs";
     const float near[] = {0.0f, 0.0f};
+    const float middle[] = {1.0f, 0.0f};
     const float far[] = {4.0f, 0.0f};
+    const float inner_low[] = {1.0f, 0.0f};
+    const float inner_high[] = {3.0f, 0.0f};
+    const float cosine_best[] = {2.0f, 0.0f};
+    const float cosine_next[] = {1.0f, 1.0f};
+    const float cosine_opposite[] = {-1.0f, 0.0f};
+    const float zero[] = {0.0f, 0.0f};
     kc_hnsw_result_t *results = (kc_hnsw_result_t *)1;
     kc_hnsw_t *ctx = open_index(2, KC_HNSW_METRIC_L2);
     size_t count = 99;
@@ -146,16 +242,92 @@ static int case_kc_hnsw_search(void) {
         return 1;
     }
     fail |= expect(kc_hnsw_add(ctx, "near", near) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(ctx, "middle", middle) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_add(ctx, "far", far) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_build(ctx) == KC_HNSW_OK);
-    fail |= expect(kc_hnsw_search(ctx, near, 2, 0.1, &results, &count) == KC_HNSW_OK);
-    fail |= expect(count == 1 && results != NULL);
-    if (results != NULL) fail |= expect(strcmp(results[0].id, "near") == 0);
+    fail |= expect(kc_hnsw_search(ctx, near, 3, 1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(count == 2 && results != NULL);
+    if (results != NULL) {
+        fail |= expect(strcmp(results[0].id, "near") == 0 && results[0].score == 0.0);
+        fail |= expect(strcmp(results[1].id, "middle") == 0 && results[1].score == 1.0);
+    }
     kc_hnsw_free(results);
     results = (kc_hnsw_result_t *)1;
     count = 99;
     fail |= expect(kc_hnsw_search(ctx, NULL, 1, 1.0, &results, &count) == KC_HNSW_EINVAL);
     fail |= expect(results == NULL && count == 0);
+    count = 99;
+    fail |= expect(kc_hnsw_search(ctx, near, 1, 1.0, NULL, &count) == KC_HNSW_EINVAL);
+    fail |= expect(count == 0);
+    results = (kc_hnsw_result_t *)1;
+    fail |= expect(kc_hnsw_search(ctx, near, 1, 1.0, &results, NULL) == KC_HNSW_EINVAL);
+    fail |= expect(results == NULL);
+    results = (kc_hnsw_result_t *)1;
+    count = 99;
+    fail |= expect(kc_hnsw_search(ctx, near, 0, 1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(results == NULL && count == 0);
+    results = (kc_hnsw_result_t *)1;
+    count = 99;
+    fail |= expect(kc_hnsw_search(ctx, near, 3, -1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(results == NULL && count == 0);
+    kc_hnsw_close(ctx);
+
+    ctx = open_index(2, KC_HNSW_METRIC_INNER_PRODUCT);
+    if (ctx == NULL) {
+        case_result(1, name, detail);
+        return 1;
+    }
+    fail |= expect(kc_hnsw_add(ctx, "low", inner_low) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(ctx, "high", inner_high) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_build(ctx) == KC_HNSW_OK);
+    results = NULL;
+    count = 0;
+    fail |= expect(kc_hnsw_search(ctx, inner_low, 2, 1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(results != NULL && count == 2);
+    if (results != NULL) {
+        fail |= expect(strcmp(results[0].id, "high") == 0 && results[0].score == 3.0);
+        fail |= expect(strcmp(results[1].id, "low") == 0 && results[1].score == 1.0);
+    }
+    kc_hnsw_free(results);
+    results = (kc_hnsw_result_t *)1;
+    count = 99;
+    fail |= expect(kc_hnsw_search(ctx, inner_low, 2, 2.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(results != NULL && count == 1 && strcmp(results[0].id, "high") == 0);
+    kc_hnsw_free(results);
+    kc_hnsw_close(ctx);
+
+    ctx = open_index(2, KC_HNSW_METRIC_COSINE);
+    if (ctx == NULL) {
+        case_result(1, name, detail);
+        return 1;
+    }
+    fail |= expect(kc_hnsw_add(ctx, "best", cosine_best) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(ctx, "next", cosine_next) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(ctx, "opposite", cosine_opposite) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(ctx, "zero", zero) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_build(ctx) == KC_HNSW_OK);
+    results = NULL;
+    count = 0;
+    fail |= expect(kc_hnsw_search(ctx, inner_low, 4, -1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(results != NULL && count == 4);
+    if (results != NULL) {
+        fail |= expect(strcmp(results[0].id, "best") == 0 && results[0].score == 1.0);
+        fail |= expect(strcmp(results[1].id, "next") == 0 && results[1].score > 0.0);
+    }
+    kc_hnsw_free(results);
+    results = (kc_hnsw_result_t *)1;
+    count = 99;
+    fail |= expect(kc_hnsw_search(ctx, inner_low, 4, 0.8, &results, &count) == KC_HNSW_OK);
+    fail |= expect(results != NULL && count == 1 && strcmp(results[0].id, "best") == 0);
+    kc_hnsw_free(results);
+    results = NULL;
+    count = 0;
+    fail |= expect(kc_hnsw_search(ctx, zero, 4, 0.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(results != NULL && count == 4);
+    if (results != NULL) {
+        for (size_t i = 0; i < count; i++) fail |= expect(results[i].score == 0.0);
+    }
+    kc_hnsw_free(results);
     kc_hnsw_close(ctx);
     case_result(fail, name, detail);
     return fail;
