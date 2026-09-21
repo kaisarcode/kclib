@@ -27,10 +27,11 @@ typedef struct { const char *code; double score; } kc_lng_result_t;
  * Summary: Detect languages for input text.
  *
  * Sanitizes/normalizes text internally; filters results below
- * threshold and bounds output count by limit. NULL or empty text
- * yields zero results (KC_LNG_OK with *out_count == 0).
+ * threshold and bounds output count by limit. text must be
+ * non-NULL; an empty string is valid and produces zero results
+ * (KC_LNG_OK with *out_count == 0, *out_results == NULL).
  *
- * @param text Input text (NULL safe, empty yields no results).
+ * @param text Input text (must be non-NULL; empty string yields no results).
  * @param threshold Minimum score in [0,1] to include;
  * results below are filtered.
  * @param limit Maximum number of results to return.

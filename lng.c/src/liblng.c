@@ -103,6 +103,8 @@ static INIT_ONCE kc_lng_once = INIT_ONCE_STATIC_INIT;
 static pthread_once_t kc_lng_once = PTHREAD_ONCE_INIT;
 #endif
 
+static int kc_lng_init_status = KC_LNG_ERROR;
+
 /**
  * Returns the byte length of a UTF-8 sequence from its lead byte.
  * @param c Lead byte of the UTF-8 sequence.
@@ -215,20 +217,23 @@ static char *kc_lng_normalize(const char *input) {
 /**
  * Builds an n-gram frequency profile from a language seed string.
  * @param lang Language entry to populate.
- * @return No return value.
+ * @return KC_LNG_OK on success, KC_LNG_ERROR on failure.
  */
-static void kc_lng_train(kc_lng_lang_t *lang) {
+static int kc_lng_train(kc_lng_lang_t *lang) {
     char *normalized;
     int len;
     int i;
 
-    if (lang == NULL || lang->profile_size > 0 || lang->seed == NULL) {
-        return;
+    if (lang == NULL || lang->seed == NULL) {
+        return KC_LNG_ERROR;
+    }
+    if (lang->profile_size > 0) {
+        return KC_LNG_OK;
     }
 
     normalized = kc_lng_normalize(lang->seed);
     if (normalized == NULL) {
-        return;
+        return KC_LNG_ERROR;
     }
 
     len = (int)strlen(normalized);
@@ -286,6 +291,7 @@ static void kc_lng_train(kc_lng_lang_t *lang) {
     }
 
     free(normalized);
+    return KC_LNG_OK;
 }
 
 /**
@@ -406,9 +412,14 @@ static int kc_lng_rank_cmp(const void *left, const void *right) {
 static void kc_lng_init_once(void) {
     int i;
 
+    kc_lng_init_status = KC_LNG_ERROR;
     for (i = 0; i < KC_LNG_MAX_LANGS && kc_lng_langs[i].code != NULL; i++) {
-        kc_lng_train(&kc_lng_langs[i]);
+        if (kc_lng_train(&kc_lng_langs[i]) != KC_LNG_OK) {
+            kc_lng_init_status = KC_LNG_ERROR;
+            return;
+        }
     }
+    kc_lng_init_status = KC_LNG_OK;
 }
 
 #ifdef _WIN32
@@ -438,15 +449,15 @@ static BOOL CALLBACK kc_lng_init_once_win(
  */
 static int kc_lng_ensure_initialized(void) {
 #ifdef _WIN32
-    if (InitOnceExecuteOnce(&kc_lng_once, kc_lng_init_once_win, NULL, NULL)) {
-        return KC_LNG_OK;
+    if (!InitOnceExecuteOnce(&kc_lng_once, kc_lng_init_once_win, NULL, NULL)) {
+        return KC_LNG_ERROR;
     }
-    return KC_LNG_ERROR;
+    return kc_lng_init_status;
 #else
     if (pthread_once(&kc_lng_once, kc_lng_init_once) != 0) {
         return KC_LNG_ERROR;
     }
-    return KC_LNG_OK;
+    return kc_lng_init_status;
 #endif
 }
 
@@ -477,6 +488,10 @@ int kc_lng_detect(const char *text, double threshold, size_t limit, kc_lng_resul
 
     if (text == NULL || out_results == NULL || out_count == NULL || limit == 0 || !isfinite(threshold) || threshold < 0.0 || threshold > 1.0) {
         return KC_LNG_ERROR;
+    }
+
+    if (text[0] == '\0') {
+        return KC_LNG_OK;
     }
 
     if (limit > KC_LNG_MAX_LANGS) {

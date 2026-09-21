@@ -328,6 +328,13 @@ static int case_kc_lng_detect_contract(void) {
     fail += expect_true("empty contract results NULL", res == NULL);
     kc_lng_free(res);
 
+    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
+    rc = kc_lng_detect("", 0.0, 32, &res, &count);
+    fail += expect_int("empty zero threshold rc", KC_LNG_OK, rc);
+    fail += expect_true("empty zero threshold count 0", count == 0);
+    fail += expect_true("empty zero threshold results NULL", res == NULL);
+    kc_lng_free(res);
+
     res = NULL; count = 0;
     rc = kc_lng_detect(TEXT_EN, 0.001, 2, &res, &count);
     if (rc == KC_LNG_OK && count > 0) {

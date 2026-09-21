@@ -83,7 +83,7 @@ void kc_lng_free(void *ptr);
 uint64_t kc_lng_version(void);
 ```
 
-- `kc_lng_detect` - stateless detection. Sanitizes/normalizes text internally, scores against all compiled profiles, sorts descending, filters below `threshold` (`[0, 1]`), bounds output by `limit`. `NULL` or empty text yields zero results (`KC_LNG_OK` with `*out_count == 0`). On success `*out_results` points to a heap-allocated array owned by the caller; on zero results or error `*out_results` is set to `NULL`. Returns `KC_LNG_OK` on success (including zero matches), `KC_LNG_ERROR` on invalid arguments or allocation failure.
+- `kc_lng_detect` - stateless detection. Sanitizes/normalizes text internally, scores against all compiled profiles, sorts descending, filters below `threshold` (`[0, 1]`), bounds output by `limit`. `text == NULL` yields `KC_LNG_ERROR`; `text[0] == '\0'` yields zero results (`KC_LNG_OK` with `*out_count == 0`, `*out_results == NULL`, even at threshold `0.0`). On success `*out_results` points to a heap-allocated array owned by the caller; on zero results or error `*out_results` is set to `NULL`. Returns `KC_LNG_OK` on success (including zero matches), `KC_LNG_ERROR` on invalid arguments or allocation failure.
 - Ownership - array returned via `out_results` is heap-allocated and caller-owned; release with `kc_lng_free()`. Each `code` string points to static library-owned storage; caller must not free or modify it. Detection does not retain input.
 - `kc_lng_free` - release memory allocated by `kc_lng_detect`. `NULL` safe (no-op).
 - `kc_lng_version` - returns build version as Unix timestamp.
