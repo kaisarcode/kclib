@@ -21,186 +21,148 @@ typedef struct kc_http kc_http_t;
 
 #define KC_HTTP_OK    0
 #define KC_HTTP_ERROR -1
-#define KC_HTTP_ESTOP (-3)
-
-#define KC_HTTP_OP_PARSE          1
-#define KC_HTTP_OP_BUILD_REQUEST  2
-#define KC_HTTP_OP_BUILD_RESPONSE 3
 
 /**
- * HTTP options.
- * @param method HTTP method.
- * @param target Request target.
- * @param version HTTP version.
- * @param chunked Use chunked encoding.
- * @param chunk_size Chunk size for chunked encoding.
- */
-typedef struct kc_http_options {
-    char *method;
-    char *target;
-    char *version;
-    int chunked;
-    size_t chunk_size;
-} kc_http_options_t;
-
-/**
- * Initialize a new http context.
- * @param out Pointer to receive the context pointer.
- * @param opts Options.
+ * Initialize a new HTTP context.
+ * @param out Receives the new context.
  * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_open(kc_http_t **out, const kc_http_options_t *opts);
+int kc_http_open(kc_http_t **out);
 
 /**
- * Execute the configured http operation.
- * @param ctx Context pointer.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
- */
-int kc_http_exec(kc_http_t *ctx);
-
-/**
- * Set the input buffer for the next exec operation.
- * @param ctx Context pointer.
- * @param data Input buffer pointer.
- * @param len Input buffer size in bytes.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if ctx is NULL.
- */
-int kc_http_set_input(kc_http_t *ctx, const void *data, size_t len);
-
-/**
- * Get the output buffer from the last exec operation.
- * @param ctx Context pointer.
- * @param out Receives pointer to output buffer (caller does not own).
- * @param out_len Receives output buffer size in bytes.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if ctx is NULL.
- */
-int kc_http_get_output(kc_http_t *ctx, unsigned char **out, size_t *out_len);
-
-/**
- * Release a http context and all owned memory.
+ * Release an HTTP context and all owned configuration.
  * @param ctx Context pointer.
  * @return None.
  */
 void kc_http_close(kc_http_t *ctx);
 
 /**
- * Request a context to stop at the next opportunity.
- * @param ctx HTTP context.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if ctx is NULL.
- */
-int kc_http_stop(kc_http_t *ctx);
-
-/**
- * Set the operation to perform.
+ * Set the HTTP method for request builds.
  * @param ctx Context pointer.
- * @param op KC_HTTP_OP_PARSE, BUILD_REQUEST, or BUILD_RESPONSE.
- * @return None.
+ * @param method Method string.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_op(kc_http_t *ctx, int op);
+int kc_http_set_method(kc_http_t *ctx, const char *method);
 
 /**
- * Enable multi-message parse mode.
+ * Set the request target for request builds.
  * @param ctx Context pointer.
- * @param all Non-zero to parse all messages until EOF.
- * @return None.
+ * @param target Request target.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_all(kc_http_t *ctx, int all);
+int kc_http_set_target(kc_http_t *ctx, const char *target);
 
 /**
- * Set the HTTP method for build request.
+ * Set the HTTP version for builds.
  * @param ctx Context pointer.
- * @param method Method string (e.g. "GET", "POST").
- * @return None.
+ * @param version Version string.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_method(kc_http_t *ctx, const char *method);
+int kc_http_set_version(kc_http_t *ctx, const char *version);
 
 /**
- * Set the request target for build request.
- * @param ctx Context pointer.
- * @param target Target string (e.g. "/api?a=1").
- * @return None.
- */
-void kc_http_set_target(kc_http_t *ctx, const char *target);
-
-/**
- * Set the HTTP version for build operations.
- * @param ctx Context pointer.
- * @param version Version string (e.g. "1.1").
- * @return None.
- */
-void kc_http_set_version(kc_http_t *ctx, const char *version);
-
-/**
- * Set the response status code for build response.
+ * Set the response status code for response builds.
  * @param ctx Context pointer.
  * @param status HTTP status code.
- * @return None.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_status(kc_http_t *ctx, int status);
+int kc_http_set_status(kc_http_t *ctx, int status);
 
 /**
- * Set the response reason phrase for build response.
+ * Set the response reason phrase for response builds.
  * @param ctx Context pointer.
- * @param reason Reason string (e.g. "OK").
- * @return None.
+ * @param reason Reason phrase.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_reason(kc_http_t *ctx, const char *reason);
+int kc_http_set_reason(kc_http_t *ctx, const char *reason);
 
 /**
- * Enable chunked transfer encoding for build operations.
+ * Set whether builds use chunked transfer encoding.
  * @param ctx Context pointer.
  * @param chunked Non-zero to use chunked encoding.
- * @return None.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_chunked(kc_http_t *ctx, int chunked);
+int kc_http_set_chunked(kc_http_t *ctx, int chunked);
 
 /**
- * Set the chunk size for chunked build operations.
+ * Set the chunk size for chunked builds.
  * @param ctx Context pointer.
- * @param size Chunk size in bytes.
- * @return None.
+ * @param chunk_size Chunk size in bytes.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_chunk_size(kc_http_t *ctx, size_t size);
+int kc_http_set_chunk_size(kc_http_t *ctx, size_t chunk_size);
 
 /**
- * Add a header for build operations.
+ * Add a header for builds.
  * @param ctx Context pointer.
- * @param header Header string in "name: value" format.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if limit exceeded.
+ * @param name Header name.
+ * @param value Header value.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_add_header(kc_http_t *ctx, const char *header);
+int kc_http_add_header(kc_http_t *ctx, const char *name, const char *value);
 
 /**
- * Add a trailer for chunked build operations.
+ * Add a trailer for chunked builds.
  * @param ctx Context pointer.
- * @param trailer Trailer string in "name: value" format.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if limit exceeded.
+ * @param name Trailer name.
+ * @param value Trailer value.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_add_trailer(kc_http_t *ctx, const char *trailer);
+int kc_http_add_trailer(kc_http_t *ctx, const char *name, const char *value);
 
 /**
- * Create an options struct initialized with default values.
- * @param none Unused.
- * @return Default-initialized options.
+ * Parse HTTP wire data into caller-owned normalized output.
+ * @param ctx Context pointer.
+ * @param data Input wire bytes.
+ * @param data_size Input size in bytes.
+ * @param all Non-zero to parse all complete messages.
+ * @param out_data Receives allocated normalized data, or NULL on failure.
+ * @param out_size Receives output size, or zero on failure.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-kc_http_options_t kc_http_options_default(void);
+int kc_http_parse(kc_http_t *ctx, const void *data, size_t data_size, int all,
+void **out_data, size_t *out_size);
 
 /**
- * Load configuration from environment variables.
- * @param opts Options to update.
+ * Build a request into caller-owned wire output.
+ * @param ctx Context pointer.
+ * @param body Body bytes.
+ * @param body_size Body size in bytes.
+ * @param out_data Receives allocated wire data, or NULL on failure.
+ * @param out_size Receives output size, or zero on failure.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
+ */
+int kc_http_build_request(kc_http_t *ctx, const void *body, size_t body_size,
+void **out_data, size_t *out_size);
+
+/**
+ * Build a response into caller-owned wire output.
+ * @param ctx Context pointer.
+ * @param body Body bytes.
+ * @param body_size Body size in bytes.
+ * @param out_data Receives allocated wire data, or NULL on failure.
+ * @param out_size Receives output size, or zero on failure.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
+ */
+int kc_http_build_response(kc_http_t *ctx, const void *body, size_t body_size,
+void **out_data, size_t *out_size);
+
+/**
+ * Free memory returned through an output parameter.
+ * @param ptr Output pointer to release.
  * @return None.
  */
-void kc_http_options_load_env(kc_http_options_t *opts);
+void kc_http_free(void *ptr);
 
 /**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
+ * Get the most recent contextual error message.
+ * @param ctx Context pointer.
+ * @return Error message, or NULL when no error is available.
  */
-void kc_http_options_free(kc_http_options_t *opts);
+const char *kc_http_get_error(const kc_http_t *ctx);
 
 /**
- * Returns the build version generated at compile time.
+ * Return the build version generated at compile time.
  * @return Unix timestamp for the current build.
  */
 uint64_t kc_http_version(void);

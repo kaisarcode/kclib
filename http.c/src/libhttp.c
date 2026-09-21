@@ -11,14 +11,6 @@
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE   700
 #endif
-#include <signal.h>
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <io.h>
-#include <fcntl.h>
-#endif
-
 #include "libhttp.h"
 
 #include <ctype.h>
@@ -27,11 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifndef _WIN32
-#include <fcntl.h>
-#include <unistd.h>
-#endif
 
 #define HTTP_HDR_MAX      256
 #define HTTP_CHUNK_DEFAULT 8192
@@ -72,36 +59,7 @@ typedef struct {
 #define HTTP_TYPE_REQUEST  1
 #define HTTP_TYPE_RESPONSE 2
 
-typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_FLOAT,
-    KC_ENV_TYPE_STR
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_HTTP_METHOD",  offsetof(kc_http_options_t, method),  KC_ENV_TYPE_STR },
-    { "KC_HTTP_TARGET",  offsetof(kc_http_options_t, target),  KC_ENV_TYPE_STR },
-    { "KC_HTTP_VERSION", offsetof(kc_http_options_t, version), KC_ENV_TYPE_STR },
-    { "KC_HTTP_CHUNKED", offsetof(kc_http_options_t, chunked), KC_ENV_TYPE_INT },
-};
-static const int env_config_table_n =
-    sizeof(env_config_table) / sizeof(env_config_table[0]);
-
 struct kc_http {
-    kc_http_options_t opts;
-    volatile sig_atomic_t stop_requested;
-    int    op;
-    int    all;
-    const unsigned char *input;
-    size_t               input_len;
-    unsigned char *result;
-    size_t         result_len;
     char  *method;
     char  *target;
     char  *version;
@@ -113,6 +71,7 @@ struct kc_http {
     int    nhdr;
     char  *trailers[HTTP_HDR_MAX];
     int    ntrailer;
+    char   error[256];
 };
 
 typedef struct {
@@ -201,6 +160,21 @@ static char *http_strdup(const char *s) {
 }
 
 /**
+ * Set or clear the most recent contextual error.
+ * @param ctx Context pointer.
+ * @param message Error message, or NULL to clear it.
+ * @return None.
+ */
+static void http_set_error(kc_http_t *ctx, const char *message) {
+    if (!ctx) return;
+    if (!message) {
+        ctx->error[0] = '\0';
+        return;
+    }
+    snprintf(ctx->error, sizeof(ctx->error), "%s", message);
+}
+
+/**
  * Duplicate a string and convert all bytes to lowercase.
  * @param s Source string.
  * @return Allocated lowercase copy or NULL on failure.
@@ -232,6 +206,102 @@ static char *http_trim(char *s) {
     memmove(s, start, n);
     s[n] = '\0';
     return s;
+}
+
+/**
+ * Return whether a field name is a non-empty HTTP token.
+ * @param name Field name to validate.
+ * @return Non-zero when name is valid, zero otherwise.
+ */
+static int http_field_name_valid(const char *name) {
+    const unsigned char *p;
+
+    if (!name || !*name) return 0;
+    for (p = (const unsigned char *)name; *p; p++) {
+        if ((*p >= 'A' && *p <= 'Z') ||
+            (*p >= 'a' && *p <= 'z') ||
+            (*p >= '0' && *p <= '9')) continue;
+        switch (*p) {
+            case '!': case '#': case '$': case '%': case '&': case '\'':
+            case '*': case '+': case '-': case '.': case '^': case '_':
+            case '`': case '|': case '~':
+                break;
+            default:
+                return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * Return whether a field value has only HTTP field-value bytes.
+ * @param value Field value to validate.
+ * @return Non-zero when value is valid, zero otherwise.
+ */
+static int http_field_value_valid(const char *value) {
+    const unsigned char *p;
+
+    if (!value) return 0;
+    for (p = (const unsigned char *)value; *p; p++) {
+        if (*p == '\t' || (*p >= 0x20 && *p != 0x7f)) continue;
+        return 0;
+    }
+    return 1;
+}
+
+/**
+ * Add one validated field to an ordered builder field list.
+ * @param ctx Context pointer.
+ * @param fields Destination field list.
+ * @param count Destination field count.
+ * @param name Field name.
+ * @param value Field value.
+ * @param kind Field kind for contextual errors.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
+ */
+static int http_add_field(kc_http_t *ctx, char **fields, int *count,
+const char *name, const char *value,
+const char *kind) {
+    char   *field;
+    size_t  name_len;
+    size_t  value_len;
+
+    if (!name || !value) {
+        http_set_error(ctx, "HTTP field name and value are required");
+        return KC_HTTP_ERROR;
+    }
+    if (*count >= HTTP_HDR_MAX) {
+        http_set_error(ctx, kind);
+        return KC_HTTP_ERROR;
+    }
+    if (!http_field_name_valid(name)) {
+        http_set_error(ctx, "invalid HTTP field name");
+        return KC_HTTP_ERROR;
+    }
+    if (!http_field_value_valid(value)) {
+        http_set_error(ctx, "invalid HTTP field value");
+        return KC_HTTP_ERROR;
+    }
+
+    name_len = strlen(name);
+    value_len = strlen(value);
+    if (value_len > (size_t)-1 - 3U ||
+        name_len > (size_t)-1 - value_len - 3U) {
+        http_set_error(ctx, "HTTP field is too large");
+        return KC_HTTP_ERROR;
+    }
+    field = (char *)malloc(name_len + value_len + 3U);
+    if (!field) {
+        http_set_error(ctx, "HTTP field allocation failed");
+        return KC_HTTP_ERROR;
+    }
+    memcpy(field, name, name_len);
+    memcpy(field + name_len, ": ", 2);
+    memcpy(field + name_len + 2, value, value_len + 1);
+    fields[*count] = field;
+    (*count)++;
+    http_set_error(ctx, NULL);
+    return KC_HTTP_OK;
 }
 
 /**
@@ -509,6 +579,40 @@ static const char *http1_header_value(const http_msg_t *msg, const char *name) {
 }
 
 /**
+ * Read and validate the Content-Length fields in a message.
+ * @param msg Source message.
+ * @param body_len Receives the declared body length.
+ * @return One when present, zero when absent, or -1 when malformed.
+ */
+static int http1_content_length(const http_msg_t *msg, size_t *body_len) {
+    int    i;
+    int    found = 0;
+    size_t length = 0;
+
+    for (i = 0; i < msg->nhdr; i++) {
+        const char    *value;
+        const char    *p;
+        char          *endp;
+        unsigned long  parsed;
+
+        if (strcmp(msg->hdrs[i].name, "content-length") != 0) continue;
+        value = msg->hdrs[i].value;
+        if (!*value) return -1;
+        for (p = value; *p; p++) {
+            if (!isdigit((unsigned char)*p)) return -1;
+        }
+        errno = 0;
+        parsed = strtoul(value, &endp, 10);
+        if (errno != 0 || *endp != '\0' || (unsigned long)(size_t)parsed != parsed) return -1;
+        if (found && length != (size_t)parsed) return -1;
+        length = (size_t)parsed;
+        found = 1;
+    }
+    if (found) *body_len = length;
+    return found;
+}
+
+/**
  * Read a chunked body and decode it to plain bytes.
  * @param src Input source.
  * @param msg Destination message (body and trailers are populated).
@@ -532,7 +636,9 @@ static int http1_read_chunked(http_src_t *src, http_msg_t *msg) {
         if (http_read_line(src, &line, &llen) <= 0) { free(body); free(line); return -1; }
         semi = strchr(line, ';');
         if (semi) *semi = '\0';
+        errno = 0;
         chunk_size = (size_t)strtoul(line, &end, 16);
+        if (errno != 0 || end == line || *end != '\0') { free(line); free(body); return -1; }
         free(line);
 
         if (chunk_size == 0) {
@@ -627,26 +733,26 @@ static int http1_parse(http_src_t *src, http_msg_t *msg) {
     }
 
     {
-        const char *cl  = http1_header_value(msg, "content-length");
-        const char *te  = http1_header_value(msg, "transfer-encoding");
-        int no_body = 0;
+        const char *te = http1_header_value(msg, "transfer-encoding");
+        size_t      body_len;
+        int         has_cl;
+        int         no_body = 0;
+
+        has_cl = http1_content_length(msg, &body_len);
+        if (has_cl < 0) return -1;
+        if (has_cl && te && strstr(te, "chunked") != NULL) return -1;
 
         if (msg->type == HTTP_TYPE_RESPONSE) {
             if (msg->status == 204 || msg->status == 304 ||
                 (msg->status >= 100 && msg->status < 200)) no_body = 1;
         } else {
-            if (!cl && (!te || strstr(te, "chunked") == NULL)) no_body = 1;
+            if (!has_cl && (!te || strstr(te, "chunked") == NULL)) no_body = 1;
         }
 
         if (!no_body) {
             if (te && strstr(te, "chunked") != NULL) {
                 if (http1_read_chunked(src, msg) != 0) return -1;
-            } else if (cl) {
-                size_t body_len;
-                char  *endp;
-                errno    = 0;
-                body_len = (size_t)strtoul(cl, &endp, 10);
-                if (errno != 0 || endp == cl) return -1;
+            } else if (has_cl) {
                 if (http_read_bytes(src, body_len, &msg->body) != 0) return -1;
                 msg->body_len = body_len;
             }
@@ -734,21 +840,23 @@ static int http_emit_body_cl(http_buf_t *b, const unsigned char *data, size_t si
 /**
  * Emit body in chunk framing to the buffer, then emit trailers.
  * @param b Output buffer.
- * @param ctx Build context (input contains the body).
+ * @param ctx Build context.
+ * @param body Borrowed body bytes.
+ * @param body_size Number of body bytes.
  * @return 0 on success, -1 on write error.
  */
-static int http_emit_body_chunked(http_buf_t *b, const kc_http_t *ctx) {
+static int http_emit_body_chunked(http_buf_t *b, const kc_http_t *ctx,
+const unsigned char *body, size_t body_size) {
     size_t chunk_size = ctx->chunk_size ? ctx->chunk_size : HTTP_CHUNK_DEFAULT;
     size_t offset = 0;
     size_t n;
     int    i;
 
-    while (offset < ctx->input_len) {
-        if (ctx->stop_requested) return -1;
-        n = ctx->input_len - offset;
+    while (offset < body_size) {
+        n = body_size - offset;
         if (n > chunk_size) n = chunk_size;
         if (http_buf_printf(b, "%zx\r\n", n) != 0) return -1;
-        if (http_buf_write(b, ctx->input + offset, n) != 0) return -1;
+        if (http_buf_write(b, body + offset, n) != 0) return -1;
         if (http_buf_printf(b, "\r\n") != 0) return -1;
         offset += n;
     }
@@ -764,22 +872,25 @@ static int http_emit_body_chunked(http_buf_t *b, const kc_http_t *ctx) {
 /**
  * Build one HTTP/1.x request into a buffer.
  * @param ctx Build context.
+ * @param body Borrowed body bytes.
+ * @param body_size Number of body bytes.
  * @param b Output buffer.
  * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
  */
-static int http1_build_request(const kc_http_t *ctx, http_buf_t *b) {
+static int http1_build_request(const kc_http_t *ctx, const unsigned char *body,
+size_t body_size, http_buf_t *b) {
     const char    *method  = ctx->method  ? ctx->method  : "GET";
     const char    *target  = ctx->target  ? ctx->target  : "/";
     const char    *version = ctx->version ? ctx->version : "1.1";
     int            rc      = KC_HTTP_OK;
 
     if (http_buf_printf(b, "%s %s HTTP/%s\r\n", method, target, version) != 0) return KC_HTTP_ERROR;
-    if (http_emit_headers(b, ctx, ctx->input_len) != 0) return KC_HTTP_ERROR;
+    if (http_emit_headers(b, ctx, body_size) != 0) return KC_HTTP_ERROR;
 
     if (ctx->chunked) {
-        if (http_emit_body_chunked(b, ctx) != 0) rc = KC_HTTP_ERROR;
+        if (http_emit_body_chunked(b, ctx, body, body_size) != 0) rc = KC_HTTP_ERROR;
     } else {
-        if (http_emit_body_cl(b, ctx->input, ctx->input_len) != 0) rc = KC_HTTP_ERROR;
+        if (http_emit_body_cl(b, body, body_size) != 0) rc = KC_HTTP_ERROR;
     }
 
     return rc;
@@ -788,22 +899,25 @@ static int http1_build_request(const kc_http_t *ctx, http_buf_t *b) {
 /**
  * Build one HTTP/1.x response into a buffer.
  * @param ctx Build context.
+ * @param body Borrowed body bytes.
+ * @param body_size Number of body bytes.
  * @param b Output buffer.
  * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
  */
-static int http1_build_response(const kc_http_t *ctx, http_buf_t *b) {
+static int http1_build_response(const kc_http_t *ctx, const unsigned char *body,
+                                size_t body_size, http_buf_t *b) {
     const char    *version = ctx->version ? ctx->version : "1.1";
     int            status  = ctx->status  ? ctx->status  : 200;
     const char    *reason  = ctx->reason  ? ctx->reason  : http_default_reason(status);
     int            rc      = KC_HTTP_OK;
 
     if (http_buf_printf(b, "HTTP/%s %d %s\r\n", version, status, reason) != 0) return KC_HTTP_ERROR;
-    if (http_emit_headers(b, ctx, ctx->input_len) != 0) return KC_HTTP_ERROR;
+    if (http_emit_headers(b, ctx, body_size) != 0) return KC_HTTP_ERROR;
 
     if (ctx->chunked) {
-        if (http_emit_body_chunked(b, ctx) != 0) rc = KC_HTTP_ERROR;
+        if (http_emit_body_chunked(b, ctx, body, body_size) != 0) rc = KC_HTTP_ERROR;
     } else {
-        if (http_emit_body_cl(b, ctx->input, ctx->input_len) != 0) rc = KC_HTTP_ERROR;
+        if (http_emit_body_cl(b, body, body_size) != 0) rc = KC_HTTP_ERROR;
     }
 
     return rc;
@@ -1866,10 +1980,13 @@ static int hpack_emit_config_header(unsigned char *out, size_t *len, const char 
 /**
  * Build one HTTP/2 request into a buffer.
  * @param ctx Build context.
+ * @param body Borrowed body bytes.
+ * @param body_size Number of body bytes.
  * @param b Output buffer.
  * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
  */
-static int http2_build_request(const kc_http_t *ctx, http_buf_t *b) {
+static int http2_build_request(const kc_http_t *ctx, const unsigned char *body,
+size_t body_size, http_buf_t *b) {
     static const unsigned char preface[] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     const char *method = ctx->method ? ctx->method : "GET";
     const char *target = ctx->target ? ctx->target : "/";
@@ -1889,18 +2006,21 @@ static int http2_build_request(const kc_http_t *ctx, http_buf_t *b) {
     for (i = 0; i < ctx->nhdr; i++) {
         if (hpack_emit_config_header(block, &block_len, ctx->hdrs[i]) != 0) return KC_HTTP_ERROR;
     }
-    if (http2_write_frame(b, HTTP2_FRAME_HEADERS, HTTP2_FLAG_END_HEADERS | (ctx->input_len == 0 ? HTTP2_FLAG_END_STREAM : 0), HTTP2_STREAM_DEFAULT, block, block_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
-    if (ctx->input_len > 0 && http2_write_frame(b, HTTP2_FRAME_DATA, HTTP2_FLAG_END_STREAM, HTTP2_STREAM_DEFAULT, ctx->input, ctx->input_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
+    if (http2_write_frame(b, HTTP2_FRAME_HEADERS, HTTP2_FLAG_END_HEADERS | (body_size == 0 ? HTTP2_FLAG_END_STREAM : 0), HTTP2_STREAM_DEFAULT, block, block_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
+    if (body_size > 0 && http2_write_frame(b, HTTP2_FRAME_DATA, HTTP2_FLAG_END_STREAM, HTTP2_STREAM_DEFAULT, body, body_size) != KC_HTTP_OK) return KC_HTTP_ERROR;
     return KC_HTTP_OK;
 }
 
 /**
  * Build one HTTP/2 response into a buffer.
  * @param ctx Build context.
+ * @param body Borrowed body bytes.
+ * @param body_size Number of body bytes.
  * @param b Output buffer.
  * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
  */
-static int http2_build_response(const kc_http_t *ctx, http_buf_t *b) {
+static int http2_build_response(const kc_http_t *ctx, const unsigned char *body,
+                                size_t body_size, http_buf_t *b) {
     static const unsigned char preface[] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     unsigned char block[65536];
     char status_buf[16];
@@ -1917,8 +2037,8 @@ static int http2_build_response(const kc_http_t *ctx, http_buf_t *b) {
     for (i = 0; i < ctx->nhdr; i++) {
         if (hpack_emit_config_header(block, &block_len, ctx->hdrs[i]) != 0) return KC_HTTP_ERROR;
     }
-    if (http2_write_frame(b, HTTP2_FRAME_HEADERS, HTTP2_FLAG_END_HEADERS | (ctx->input_len == 0 ? HTTP2_FLAG_END_STREAM : 0), HTTP2_STREAM_DEFAULT, block, block_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
-    if (ctx->input_len > 0 && http2_write_frame(b, HTTP2_FRAME_DATA, HTTP2_FLAG_END_STREAM, HTTP2_STREAM_DEFAULT, ctx->input, ctx->input_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
+    if (http2_write_frame(b, HTTP2_FRAME_HEADERS, HTTP2_FLAG_END_HEADERS | (body_size == 0 ? HTTP2_FLAG_END_STREAM : 0), HTTP2_STREAM_DEFAULT, block, block_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
+    if (body_size > 0 && http2_write_frame(b, HTTP2_FRAME_DATA, HTTP2_FLAG_END_STREAM, HTTP2_STREAM_DEFAULT, body, body_size) != KC_HTTP_OK) return KC_HTTP_ERROR;
     return KC_HTTP_OK;
 }
 
@@ -2321,10 +2441,13 @@ static int http3_write_frame(http_buf_t *b, unsigned long long type, const unsig
 /**
  * Build one HTTP/3 request into a buffer.
  * @param ctx Build context.
+ * @param body Borrowed body bytes.
+ * @param body_size Number of body bytes.
  * @param b Output buffer.
  * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
  */
-static int http3_build_request(const kc_http_t *ctx, http_buf_t *b) {
+static int http3_build_request(const kc_http_t *ctx, const unsigned char *body,
+size_t body_size, http_buf_t *b) {
     const char *method = ctx->method ? ctx->method : "GET";
     const char *target = ctx->target ? ctx->target : "/";
     unsigned char block[65536];
@@ -2345,17 +2468,20 @@ static int http3_build_request(const kc_http_t *ctx, http_buf_t *b) {
         if (qpack_emit_config_header(block, &block_len, ctx->hdrs[i]) != 0) return KC_HTTP_ERROR;
     }
     if (http3_write_frame(b, HTTP3_FRAME_HEADERS, block, block_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
-    if (ctx->input_len > 0 && http3_write_frame(b, HTTP3_FRAME_DATA, ctx->input, ctx->input_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
+    if (body_size > 0 && http3_write_frame(b, HTTP3_FRAME_DATA, body, body_size) != KC_HTTP_OK) return KC_HTTP_ERROR;
     return KC_HTTP_OK;
 }
 
 /**
  * Build one HTTP/3 response into a buffer.
  * @param ctx Build context.
+ * @param body Borrowed body bytes.
+ * @param body_size Number of body bytes.
  * @param b Output buffer.
  * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
  */
-static int http3_build_response(const kc_http_t *ctx, http_buf_t *b) {
+static int http3_build_response(const kc_http_t *ctx, const unsigned char *body,
+                                size_t body_size, http_buf_t *b) {
     unsigned char block[65536];
     char status_buf[16];
     size_t block_len = 0;
@@ -2372,35 +2498,60 @@ static int http3_build_response(const kc_http_t *ctx, http_buf_t *b) {
         if (qpack_emit_config_header(block, &block_len, ctx->hdrs[i]) != 0) return KC_HTTP_ERROR;
     }
     if (http3_write_frame(b, HTTP3_FRAME_HEADERS, block, block_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
-    if (ctx->input_len > 0 && http3_write_frame(b, HTTP3_FRAME_DATA, ctx->input, ctx->input_len) != KC_HTTP_OK) return KC_HTTP_ERROR;
+    if (body_size > 0 && http3_write_frame(b, HTTP3_FRAME_DATA, body, body_size) != KC_HTTP_OK) return KC_HTTP_ERROR;
     return KC_HTTP_OK;
+}
+
+/**
+ * Build one HTTP request or response using the configured protocol version.
+ * @param ctx Build context.
+ * @param response Non-zero to build a response.
+ * @param body Borrowed body bytes.
+ * @param body_size Number of body bytes.
+ * @param b Output buffer.
+ * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
+ */
+static int http_build(const kc_http_t *ctx, int response,
+const unsigned char *body, size_t body_size,
+http_buf_t *b) {
+    const char *version = ctx->version ? ctx->version : "1.1";
+
+    if (strcmp(version, "2") == 0) {
+        return response ? http2_build_response(ctx, body, body_size, b)
+                        : http2_build_request(ctx, body, body_size, b);
+    }
+    if (strcmp(version, "3") == 0) {
+        return response ? http3_build_response(ctx, body, body_size, b)
+                        : http3_build_request(ctx, body, body_size, b);
+    }
+    return response ? http1_build_response(ctx, body, body_size, b)
+                    : http1_build_request(ctx, body, body_size, b);
 }
 
 /**
  * Initialize a new http context.
  * @param out Pointer to receive the context pointer.
- * @param opts Options.
  * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_open(kc_http_t **out, const kc_http_options_t *opts) {
+int kc_http_open(kc_http_t **out) {
     kc_http_t *ctx;
 
-    if (!out || !opts) return KC_HTTP_ERROR;
+    if (!out) return KC_HTTP_ERROR;
+    *out = NULL;
 
     ctx = (kc_http_t *)calloc(1, sizeof(kc_http_t));
     if (!ctx) return KC_HTTP_ERROR;
 
-    ctx->opts = *opts;
-    ctx->opts.method = opts->method ? http_strdup(opts->method) : NULL;
-    ctx->opts.target = opts->target ? http_strdup(opts->target) : NULL;
-    ctx->opts.version = opts->version ? http_strdup(opts->version) : NULL;
-
-    ctx->chunk_size = opts->chunk_size > 0 ? opts->chunk_size : HTTP_CHUNK_DEFAULT;
-    
-    if (ctx->opts.method) kc_http_set_method(ctx, ctx->opts.method);
-    if (ctx->opts.target) kc_http_set_target(ctx, ctx->opts.target);
-    if (ctx->opts.version) kc_http_set_version(ctx, ctx->opts.version);
-    if (ctx->opts.chunked) kc_http_set_chunked(ctx, ctx->opts.chunked);
+    ctx->method = http_strdup("GET");
+    ctx->target = http_strdup("/");
+    ctx->version = http_strdup("1.1");
+    ctx->status = 200;
+    ctx->chunked = 0;
+    ctx->chunk_size = HTTP_CHUNK_DEFAULT;
+    if (!ctx->method || !ctx->target || !ctx->version) {
+        kc_http_close(ctx);
+        return KC_HTTP_ERROR;
+    }
 
     *out = ctx;
     return KC_HTTP_OK;
@@ -2408,16 +2559,16 @@ int kc_http_open(kc_http_t **out, const kc_http_options_t *opts) {
 
 /**
  * Parse one or all HTTP/1.x messages from a stream.
- * @param ctx Parse context.
  * @param src Input source.
+ * @param b Normalized output buffer.
+ * @param all Non-zero to parse all complete messages.
  * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
  */
-static int http_parse_http1_stream(const kc_http_t *ctx, http_src_t *src, http_buf_t *b) {
+static int http_parse_http1_stream(http_src_t *src, http_buf_t *b, int all) {
     http_msg_t msg;
     int        first = 1;
 
     for (;;) {
-        if (ctx->stop_requested) return KC_HTTP_ESTOP;
         int r = http1_parse(src, &msg);
         if (r == 1) {
             http_msg_free(&msg);
@@ -2428,7 +2579,7 @@ static int http_parse_http1_stream(const kc_http_t *ctx, http_src_t *src, http_b
             http_msg_free(&msg);
             return KC_HTTP_ERROR;
         }
-        if (!first && ctx->all) {
+        if (!first && all) {
             if (http_buf_printf(b, "\n\n") != 0) { http_msg_free(&msg); return KC_HTTP_ERROR; }
         }
         if (http1_emit_msg(b, &msg) != 0) {
@@ -2437,29 +2588,34 @@ static int http_parse_http1_stream(const kc_http_t *ctx, http_src_t *src, http_b
         }
         http_msg_free(&msg);
         first = 0;
-        if (!ctx->all) break;
+        if (!all) break;
     }
     return KC_HTTP_OK;
 }
 
 /**
  * Detect the HTTP protocol version and parse input.
- * @param ctx Parse context.
+ * @param data Input wire bytes.
+ * @param data_size Input size in bytes.
+ * @param all Non-zero to parse all complete messages.
  * @param b Output buffer.
  * @return KC_HTTP_OK on success, KC_HTTP_ERROR on failure.
  */
-static int http_do_parse(const kc_http_t *ctx, http_buf_t *b) {
+static int http_do_parse(const void *data, size_t data_size, int all,
+http_buf_t *b) {
     static const unsigned char preface[] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
     http_src_t src;
     size_t     first_n;
     int        rc;
 
     memset(&src, 0, sizeof(src));
-    src.data = ctx->input;
-    src.len  = ctx->input_len;
+    src.data = (const unsigned char *)data;
+    src.len  = data_size;
     first_n = (src.len < sizeof(preface) - 1) ? src.len : sizeof(preface) - 1;
-    memcpy(src.pre, src.data, first_n);
-    src.data += first_n;
+    if (first_n > 0) {
+        memcpy(src.pre, src.data, first_n);
+        src.data += first_n;
+    }
     src.len  -= first_n;
     src.pre_n = first_n;
     src.pos = 0;
@@ -2483,74 +2639,120 @@ static int http_do_parse(const kc_http_t *ctx, http_buf_t *b) {
         if (rc == 0) rc = http1_emit_msg(b, &msg);
         http_msg_free(&msg);
     } else {
-        rc = http_parse_http1_stream(ctx, &src, b);
+        rc = http_parse_http1_stream(&src, b, all);
     }
     return rc == 0 ? KC_HTTP_OK : KC_HTTP_ERROR;
 }
 
 /**
- * Execute the configured http operation.
+ * Parse HTTP wire data into caller-owned normalized output.
  * @param ctx Context pointer.
+ * @param data Input wire bytes.
+ * @param data_size Input size in bytes.
+ * @param all Non-zero to parse all complete messages.
+ * @param out_data Receives allocated normalized data.
+ * @param out_size Receives output size.
  * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_exec(kc_http_t *ctx) {
-    const char *version;
+int kc_http_parse(kc_http_t *ctx, const void *data, size_t data_size, int all,
+void **out_data, size_t *out_size) {
     http_buf_t buf;
-    int rc;
 
-    if (!ctx) return KC_HTTP_ERROR;
-    version = ctx->version ? ctx->version : "1.1";
-    http_buf_init(&buf);
-    switch (ctx->op) {
-        case KC_HTTP_OP_PARSE:
-            rc = http_do_parse(ctx, &buf);
-            break;
-        case KC_HTTP_OP_BUILD_REQUEST:
-            if (strcmp(version, "2") == 0) rc = http2_build_request(ctx, &buf);
-            else if (strcmp(version, "3") == 0) rc = http3_build_request(ctx, &buf);
-            else rc = http1_build_request(ctx, &buf);
-            break;
-        case KC_HTTP_OP_BUILD_RESPONSE:
-            if (strcmp(version, "2") == 0) rc = http2_build_response(ctx, &buf);
-            else if (strcmp(version, "3") == 0) rc = http3_build_response(ctx, &buf);
-            else rc = http1_build_response(ctx, &buf);
-            break;
-        default:
-            free(buf.data);
-            return KC_HTTP_ERROR;
+    if (!out_data || !out_size) {
+        if (ctx) http_set_error(ctx, "parse output parameters are required");
+        return KC_HTTP_ERROR;
     }
-    if (rc != KC_HTTP_OK) { free(buf.data); return rc; }
-    free(ctx->result);
-    ctx->result = buf.data;
-    ctx->result_len = buf.len;
+    *out_data = NULL;
+    *out_size = 0;
+    if (!ctx) return KC_HTTP_ERROR;
+    if (!data && data_size != 0) {
+        http_set_error(ctx, "parse input data is required");
+        return KC_HTTP_ERROR;
+    }
+
+    http_buf_init(&buf);
+    if (http_do_parse(data, data_size, all, &buf) != KC_HTTP_OK) {
+        free(buf.data);
+        http_set_error(ctx, "HTTP parse failed");
+        return KC_HTTP_ERROR;
+    }
+    *out_data = buf.data;
+    *out_size = buf.len;
+    http_set_error(ctx, NULL);
     return KC_HTTP_OK;
 }
 
 /**
- * Set the input buffer for the next exec operation.
+ * Build an HTTP request into caller-owned wire data.
  * @param ctx Context pointer.
- * @param data Input buffer pointer.
- * @param len Input buffer size in bytes.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if ctx is NULL.
+ * @param body Borrowed request body bytes, or NULL when body_size is zero.
+ * @param body_size Number of body bytes.
+ * @param out_data Receives allocated wire data.
+ * @param out_size Receives wire data size.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_set_input(kc_http_t *ctx, const void *data, size_t len) {
+int kc_http_build_request(kc_http_t *ctx, const void *body, size_t body_size,
+void **out_data, size_t *out_size) {
+    http_buf_t buf;
+
+    if (!out_data || !out_size) {
+        if (ctx) http_set_error(ctx, "build output parameters are required");
+        return KC_HTTP_ERROR;
+    }
+    *out_data = NULL;
+    *out_size = 0;
     if (!ctx) return KC_HTTP_ERROR;
-    ctx->input = (const unsigned char *)data;
-    ctx->input_len = len;
+    if (!body && body_size != 0) {
+        http_set_error(ctx, "build body data is required");
+        return KC_HTTP_ERROR;
+    }
+
+    http_buf_init(&buf);
+    if (http_build(ctx, 0, (const unsigned char *)body, body_size, &buf) != KC_HTTP_OK) {
+        free(buf.data);
+        http_set_error(ctx, "HTTP request build failed");
+        return KC_HTTP_ERROR;
+    }
+    *out_data = buf.data;
+    *out_size = buf.len;
+    http_set_error(ctx, NULL);
     return KC_HTTP_OK;
 }
 
 /**
- * Get the output buffer from the last exec operation.
+ * Build an HTTP response into caller-owned wire data.
  * @param ctx Context pointer.
- * @param out Receives pointer to output buffer (caller does not own).
- * @param out_len Receives output buffer size in bytes.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if ctx is NULL.
+ * @param body Borrowed response body bytes, or NULL when body_size is zero.
+ * @param body_size Number of body bytes.
+ * @param out_data Receives allocated wire data.
+ * @param out_size Receives wire data size.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_get_output(kc_http_t *ctx, unsigned char **out, size_t *out_len) {
+int kc_http_build_response(kc_http_t *ctx, const void *body, size_t body_size,
+void **out_data, size_t *out_size) {
+    http_buf_t buf;
+
+    if (!out_data || !out_size) {
+        if (ctx) http_set_error(ctx, "build output parameters are required");
+        return KC_HTTP_ERROR;
+    }
+    *out_data = NULL;
+    *out_size = 0;
     if (!ctx) return KC_HTTP_ERROR;
-    if (out) *out = ctx->result;
-    if (out_len) *out_len = ctx->result_len;
+    if (!body && body_size != 0) {
+        http_set_error(ctx, "build body data is required");
+        return KC_HTTP_ERROR;
+    }
+
+    http_buf_init(&buf);
+    if (http_build(ctx, 1, (const unsigned char *)body, body_size, &buf) != KC_HTTP_OK) {
+        free(buf.data);
+        http_set_error(ctx, "HTTP response build failed");
+        return KC_HTTP_ERROR;
+    }
+    *out_data = buf.data;
+    *out_size = buf.len;
+    http_set_error(ctx, NULL);
     return KC_HTTP_OK;
 }
 
@@ -2562,219 +2764,195 @@ int kc_http_get_output(kc_http_t *ctx, unsigned char **out, size_t *out_len) {
 void kc_http_close(kc_http_t *ctx) {
     int i;
     if (!ctx) return;
-    free(ctx->result);
     free(ctx->method);
     free(ctx->target);
     free(ctx->version);
     free(ctx->reason);
     for (i = 0; i < ctx->nhdr; i++)      free(ctx->hdrs[i]);
     for (i = 0; i < ctx->ntrailer; i++)  free(ctx->trailers[i]);
-    kc_http_options_free(&ctx->opts);
     free(ctx);
 }
 
 /**
- * Set the operation to perform.
- * @param ctx Context pointer.
- * @param op Operation constant.
+ * Release caller-owned output memory.
+ * @param ptr Output pointer to release.
  * @return None.
  */
-void kc_http_set_op(kc_http_t *ctx, int op) {
-    if (ctx) ctx->op = op;
+void kc_http_free(void *ptr) {
+    free(ptr);
 }
 
 /**
- * Enable multi-message parse mode.
+ * Get the most recent contextual error message.
  * @param ctx Context pointer.
- * @param all Non-zero to parse all messages until EOF.
- * @return None.
+ * @return Error message, or NULL when no error is available.
  */
-void kc_http_set_all(kc_http_t *ctx, int all) {
-    if (ctx) ctx->all = all;
+const char *kc_http_get_error(const kc_http_t *ctx) {
+    if (!ctx || ctx->error[0] == '\0') return NULL;
+    return ctx->error;
 }
 
 /**
  * Set the HTTP method for build request.
  * @param ctx Context pointer.
  * @param method Method string.
- * @return None.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_method(kc_http_t *ctx, const char *method) {
-    if (!ctx) return;
+int kc_http_set_method(kc_http_t *ctx, const char *method) {
+    char *copy;
+
+    if (!ctx) return KC_HTTP_ERROR;
+    copy = http_strdup(method ? method : "GET");
+    if (!copy) {
+        http_set_error(ctx, "method allocation failed");
+        return KC_HTTP_ERROR;
+    }
     free(ctx->method);
-    ctx->method = http_strdup(method);
+    ctx->method = copy;
+    http_set_error(ctx, NULL);
+    return KC_HTTP_OK;
 }
 
 /**
  * Set the request target for build request.
  * @param ctx Context pointer.
  * @param target Target string.
- * @return None.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_target(kc_http_t *ctx, const char *target) {
-    if (!ctx) return;
+int kc_http_set_target(kc_http_t *ctx, const char *target) {
+    char *copy;
+
+    if (!ctx) return KC_HTTP_ERROR;
+    copy = http_strdup(target ? target : "/");
+    if (!copy) {
+        http_set_error(ctx, "target allocation failed");
+        return KC_HTTP_ERROR;
+    }
     free(ctx->target);
-    ctx->target = http_strdup(target);
+    ctx->target = copy;
+    http_set_error(ctx, NULL);
+    return KC_HTTP_OK;
 }
 
 /**
  * Set the HTTP version for build operations.
  * @param ctx Context pointer.
  * @param version Version string.
- * @return None.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_version(kc_http_t *ctx, const char *version) {
-    if (!ctx) return;
+int kc_http_set_version(kc_http_t *ctx, const char *version) {
+    char *copy;
+
+    if (!ctx) return KC_HTTP_ERROR;
+    copy = http_strdup(version ? version : "1.1");
+    if (!copy) {
+        http_set_error(ctx, "version allocation failed");
+        return KC_HTTP_ERROR;
+    }
     free(ctx->version);
-    ctx->version = http_strdup(version);
+    ctx->version = copy;
+    http_set_error(ctx, NULL);
+    return KC_HTTP_OK;
 }
 
 /**
  * Set the response status code.
  * @param ctx Context pointer.
  * @param status HTTP status code.
- * @return None.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_status(kc_http_t *ctx, int status) {
-    if (ctx) ctx->status = status;
+int kc_http_set_status(kc_http_t *ctx, int status) {
+    if (!ctx) return KC_HTTP_ERROR;
+    if (status < 100 || status > 599) {
+        http_set_error(ctx, "invalid HTTP status");
+        return KC_HTTP_ERROR;
+    }
+    ctx->status = status;
+    http_set_error(ctx, NULL);
+    return KC_HTTP_OK;
 }
 
 /**
  * Set the response reason phrase.
  * @param ctx Context pointer.
  * @param reason Reason string.
- * @return None.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_reason(kc_http_t *ctx, const char *reason) {
-    if (!ctx) return;
+int kc_http_set_reason(kc_http_t *ctx, const char *reason) {
+    char *copy;
+
+    if (!ctx) return KC_HTTP_ERROR;
+    if (!reason) {
+        free(ctx->reason);
+        ctx->reason = NULL;
+        http_set_error(ctx, NULL);
+        return KC_HTTP_OK;
+    }
+    copy = http_strdup(reason);
+    if (!copy) {
+        http_set_error(ctx, "reason allocation failed");
+        return KC_HTTP_ERROR;
+    }
     free(ctx->reason);
-    ctx->reason = http_strdup(reason);
+    ctx->reason = copy;
+    http_set_error(ctx, NULL);
+    return KC_HTTP_OK;
 }
 
 /**
  * Enable chunked transfer encoding for build operations.
  * @param ctx Context pointer.
  * @param chunked Non-zero to use chunked encoding.
- * @return None.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_chunked(kc_http_t *ctx, int chunked) {
-    if (ctx) ctx->chunked = chunked;
+int kc_http_set_chunked(kc_http_t *ctx, int chunked) {
+    if (!ctx) return KC_HTTP_ERROR;
+    ctx->chunked = chunked ? 1 : 0;
+    http_set_error(ctx, NULL);
+    return KC_HTTP_OK;
 }
 
 /**
  * Set the chunk size for chunked build operations.
  * @param ctx Context pointer.
- * @param size Chunk size in bytes.
- * @return None.
+ * @param chunk_size Chunk size in bytes.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-void kc_http_set_chunk_size(kc_http_t *ctx, size_t size) {
-    if (ctx && size > 0) ctx->chunk_size = size;
+int kc_http_set_chunk_size(kc_http_t *ctx, size_t chunk_size) {
+    if (!ctx) return KC_HTTP_ERROR;
+    if (chunk_size == 0) {
+        http_set_error(ctx, "chunk size must be non-zero");
+        return KC_HTTP_ERROR;
+    }
+    ctx->chunk_size = chunk_size;
+    http_set_error(ctx, NULL);
+    return KC_HTTP_OK;
 }
 
 /**
  * Add a header for build operations.
  * @param ctx Context pointer.
- * @param header Header string in "name: value" format.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if limit exceeded.
+ * @param name Header name.
+ * @param value Header value.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_add_header(kc_http_t *ctx, const char *header) {
-    if (!ctx || ctx->nhdr >= HTTP_HDR_MAX) return KC_HTTP_ERROR;
-    ctx->hdrs[ctx->nhdr] = http_strdup(header);
-    if (!ctx->hdrs[ctx->nhdr]) return KC_HTTP_ERROR;
-    ctx->nhdr++;
-    return KC_HTTP_OK;
+int kc_http_add_header(kc_http_t *ctx, const char *name, const char *value) {
+    if (!ctx) return KC_HTTP_ERROR;
+    return http_add_field(ctx, ctx->hdrs, &ctx->nhdr, name, value,
+    "header limit exceeded");
 }
 
 /**
  * Add a trailer for chunked build operations.
  * @param ctx Context pointer.
- * @param trailer Trailer string in "name: value" format.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if limit exceeded.
+ * @param name Trailer name.
+ * @param value Trailer value.
+ * @return KC_HTTP_OK on success, or KC_HTTP_ERROR on failure.
  */
-int kc_http_add_trailer(kc_http_t *ctx, const char *trailer) {
-    if (!ctx || ctx->ntrailer >= HTTP_HDR_MAX) return KC_HTTP_ERROR;
-    ctx->trailers[ctx->ntrailer] = http_strdup(trailer);
-    if (!ctx->trailers[ctx->ntrailer]) return KC_HTTP_ERROR;
-    ctx->ntrailer++;
-    return KC_HTTP_OK;
-}
-
-/**
- * Create an options struct initialized with default values.
- * @param none Unused.
- * @return Default-initialized options.
- */
-kc_http_options_t kc_http_options_default(void) {
-    kc_http_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.chunk_size = HTTP_CHUNK_DEFAULT;
-    return opts;
-}
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_http_options_load_env(kc_http_options_t *opts) {
-    int i;
-    if (!opts) return;
-
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        char *end;
-
-        if (!val) continue;
-
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_FLOAT: {
-                float v = strtof(val, &end);
-                if (end != val && *end == '\0') {
-                    *(float *)((char *)opts + env_config_table[i].offset) = v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_STR: {
-                char **p = (char **)((char *)opts + env_config_table[i].offset);
-                free(*p);
-                *p = http_strdup(val);
-                break;
-            }
-        }
-    }
-}
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_http_options_free(kc_http_options_t *opts) {
-    if (!opts) return;
-    free(opts->method);
-    free(opts->target);
-    free(opts->version);
-    opts->method = NULL;
-    opts->target = NULL;
-    opts->version = NULL;
-}
-
-/**
- * Requests a context to stop at the next opportunity.
- * @param ctx HTTP context.
- * @return KC_HTTP_OK on success, or KC_HTTP_ERROR if ctx is NULL.
- */
-int kc_http_stop(kc_http_t *ctx) {
+int kc_http_add_trailer(kc_http_t *ctx, const char *name, const char *value) {
     if (!ctx) return KC_HTTP_ERROR;
-    ctx->stop_requested = 1;
-    return KC_HTTP_OK;
+    return http_add_field(ctx, ctx->trailers, &ctx->ntrailer, name, value,
+    "trailer limit exceeded");
 }
 
 #ifndef KC_HTTP_BUILD_VERSION

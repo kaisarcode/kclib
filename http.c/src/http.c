@@ -98,6 +98,62 @@ static int kc_http_read_stdin(unsigned char **out_data, size_t *out_size) {
 }
 
 /**
+ * Print a contextual library error when one is available.
+ * @param ctx HTTP context pointer.
+ * @param operation Failed operation description.
+ * @return None.
+ */
+static void cli_report_error(const kc_http_t *ctx, const char *operation) {
+    const char *error = kc_http_get_error(ctx);
+
+    if (error) {
+        fprintf(stderr, "http: %s: %s\n", operation, error);
+    } else {
+        fprintf(stderr, "http: %s\n", operation);
+    }
+}
+
+/**
+ * Write caller-owned output bytes to stdout.
+ * @param out Output bytes.
+ * @param out_len Output byte count.
+ * @return 0 on success, -1 on failure.
+ */
+static int cli_write_output(const void *out, size_t out_len) {
+    if (out_len != 0 && fwrite(out, 1, out_len, stdout) != out_len) {
+        fprintf(stderr, "http: stdout write failed\n");
+        return -1;
+    }
+    return 0;
+}
+
+/**
+ * Split a command-line field into a malloc'd name and a borrowed value.
+ * @param field Command-line field in name: value form.
+ * @param value Receives the value portion.
+ * @return Malloc'd name, or NULL for malformed input or allocation failure.
+ */
+static char *cli_split_field(const char *field, const char **value) {
+    const char *colon;
+    const char *field_value;
+    char       *name;
+    size_t      name_len;
+
+    if (!field || !value) return NULL;
+    colon = strchr(field, ':');
+    if (!colon || colon == field) return NULL;
+    name_len = (size_t)(colon - field);
+    name = (char *)malloc(name_len + 1);
+    if (!name) return NULL;
+    memcpy(name, field, name_len);
+    name[name_len] = '\0';
+    field_value = colon + 1;
+    while (*field_value == ' ' || *field_value == '\t') field_value++;
+    *value = field_value;
+    return name;
+}
+
+/**
  * Execute the parse operation and write normalized output to stdout.
  * @param all Parse all messages until EOF.
  * @param body Input bytes.
@@ -105,35 +161,26 @@ static int kc_http_read_stdin(unsigned char **out_data, size_t *out_size) {
  * @return Process exit code.
  */
 static int cli_do_parse(int all, const void *body, size_t body_len) {
-    kc_http_options_t opts;
     kc_http_t *ctx = NULL;
-    unsigned char *out = NULL;
+    void *out = NULL;
     size_t out_len = 0;
+    int rc = 1;
 
-    opts = kc_http_options_default();
-    if (kc_http_open(&ctx, &opts) != KC_HTTP_OK) {
-        kc_http_options_free(&opts);
-        fprintf(stderr, "http: out of memory\n");
+    if (kc_http_open(&ctx) != KC_HTTP_OK) {
+        fprintf(stderr, "http: context allocation failed\n");
         return 1;
     }
-    kc_http_options_free(&opts);
-
-    kc_http_set_op(ctx, KC_HTTP_OP_PARSE);
-    if (all) kc_http_set_all(ctx, 1);
-    kc_http_set_input(ctx, body, body_len);
-
-    if (kc_http_exec(ctx) != KC_HTTP_OK) {
-        kc_http_close(ctx);
-        fprintf(stderr, "http: parse failed\n");
-        return 1;
+    if (kc_http_parse(ctx, body, body_len, all, &out, &out_len) != KC_HTTP_OK) {
+        cli_report_error(ctx, "parse failed");
+        goto done;
     }
+    if (cli_write_output(out, out_len) != 0) goto done;
+    rc = 0;
 
-    kc_http_get_output(ctx, &out, &out_len);
-    if (out != NULL && out_len > 0) {
-        fwrite(out, 1, out_len, stdout);
-    }
+done:
+    kc_http_free(out);
     kc_http_close(ctx);
-    return 0;
+    return rc;
 }
 
 /**
@@ -158,57 +205,69 @@ static int cli_do_build(int response, const char *method,
     const char *target, const char *version, int status, const char *reason,
     int chunked, unsigned long chunk_size, const char **hdrs, int nhdr,
     const char **trl, int ntrl, const void *body, size_t body_len) {
-    kc_http_options_t opts;
     kc_http_t *ctx = NULL;
-    unsigned char *out = NULL;
+    void *out = NULL;
     size_t out_len = 0;
     int i;
+    int rc = 1;
 
-    opts = kc_http_options_default();
-    if (kc_http_open(&ctx, &opts) != KC_HTTP_OK) {
-        kc_http_options_free(&opts);
-        fprintf(stderr, "http: out of memory\n");
+    if (kc_http_open(&ctx) != KC_HTTP_OK) {
+        fprintf(stderr, "http: context allocation failed\n");
         return 1;
     }
-    kc_http_options_free(&opts);
 
-    kc_http_set_op(ctx, response ? KC_HTTP_OP_BUILD_RESPONSE : KC_HTTP_OP_BUILD_REQUEST);
-    if (method)  kc_http_set_method(ctx, method);
-    if (target)  kc_http_set_target(ctx, target);
-    if (version) kc_http_set_version(ctx, version);
-    if (status > 0) kc_http_set_status(ctx, status);
-    if (reason)  kc_http_set_reason(ctx, reason);
-    if (chunked) kc_http_set_chunked(ctx, 1);
-    if (chunk_size > 0) kc_http_set_chunk_size(ctx, (size_t)chunk_size);
+    if ((method && kc_http_set_method(ctx, method) != KC_HTTP_OK) ||
+        (target && kc_http_set_target(ctx, target) != KC_HTTP_OK) ||
+        (version && kc_http_set_version(ctx, version) != KC_HTTP_OK) ||
+        (status > 0 && kc_http_set_status(ctx, status) != KC_HTTP_OK) ||
+        (reason && kc_http_set_reason(ctx, reason) != KC_HTTP_OK) ||
+        (chunked && kc_http_set_chunked(ctx, 1) != KC_HTTP_OK) ||
+        (chunk_size > 0 && kc_http_set_chunk_size(ctx, (size_t)chunk_size) != KC_HTTP_OK)) {
+        cli_report_error(ctx, "build configuration failed");
+        goto done;
+    }
     for (i = 0; i < nhdr; i++) {
-        if (kc_http_add_header(ctx, hdrs[i]) != KC_HTTP_OK) {
-            kc_http_close(ctx);
-            fprintf(stderr, "http: too many headers\n");
-            return 1;
+        const char *value;
+        char *name = cli_split_field(hdrs[i], &value);
+
+        if (!name) {
+            fprintf(stderr, "http: malformed header '%s'\n", hdrs[i]);
+            goto done;
         }
+        if (kc_http_add_header(ctx, name, value) != KC_HTTP_OK) {
+            free(name);
+            cli_report_error(ctx, "add header failed");
+            goto done;
+        }
+        free(name);
     }
     for (i = 0; i < ntrl; i++) {
-        if (kc_http_add_trailer(ctx, trl[i]) != KC_HTTP_OK) {
-            kc_http_close(ctx);
-            fprintf(stderr, "http: too many trailers\n");
-            return 1;
+        const char *value;
+        char *name = cli_split_field(trl[i], &value);
+
+        if (!name) {
+            fprintf(stderr, "http: malformed trailer '%s'\n", trl[i]);
+            goto done;
         }
+        if (kc_http_add_trailer(ctx, name, value) != KC_HTTP_OK) {
+            free(name);
+            cli_report_error(ctx, "add trailer failed");
+            goto done;
+        }
+        free(name);
     }
-    kc_http_set_input(ctx, body, body_len);
+    if ((response ? kc_http_build_response(ctx, body, body_len, &out, &out_len)
+    : kc_http_build_request(ctx, body, body_len, &out, &out_len)) != KC_HTTP_OK) {
+        cli_report_error(ctx, response ? "build response failed" : "build request failed");
+        goto done;
+    }
+    if (cli_write_output(out, out_len) != 0) goto done;
+    rc = 0;
 
-    if (kc_http_exec(ctx) != KC_HTTP_OK) {
-        kc_http_close(ctx);
-        fprintf(stderr, "http: %s failed\n",
-            response ? "build response" : "build request");
-        return 1;
-    }
-
-    kc_http_get_output(ctx, &out, &out_len);
-    if (out != NULL && out_len > 0) {
-        fwrite(out, 1, out_len, stdout);
-    }
+done:
+    kc_http_free(out);
     kc_http_close(ctx);
-    return 0;
+    return rc;
 }
 
 /**

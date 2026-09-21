@@ -158,18 +158,17 @@ The consumer uses `body.length` to determine the exact end of each body.
 ```c
 #include "libhttp.h"
 
-kc_http_options_t opts = kc_http_options_default();
 kc_http_t *ctx = NULL;
-kc_http_open(&ctx, &opts);
-kc_http_options_free(&opts);
+if (kc_http_open(&ctx) != KC_HTTP_OK) {
+    /* allocation failed */
+}
 
-kc_http_set_op(ctx, KC_HTTP_OP_PARSE);
-kc_http_set_input(ctx, data, len);
-kc_http_exec(ctx);
-
-unsigned char *out = NULL;
-size_t out_len = 0;
-kc_http_get_output(ctx, &out, &out_len); /* caller does not own */
+void *out = NULL;
+size_t out_size = 0;
+if (kc_http_parse(ctx, data, data_size, 0, &out, &out_size) != KC_HTTP_OK) {
+    fprintf(stderr, "%s\n", kc_http_get_error(ctx));
+}
+kc_http_free(out);
 
 kc_http_close(ctx);
 ```
@@ -177,24 +176,30 @@ kc_http_close(ctx);
 Build a response programmatically:
 
 ```c
-kc_http_set_op(ctx, KC_HTTP_OP_BUILD_RESPONSE);
 kc_http_set_status(ctx, 200);
-kc_http_add_header(ctx, "content-type: text/plain");
-kc_http_set_input(ctx, body, body_len);
-kc_http_exec(ctx);
+kc_http_add_header(ctx, "content-type", "text/plain");
+kc_http_build_response(ctx, body, body_size, &out, &out_size);
+kc_http_free(out);
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_http_open()` allocates a context and deep-copies the options.
-- `kc_http_set_*` / `kc_http_add_*` configure the operation.
-- `kc_http_set_input()` supplies the wire or body bytes for the next exec.
-- `kc_http_exec()` performs the configured operation.
-- `kc_http_get_output()` borrows the result buffer from the last exec.
-- `kc_http_stop()` requests a stop at the next parsing opportunity.
-- `kc_http_close()` frees all owned memory.
+- `kc_http_open(&ctx)` creates a reusable configuration context.
+- The `kc_http_set_*` and `kc_http_add_*` functions copy their configuration
+    into the context. Headers and trailers use separate `name` and `value`
+    arguments.
+- `kc_http_parse(ctx, data, data_size, all, &out, &out_size)` parses the
+    borrowed wire input supplied for that call. Set `all` non-zero to parse all
+    complete messages from that input.
+- `kc_http_build_request()` and `kc_http_build_response()` build from the
+    borrowed body bytes supplied for that call, using the context configuration.
+- Successful parse and build calls return caller-owned binary output through
+    `out`; release it with `kc_http_free()`.
+- `kc_http_get_error(ctx)` returns a borrowed contextual error string. Do not
+    free it.
+- `kc_http_close(ctx)` releases the context and its copied configuration.
 
 `http.c` owns HTTP framing completely. Callers provide raw payload bytes and receive logical payload bytes. Wire framing details (chunk syntax, Content-Length, CRLF) are never exposed to the caller.
 
