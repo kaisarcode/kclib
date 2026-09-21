@@ -44,7 +44,7 @@ if(EMSCRIPTEN)
     target_link_options(lng_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_lng_options_default,_kc_lng_options_load_env,_kc_lng_options_free,_kc_lng_open,_kc_lng_close,_kc_lng_stop,_kc_lng_stop_requested,_kc_lng_init,_kc_lng_detect,_kc_lng_detect_top,_kc_lng_detect_ctx,_kc_lng_version
+        -sEXPORTED_FUNCTIONS=_kc_lng_detect,_kc_lng_free,_kc_lng_version
     )
 endif()
 

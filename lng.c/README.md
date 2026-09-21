@@ -36,8 +36,8 @@ EOF terminates the one-shot request and the process exits.
 
 | Flag | Description |
 | :--- | :--- |
-| `-t`, `--threshold <n>` | Minimum score threshold |
-| `-l`, `--limit <n>` | Maximum number of results |
+| `-t`, `--threshold <n>` | Minimum score threshold (default `0.001`) |
+| `-l`, `--limit <n>` | Maximum number of results (default `1`) |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
@@ -56,23 +56,65 @@ en: 0.9500
 es: 0.0400
 ```
 
+Defaults are threshold `0.001` and limit `1`. Limit `1` prints only the code; larger limits print `code: score` with four decimal places. Empty input produces no output.
+
+---
+
 ## Public API
+
+Stateless detection over heap-allocated results. No handle or explicit initialization required - internal language profiles are initialized automatically exactly once with platform once-control and remain read-only thereafter, safe for concurrent detection.
+
+Scores are heuristic ranking values in `[0, 1]` shaped for thresholding, not calibrated probabilities.
 
 ```c
 #include "liblng.h"
 
-kc_lng_init();
+#define KC_LNG_OK 0
+#define KC_LNG_ERROR -1
 
-const char *code = kc_lng_detect("Hello world");
+typedef struct {
+    const char *code;  // borrowed static storage, do not free or modify
+    double score;      // heuristic ranking value, not a probability
+} kc_lng_result_t;
 
-kc_lng_result_t results[3];
-int count = kc_lng_detect_top("Hello world", results, 3, 0.1);
+int kc_lng_detect(const char *text, double threshold, size_t limit,
+                  kc_lng_result_t **out_results, size_t *out_count);
+void kc_lng_free(void *ptr);
+uint64_t kc_lng_version(void);
+```
+
+- `kc_lng_detect` - stateless detection. Sanitizes/normalizes text internally, scores against all compiled profiles, sorts descending, filters below `threshold` (`[0, 1]`), bounds output by `limit`. `NULL` or empty text yields zero results (`KC_LNG_OK` with `*out_count == 0`). On success `*out_results` points to a heap-allocated array owned by the caller; on zero results or error `*out_results` is set to `NULL`. Returns `KC_LNG_OK` on success (including zero matches), `KC_LNG_ERROR` on invalid arguments or allocation failure.
+- Ownership - array returned via `out_results` is heap-allocated and caller-owned; release with `kc_lng_free()`. Each `code` string points to static library-owned storage; caller must not free or modify it. Detection does not retain input.
+- `kc_lng_free` - release memory allocated by `kc_lng_detect`. `NULL` safe (no-op).
+- `kc_lng_version` - returns build version as Unix timestamp.
+- Threshold filters results; limit bounds output count. Zero matches is a successful result with count zero, not an error. No network, external model, or persistent state is required.
+
+### Example
+
+```c
+#include "liblng.h"
+
+kc_lng_result_t *results = NULL;
+size_t count = 0;
+
+if (kc_lng_detect(
+    "Hello world",
+    0.001,
+    3,
+    &results,
+    &count
+) == KC_LNG_OK) {
+    for (size_t i = 0; i < count; i++) {
+        // results[i].code is borrowed static storage; results[i].score is heuristic
+    }
+}
+
+kc_lng_free(results);
 ```
 
 ## Lifecycle
 
-- `kc_lng_init()` - initializes internal language profiles. This call is idempotent and thread-safe.
-- `kc_lng_detect()` and `kc_lng_detect_top()` - perform language detection. Both call `kc_lng_init()` internally if not yet initialized. Once initialized, all state is read-only and safe for concurrent access.
+No explicit initialization required. Internal profiles are initialized automatically on first detection, exactly once, in a thread-safe manner. Once initialized, profile state remains read-only and safe for concurrent detection without additional synchronization. Results are sorted by descending heuristic score. Scores remain heuristic ranking values, not probabilities or confidence percentages.
 
 ---
 

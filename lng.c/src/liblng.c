@@ -19,7 +19,6 @@
 #include <string.h>
 
 #include <stddef.h>
-#include <signal.h>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -103,44 +102,6 @@ static INIT_ONCE kc_lng_once = INIT_ONCE_STATIC_INIT;
 #else
 static pthread_once_t kc_lng_once = PTHREAD_ONCE_INIT;
 #endif
-
-typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_FLOAT,
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_LNG_THRESHOLD", offsetof(kc_lng_options_t, threshold), KC_ENV_TYPE_FLOAT },
-    { "KC_LNG_LIMIT", offsetof(kc_lng_options_t, limit), KC_ENV_TYPE_INT },
-};
-static const int env_config_table_n =
-    sizeof(env_config_table) / sizeof(env_config_table[0]);
-
-struct kc_lng {
-    kc_lng_options_t opts;
-    volatile sig_atomic_t stop_requested;
-};
-
-/**
- * Normalizes one limit value to the supported runtime range.
- * @param limit Requested result limit.
- * @return Clamped limit value.
- */
-static int kc_lng_limit_normalize(int limit) {
-    if (limit < 1) {
-        return 1;
-    }
-    if (limit > KC_LNG_MAX_LANGS) {
-        return KC_LNG_MAX_LANGS;
-    }
-    return limit;
-}
 
 /**
  * Returns the byte length of a UTF-8 sequence from its lead byte.
@@ -472,239 +433,109 @@ static BOOL CALLBACK kc_lng_init_once_win(
 #endif
 
 /**
- * Builds default options with threshold 0.001 and limit 1.
- * @return Default-initialized options.
+ * Ensures internal language profiles are initialized via once-control.
+ * @return KC_LNG_OK on success, KC_LNG_ERROR on failure.
  */
-kc_lng_options_t kc_lng_options_default(void) {
-    kc_lng_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.threshold = 0.001;
-    opts.limit = 1;
-    return opts;
-}
-
-/**
- * Overrides options fields from KC_LNG_* environment variables.
- * @return None.
- */
-void kc_lng_options_load_env(kc_lng_options_t *opts) {
-    int i;
-    if (!opts) return;
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        char *end;
-        if (!val) continue;
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_FLOAT: {
-                double v = strtod(val, &end);
-                if (end != val && *end == '\0') {
-                    *(double *)((char *)opts + env_config_table[i].offset) = v;
-                }
-                break;
-            }
-        }
-    }
-}
-
-/**
- * Releases resources held by options (currently a no-op).
- * @return None.
- */
-void kc_lng_options_free(kc_lng_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Creates a new language detection context.
- * @param out Destination for the context pointer.
- * @param opts Configuration options.
- * @return KC_LNG_OK on success, or KC_LNG_ERROR on failure.
- */
-int kc_lng_open(kc_lng_t **out, const kc_lng_options_t *opts) {
-    kc_lng_t *ctx;
-
-    if (!out || !opts) return KC_LNG_ERROR;
-
-    ctx = (kc_lng_t *)calloc(1, sizeof(kc_lng_t));
-    if (!ctx) return KC_LNG_ERROR;
-
-    ctx->opts = *opts;
-    ctx->opts.limit = kc_lng_limit_normalize(ctx->opts.limit);
-    *out = ctx;
-    return KC_LNG_OK;
-}
-
-/**
- * Releases a language detection context.
- * @param ctx Context pointer (NULL safe).
- * @return KC_LNG_OK.
- */
-int kc_lng_close(kc_lng_t *ctx) {
-    if (!ctx) return KC_LNG_OK;
-
-    kc_lng_options_free(&ctx->opts);
-    free(ctx);
-    return KC_LNG_OK;
-}
-
-/**
- * Requests clean termination for one language detection context.
- * @param ctx Context pointer.
- * @return KC_LNG_OK on success, or KC_LNG_ERROR on failure.
- */
-int kc_lng_stop(kc_lng_t *ctx) {
-    if (!ctx) return KC_LNG_ERROR;
-    ctx->stop_requested = 1;
-    return KC_LNG_OK;
-}
-
-/**
- * Returns whether stop has been requested on the context.
- * @param ctx Context pointer.
- * @return 1 when stop was requested, otherwise 0.
- */
-int kc_lng_stop_requested(kc_lng_t *ctx) {
-    if (!ctx) {
-        return 0;
-    }
-    return ctx->stop_requested ? 1 : 0;
-}
-
-/**
- * Initializes internal language profiles via once-control.
- * @return KC_LNG_OK on success, KC_LNG_EINIT on failure.
- */
-int kc_lng_init(void) {
+static int kc_lng_ensure_initialized(void) {
 #ifdef _WIN32
     if (InitOnceExecuteOnce(&kc_lng_once, kc_lng_init_once_win, NULL, NULL)) {
         return KC_LNG_OK;
     }
-    return KC_LNG_EINIT;
+    return KC_LNG_ERROR;
 #else
     if (pthread_once(&kc_lng_once, kc_lng_init_once) != 0) {
-        return KC_LNG_EINIT;
+        return KC_LNG_ERROR;
     }
     return KC_LNG_OK;
 #endif
 }
 
 /**
- * Detects the best matching language for input text.
- * @param text Input text to analyze.
- * @return Best matching language code, or NULL when no match is found.
+ * Detect languages for input text.
+ * Summary: Detect languages for input text.
+ *
+ * @param text Input text.
+ * @param threshold Minimum score threshold.
+ * @param limit Maximum number of results.
+ * @param out_results Output array (caller-owned).
+ * @param out_count Output count.
+ * @return KC_LNG_OK on success, KC_LNG_ERROR on failure.
  */
-const char *kc_lng_detect(const char *text) {
-    kc_lng_result_t result;
-
-    if (kc_lng_detect_top(text, &result, 1, 0.001) != 1) {
-        return NULL;
-    }
-
-    return result.code;
-}
-
-/**
- * Detects top matching languages for input text.
- * @param text Input text to analyze.
- * @param out Caller-provided output buffer for results.
- * @param max_results Maximum number of results to write into out.
- * @param threshold Minimum score required for a result to be included.
- * @return Number of results written to out.
- */
-int kc_lng_detect_top(
-    const char *text,
-    kc_lng_result_t *out,
-    int max_results,
-    double threshold
-) {
+int kc_lng_detect(const char *text, double threshold, size_t limit, kc_lng_result_t **out_results, size_t *out_count) {
     kc_lng_rank_t ranks[KC_LNG_MAX_LANGS];
-    int lang_count;
-    int i;
-    int written;
+    size_t lang_count;
+    size_t filtered_count;
+    size_t i;
+    int idx;
 
-    if (text == NULL || out == NULL || max_results <= 0) {
-        return 0;
+    if (out_results) {
+        *out_results = NULL;
+    }
+    if (out_count) {
+        *out_count = 0;
     }
 
-    if (kc_lng_init() != KC_LNG_OK) {
-        return 0;
+    if (text == NULL || out_results == NULL || out_count == NULL || limit == 0 || !isfinite(threshold) || threshold < 0.0 || threshold > 1.0) {
+        return KC_LNG_ERROR;
+    }
+
+    if (limit > KC_LNG_MAX_LANGS) {
+        limit = KC_LNG_MAX_LANGS;
+    }
+
+    if (kc_lng_ensure_initialized() != KC_LNG_OK) {
+        return KC_LNG_ERROR;
     }
 
     lang_count = 0;
-    for (i = 0; i < KC_LNG_MAX_LANGS && kc_lng_langs[i].code != NULL; i++) {
-        ranks[lang_count].code = kc_lng_langs[i].code;
-        ranks[lang_count].score = kc_lng_score(text, &kc_lng_langs[i]);
+    for (idx = 0; idx < KC_LNG_MAX_LANGS && kc_lng_langs[idx].code != NULL; idx++) {
+        ranks[lang_count].code = kc_lng_langs[idx].code;
+        ranks[lang_count].score = kc_lng_score(text, &kc_lng_langs[idx]);
         lang_count++;
     }
 
-    qsort(ranks, (size_t)lang_count, sizeof(ranks[0]), kc_lng_rank_cmp);
+    qsort(ranks, lang_count, sizeof(ranks[0]), kc_lng_rank_cmp);
 
-    written = 0;
-    for (i = 0; i < lang_count && written < max_results; i++) {
+    filtered_count = 0;
+    for (i = 0; i < lang_count && filtered_count < limit; i++) {
         if (ranks[i].score >= threshold) {
-            out[written].code = ranks[i].code;
-            out[written].score = ranks[i].score;
-            written++;
+            filtered_count++;
         }
     }
 
-    return written;
+    if (filtered_count == 0) {
+        return KC_LNG_OK;
+    }
+
+    {
+        kc_lng_result_t *arr = (kc_lng_result_t *)malloc(filtered_count * sizeof(*arr));
+        size_t written = 0;
+        if (arr == NULL) {
+            return KC_LNG_ERROR;
+        }
+        for (i = 0; i < lang_count && written < filtered_count; i++) {
+            if (ranks[i].score >= threshold) {
+                arr[written].code = ranks[i].code;
+                arr[written].score = ranks[i].score;
+                written++;
+            }
+        }
+        *out_results = arr;
+        *out_count = filtered_count;
+    }
+
+    return KC_LNG_OK;
 }
 
 /**
- * Detects language using a specific context and observes stop state.
- * @param ctx Context pointer.
- * @param text Input text to analyze.
- * @param out Caller-provided output buffer for results.
- * @param max_results Maximum number of results to write into out.
- * @param threshold Minimum score required for a result to be included.
- * @return Number of results written to out.
+ * Release memory allocated by kc_lng_detect.
+ * Summary: Release memory allocated by kc_lng_detect.
+ *
+ * @param ptr Pointer returned via out_results (NULL safe, no-op on NULL).
+ * @return None.
  */
-int kc_lng_detect_ctx(kc_lng_t *ctx, const char *text, kc_lng_result_t *out, int max_results, double threshold) {
-    kc_lng_rank_t ranks[KC_LNG_MAX_LANGS];
-    int lang_count;
-    int i;
-    int written;
-
-    if (!ctx || text == NULL || out == NULL || max_results <= 0) {
-        return 0;
-    }
-
-    if (kc_lng_init() != KC_LNG_OK) {
-        return 0;
-    }
-
-    lang_count = 0;
-    for (i = 0; i < KC_LNG_MAX_LANGS && kc_lng_langs[i].code != NULL; i++) {
-        if (ctx->stop_requested) break;
-        ranks[lang_count].code = kc_lng_langs[i].code;
-        ranks[lang_count].score = kc_lng_score(text, &kc_lng_langs[i]);
-        lang_count++;
-    }
-
-    if (ctx->stop_requested) {
-        return 0;
-    }
-
-    qsort(ranks, (size_t)lang_count, sizeof(ranks[0]), kc_lng_rank_cmp);
-
-    written = 0;
-    for (i = 0; i < lang_count && written < max_results; i++) {
-        if (ranks[i].score >= threshold) {
-            out[written].code = ranks[i].code;
-            out[written].score = ranks[i].score;
-            written++;
-        }
-    }
-
-    return written;
+void kc_lng_free(void *ptr) {
+    free(ptr);
 }
 
 #ifndef KC_LNG_BUILD_VERSION

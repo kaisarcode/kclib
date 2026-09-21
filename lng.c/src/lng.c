@@ -173,14 +173,18 @@ int main(int argc, char **argv) {
     int i;
     int exit_code;
     char *input;
-    kc_lng_result_t results[32];
-    int count;
-    int j;
+    kc_lng_result_t *results;
+    size_t count;
+    size_t j;
+    int rc;
 
     text = NULL;
     threshold = 0.001;
     limit = 1;
     exit_code = 0;
+    input = NULL;
+    results = NULL;
+    count = 0;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -247,22 +251,43 @@ int main(int argc, char **argv) {
     input = NULL;
 
     if (text) {
-        count = kc_lng_detect_top(text, results, limit, threshold);
+        rc = kc_lng_detect(text, threshold, (size_t)limit, &results, &count);
+        if (rc != KC_LNG_OK) {
+            fprintf(stderr, "lng: detection failed\n");
+            kc_lng_free(results);
+            results = NULL;
+            exit_code = 1;
+            goto cleanup;
+        }
     } else {
         if (kc_lng_read_all(KC_LNG_STDIN_FD, &input) != 0) {
             fprintf(stderr, "lng: failed to read stdin\n");
             free(input);
+            input = NULL;
+            kc_lng_free(results);
+            results = NULL;
             exit_code = 1;
             goto cleanup;
         }
 
         if (input == NULL || input[0] == '\0') {
             free(input);
+            input = NULL;
+            kc_lng_free(results);
+            results = NULL;
             goto cleanup;
         }
 
-        count = kc_lng_detect_top(input, results, limit, threshold);
+        rc = kc_lng_detect(input, threshold, (size_t)limit, &results, &count);
         free(input);
+        input = NULL;
+        if (rc != KC_LNG_OK) {
+            fprintf(stderr, "lng: detection failed\n");
+            kc_lng_free(results);
+            results = NULL;
+            exit_code = 1;
+            goto cleanup;
+        }
     }
 
     for (j = 0; j < count; j++) {
@@ -273,6 +298,11 @@ int main(int argc, char **argv) {
         }
     }
 
+    kc_lng_free(results);
+    results = NULL;
+
 cleanup:
+    free(input);
+    kc_lng_free(results);
     return exit_code;
 }
