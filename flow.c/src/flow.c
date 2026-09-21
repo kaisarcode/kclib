@@ -23,6 +23,19 @@
 #include <io.h>
 #endif
 
+#define KC_FLOW_CLI_MAX_OVERLAYS 256
+
+typedef enum {
+    KC_FLOW_CLI_SET,
+    KC_FLOW_CLI_UNSET
+} kc_flow_cli_op_kind;
+
+typedef struct {
+    kc_flow_cli_op_kind kind;
+    char *key;
+    char *value;
+} kc_flow_cli_op;
+
 /**
  * Read standard input into memory.
  * @param output Output buffer pointer.
@@ -141,19 +154,15 @@ static int kc_flow_cli_fail(const char *message) {
 int main(int argc, char **argv) {
     const char *run_path = NULL;
     const char *link = NULL;
-    char *set_keys[256];
-    char *set_vals[256];
-    int set_count = 0;
-    char *unset_keys[256];
-    int unset_count = 0;
+    kc_flow_cli_op ops[KC_FLOW_CLI_MAX_OVERLAYS];
+    int op_count = 0;
     char *input = NULL;
     size_t input_size = 0;
-    char *output = NULL;
+    void *output = NULL;
     size_t output_size = 0;
-    kc_flow_options_t opts;
     kc_flow_t *ctx = NULL;
     int i;
-    int rc;
+    int rc = 0;
 
     if (argc == 1) {
         kc_flow_cli_help(argv[0]);
@@ -163,103 +172,116 @@ int main(int argc, char **argv) {
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             kc_flow_cli_help(argv[0]);
-            return 0;
+            goto cleanup;
         }
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             kc_flow_cli_version();
-            return 0;
+            goto cleanup;
         }
         if (strcmp(argv[i], "--link") == 0) {
             if (++i >= argc) {
-                return kc_flow_cli_fail("missing value for --link");
+                rc = kc_flow_cli_fail("missing value for --link");
+                goto cleanup;
             }
             link = argv[i];
         } else if (strcmp(argv[i], "--set") == 0) {
             const char *eq;
             size_t key_size;
             if (++i >= argc) {
-                return kc_flow_cli_fail("missing value for --set");
+                rc = kc_flow_cli_fail("missing value for --set");
+                goto cleanup;
             }
             eq = strchr(argv[i], '=');
             if (!eq || eq == argv[i]) {
-                return kc_flow_cli_fail("invalid --set value");
+                rc = kc_flow_cli_fail("invalid --set value");
+                goto cleanup;
             }
             key_size = (size_t)(eq - argv[i]);
             if (key_size >= 256) {
-                return kc_flow_cli_fail("overlay key too long");
+                rc = kc_flow_cli_fail("overlay key too long");
+                goto cleanup;
             }
-            set_keys[set_count] = (char *)malloc(key_size + 1);
-            set_vals[set_count] = strdup(eq + 1);
-            if (set_keys[set_count] == NULL || set_vals[set_count] == NULL) {
-                free(set_keys[set_count]);
-                free(set_vals[set_count]);
-                return kc_flow_cli_fail("allocation failure");
+            if (op_count >= KC_FLOW_CLI_MAX_OVERLAYS) {
+                rc = kc_flow_cli_fail("too many overlays");
+                goto cleanup;
             }
-            memcpy(set_keys[set_count], argv[i], key_size);
-            set_keys[set_count][key_size] = '\0';
-            set_count++;
+            ops[op_count].kind = KC_FLOW_CLI_SET;
+            ops[op_count].key = (char *)malloc(key_size + 1);
+            ops[op_count].value = strdup(eq + 1);
+            if (ops[op_count].key == NULL || ops[op_count].value == NULL) {
+                free(ops[op_count].key);
+                free(ops[op_count].value);
+                rc = kc_flow_cli_fail("allocation failure");
+                goto cleanup;
+            }
+            memcpy(ops[op_count].key, argv[i], key_size);
+            ops[op_count].key[key_size] = '\0';
+            op_count++;
         } else if (strcmp(argv[i], "--unset") == 0) {
             if (++i >= argc) {
-                return kc_flow_cli_fail("missing value for --unset");
+                rc = kc_flow_cli_fail("missing value for --unset");
+                goto cleanup;
             }
-            unset_keys[unset_count] = strdup(argv[i]);
-            if (unset_keys[unset_count] == NULL) {
-                return kc_flow_cli_fail("allocation failure");
+            if (op_count >= KC_FLOW_CLI_MAX_OVERLAYS) {
+                rc = kc_flow_cli_fail("too many overlays");
+                goto cleanup;
             }
-            unset_count++;
+            ops[op_count].kind = KC_FLOW_CLI_UNSET;
+            ops[op_count].key = strdup(argv[i]);
+            ops[op_count].value = NULL;
+            if (ops[op_count].key == NULL) {
+                rc = kc_flow_cli_fail("allocation failure");
+                goto cleanup;
+            }
+            op_count++;
         } else if (argv[i][0] == '-') {
-            return kc_flow_cli_fail("unknown option");
+            rc = kc_flow_cli_fail("unknown option");
+            goto cleanup;
         } else if (run_path == NULL) {
             run_path = argv[i];
         } else {
-            return kc_flow_cli_fail("unexpected positional argument");
+            rc = kc_flow_cli_fail("unexpected positional argument");
+            goto cleanup;
         }
     }
 
     if (!run_path) {
-        return kc_flow_cli_fail("missing flow file");
+        rc = kc_flow_cli_fail("missing flow file");
+        goto cleanup;
     }
 
     if (kc_flow_cli_read_input(&input, &input_size) != KC_FLOW_OK) {
-        for (i = 0; i < set_count; i++) { free(set_keys[i]); free(set_vals[i]); }
-        for (i = 0; i < unset_count; i++) free(unset_keys[i]);
-        return kc_flow_cli_fail("unable to read stdin");
+        rc = kc_flow_cli_fail("unable to read stdin");
+        goto cleanup;
     }
 
-    opts = kc_flow_options_default();
-    if (kc_flow_open(&ctx, &opts) != KC_FLOW_OK) {
-        free(input);
-        for (i = 0; i < set_count; i++) { free(set_keys[i]); free(set_vals[i]); }
-        for (i = 0; i < unset_count; i++) free(unset_keys[i]);
-        return kc_flow_cli_fail("allocation failure");
+    if (kc_flow_open(&ctx) != KC_FLOW_OK) {
+        rc = kc_flow_cli_fail("allocation failure");
+        goto cleanup;
     }
 
-    for (i = 0; i < set_count; i++) {
-        if (kc_flow_set(ctx, set_keys[i], set_vals[i]) != KC_FLOW_OK) {
-            rc = kc_flow_cli_fail("invalid --set overlay");
-            goto cleanup;
-        }
-    }
-
-    for (i = 0; i < unset_count; i++) {
-        if (kc_flow_unset(ctx, unset_keys[i]) != KC_FLOW_OK) {
-            rc = kc_flow_cli_fail("invalid --unset overlay");
-            goto cleanup;
+    for (i = 0; i < op_count; i++) {
+        if (ops[i].kind == KC_FLOW_CLI_SET) {
+            if (kc_flow_set(ctx, ops[i].key, ops[i].value) != KC_FLOW_OK) {
+                rc = kc_flow_cli_fail("invalid --set overlay");
+                goto cleanup;
+            }
+        } else {
+            if (kc_flow_unset(ctx, ops[i].key) != KC_FLOW_OK) {
+                rc = kc_flow_cli_fail("invalid --unset overlay");
+                goto cleanup;
+            }
         }
     }
 
     if (link) {
-        rc = kc_flow_exec_entry(ctx, run_path, link, input, input_size, &output, &output_size);
+        rc = kc_flow_exec(ctx, run_path, link, input, input_size, &output, &output_size);
     } else {
-        rc = kc_flow_exec(ctx, run_path, input, input_size, &output, &output_size);
+        rc = kc_flow_exec(ctx, run_path, NULL, input, input_size, &output, &output_size);
     }
 
-    free(input);
-    for (i = 0; i < set_count; i++) { free(set_keys[i]); free(set_vals[i]); }
-    for (i = 0; i < unset_count; i++) free(unset_keys[i]);
-
     if (rc != KC_FLOW_OK) {
-        const char *err = kc_flow_strerror(ctx);
+        const char *err = kc_flow_get_error(ctx);
         fprintf(stderr, "flow: %s\n", err ? err : "execution failed");
         rc = 1;
         goto cleanup;
@@ -275,6 +297,11 @@ int main(int argc, char **argv) {
     rc = 0;
 
 cleanup:
+    for (i = 0; i < op_count; i++) {
+        free(ops[i].key);
+        free(ops[i].value);
+    }
+    if (input) free(input);
     if (output) kc_flow_free(output);
     kc_flow_close(ctx);
     return rc;

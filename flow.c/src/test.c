@@ -267,6 +267,18 @@ static int write_all_fixtures(const char *dir) {
         "node.right.link=left\n") != 0)
         return 1;
 #endif
+    if (write_fixture(dir, "empty.flow",
+        "flow.link=pass\n"
+        "node.pass.exec=\n") != 0)
+        return 1;
+    if (write_fixture(dir, "size.flow",
+        "flow.id=sizefan\n"
+        "flow.link=root\n"
+        "node.root.link=left\n"
+        "node.root.link=right\n"
+        "node.left.exec=echo Left\n"
+        "node.right.exec=echo Right\n") != 0)
+        return 1;
     return 0;
 }
 
@@ -276,71 +288,23 @@ static int write_all_fixtures(const char *dir) {
  */
 static int case_kc_flow_open(void) {
     const char *name = "kc_flow_open";
-    const char *detail = "open validates inputs and allocates context";
-    kc_flow_options_t opts;
+    const char *detail = "open validates inputs and sets context pointer";
     kc_flow_t *ctx;
+    kc_flow_t *first;
     int fail;
 
-    opts = kc_flow_options_default();
     ctx = NULL;
+    first = NULL;
     fail = 0;
-    fail += expect_int("open NULL out", KC_FLOW_ERROR, kc_flow_open(NULL, &opts));
-    fail += expect_int("open NULL opts", KC_FLOW_ERROR, kc_flow_open(&ctx, NULL));
-    fail += expect_int("open valid context", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
+    fail += expect_int("open NULL out", KC_FLOW_ERROR, kc_flow_open(NULL));
+    fail += expect_int("open valid context", KC_FLOW_OK, kc_flow_open(&ctx));
+    fail += expect_true("open sets out", ctx != NULL);
+    fail += expect_string("fresh ctx get_error", "", kc_flow_get_error(ctx));
+    first = ctx;
+    fail += expect_int("open overwrites same pointer", KC_FLOW_OK, kc_flow_open(&ctx));
+    fail += expect_true("open replaces context", ctx != NULL && ctx != first);
     kc_flow_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_flow_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_flow_options_default(void) {
-    const char *name = "kc_flow_options_default";
-    const char *detail = "default options initialize correctly";
-    kc_flow_options_t opts;
-
-    opts = kc_flow_options_default();
-    int fail = expect_int("default options are zero initialized", 0, (int)opts.reserved);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_flow_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_flow_options_load_env(void) {
-    const char *name = "kc_flow_options_load_env";
-    const char *detail = "options load from environment";
-    kc_flow_options_t opts;
-    int fail;
-
-    opts = kc_flow_options_default();
-    fail = 0;
-    kc_flow_options_load_env(&opts);
-    fail += expect_int("load_env preserves options", 0, (int)opts.reserved);
-    kc_flow_options_load_env(NULL);
-    kc_flow_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_flow_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_flow_options_free(void) {
-    const char *name = "kc_flow_options_free";
-    const char *detail = "options free releases resources";
-    kc_flow_options_t opts;
-    int fail;
-
-    opts = kc_flow_options_default();
-    kc_flow_options_free(&opts);
-    kc_flow_options_free(NULL);
-    fail = expect_int("options free preserves reserved field", 0, (int)opts.reserved);
+    kc_flow_close(first);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -352,14 +316,12 @@ static int case_kc_flow_options_free(void) {
 static int case_kc_flow_close(void) {
     const char *name = "kc_flow_close";
     const char *detail = "close releases context";
-    kc_flow_options_t opts;
     kc_flow_t *ctx;
     int fail;
 
-    opts = kc_flow_options_default();
     ctx = NULL;
     fail = 0;
-    fail += expect_int("open before close", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
+    fail += expect_int("open before close", KC_FLOW_OK, kc_flow_open(&ctx));
     kc_flow_close(NULL);
     kc_flow_close(ctx);
     case_result(fail, name, detail);
@@ -372,47 +334,28 @@ static int case_kc_flow_close(void) {
  */
 static int case_kc_flow_stop(void) {
     const char *name = "kc_flow_stop";
-    const char *detail = "stop sets flag on context";
-    kc_flow_options_t opts;
-    kc_flow_t *first;
-    kc_flow_t *second;
+    const char *detail = "stop is idempotent and cooperative; exec on a stopped context fails";
+    kc_flow_t *ctx;
+    char tmpdir[320];
+    char path[640];
+    void *out;
+    size_t out_size;
     int fail;
 
-    opts = kc_flow_options_default();
-    first = NULL;
-    second = NULL;
+    ctx = NULL;
+    out = NULL;
+    out_size = 0;
     fail = 0;
     fail += expect_int("stop NULL ctx", KC_FLOW_ERROR, kc_flow_stop(NULL));
-    fail += expect_int("open first context", KC_FLOW_OK, kc_flow_open(&first, &opts));
-    fail += expect_int("open second context", KC_FLOW_OK, kc_flow_open(&second, &opts));
-    fail += expect_int("stop first context", KC_FLOW_OK, kc_flow_stop(first));
-    fail += expect_int("stop first context again", KC_FLOW_OK, kc_flow_stop(first));
-    fail += expect_int("stop second context", KC_FLOW_OK, kc_flow_stop(second));
-    kc_flow_close(first);
-    kc_flow_close(second);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_flow_stop_requested.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_flow_stop_requested(void) {
-    const char *name = "kc_flow_stop_requested";
-    const char *detail = "stop_requested reports flag state";
-    kc_flow_options_t opts;
-    kc_flow_t *ctx;
-    int fail;
-
-    opts = kc_flow_options_default();
-    ctx = NULL;
-    fail = 0;
-    fail += expect_int("stop_requested NULL ctx", 0, kc_flow_stop_requested(NULL));
-    fail += expect_int("open for stop_requested", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
-    fail += expect_int("stop_requested not set", 0, kc_flow_stop_requested(ctx));
-    fail += expect_int("stop sets flag", KC_FLOW_OK, kc_flow_stop(ctx));
-    fail += expect_int("stop_requested set", 1, kc_flow_stop_requested(ctx));
+    if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
+    if (write_all_fixtures(tmpdir) != 0) return 1;
+    if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open for stop", KC_FLOW_OK, kc_flow_open(&ctx));
+    fail += expect_int("stop context", KC_FLOW_OK, kc_flow_stop(ctx));
+    fail += expect_int("stop context again", KC_FLOW_OK, kc_flow_stop(ctx));
+    fail += expect_int("exec on stopped context", KC_FLOW_ESTOP,
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("stopped exec clears output", out == NULL && out_size == 0);
     kc_flow_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -424,16 +367,15 @@ static int case_kc_flow_stop_requested(void) {
  */
 static int case_kc_flow_set(void) {
     const char *name = "kc_flow_set";
-    const char *detail = "set assigns variables to context";
-    kc_flow_options_t opts;
+    const char *detail = "set validates inputs and applies ordered overlays";
     kc_flow_t *ctx;
     char tmpdir[320];
     char path[640];
-    char *out;
+    char replace_path[640];
+    void *out;
     size_t out_size;
     int fail;
 
-    opts = kc_flow_options_default();
     ctx = NULL;
     out = NULL;
     out_size = 0;
@@ -442,21 +384,36 @@ static int case_kc_flow_set(void) {
         kc_flow_set(NULL, "flow.link", "x"));
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
+    if (write_fixture(tmpdir, "replace.flow",
+        "flow.testkey=first\n"
+        "flow.link=root\n"
+        "node.root.exec=echo key=<flow.testkey>\n") != 0) return 1;
     if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("open for set", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
+    if (join_path(tmpdir, "replace.flow", replace_path, sizeof(replace_path)) != 0) return 1;
+    fail += expect_int("open for set", KC_FLOW_OK, kc_flow_open(&ctx));
     fail += expect_int("set NULL key", KC_FLOW_ERROR,
         kc_flow_set(ctx, NULL, "x"));
     fail += expect_int("set NULL value", KC_FLOW_ERROR,
         kc_flow_set(ctx, "flow.link", NULL));
     fail += expect_int("set invalid key", KC_FLOW_ERROR,
         kc_flow_set(ctx, "bad key", "x"));
+    fail += expect_int("set replaces existing value", KC_FLOW_OK,
+        kc_flow_set(ctx, "flow.testkey", "second"));
+    fail += expect_int("exec after set replace", KC_FLOW_OK,
+        kc_flow_exec(ctx, replace_path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("set replace output", (const char *)out,
+        out_size, "key=second");
+    kc_flow_free(out);
+    out = NULL;
+    out_size = 0;
     fail += expect_int("set overlay value", KC_FLOW_OK,
         kc_flow_set(ctx, "node.server.param.msg", "Hello"));
     fail += expect_int("set flow.link=server", KC_FLOW_OK,
         kc_flow_set(ctx, "flow.link", "server"));
     fail += expect_int("exec overlay after set", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("set overlay output", out, out_size, "Hello");
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("set overlay output", (const char *)out,
+        out_size, "Hello");
     kc_flow_free(out);
     kc_flow_close(ctx);
     case_result(fail, name, detail);
@@ -470,15 +427,13 @@ static int case_kc_flow_set(void) {
 static int case_kc_flow_unset(void) {
     const char *name = "kc_flow_unset";
     const char *detail = "unset removes variables from context";
-    kc_flow_options_t opts;
     kc_flow_t *ctx;
     char tmpdir[320];
     char path[640];
-    char *out;
+    void *out;
     size_t out_size;
     int fail;
 
-    opts = kc_flow_options_default();
     ctx = NULL;
     out = NULL;
     out_size = 0;
@@ -488,7 +443,7 @@ static int case_kc_flow_unset(void) {
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
     if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("open for unset", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
+    fail += expect_int("open for unset", KC_FLOW_OK, kc_flow_open(&ctx));
     fail += expect_int("unset NULL key", KC_FLOW_ERROR,
         kc_flow_unset(ctx, NULL));
     fail += expect_int("unset invalid key", KC_FLOW_ERROR,
@@ -498,8 +453,9 @@ static int case_kc_flow_unset(void) {
     fail += expect_int("set flow.link=install", KC_FLOW_OK,
         kc_flow_set(ctx, "flow.link", "install"));
     fail += expect_int("exec overlay after unset", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("unset overlay output", out, out_size, "install");
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("unset overlay output", (const char *)out,
+        out_size, "install");
     kc_flow_free(out);
     kc_flow_close(ctx);
     case_result(fail, name, detail);
@@ -507,39 +463,53 @@ static int case_kc_flow_unset(void) {
 }
 
 /**
- * Tests kc_flow_set overlay replaces an existing key (regression).
+ * Tests ordered overlay semantics through the public API.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_flow_overlay_replace(void) {
-    const char *name = "kc_flow_set";
-    const char *detail = "set overlay replaces an existing key";
-    kc_flow_options_t opts;
+static int case_kc_flow_overlay_order(void) {
+    const char *name = "kc_flow_overlay_order";
+    const char *detail = "ordered overlays apply in operation order; unset-then-set differs from set-then-unset";
     kc_flow_t *ctx;
+    kc_flow_t *other;
     char tmpdir[320];
     char path[640];
-    char *out;
+    void *out;
     size_t out_size;
     int fail;
 
-    opts = kc_flow_options_default();
     ctx = NULL;
+    other = NULL;
     out = NULL;
     out_size = 0;
     fail = 0;
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
-    if (write_fixture(tmpdir, "replace.flow",
-        "flow.testkey=first\n"
-        "flow.link=root\n"
-        "node.root.exec=echo key=<flow.testkey>\n") != 0) return 1;
-    if (join_path(tmpdir, "replace.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("open for overlay replace", KC_FLOW_OK,
-        kc_flow_open(&ctx, &opts));
-    fail += expect_int("set overlay replaces flow.testkey", KC_FLOW_OK,
-        kc_flow_set(ctx, "flow.testkey", "second"));
-    fail += expect_int("exec after replace overlay", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("overlay replace output", out, out_size, "key=second");
+    if (write_all_fixtures(tmpdir) != 0) return 1;
+    if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open for overlay order A", KC_FLOW_OK, kc_flow_open(&ctx));
+    fail += expect_int("overlay A unset flow.link", KC_FLOW_OK,
+        kc_flow_unset(ctx, "flow.link"));
+    fail += expect_int("overlay A set server param", KC_FLOW_OK,
+        kc_flow_set(ctx, "node.server.param.msg", "Hello"));
+    fail += expect_int("overlay A set flow.link=server", KC_FLOW_OK,
+        kc_flow_set(ctx, "flow.link", "server"));
+    fail += expect_int("exec overlay order A", KC_FLOW_OK,
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("overlay order A output", (const char *)out,
+        out_size, "Hello");
     kc_flow_free(out);
+    out = NULL;
+    out_size = 0;
+    fail += expect_int("open for overlay order B", KC_FLOW_OK, kc_flow_open(&other));
+    fail += expect_int("overlay B set server param", KC_FLOW_OK,
+        kc_flow_set(other, "node.server.param.msg", "Hello"));
+    fail += expect_int("overlay B set flow.link=server", KC_FLOW_OK,
+        kc_flow_set(other, "flow.link", "server"));
+    fail += expect_int("overlay B unset flow.link", KC_FLOW_OK,
+        kc_flow_unset(other, "flow.link"));
+    fail += expect_int("exec overlay order B", KC_FLOW_OK,
+        kc_flow_exec(other, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("overlay order B output empty", out == NULL && out_size == 0);
+    kc_flow_close(other);
     kc_flow_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -551,84 +521,81 @@ static int case_kc_flow_overlay_replace(void) {
  */
 static int case_kc_flow_exec(void) {
     const char *name = "kc_flow_exec";
-    const char *detail = "exec processes input through pipeline";
-    kc_flow_options_t opts;
+    const char *detail = "exec executes declared and explicit entries with owned, size-accurate output";
     kc_flow_t *ctx;
     char tmpdir[320];
     char path[640];
-    char *out;
+    void *out;
     size_t out_size;
     int fail;
 
-    opts = kc_flow_options_default();
     ctx = NULL;
-    out = NULL;
-    out_size = 0;
+    out = (void *)"sentinel";
+    out_size = 123;
     fail = 0;
     fail += expect_int("exec NULL ctx", KC_FLOW_ERROR,
-        kc_flow_exec(NULL, "x.flow", NULL, 0, &out, &out_size));
-    fail += expect_int("open for exec", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
+        kc_flow_exec(NULL, "x.flow", NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("exec NULL ctx clears output", out == NULL && out_size == 0);
+    fail += expect_int("open for exec", KC_FLOW_OK, kc_flow_open(&ctx));
+    out = (void *)"sentinel";
+    out_size = 123;
     fail += expect_int("exec NULL path", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, NULL, NULL, 0, &out, &out_size));
+        kc_flow_exec(ctx, NULL, NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("exec NULL path clears output", out == NULL && out_size == 0);
+    fail += expect_int("exec NULL out_size", KC_FLOW_ERROR,
+        kc_flow_exec(ctx, "x.flow", NULL, NULL, 0, &out, NULL));
     fail += expect_int("exec missing file", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, "/nonexistent/path.flow", NULL, 0, &out, &out_size));
+        kc_flow_exec(ctx, "/nonexistent/path.flow", NULL, NULL, 0, &out, &out_size));
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
     if (join_path(tmpdir, "fanout.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("exec fanout", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("fanout left output", out, out_size, "Hi Left");
-    fail += expect_output_contains("fanout right output", out, out_size, "Hi Right");
+    fail += expect_int("exec declared fanout", KC_FLOW_OK,
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("fanout left output", (const char *)out,
+        out_size, "Hi Left");
+    fail += expect_output_contains("fanout right output", (const char *)out,
+        out_size, "Hi Right");
     kc_flow_free(out);
     out = NULL;
     out_size = 0;
+    if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("exec explicit entry", KC_FLOW_OK,
+        kc_flow_exec(ctx, path, "default", NULL, 0, &out, &out_size));
+    fail += expect_output_contains("explicit entry output", (const char *)out,
+        out_size, "default");
+    kc_flow_free(out);
+    out = NULL;
+    out_size = 0;
+    fail += expect_int("exec empty entry", KC_FLOW_ERROR,
+        kc_flow_exec(ctx, path, "", NULL, 0, &out, &out_size));
+    fail += expect_true("exec empty entry clears output", out == NULL && out_size == 0);
+    fail += expect_int("exec input without buffer", KC_FLOW_ERROR,
+        kc_flow_exec(ctx, path, NULL, NULL, 5, &out, &out_size));
+    fail += expect_true("exec input error clears output", out == NULL && out_size == 0);
     if (join_path(tmpdir, "stdin.flow", path, sizeof(path)) != 0) return 1;
     fail += expect_int("exec stdin", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, "Pipe Input", 10, &out, &out_size));
-    fail += expect_output_contains("stdin output", out, out_size, "Pipe Input");
+        kc_flow_exec(ctx, path, NULL, "Pipe Input", 10, &out, &out_size));
+    fail += expect_output_contains("stdin output", (const char *)out,
+        out_size, "Pipe Input");
+    kc_flow_free(out);
+    out = NULL;
+    out_size = 0;
+    if (join_path(tmpdir, "empty.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("exec empty output", KC_FLOW_OK,
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("empty output is NULL/0", out == NULL && out_size == 0);
+    if (join_path(tmpdir, "size.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("exec size fanout", KC_FLOW_OK,
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("size fanout exact byte count", out != NULL && out_size == 11);
+    fail += expect_true("size fanout payload bytes", out != NULL && out_size == 11 &&
+        memcmp(out, "Left\nRight\n", 11) == 0);
     kc_flow_free(out);
     out = NULL;
     out_size = 0;
     if (join_path(tmpdir, "cycle.flow", path, sizeof(path)) != 0) return 1;
     fail += expect_int("exec cycle fails", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, path, NULL, 0, &out, &out_size));
-    kc_flow_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_flow_exec_entry.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_flow_exec_entry(void) {
-    const char *name = "kc_flow_exec_entry";
-    const char *detail = "exec entry point runs pipeline step";
-    kc_flow_options_t opts;
-    kc_flow_t *ctx;
-    char tmpdir[320];
-    char path[640];
-    char *out;
-    size_t out_size;
-    int fail;
-
-    opts = kc_flow_options_default();
-    ctx = NULL;
-    out = NULL;
-    out_size = 0;
-    fail = 0;
-    if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
-    if (write_all_fixtures(tmpdir) != 0) return 1;
-    if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("open for exec_entry", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
-    fail += expect_int("exec_entry NULL ctx", KC_FLOW_ERROR,
-        kc_flow_exec_entry(NULL, path, "default", NULL, 0, &out, &out_size));
-    fail += expect_int("exec_entry empty entry", KC_FLOW_ERROR,
-        kc_flow_exec_entry(ctx, path, "", NULL, 0, &out, &out_size));
-    fail += expect_int("exec_entry default", KC_FLOW_OK,
-        kc_flow_exec_entry(ctx, path, "default", NULL, 0, &out, &out_size));
-    fail += expect_output_contains("entry default output", out, out_size, "default");
-    kc_flow_free(out);
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
     kc_flow_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -668,33 +635,47 @@ static int case_kc_flow_version(void) {
 }
 
 /**
- * Tests kc_flow_strerror.
+ * Tests kc_flow_get_error.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_flow_strerror(void) {
-    const char *name = "kc_flow_strerror";
-    const char *detail = "strerror returns error details";
-    kc_flow_options_t opts;
+static int case_kc_flow_get_error(void) {
+    const char *name = "kc_flow_get_error";
+    const char *detail = "error is descriptive after failure and cleared by later success";
     kc_flow_t *ctx;
-    char *out;
+    char tmpdir[320];
+    char path[640];
+    void *out;
     size_t out_size;
     const char *err;
-    int fail = 0;
+    int fail;
 
-    opts = kc_flow_options_default();
     ctx = NULL;
     out = NULL;
     out_size = 0;
     fail = 0;
-    fail += expect_string("strerror NULL ctx", "unknown error", kc_flow_strerror(NULL));
-    fail += expect_int("open for strerror", KC_FLOW_OK, kc_flow_open(&ctx, &opts));
-    fail += expect_string("strerror fresh ctx", "unknown error", kc_flow_strerror(ctx));
-    fail += expect_int("exec missing file for strerror", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, "/nonexistent/path.flow", NULL, 0, &out, &out_size));
-    err = kc_flow_strerror(ctx);
-    fail += expect_true("strerror after failure is non-NULL", err != NULL);
-    fail += expect_true("strerror after failure is descriptive",
-        err != NULL && strcmp(err, "unknown error") != 0);
+    fail += expect_true("get_error NULL is NULL", kc_flow_get_error(NULL) == NULL);
+    fail += expect_int("open for get_error", KC_FLOW_OK, kc_flow_open(&ctx));
+    fail += expect_string("get_error fresh ctx", "", kc_flow_get_error(ctx));
+    fail += expect_int("exec missing file for get_error", KC_FLOW_ERROR,
+        kc_flow_exec(ctx, "/nonexistent/path.flow", NULL, NULL, 0, &out, &out_size));
+    err = kc_flow_get_error(ctx);
+    fail += expect_true("get_error after failure is non-NULL", err != NULL);
+    fail += expect_true("get_error after failure is descriptive",
+        err != NULL && err[0] != '\0');
+    fail += expect_int("set after failure", KC_FLOW_OK,
+        kc_flow_set(ctx, "flow.tmp", "x"));
+    fail += expect_string("set clears stale error", "", kc_flow_get_error(ctx));
+    fail += expect_int("exec missing file again", KC_FLOW_ERROR,
+        kc_flow_exec(ctx, "/nonexistent/path.flow", NULL, NULL, 0, &out, &out_size));
+    err = kc_flow_get_error(ctx);
+    fail += expect_true("get_error refreshed after failure",
+        err != NULL && err[0] != '\0');
+    if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
+    if (write_all_fixtures(tmpdir) != 0) return 1;
+    if (join_path(tmpdir, "empty.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("exec after failure", KC_FLOW_OK,
+        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+    fail += expect_string("exec clears stale error", "", kc_flow_get_error(ctx));
     kc_flow_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -706,23 +687,18 @@ static int case_kc_flow_strerror(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 15;
+    test_case_total = 10;
     test_case_current = 0;
     run_case(&rc, case_kc_flow_open);
-    run_case(&rc, case_kc_flow_options_default);
-    run_case(&rc, case_kc_flow_options_load_env);
-    run_case(&rc, case_kc_flow_options_free);
     run_case(&rc, case_kc_flow_close);
     run_case(&rc, case_kc_flow_stop);
-    run_case(&rc, case_kc_flow_stop_requested);
     run_case(&rc, case_kc_flow_set);
     run_case(&rc, case_kc_flow_unset);
-    run_case(&rc, case_kc_flow_overlay_replace);
+    run_case(&rc, case_kc_flow_overlay_order);
     run_case(&rc, case_kc_flow_exec);
-    run_case(&rc, case_kc_flow_exec_entry);
     run_case(&rc, case_kc_flow_free);
     run_case(&rc, case_kc_flow_version);
-    run_case(&rc, case_kc_flow_strerror);
+    run_case(&rc, case_kc_flow_get_error);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -740,20 +716,15 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_flow_open") == 0) return case_kc_flow_open();
-    if (strcmp(argv[1], "kc_flow_options_default") == 0) return case_kc_flow_options_default();
-    if (strcmp(argv[1], "kc_flow_options_load_env") == 0) return case_kc_flow_options_load_env();
-    if (strcmp(argv[1], "kc_flow_options_free") == 0) return case_kc_flow_options_free();
     if (strcmp(argv[1], "kc_flow_close") == 0) return case_kc_flow_close();
     if (strcmp(argv[1], "kc_flow_stop") == 0) return case_kc_flow_stop();
-    if (strcmp(argv[1], "kc_flow_stop_requested") == 0) return case_kc_flow_stop_requested();
     if (strcmp(argv[1], "kc_flow_set") == 0) return case_kc_flow_set();
     if (strcmp(argv[1], "kc_flow_unset") == 0) return case_kc_flow_unset();
-    if (strcmp(argv[1], "kc_flow_overlay_replace") == 0) return case_kc_flow_overlay_replace();
+    if (strcmp(argv[1], "kc_flow_overlay_order") == 0) return case_kc_flow_overlay_order();
     if (strcmp(argv[1], "kc_flow_exec") == 0) return case_kc_flow_exec();
-    if (strcmp(argv[1], "kc_flow_exec_entry") == 0) return case_kc_flow_exec_entry();
     if (strcmp(argv[1], "kc_flow_free") == 0) return case_kc_flow_free();
     if (strcmp(argv[1], "kc_flow_version") == 0) return case_kc_flow_version();
-    if (strcmp(argv[1], "kc_flow_strerror") == 0) return case_kc_flow_strerror();
+    if (strcmp(argv[1], "kc_flow_get_error") == 0) return case_kc_flow_get_error();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

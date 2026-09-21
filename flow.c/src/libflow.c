@@ -25,12 +25,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
-#include <signal.h>
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
 #endif
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stddef.h>
 
 #define KC_FLOW_MAX_RECORDS 2048
@@ -118,7 +118,7 @@ struct kc_flow {
     kc_flow_overlay_t overlays[KC_FLOW_MAX_RECORDS];
     size_t overlay_count;
     char error[KC_FLOW_ERROR_SIZE];
-    volatile sig_atomic_t stop_requested;
+    atomic_int stop_requested;
 };
 
 /**
@@ -185,6 +185,26 @@ static int kc_flow_fail_stop(kc_flow_t *ctx) {
         snprintf(ctx->error, sizeof(ctx->error), "%s", "stop requested");
     }
     return KC_FLOW_ESTOP;
+}
+
+/**
+ * Check whether a stop request is pending on one context.
+ * @param ctx Context pointer.
+ * @return 1 when stop was requested, otherwise 0.
+ */
+static int kc_flow_is_stopped(const kc_flow_t *ctx) {
+    return ctx && atomic_load_explicit(&ctx->stop_requested, memory_order_acquire) ? 1 : 0;
+}
+
+/**
+ * Clear any stored context error.
+ * @param ctx Context pointer.
+ * @return None.
+ */
+static void kc_flow_clear_error(kc_flow_t *ctx) {
+    if (ctx) {
+        ctx->error[0] = '\0';
+    }
 }
 
 /**
@@ -2701,7 +2721,7 @@ static int kc_flow_builtin_finish(
         if (!buf->data) return KC_FLOW_ERROR;
     }
     buf->data[buf->len] = '\0';
-    if (ctx && ctx->stop_requested) {
+    if (kc_flow_is_stopped(ctx)) {
         free(buf->data);
         buf->data = NULL;
         return kc_flow_fail_stop(ctx);
@@ -2836,7 +2856,7 @@ static int kc_flow_run_command(
 
     kc_flow_buf_init(&builtin_out);
 
-    if (ctx && ctx->stop_requested) return kc_flow_fail_stop(ctx);
+    if (kc_flow_is_stopped(ctx)) return kc_flow_fail_stop(ctx);
 
     if (kc_flow_dir(dir, sizeof(dir), flow_path) != KC_FLOW_OK) {
         return KC_FLOW_ERROR;
@@ -2855,7 +2875,7 @@ static int kc_flow_run_command(
         }
     }
 
-    if (ctx && ctx->stop_requested) {
+    if (kc_flow_is_stopped(ctx)) {
         kc_flow_free_argv(argv);
         return kc_flow_fail_stop(ctx);
     }
@@ -2916,13 +2936,13 @@ static int kc_flow_run_command(
     if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || (WEXITSTATUS(status) != 0 && !ignore_error)) {
         fclose(in);
         fclose(out);
-        return ctx && ctx->stop_requested ? kc_flow_fail_stop(ctx) : KC_FLOW_ERROR;
+        return kc_flow_is_stopped(ctx) ? kc_flow_fail_stop(ctx) : KC_FLOW_ERROR;
     }
     fflush(out);
     rewind(out);
     while (!feof(out)) {
         size_t n = fread(chunk, 1, sizeof(chunk), out);
-        if (ctx && ctx->stop_requested) {
+        if (kc_flow_is_stopped(ctx)) {
             free(data);
             fclose(in);
             fclose(out);
@@ -2962,7 +2982,7 @@ static int kc_flow_run_command(
             return KC_FLOW_ERROR;
         }
     }
-    if (ctx && ctx->stop_requested) {
+    if (kc_flow_is_stopped(ctx)) {
         free(data);
         return kc_flow_fail_stop(ctx);
     }
@@ -2989,7 +3009,7 @@ static int kc_flow_run_command(
 
     kc_flow_buf_init(&builtin_out);
 
-    if (ctx && ctx->stop_requested) return kc_flow_fail_stop(ctx);
+    if (kc_flow_is_stopped(ctx)) return kc_flow_fail_stop(ctx);
 
     if (kc_flow_dir(dir, sizeof(dir), flow_path) != KC_FLOW_OK) {
         return KC_FLOW_ERROR;
@@ -3010,7 +3030,7 @@ static int kc_flow_run_command(
         argv = NULL;
     }
 
-    if (ctx && ctx->stop_requested) {
+    if (kc_flow_is_stopped(ctx)) {
         return kc_flow_fail_stop(ctx);
     }
 
@@ -3075,14 +3095,14 @@ static int kc_flow_run_command(
         if (exit_code != 0 && !ignore_error) {
             fclose(in);
             fclose(out);
-            return ctx && ctx->stop_requested ? kc_flow_fail_stop(ctx) : KC_FLOW_ERROR;
+            return kc_flow_is_stopped(ctx) ? kc_flow_fail_stop(ctx) : KC_FLOW_ERROR;
         }
     }
     fflush(out);
     rewind(out);
     while (1) {
         size_t n = fread(chunk, 1, sizeof(chunk), out);
-        if (ctx && ctx->stop_requested) {
+        if (kc_flow_is_stopped(ctx)) {
             free(data);
             fclose(out);
             return kc_flow_fail_stop(ctx);
@@ -3117,7 +3137,7 @@ static int kc_flow_run_command(
         data = kc_flow_dup("");
         if (!data) return KC_FLOW_ERROR;
     }
-    if (ctx && ctx->stop_requested) {
+    if (kc_flow_is_stopped(ctx)) {
         free(data);
         return kc_flow_fail_stop(ctx);
     }
@@ -3496,7 +3516,7 @@ static int kc_flow_exec_loaded(
     if (!ctx || !path || !output || !output_size || (input_size > 0 && !input)) {
         return kc_flow_fail(ctx, "invalid argument");
     }
-    if (ctx->stop_requested) {
+    if (kc_flow_is_stopped(ctx)) {
         return kc_flow_fail_stop(ctx);
     }
     *output = NULL;
@@ -3594,13 +3614,15 @@ static int kc_flow_exec_loaded(
 /**
  * Allocate one flow runtime context.
  * @param out Pointer to receive context pointer.
- * @param opts Configuration options.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-int kc_flow_open(kc_flow_t **out, const kc_flow_options_t *opts) {
+int kc_flow_open(kc_flow_t **out) {
     kc_flow_t *ctx;
 
-    if (!out || !opts) {
+    if (out != NULL) {
+        *out = NULL;
+    }
+    if (!out) {
         return KC_FLOW_ERROR;
     }
 
@@ -3609,6 +3631,8 @@ int kc_flow_open(kc_flow_t **out, const kc_flow_options_t *opts) {
         return KC_FLOW_ERROR;
     }
 
+    atomic_init(&ctx->stop_requested, 0);
+    ctx->error[0] = '\0';
     *out = ctx;
 
     return KC_FLOW_OK;
@@ -3640,18 +3664,8 @@ void kc_flow_close(kc_flow_t *ctx) {
  */
 int kc_flow_stop(kc_flow_t *ctx) {
     if (!ctx) return KC_FLOW_ERROR;
-    ctx->stop_requested = 1;
-    snprintf(ctx->error, sizeof(ctx->error), "%s", "stop requested");
+    atomic_store_explicit(&ctx->stop_requested, 1, memory_order_release);
     return KC_FLOW_OK;
-}
-
-/**
- * Report whether a stop request is pending on one context.
- * @param ctx Context pointer.
- * @return 1 when stop was requested, otherwise 0.
- */
-int kc_flow_stop_requested(const kc_flow_t *ctx) {
-    return ctx && ctx->stop_requested ? 1 : 0;
 }
 
 /**
@@ -3677,6 +3691,7 @@ int kc_flow_set(kc_flow_t *ctx, const char *key, const char *value) {
         return kc_flow_fail(ctx, "out of memory");
     }
     ctx->overlay_count++;
+    kc_flow_clear_error(ctx);
     return KC_FLOW_OK;
 }
 
@@ -3699,54 +3714,54 @@ int kc_flow_unset(kc_flow_t *ctx, const char *key) {
         return kc_flow_fail(ctx, "out of memory");
     }
     ctx->overlay_count++;
+    kc_flow_clear_error(ctx);
     return KC_FLOW_OK;
 }
 
 /**
- * Execute one flow file from its declared entries.
+ * Execute one flow file, optionally from one explicit entry node.
  * @param ctx Context pointer.
  * @param path Flow file path.
+ * @param entry Optional entry node reference, or NULL for declared entries.
  * @param input Optional input buffer.
  * @param input_size Input buffer size.
- * @param output Owned output buffer pointer.
- * @param output_size Output buffer size pointer.
+ * @param out_data Owned output buffer pointer.
+ * @param out_size Output buffer size pointer.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
  */
 int kc_flow_exec(
     kc_flow_t *ctx,
     const char *path,
-    const void *input,
-    size_t input_size,
-    char **output,
-    size_t *output_size
-) {
-    return kc_flow_exec_loaded(ctx, path, NULL, input, input_size, output, output_size);
-}
-
-/**
- * Execute one flow file from one explicit entry node.
- * @param ctx Context pointer.
- * @param path Flow file path.
- * @param entry Entry node reference.
- * @param input Optional input buffer.
- * @param input_size Input buffer size.
- * @param output Owned output buffer pointer.
- * @param output_size Output buffer size pointer.
- * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
- */
-int kc_flow_exec_entry(
-    kc_flow_t *ctx,
-    const char *path,
     const char *entry,
     const void *input,
     size_t input_size,
-    char **output,
-    size_t *output_size
+    void **out_data,
+    size_t *out_size
 ) {
-    if (!entry || !*entry) {
-        return kc_flow_fail(ctx, "invalid entry");
+    char *output = NULL;
+    int rc;
+
+    if (out_data != NULL) {
+        *out_data = NULL;
     }
-    return kc_flow_exec_loaded(ctx, path, entry, input, input_size, output, output_size);
+    if (out_size != NULL) {
+        *out_size = 0;
+    }
+    if (!ctx || !path || !out_data || !out_size || (input_size > 0 && !input) || (entry && entry[0] == '\0')) {
+        return kc_flow_fail(ctx, "invalid argument");
+    }
+    rc = kc_flow_exec_loaded(ctx, path, entry, input, input_size, &output, out_size);
+    if (rc == KC_FLOW_OK) {
+        if (*out_size == 0) {
+            free(output);
+            output = NULL;
+        }
+        *out_data = output;
+        kc_flow_clear_error(ctx);
+    } else {
+        free(output);
+    }
+    return rc;
 }
 
 /**
@@ -3761,42 +3776,10 @@ void kc_flow_free(void *output) {
 /**
  * Returns the last error message from a flow context.
  * @param ctx Context pointer.
- * @return Static error string.
+ * @return Borrowed error string, or NULL.
  */
-const char *kc_flow_strerror(kc_flow_t *ctx) {
-    if (!ctx || !ctx->error[0]) {
-        return "unknown error";
-    }
-    return ctx->error;
-}
-
-/**
- * Create an options struct initialized with default values.
- * @param none Unused.
- * @return Default-initialized options.
- */
-kc_flow_options_t kc_flow_options_default(void) {
-    kc_flow_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    return opts;
-}
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_flow_options_load_env(kc_flow_options_t *opts) {
-    (void)opts;
-}
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_flow_options_free(kc_flow_options_t *opts) {
-    (void)opts;
+const char *kc_flow_get_error(const kc_flow_t *ctx) {
+    return ctx ? ctx->error : NULL;
 }
 
 #ifndef KC_FLOW_BUILD_VERSION

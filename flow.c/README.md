@@ -22,7 +22,7 @@ without editing the source file.
 Execute one flow file:
 
 ```bash
-./bin/x86_64/linux/flow etc/site.flow
+./bin/x86_64/linux/flow file.flow
 ```
 
 Execute one explicit entry:
@@ -45,19 +45,19 @@ flow.link=upper
 node.upper.exec=tr '[:lower:]' '[:upper:]'
 ```
 
-The included `etc` directory is a small static-site request pipeline:
+Write the minimal flow file above to a local `file.flow` and run it:
 
 ```bash
-./bin/x86_64/linux/flow etc/site.flow
-./bin/x86_64/linux/flow etc/site.flow --set flow.path=/
-./bin/x86_64/linux/flow etc/site.flow --set flow.path=/missing
-printf "Hello" | ./bin/x86_64/linux/flow etc/page.flow
+./bin/x86_64/linux/flow file.flow
+./bin/x86_64/linux/flow file.flow --link build
+printf "input" | ./bin/x86_64/linux/flow file.flow
 ```
 
-`site.flow` routes a request path, renders a page through `page.flow`, then
-fans the rendered page out to emit the page, count words, and compute a
-checksum. It uses only default Linux commands such as `printf`, `cat`, `wc`,
-`cksum`, `cut`, and shell `case`.
+The progression above illustrates a small static-site request pipeline: a
+router routes a request path, renders a page through a child flow, then fans
+the rendered page out to emit the page, count words, and compute a checksum.
+It uses only default Linux commands such as `printf`, `cat`, `wc`, `cksum`,
+`cut`, and shell `case`.
 
 Its main route is an executable heredoc `node.link`:
 
@@ -197,13 +197,16 @@ Overlay one effective flow document:
     --set node.server.exec='printf "%s" "<flow.message>"'
 ```
 
-Run the included cohesive examples:
+Overlays apply in the exact command-line order, and at most 256 overlay
+operations are accepted (further ones fail with "too many overlays").
+
+Run the illustrated pipeline against a local `file.flow`:
 
 ```bash
-./bin/x86_64/linux/flow etc/site.flow
-./bin/x86_64/linux/flow etc/site.flow --set flow.path=/
-./bin/x86_64/linux/flow etc/site.flow --set flow.path=/missing
-./bin/x86_64/linux/flow etc/page.flow --set flow.heading=Preview
+./bin/x86_64/linux/flow file.flow --set flow.link=request
+./bin/x86_64/linux/flow file.flow --set flow.path=/
+./bin/x86_64/linux/flow file.flow --set flow.path=/missing
+printf "Hello" | ./bin/x86_64/linux/flow file.flow --link page
 ```
 
 ---
@@ -227,35 +230,30 @@ Run the included cohesive examples:
 ```c
 #include "libflow.h"
 
-kc_flow_options_t opts = kc_flow_options_default();
 kc_flow_t *ctx = NULL;
-char *output = NULL;
+void *output = NULL;
 size_t output_size = 0;
 
-kc_flow_open(&ctx, &opts);
+kc_flow_open(&ctx);
 kc_flow_set(ctx, "flow.hello", "Hello");
-kc_flow_exec(ctx, "etc/page.flow", NULL, 0, &output, &output_size);
+kc_flow_exec(ctx, "file.flow", NULL, NULL, 0, &output, &output_size);
 
+/* output is released with kc_flow_free(); a successful empty output is NULL with size 0 */
 kc_flow_free(output);
 kc_flow_close(ctx);
-kc_flow_options_free(&opts);
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_flow_options_default()` - creates a default options struct.
-- `kc_flow_options_load_env()` - overlays options from environment variables.
-- `kc_flow_options_free()` - releases resources owned by options.
 - `kc_flow_open()` - allocates and returns a new context owned by the caller.
 - `kc_flow_set()` - appends one ordered set overlay.
 - `kc_flow_unset()` - appends one ordered unset overlay.
-- `kc_flow_exec()` - executes a flow file from its declared entries.
-- `kc_flow_exec_entry()` - executes a flow file from one explicit entry node.
+- `kc_flow_exec()` - executes a flow file from its declared entries, or from one explicit entry node when the `entry` argument is non-empty; an empty-string entry is rejected as an argument error. Output is caller-owned and released with `kc_flow_free()`; empty success yields NULL output with size 0.
 - `kc_flow_free()` - releases output data owned by the library.
-- `kc_flow_strerror()` - returns the last context error message.
-- `kc_flow_stop()` - requests stop for a context.
+- `kc_flow_get_error()` - returns the borrowed last contextual error string; a fresh context returns an empty string; successful set, unset, and exec operations clear stale contextual errors; a NULL context returns NULL.
+- `kc_flow_stop()` - requests a cooperative stop; idempotent; makes subsequent execution fail with `KC_FLOW_ESTOP` until the context is closed; there is no public stop-introspection API and no reset.
 - `kc_flow_version()` - returns the build version.
 - `kc_flow_close()` - releases the context and all associated resources.
 
@@ -266,7 +264,7 @@ kc_flow_options_free(&opts);
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests
