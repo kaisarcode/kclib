@@ -1,6 +1,10 @@
 /**
  * test.c - libhnsw public API tests.
  * Summary: Exercises the normalized HNSW lifecycle and search contract.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
 #ifndef _WIN32
@@ -37,18 +41,45 @@ typedef struct {
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+/**
+ * Prints one test case result.
+ * @param fail Non-zero when the case failed.
+ * @param name Public API group name.
+ * @param detail Behavior verified by the group.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, detail);
 }
 
+/**
+ * Converts one boolean condition into a test failure count.
+ * @param condition Non-zero when the expectation passed.
+ * @return Zero on success, or one on failure.
+ */
 static int expect(int condition) {
     return condition ? 0 : 1;
 }
 
+/**
+ * Executes one concurrent search worker.
+ * @param arg Worker state.
+ * @return Platform thread return value.
+ */
 #ifdef _WIN32
+/**
+ * Executes one concurrent search worker.
+ * @param arg Worker state.
+ * @return Platform thread return value.
+ */
 static DWORD WINAPI test_search_worker_main(void *arg) {
 #else
+/**
+ * Executes one concurrent search worker.
+ * @param arg Worker state.
+ * @return Platform thread return value.
+ */
 static void *test_search_worker_main(void *arg) {
 #endif
     test_search_worker_t *worker = (test_search_worker_t *)arg;
@@ -62,6 +93,12 @@ static void *test_search_worker_main(void *arg) {
 #endif
 }
 
+/**
+ * Starts one concurrent search worker.
+ * @param thread Destination thread handle.
+ * @param worker Worker state.
+ * @return Zero on success, or one on failure.
+ */
 static int test_thread_start(test_thread_t *thread, test_search_worker_t *worker) {
 #ifdef _WIN32
     *thread = CreateThread(NULL, 0, test_search_worker_main, worker, 0, NULL);
@@ -71,6 +108,11 @@ static int test_thread_start(test_thread_t *thread, test_search_worker_t *worker
 #endif
 }
 
+/**
+ * Joins one concurrent search worker.
+ * @param thread Thread handle.
+ * @return Zero on success, or one on failure.
+ */
 static int test_thread_join(test_thread_t thread) {
 #ifdef _WIN32
     if (WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) return 1;
@@ -81,11 +123,22 @@ static int test_thread_join(test_thread_t thread) {
 #endif
 }
 
+/**
+ * Runs one grouped test case.
+ * @param fn Test case function.
+ * @return Test failure count.
+ */
 static int run_case(case_fn fn) {
     test_case_current++;
     return fn();
 }
 
+/**
+ * Opens one configured HNSW index for a test.
+ * @param dimension Vector dimension.
+ * @param metric Metric constant.
+ * @return Open index, or NULL on failure.
+ */
 static kc_hnsw_t *open_index(size_t dimension, int metric) {
     kc_hnsw_options_t options = kc_hnsw_options_default();
     kc_hnsw_t *ctx = NULL;
@@ -98,6 +151,10 @@ static kc_hnsw_t *open_index(size_t dimension, int metric) {
     return ctx;
 }
 
+/**
+ * Tests opening and closing an HNSW index.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_open(void) {
     const char *name = "kc_hnsw_open";
     const char *detail = "validates options and manages index lifetime";
@@ -118,6 +175,10 @@ static int case_kc_hnsw_open(void) {
     return fail;
 }
 
+/**
+ * Tests invalid reserve and mutation arguments.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_reserve(void) {
     const char *name = "kc_hnsw_reserve";
     const char *detail = "rejects invalid index arguments";
@@ -135,6 +196,10 @@ static int case_kc_hnsw_reserve(void) {
     return fail;
 }
 
+/**
+ * Tests build lifecycle and concurrent searches.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_build(void) {
     const char *name = "kc_hnsw_build";
     const char *detail = "enforces mutation and build state";
@@ -193,6 +258,10 @@ static int case_kc_hnsw_build(void) {
     return fail;
 }
 
+/**
+ * Tests owned cosine search result release.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_free(void) {
     const char *name = "kc_hnsw_free";
     const char *detail = "releases cosine search results";
@@ -220,6 +289,10 @@ static int case_kc_hnsw_free(void) {
     return fail;
 }
 
+/**
+ * Tests search metrics, thresholds, and output contracts.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_search(void) {
     const char *name = "kc_hnsw_search";
     const char *detail = "applies L2 thresholds and clears invalid outputs";
@@ -333,6 +406,10 @@ static int case_kc_hnsw_search(void) {
     return fail;
 }
 
+/**
+ * Tests metric and status helper functions.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_metric_from_string(void) {
     const char *name = "kc_hnsw_metric_from_string";
     const char *detail = "converts metrics and status values";
@@ -351,6 +428,10 @@ static int case_kc_hnsw_metric_from_string(void) {
     return fail;
 }
 
+/**
+ * Tests stop behavior for build and search.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_stop(void) {
     const char *name = "kc_hnsw_stop";
     const char *detail = "stops build and search operations";
@@ -375,6 +456,10 @@ static int case_kc_hnsw_stop(void) {
     return fail;
 }
 
+/**
+ * Runs all grouped HNSW contract tests.
+ * @return Total failure count.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -391,6 +476,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Dispatches grouped HNSW contract tests.
+ * @param argc Argument count.
+ * @param argv Argument values.
+ * @return Process exit status.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);

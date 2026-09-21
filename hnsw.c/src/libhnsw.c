@@ -112,6 +112,11 @@ static int kc_hnsw_add_edge(kc_hnsw_t *hnsw, size_t src_idx, size_t dst_idx, int
 static void kc_hnsw_neighbor_list_init(kc_hnsw_neighbor_list_t *list);
 static void kc_hnsw_neighbor_list_free(kc_hnsw_neighbor_list_t *list);
 
+/**
+ * Checks whether clean termination has been requested for an index.
+ * @param hnsw Index whose stop state is checked.
+ * @return Nonzero when termination was requested, otherwise zero.
+ */
 static int kc_hnsw_is_stopped(const kc_hnsw_t *hnsw) {
     return atomic_load_explicit(&hnsw->stop_requested, memory_order_relaxed);
 }

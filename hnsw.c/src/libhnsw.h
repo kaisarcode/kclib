@@ -41,7 +41,8 @@ typedef struct {
 } kc_hnsw_result_t;
 
 /**
- * Configuration for one vector index instance. Options are plain caller-owned values.
+ * Configuration for one vector index instance.
+ * Options are plain caller-owned values.
  * @param dimension Fixed vector dimension for all entries.
  * @param metric Configured similarity metric.
  * @param m Maximum graph connections per level.
