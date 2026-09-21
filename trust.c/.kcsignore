@@ -1,4 +1,5 @@
 lib/
 .build
+bin/
 PLAN.md
 AGENTS.md

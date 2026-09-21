@@ -10,6 +10,11 @@
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 700
+#ifdef __EMSCRIPTEN__
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#endif
 #endif
 
 #include "libtrust.h"
@@ -18,8 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
-#include <fcntl.h>
-#include <sys/stat.h>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -41,7 +44,6 @@
 #endif
 
 #define KC_TRUST_MAX_TRUST 256
-#define KC_TRUST_MAX_KEY_PATH 1024
 #define KC_TRUST_NONCE_SIZE 12
 #define KC_TRUST_MAC_SIZE 16
 #define KC_TRUST_ENCRYPTED_PK_SIZE (KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE)
@@ -52,91 +54,7 @@
 #define KC_TRUST_LENGTH_RECORD_SIZE (KC_TRUST_LOGICAL_LENGTH_SIZE + KC_TRUST_MAC_SIZE)
 #define KC_TRUST_PAYLOAD_BASE_SIZE (KC_TRUST_HANDSHAKE_SIZE + KC_TRUST_LENGTH_RECORD_SIZE)
 
-/**
- * Joins a directory and child name using the platform separator.
- * @param directory Parent directory.
- * @param child Child name.
- * @param path Destination buffer.
- * @param path_cap Destination buffer capacity.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_join_path(const char *directory, const char *child,
-char *path, size_t path_cap) {
 #ifdef _WIN32
-    const char separator = '\\';
-#else
-    const char separator = '/';
-#endif
-    int length = snprintf(path, path_cap, "%s%c%s", directory, separator,
-        child);
-    return length >= 0 && (size_t)length < path_cap ? 0 : -1;
-}
-
-/**
- * Validates an existing trust-owned state directory.
- * @param path State directory path.
- * @return 0 for a safe directory, -1 otherwise.
- */
-static int kc_trust_state_directory_valid(const char *path) {
-#ifdef _WIN32
-    DWORD attributes = GetFileAttributesA(path);
-    if (attributes == INVALID_FILE_ATTRIBUTES) return -1;
-    if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) return -1;
-    return attributes & FILE_ATTRIBUTE_REPARSE_POINT ? -1 : 0;
-#else
-    struct stat status;
-    if (lstat(path, &status) != 0) return -1;
-    if (!S_ISDIR(status.st_mode)) return -1;
-    return status.st_mode & 0022 ? -1 : 0;
-#endif
-}
-
-/**
- * Creates or validates a trust-owned state directory.
- * @param path State directory path.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_ensure_state_directory(const char *path) {
-    if (kc_trust_state_directory_valid(path) == 0) return 0;
-#ifdef _WIN32
-    if (!CreateDirectoryA(path, NULL)) return -1;
-#else
-    if (mkdir(path, 0700) != 0) return -1;
-#endif
-    return kc_trust_state_directory_valid(path);
-}
-
-static int kc_trust_file_exists(const char *path);
-
-/**
- * Resolves the identity path from explicit key and state options.
- * @param opts Configuration options.
- * @param path Destination path buffer.
- * @param path_cap Destination buffer capacity.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_resolve_identity_path(const kc_trust_options_t *opts,
-char *path, size_t path_cap) {
-    if (opts->key_path) {
-        int length = snprintf(path, path_cap, "%s", opts->key_path);
-        return length >= 0 && (size_t)length < path_cap ? 0 : -1;
-    }
-    char state_path[KC_TRUST_MAX_KEY_PATH];
-    if (kc_trust_resolve_state_path(opts, state_path,
-        sizeof(state_path)) != KC_TRUST_OK) return -1;
-    if (kc_trust_state_directory_valid(state_path) != 0) return -1;
-    return kc_trust_join_path(state_path, "id", path, path_cap);
-}
-
-#ifdef _WIN32
-
-/**
- * Initialises the Windows entropy provider.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_entropy_init(void) {
-    return 0;
-}
 
 /**
  * Reads random bytes using BCryptGenRandom on Windows.
@@ -150,22 +68,29 @@ static int kc_trust_read_random(unsigned char *buf, size_t len) {
     return rc == 0 ? 0 : -1;
 }
 
+#elif defined(__EMSCRIPTEN__)
+
 /**
- * Performs Windows-specific cleanup.
- * @return Nothing.
+ * Reads random bytes using getentropy on Emscripten.
+ * Processes requests in chunks of at most 256 bytes per call, returning
+ * failure if any individual call fails.  Never opens /dev/urandom and
+ * never falls back to a deterministic source.
+ * @param buf Destination buffer.
+ * @param len Number of bytes to read.
+ * @return 0 on success, -1 on failure.
  */
-static void kc_trust_entropy_cleanup(void) {
+static int kc_trust_read_random(unsigned char *buf, size_t len) {
+    size_t done = 0;
+    while (done < len) {
+        size_t part = len - done;
+        if (part > 256) part = 256;
+        if (getentropy(buf + done, part) != 0) return -1;
+        done += part;
+    }
+    return 0;
 }
 
 #else
-
-/**
- * Initialises the POSIX entropy provider.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_entropy_init(void) {
-    return 0;
-}
 
 /**
  * Reads random bytes from /dev/urandom.
@@ -186,79 +111,7 @@ static int kc_trust_read_random(unsigned char *buf, size_t len) {
     return 0;
 }
 
-/**
- * Performs POSIX-specific cleanup.
- * @return Nothing.
- */
-static void kc_trust_entropy_cleanup(void) {
-}
-
 #endif
-
-/**
- * Reads a file expecting exactly the specified number of bytes.
- * @param path File path.
- * @param buf Destination buffer.
- * @param expected Expected byte count.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_read_file_exact(const char *path, unsigned char *buf, size_t expected) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return -1;
-    size_t done = 0;
-    while (done < expected) {
-        size_t n = fread(buf + done, 1, expected - done, f);
-        done += n;
-        if (n == 0) break;
-    }
-    if (ferror(f) || done != expected) {
-        fclose(f);
-        return -1;
-    }
-    unsigned char extra;
-    size_t extra_len = fread(&extra, 1, 1, f);
-    int failed = extra_len != 0 || ferror(f);
-    if (fclose(f) != 0) failed = 1;
-    return failed ? -1 : 0;
-}
-
-/**
- * Writes a buffer to a file with restrictive permissions.
- * @param path File path.
- * @param buf Source buffer.
- * @param len Number of bytes to write.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_write_file(const char *path, const unsigned char *buf, size_t len) {
-    FILE *f = NULL;
-#ifdef _WIN32
-    f = fopen(path, "wb");
-    if (!f) return -1;
-#else
-    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd < 0) return -1;
-    f = fdopen(fd, "wb");
-    if (!f) { close(fd); return -1; }
-#endif
-    size_t done = 0;
-    while (done < len) {
-        size_t n = fwrite(buf + done, 1, len - done, f);
-        if (n == 0) { fclose(f); return -1; }
-        done += n;
-    }
-    if (fclose(f) != 0) return -1;
-    return 0;
-}
-
-/**
- * Tests whether a file already exists.
- * @param path File path.
- * @return 1 if exists, 0 otherwise.
- */
-static int kc_trust_file_exists(const char *path) {
-    struct stat st;
-    return stat(path, &st) == 0;
-}
 
 typedef struct {
     size_t id_len;
@@ -613,191 +466,58 @@ uint64_t kc_trust_version(void) {
 }
 
 /**
- * Resolves the configured state directory or the platform default.
- * @param opts Options containing an optional caller-owned state_path.
- * @param path Destination path buffer.
- * @param path_cap Destination buffer capacity.
+ * Generates a fresh random keypair for a new identity.
+ * Zeroes both output buffers, then fills the secret key with random bytes
+ * from the platform entropy backend and derives the public key.
+ * Memory-only: no files, no environment, no paths.
+ * @param secret_key Destination for the random 32-byte secret key.
+ * @param public_key Destination for the derived 32-byte public key.
  * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
  */
-int kc_trust_resolve_state_path(const kc_trust_options_t *opts,
-char *path, size_t path_cap) {
-    if (!path || path_cap == 0) return KC_TRUST_ERROR;
-    if (opts && opts->state_path) {
-        int length = snprintf(path, path_cap, "%s", opts->state_path);
-        return length >= 0 && (size_t)length < path_cap && path[0] ?
-            KC_TRUST_OK : KC_TRUST_ERROR;
-    }
-#ifdef _WIN32
-    const char *base = getenv("LOCALAPPDATA");
-    const char *child = "trust";
-    if (!base || !base[0]) {
-        base = getenv("USERPROFILE");
-        child = ".trust";
-    }
-    if (!base || !base[0]) return KC_TRUST_ERROR;
-    return kc_trust_join_path(base, child, path, path_cap) == 0 ?
-        KC_TRUST_OK : KC_TRUST_ERROR;
-#else
-    const char *base = getenv("XDG_DATA_HOME");
-    if (base && base[0])
-        return kc_trust_join_path(base, "trust", path, path_cap) == 0 ?
-            KC_TRUST_OK : KC_TRUST_ERROR;
-    base = getenv("HOME");
-    if (!base || !base[0]) return KC_TRUST_ERROR;
-    return snprintf(path, path_cap, "%s/.local/share/trust", base) > 0 &&
-        path[0] ? KC_TRUST_OK : KC_TRUST_ERROR;
-#endif
-}
-
-/**
- * Returns default options for the library.
- * @return Default options struct (caller-owned).
- */
-kc_trust_options_t kc_trust_options_default(void) {
-    kc_trust_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    return opts;
-}
-
-/**
- * Loads configuration overrides from environment variables.
- * @param opts Options to override. NULL is a safe no-op.
- * @return Nothing.
- */
-void kc_trust_options_load_env(kc_trust_options_t *opts) {
-    if (!opts) return;
-    const char *v;
-    v = getenv("TRUST_STATE_DIR");
-    if (v && v[0]) {
-        char *state_path = strdup(v);
-        if (state_path) {
-            free(opts->state_path);
-            opts->state_path = state_path;
-        }
-    }
-    v = getenv("TRUST_KEY");
-    if (v && v[0]) {
-        char *key_path = strdup(v);
-        if (key_path) {
-            free(opts->key_path);
-            opts->key_path = key_path;
-        }
-    }
-}
-
-/**
- * Releases resources owned by options struct.
- * @param opts Options to free. NULL is a safe no-op.
- * @return Nothing.
- */
-void kc_trust_options_free(kc_trust_options_t *opts) {
-    if (!opts) return;
-    free(opts->state_path);
-    opts->state_path = NULL;
-    free(opts->key_path);
-    opts->key_path = NULL;
-}
-
-/**
- * Generates a new random identity keypair and writes it to disk.
- * @param key_path Destination file path. NULL uses the default path.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
- */
-int kc_trust_generate(const char *key_path) {
-    char resolved_path[KC_TRUST_MAX_KEY_PATH];
-    kc_trust_options_t opts = kc_trust_options_default();
-    const char *path = key_path;
-    if (!path) {
-        kc_trust_options_load_env(&opts);
-        if (opts.key_path) {
-            path = opts.key_path;
-        } else {
-            char state_path[KC_TRUST_MAX_KEY_PATH];
-            if (kc_trust_resolve_state_path(&opts, state_path,
-                sizeof(state_path)) != KC_TRUST_OK ||
-                kc_trust_ensure_state_directory(state_path) != 0 ||
-                kc_trust_join_path(state_path, "id", resolved_path,
-                sizeof(resolved_path)) != 0) {
-                kc_trust_options_free(&opts);
-                return KC_TRUST_ERROR;
-            }
-            path = resolved_path;
-        }
-    }
-    if (kc_trust_file_exists(path)) {
-        kc_trust_options_free(&opts);
+int kc_trust_generate(unsigned char secret_key[KC_TRUST_SK_SIZE],
+unsigned char public_key[KC_TRUST_PK_SIZE]) {
+    if (!secret_key || !public_key) return KC_TRUST_ERROR;
+    memset(secret_key, 0, KC_TRUST_SK_SIZE);
+    memset(public_key, 0, KC_TRUST_PK_SIZE);
+    if (kc_trust_read_random(secret_key, KC_TRUST_SK_SIZE) != 0)
         return KC_TRUST_ERROR;
-    }
-    unsigned char sk[KC_TRUST_SK_SIZE];
-    unsigned char pk[KC_TRUST_PK_SIZE];
-    if (kc_trust_read_random(sk, KC_TRUST_SK_SIZE) != 0) {
-        kc_trust_options_free(&opts);
-        return KC_TRUST_ERROR;
-    }
-    crypto_x25519_public_key(pk, sk);
-    unsigned char buf[KC_TRUST_IDENTITY_SIZE];
-    memcpy(buf, sk, KC_TRUST_SK_SIZE);
-    memcpy(buf + KC_TRUST_SK_SIZE, pk, KC_TRUST_PK_SIZE);
-    int rc = kc_trust_write_file(path, buf, sizeof(buf));
-    crypto_wipe(sk, KC_TRUST_SK_SIZE);
-    crypto_wipe(buf, sizeof(buf));
-    kc_trust_options_free(&opts);
-    return rc == 0 ? KC_TRUST_OK : KC_TRUST_ERROR;
-}
-
-/**
- * Loads an identity keypair from a file into a context.
- * @param ctx Destination context.
- * @param path Key file path.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
- */
-static int kc_trust_load_identity(kc_trust_t *ctx, const char *path) {
-    unsigned char buf[KC_TRUST_IDENTITY_SIZE];
-    if (kc_trust_read_file_exact(path, buf, KC_TRUST_IDENTITY_SIZE) != 0) return KC_TRUST_ERROR;
-    memcpy(ctx->sk, buf, KC_TRUST_SK_SIZE);
-    crypto_x25519_public_key(ctx->pk, ctx->sk);
-    crypto_wipe(buf, sizeof(buf));
-    ctx->has_identity = 1;
+    crypto_x25519_public_key(public_key, secret_key);
     return KC_TRUST_OK;
 }
 
 /**
- * Initialises a new trust context.
- * @param ctx_out Destination context pointer.
- * @param opts Configuration options.
+ * Initialises a new trust context from a caller-provided secret key.
+ * Copies the secret key, derives the context public key, and initializes
+ * empty in-memory TOFU state.  Memory-only: no files, no environment.
+ * @param out Destination context pointer.
+ * @param secret_key 32-byte secret key to install in the context.
  * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
  */
-int kc_trust_create(kc_trust_t **ctx_out, kc_trust_options_t *opts) {
-    if (!ctx_out) return KC_TRUST_ERROR;
-    *ctx_out = NULL;
-    if (!opts) return KC_TRUST_ERROR;
-    if (kc_trust_entropy_init() != 0) return KC_TRUST_ERROR;
+int kc_trust_create(kc_trust_t **out,
+const unsigned char secret_key[KC_TRUST_SK_SIZE]) {
+    if (out) *out = NULL;
+    if (!out || !secret_key) return KC_TRUST_ERROR;
     kc_trust_t *ctx = (kc_trust_t *)calloc(1, sizeof(kc_trust_t));
     if (!ctx) return KC_TRUST_ERROR;
-    char path[KC_TRUST_MAX_KEY_PATH];
-    if (kc_trust_resolve_identity_path(opts, path, sizeof(path)) != 0 ||
-        kc_trust_load_identity(ctx, path) != KC_TRUST_OK) {
-        free(ctx);
-        return KC_TRUST_ERROR;
-    }
-    *ctx_out = ctx;
+    memcpy(ctx->sk, secret_key, KC_TRUST_SK_SIZE);
+    crypto_x25519_public_key(ctx->pk, ctx->sk);
+    ctx->has_identity = 1;
+    *out = ctx;
     return KC_TRUST_OK;
 }
 
 /**
  * Releases a trust context and wipes all sensitive material.
  * @param ctx Context pointer. NULL is a safe no-op.
- * @return KC_TRUST_OK.
+ * @return Nothing.
  */
-int kc_trust_close(kc_trust_t *ctx) {
-    if (!ctx) return KC_TRUST_OK;
+void kc_trust_close(kc_trust_t *ctx) {
+    if (!ctx) return;
     crypto_wipe(ctx->sk, KC_TRUST_SK_SIZE);
     for (int i = 0; i < ctx->trust_count; i++)
         crypto_wipe(ctx->trust[i].pk, KC_TRUST_PK_SIZE);
     crypto_wipe(ctx, sizeof(*ctx));
     free(ctx);
-    kc_trust_entropy_cleanup();
-    return KC_TRUST_OK;
 }
 
 /**
@@ -805,7 +525,7 @@ int kc_trust_close(kc_trust_t *ctx) {
  * @param ctx Context pointer.
  * @return Pointer to 32 bytes, or NULL on error.
  */
-const unsigned char *kc_trust_public_key(kc_trust_t *ctx) {
+const unsigned char *kc_trust_public_key(const kc_trust_t *ctx) {
     if (!ctx || !ctx->has_identity) return NULL;
     return ctx->pk;
 }
@@ -820,7 +540,7 @@ const unsigned char *kc_trust_public_key(kc_trust_t *ctx) {
  * @param payload_len Destination payload length.
  * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
  */
-int kc_trust_seal(kc_trust_t *ctx,
+int kc_trust_seal(const kc_trust_t *ctx,
 const unsigned char recipient_pk[KC_TRUST_PK_SIZE],
 const unsigned char *message, size_t message_len,
 unsigned char **payload, size_t *payload_len) {
@@ -1000,7 +720,7 @@ int kc_trust_forget(kc_trust_t *ctx,
  * @param sender_pk Sender public key to compare.
  * @return Trust status code.
  */
-static int kc_trust_eval_trust(kc_trust_t *ctx,
+static int kc_trust_eval_trust(const kc_trust_t *ctx,
     const unsigned char *peer_id, size_t peer_id_len,
     const unsigned char sender_pk[KC_TRUST_PK_SIZE]) {
     for (int i = 0; i < ctx->trust_count; i++) {
@@ -1025,7 +745,7 @@ static int kc_trust_eval_trust(kc_trust_t *ctx,
  *                kc_trust_result_free().
  * @return KC_TRUST_OK when the result is populated, KC_TRUST_ERROR on failure.
  */
-int kc_trust_open(kc_trust_t *ctx,
+int kc_trust_open(const kc_trust_t *ctx,
 const unsigned char *payload, size_t payload_len,
 const unsigned char *peer_id, size_t peer_id_len,
 kc_trust_result_t **result) {
@@ -1168,6 +888,15 @@ kc_trust_result_t **result) {
 
     *result = r;
     return KC_TRUST_OK;
+}
+
+/**
+ * Releases an allocation returned by kc_trust_seal().
+ * @param ptr Payload pointer. NULL is a safe no-op.
+ * @return Nothing.
+ */
+void kc_trust_free(void *ptr) {
+    free(ptr);
 }
 
 /**

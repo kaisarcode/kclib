@@ -7,30 +7,12 @@
  * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
-#ifndef _WIN32
-#define _POSIX_C_SOURCE 200809L
-#endif
-
 #include "libtrust.h"
 #include "monocypher.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <sys/wait.h>
-#else
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#include <process.h>
-#define getpid _getpid
-#endif
 
 static int test_case_total = 0;
 static int test_case_current = 0;
@@ -65,8 +47,6 @@ static void run_case(int *rc, int (*fn)(void)) {
 #define TEST_LENGTH_RECORD_SIZE 24
 #define TEST_PAYLOAD_BASE_SIZE 120
 
-static int temp_keyfile_counter = 0;
-
 /**
  * Verifies one integer result.
  * @param name Check description.
@@ -91,22 +71,6 @@ static int expect_int(const char *name, int expected, int actual) {
 static int expect_true(const char *name, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", name);
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Verifies one string result.
- * @param name Check description.
- * @param expected Expected string.
- * @param actual Actual string.
- * @return 0 on success, 1 on failure.
- */
-static int expect_string(const char *name, const char *expected, const char *actual) {
-    if (actual == NULL || strcmp(expected, actual) != 0) {
-        printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
-            actual != NULL ? actual : "NULL");
         return 1;
     }
     return 0;
@@ -156,144 +120,9 @@ static size_t expected_payload_size(size_t plaintext_len) {
         records * TEST_NOISE_MAC_SIZE;
 }
 
-/**
- * Sets or unsets an environment variable.
- * @param name Variable name.
- * @param value Value to set, or NULL to unset.
- * @return 0 on success, 1 on failure.
- */
-static int set_env_value(const char *name, const char *value) {
-#ifdef _WIN32
-    return _putenv_s(name, value != NULL ? value : "") == 0 ? 0 : 1;
-#else
-    if (value == NULL) return unsetenv(name) == 0 ? 0 : 1;
-    return setenv(name, value, 1) == 0 ? 0 : 1;
-#endif
-}
-
-/**
- * Joins a test directory and child using the platform separator.
- * @param directory Parent directory.
- * @param child Child name.
- * @param path Destination path buffer.
- * @param path_cap Destination capacity.
- * @return 0 on success, 1 on failure.
- */
-static int join_test_path(const char *directory, const char *child,
-char *path, size_t path_cap) {
-#ifdef _WIN32
-    const char separator = '\\';
-#else
-    const char separator = '/';
-#endif
-    size_t directory_len = strlen(directory);
-    int length = snprintf(path, path_cap, "%s%s%s", directory,
-        directory_len > 0 && (directory[directory_len - 1] == '/' ||
-        directory[directory_len - 1] == '\\') ? "" :
-        (separator == '\\' ? "\\" : "/"), child);
-    return length >= 0 && (size_t)length < path_cap ? 0 : 1;
-}
-
-/**
- * Builds a unique temporary test path without creating it.
- * @param suffix Descriptive filename suffix.
- * @param path Destination path buffer.
- * @param path_cap Destination capacity.
- * @return 0 on success, 1 on failure.
- */
-static int make_temp_path(const char *suffix, char *path, size_t path_cap) {
-    char directory[512];
-#ifdef _WIN32
-    DWORD length = GetTempPathA((DWORD)sizeof(directory), directory);
-    if (length == 0 || length >= sizeof(directory)) return 1;
-#else
-    int length = snprintf(directory, sizeof(directory), "/tmp");
-    if (length < 0 || (size_t)length >= sizeof(directory)) return 1;
-#endif
-    char name[128];
-    int name_len = snprintf(name, sizeof(name), "trust_test_%d_%d_%s",
-        getpid(), temp_keyfile_counter++, suffix);
-    if (name_len < 0 || (size_t)name_len >= sizeof(name)) return 1;
-    return join_test_path(directory, name, path, path_cap);
-}
-
-/**
- * Creates a temporary keyfile containing sk and pk.
- * @param sk 32-byte secret key.
- * @param pk 32-byte public key.
- * @return Allocated path string, or NULL on failure.
- */
-static char *create_temp_keyfile(unsigned char sk[32], unsigned char pk[32]) {
-    char *path = (char *)malloc(1024);
-    if (!path || make_temp_path("key", path, 1024) != 0) {
-        free(path);
-        return NULL;
-    }
-    FILE *f = fopen(path, "wb");
-    if (!f) { free(path); return NULL; }
-    size_t sk_written = fwrite(sk, 1, 32, f);
-    size_t pk_written = fwrite(pk, 1, 32, f);
-    if (fclose(f) != 0 || sk_written != 32 || pk_written != 32) {
-        remove(path);
-        free(path);
-        return NULL;
-    }
-    return path;
-}
-
-/**
- * Removes a temporary file.
- * @param path File path to remove.
- * @return Nothing.
- */
-static void remove_temp_file(const char *path) {
-    if (!path) return;
-#ifdef _WIN32
-    DeleteFileA(path);
-#else
-    remove(path);
-#endif
-}
-
-/**
- * Replaces a test file with the specified bytes.
- * @param path File path.
- * @param data Source bytes.
- * @param data_len Source length.
- * @return 0 on success, 1 on failure.
- */
-static int write_test_file(const char *path, const unsigned char *data,
-size_t data_len) {
-    FILE *f = fopen(path, "wb");
-    if (!f) return 1;
-    size_t written = fwrite(data, 1, data_len, f);
-    int close_failed = fclose(f) != 0;
-    return written == data_len && !close_failed ? 0 : 1;
-}
-
-/**
- * Reads an exact test file and rejects trailing bytes.
- * @param path File path.
- * @param data Destination buffer.
- * @param data_len Expected file size.
- * @return 0 on success, 1 on failure.
- */
-static int read_test_file_exact(const char *path, unsigned char *data,
-size_t data_len) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return 1;
-    size_t read_len = fread(data, 1, data_len, f);
-    unsigned char extra;
-    size_t extra_len = fread(&extra, 1, 1, f);
-    int failed = ferror(f) || read_len != data_len || extra_len != 0;
-    if (fclose(f) != 0) failed = 1;
-    return failed ? 1 : 0;
-}
-
 typedef struct {
     unsigned char sk[KC_TRUST_SK_SIZE];
     unsigned char pk[KC_TRUST_PK_SIZE];
-    char *path;
     kc_trust_t *ctx;
 } test_identity_t;
 
@@ -306,16 +135,7 @@ static int open_test_identity(test_identity_t *identity, unsigned char marker) {
     identity->sk[0] = marker;
     identity->sk[1] = marker;
     crypto_x25519_public_key(identity->pk, identity->sk);
-    identity->path = create_temp_keyfile(identity->sk, identity->pk);
-    if (!identity->path) return 1;
-    kc_trust_options_t opts = kc_trust_options_default();
-    opts.key_path = identity->path;
-    if (kc_trust_create(&identity->ctx, &opts) != KC_TRUST_OK) {
-        remove_temp_file(identity->path);
-        free(identity->path);
-        identity->path = NULL;
-        return 1;
-    }
+    if (kc_trust_create(&identity->ctx, identity->sk) != KC_TRUST_OK) return 1;
     return 0;
 }
 
@@ -325,8 +145,6 @@ static int open_test_identity(test_identity_t *identity, unsigned char marker) {
  */
 static void close_test_identity(test_identity_t *identity) {
     kc_trust_close(identity->ctx);
-    remove_temp_file(identity->path);
-    free(identity->path);
     memset(identity, 0, sizeof(*identity));
 }
 
@@ -357,7 +175,7 @@ test_identity_t *recipient, const unsigned char *message, size_t message_len) {
                 result->peer_pk, KC_TRUST_PK_SIZE);
             kc_trust_result_free(result);
         }
-        free(payload);
+        kc_trust_free(payload);
     }
     return rc;
 }
@@ -390,143 +208,6 @@ size_t payload_len, const unsigned char *peer_id, size_t peer_id_len) {
 }
 
 /**
- * Tests kc_trust_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_trust_options_default(void) {
-    const char *name = "kc_trust_options_default";
-    const char *detail = "returns empty options";
-    int fail = 0;
-
-    kc_trust_options_t opts = kc_trust_options_default();
-    fail += expect_true("default options are empty",
-        !opts.state_path && !opts.key_path);
-    kc_trust_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_trust_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_trust_options_load_env(void) {
-    const char *name = "kc_trust_options_load_env";
-    const char *detail = "loads environment overrides independently";
-    int fail = 0;
-
-    kc_trust_options_t opts = kc_trust_options_default();
-    set_env_value("TRUST_STATE_DIR", "/tmp/test_state");
-    set_env_value("TRUST_KEY", "/tmp/test_key");
-    kc_trust_options_load_env(&opts);
-    fail += expect_string("TRUST_STATE_DIR loads", "/tmp/test_state",
-        opts.state_path);
-    fail += expect_string("TRUST_KEY loads", "/tmp/test_key", opts.key_path);
-    set_env_value("TRUST_STATE_DIR", "/tmp/test_state2");
-    set_env_value("TRUST_KEY", NULL);
-    kc_trust_options_load_env(&opts);
-    fail += expect_string("state replaces independently", "/tmp/test_state2",
-        opts.state_path);
-    fail += expect_string("unset key remains", "/tmp/test_key", opts.key_path);
-    set_env_value("TRUST_STATE_DIR", NULL);
-    set_env_value("TRUST_KEY", "/tmp/test_key2");
-    kc_trust_options_load_env(&opts);
-    fail += expect_string("key replaces independently", "/tmp/test_key2",
-        opts.key_path);
-    kc_trust_options_free(&opts);
-    fail += expect_true("options free clears fields",
-        !opts.state_path && !opts.key_path);
-    kc_trust_options_free(&opts);
-    kc_trust_options_load_env(NULL);
-    set_env_value("TRUST_STATE_DIR", NULL);
-    set_env_value("TRUST_KEY", NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_trust_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_trust_options_free(void) {
-    const char *name = "kc_trust_options_free";
-    const char *detail = "clears options and accepts NULL";
-    int fail = 0;
-
-    kc_trust_options_t opts = kc_trust_options_default();
-    opts.state_path = strdup("/tmp/test_state");
-    opts.key_path = strdup("/tmp/test_key");
-    fail += expect_true("options hold allocated fields",
-        opts.state_path != NULL && opts.key_path != NULL);
-    kc_trust_options_free(&opts);
-    fail += expect_true("options free clears fields",
-        !opts.state_path && !opts.key_path);
-    kc_trust_options_free(&opts);
-    kc_trust_options_free(NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_trust_resolve_state_path.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_trust_resolve_state_path(void) {
-    const char *name = "kc_trust_resolve_state_path";
-    const char *detail = "resolves explicit and platform defaults";
-    int fail = 0;
-
-    kc_trust_options_t opts = kc_trust_options_default();
-    char path[256];
-    opts.state_path = "/explicit/trust-state";
-    fail += expect_int("explicit state resolves", KC_TRUST_OK,
-        kc_trust_resolve_state_path(&opts, path, sizeof(path)));
-    fail += expect_string("explicit state wins", "/explicit/trust-state", path);
-    opts.state_path = NULL;
-#ifdef _WIN32
-    set_env_value("LOCALAPPDATA", "C:\\Users\\test\\AppData\\Local");
-    set_env_value("USERPROFILE", "C:\\Users\\test");
-    fail += expect_int("LOCALAPPDATA resolves", KC_TRUST_OK,
-        kc_trust_resolve_state_path(&opts, path, sizeof(path)));
-    fail += expect_string("LOCALAPPDATA default",
-        "C:\\Users\\test\\AppData\\Local\\trust", path);
-    set_env_value("LOCALAPPDATA", NULL);
-    fail += expect_int("USERPROFILE resolves", KC_TRUST_OK,
-        kc_trust_resolve_state_path(&opts, path, sizeof(path)));
-    fail += expect_string("USERPROFILE fallback", "C:\\Users\\test\\.trust", path);
-    set_env_value("USERPROFILE", NULL);
-#else
-    const char *home = getenv("HOME");
-    char *saved_home = home ? strdup(home) : NULL;
-    const char *saved_xdg_data = getenv("XDG_DATA_HOME");
-    char *saved_xdg_data_copy =
-        saved_xdg_data ? strdup(saved_xdg_data) : NULL;
-    set_env_value("XDG_DATA_HOME", NULL);
-    set_env_value("HOME", "/tmp/test_home");
-    fail += expect_int("HOME resolves", KC_TRUST_OK,
-        kc_trust_resolve_state_path(&opts, path, sizeof(path)));
-    fail += expect_string("HOME default",
-        "/tmp/test_home/.local/share/trust", path);
-    set_env_value("XDG_DATA_HOME", "/tmp/test_xdg");
-    fail += expect_int("XDG_DATA_HOME resolves", KC_TRUST_OK,
-        kc_trust_resolve_state_path(&opts, path, sizeof(path)));
-    fail += expect_string("XDG_DATA_HOME default",
-        "/tmp/test_xdg/trust", path);
-    set_env_value("XDG_DATA_HOME", saved_xdg_data_copy);
-    free(saved_xdg_data_copy);
-    set_env_value("HOME", NULL);
-#endif
-    fail += expect_int("missing platform root fails", KC_TRUST_ERROR,
-        kc_trust_resolve_state_path(&opts, path, sizeof(path)));
-#ifndef _WIN32
-    set_env_value("HOME", saved_home);
-    free(saved_home);
-#endif
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_trust_version.
  * @return 0 on success, 1 on failure.
  */
@@ -544,24 +225,23 @@ static int case_kc_trust_version(void) {
  */
 static int case_kc_trust_generate(void) {
     const char *name = "kc_trust_generate";
-    const char *detail = "writes a non-overwritten identity";
+    const char *detail = "generates a memory keypair and rejects NULL";
     int fail = 0;
 
-    char path[1024];
-    if (make_temp_path("generated", path, sizeof(path))) return 1;
-    unsigned char identity[KC_TRUST_IDENTITY_SIZE];
+    unsigned char sk[KC_TRUST_SK_SIZE];
+    unsigned char pk[KC_TRUST_PK_SIZE];
     unsigned char derived[KC_TRUST_PK_SIZE];
-    fail += expect_int("generate identity", KC_TRUST_OK,
-        kc_trust_generate(path));
-    fail += expect_int("generated identity is exact", 0,
-        read_test_file_exact(path, identity, sizeof(identity)));
-    crypto_x25519_public_key(derived, identity);
-    fail += expect_bytes("generated public key", derived,
-        identity + KC_TRUST_SK_SIZE, KC_TRUST_PK_SIZE);
-    fail += expect_int("generate does not overwrite", KC_TRUST_ERROR,
-        kc_trust_generate(path));
-    crypto_wipe(identity, sizeof(identity));
-    remove_temp_file(path);
+    fail += expect_int("generate keypair", KC_TRUST_OK,
+        kc_trust_generate(sk, pk));
+    crypto_x25519_public_key(derived, sk);
+    fail += expect_bytes("generated public key", derived, pk, KC_TRUST_PK_SIZE);
+    fail += expect_int("generate rejects NULL secret key", KC_TRUST_ERROR,
+        kc_trust_generate(NULL, pk));
+    fail += expect_int("generate rejects NULL public key", KC_TRUST_ERROR,
+        kc_trust_generate(sk, NULL));
+    crypto_wipe(sk, sizeof(sk));
+    crypto_wipe(pk, sizeof(pk));
+    crypto_wipe(derived, sizeof(derived));
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -572,34 +252,28 @@ static int case_kc_trust_generate(void) {
  */
 static int case_kc_trust_create(void) {
     const char *name = "kc_trust_create";
-    const char *detail = "loads identities and rejects bad arguments";
+    const char *detail = "creates contexts from secret keys and rejects bad args";
     int fail = 0;
 
-    test_identity_t identity;
-    if (open_test_identity(&identity, 0x11)) return 1;
-    kc_trust_options_t opts = kc_trust_options_default();
-    opts.key_path = identity.path;
-    kc_trust_t *ctx = (kc_trust_t *)1;
+    unsigned char sk[KC_TRUST_SK_SIZE];
+    unsigned char derived[KC_TRUST_PK_SIZE];
+    memset(sk, 0x44, sizeof(sk));
+    crypto_x25519_public_key(derived, sk);
     fail += expect_int("create rejects NULL output", KC_TRUST_ERROR,
-        kc_trust_create(NULL, &opts));
-    fail += expect_int("create rejects NULL options", KC_TRUST_ERROR,
+        kc_trust_create(NULL, sk));
+    kc_trust_t *ctx = (kc_trust_t *)1;
+    fail += expect_int("create rejects NULL secret key", KC_TRUST_ERROR,
         kc_trust_create(&ctx, NULL));
     fail += expect_true("failed create clears output", ctx == NULL);
-    unsigned char bytes[KC_TRUST_IDENTITY_SIZE + 1];
-    memcpy(bytes, identity.sk, KC_TRUST_SK_SIZE);
-    memcpy(bytes + KC_TRUST_SK_SIZE, identity.pk, KC_TRUST_PK_SIZE);
-    bytes[KC_TRUST_IDENTITY_SIZE] = 0xff;
-    kc_trust_close(identity.ctx);
-    identity.ctx = NULL;
-    fail += expect_int("write 63-byte identity", 0,
-        write_test_file(identity.path, bytes, KC_TRUST_IDENTITY_SIZE - 1));
-    fail += expect_int("reject 63-byte identity", KC_TRUST_ERROR,
-        kc_trust_create(&ctx, &opts));
-    fail += expect_int("write 65-byte identity", 0,
-        write_test_file(identity.path, bytes, KC_TRUST_IDENTITY_SIZE + 1));
-    fail += expect_int("reject 65-byte identity", KC_TRUST_ERROR,
-        kc_trust_create(&ctx, &opts));
-    close_test_identity(&identity);
+    fail += expect_int("create valid context", KC_TRUST_OK,
+        kc_trust_create(&ctx, sk));
+    if (ctx) {
+        fail += expect_bytes("created public key matches derivation", derived,
+            kc_trust_public_key(ctx), KC_TRUST_PK_SIZE);
+        kc_trust_close(ctx);
+    }
+    crypto_wipe(sk, sizeof(sk));
+    crypto_wipe(derived, sizeof(derived));
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -613,13 +287,12 @@ static int case_kc_trust_close(void) {
     const char *detail = "releases contexts and accepts NULL";
     int fail = 0;
 
-    fail += expect_int("close NULL", KC_TRUST_OK, kc_trust_close(NULL));
+    kc_trust_close(NULL);
+    fail += expect_true("close accepts NULL", 1);
     test_identity_t identity;
     if (open_test_identity(&identity, 0x12)) return 1;
     kc_trust_close(identity.ctx);
     identity.ctx = NULL;
-    remove_temp_file(identity.path);
-    free(identity.path);
     fail += expect_true("close opened context", 1);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -728,9 +401,9 @@ static int case_kc_trust_open(void) {
             trailing[payload_len] = 0;
             fail += expect_open_rejected("reject trailing payload",
                 recipient.ctx, trailing, payload_len + 1);
-            free(trailing);
+            kc_trust_free(trailing);
         } else {
-            free(payload);
+            kc_trust_free(payload);
         }
     } else {
         fail++;
@@ -755,6 +428,43 @@ static int case_kc_trust_open(void) {
     fail += expect_int("open rejects long peer id", KC_TRUST_ERROR,
         kc_trust_open(recipient.ctx, dummy_payload, sizeof(dummy_payload),
         long_id, sizeof(long_id), &result));
+    close_test_identity(&sender);
+    close_test_identity(&recipient);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_trust_free.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_trust_free(void) {
+    const char *name = "kc_trust_free";
+    const char *detail = "releases seal payloads and accepts NULL";
+    int fail = 0;
+
+    kc_trust_free(NULL);
+    fail += expect_true("free accepts NULL", 1);
+    test_identity_t sender;
+    test_identity_t recipient;
+    if (open_test_identity(&sender, 0x14) ||
+        open_test_identity(&recipient, 0x15)) return 1;
+    const unsigned char message[] = "owned payload";
+    unsigned char *payload = NULL;
+    size_t payload_len = 0;
+    if (kc_trust_seal(sender.ctx, recipient.pk, message, sizeof(message) - 1,
+        &payload, &payload_len) == KC_TRUST_OK && payload) {
+        kc_trust_free(payload);
+        fail += expect_true("free releases seal payload", 1);
+    } else {
+        fail++;
+    }
+    unsigned char *generic = (unsigned char *)malloc(16);
+    fail += expect_true("allocate generic heap buffer", generic != NULL);
+    if (generic) {
+        kc_trust_free(generic);
+        fail += expect_true("free releases generic buffer", 1);
+    }
     close_test_identity(&sender);
     close_test_identity(&recipient);
     case_result(fail, name, detail);
@@ -789,7 +499,7 @@ static int case_kc_trust_result_free(void) {
         } else {
             fail++;
         }
-        free(payload);
+        kc_trust_free(payload);
     } else {
         fail++;
     }
@@ -915,8 +625,8 @@ static int case_kc_trust_tofu_state_machine(void) {
         fail += expect_int("forget missing binding", KC_TRUST_ERROR,
             kc_trust_forget(receiver.ctx, peer, 5));
     }
-    free(sender_payload);
-    free(changed_payload);
+    kc_trust_free(sender_payload);
+    kc_trust_free(changed_payload);
     close_test_identity(&receiver);
     close_test_identity(&sender);
     close_test_identity(&changed);
@@ -944,7 +654,6 @@ static int case_kc_trust_noise_conformance(void) {
     static const char sender_pk_hex[] =
         "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67b";
     unsigned char recipient_sk[32];
-    unsigned char recipient_pk[32];
     unsigned char expected_sender_pk[32];
     unsigned char expected_handshake[TEST_HANDSHAKE_SIZE];
     unsigned char payload[TEST_PAYLOAD_BASE_SIZE + 5 + TEST_NOISE_MAC_SIZE];
@@ -952,7 +661,6 @@ static int case_kc_trust_noise_conformance(void) {
 
     for (size_t i = 0; i < sizeof(recipient_sk); i++)
         recipient_sk[i] = (unsigned char)(i + 1);
-    crypto_x25519_public_key(recipient_pk, recipient_sk);
     if (decode_hex(handshake_hex, expected_handshake,
         sizeof(expected_handshake)) != 0 ||
         decode_hex(handshake_hex, payload, TEST_HANDSHAKE_SIZE) != 0 ||
@@ -963,13 +671,9 @@ static int case_kc_trust_noise_conformance(void) {
         decode_hex(sender_pk_hex, expected_sender_pk,
         sizeof(expected_sender_pk)) != 0) return 1;
 
-    char *path = create_temp_keyfile(recipient_sk, recipient_pk);
-    if (!path) return 1;
-    kc_trust_options_t opts = kc_trust_options_default();
-    opts.key_path = path;
     kc_trust_t *ctx = NULL;
     fail += expect_int("create vector recipient", KC_TRUST_OK,
-        kc_trust_create(&ctx, &opts));
+        kc_trust_create(&ctx, recipient_sk));
     fail += expect_int("fixed Noise X handshake size", 96,
         TEST_HANDSHAKE_SIZE);
     fail += expect_int("fixed payload base size", 120,
@@ -995,8 +699,6 @@ static int case_kc_trust_noise_conformance(void) {
         }
         kc_trust_close(ctx);
     }
-    remove_temp_file(path);
-    free(path);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -1050,7 +752,7 @@ static int case_kc_trust_crypto_rejection(void) {
                 mutated, payload_len);
             free(mutated);
         }
-        free(payload);
+        kc_trust_free(payload);
     }
     unsigned char garbage[200];
     memset(garbage, 0xab, sizeof(garbage));
@@ -1072,21 +774,16 @@ static int case_kc_trust_crypto_rejection(void) {
         TEST_PAYLOAD_BASE_SIZE * 2, (int)strlen(zero_static_hex));
     int decoded = decode_hex(zero_static_hex, zero_static, sizeof(zero_static));
     fail += expect_int("decode zero static vector", 0, decoded);
-    test_identity_t vector_recipient;
-    memset(&vector_recipient, 0, sizeof(vector_recipient));
-    for (size_t i = 0; i < sizeof(vector_recipient.sk); i++)
-        vector_recipient.sk[i] = (unsigned char)(i + 1);
-    crypto_x25519_public_key(vector_recipient.pk, vector_recipient.sk);
-    vector_recipient.path = create_temp_keyfile(vector_recipient.sk,
-        vector_recipient.pk);
-    kc_trust_options_t vector_opts = kc_trust_options_default();
-    vector_opts.key_path = vector_recipient.path;
-    if (!vector_recipient.path || kc_trust_create(&vector_recipient.ctx,
-        &vector_opts) != KC_TRUST_OK) fail++;
+    unsigned char vector_sk[KC_TRUST_SK_SIZE];
+    kc_trust_t *vector_ctx = NULL;
+    for (size_t i = 0; i < sizeof(vector_sk); i++)
+        vector_sk[i] = (unsigned char)(i + 1);
+    if (kc_trust_create(&vector_ctx, vector_sk) != KC_TRUST_OK) fail++;
     else if (!decoded)
         fail += expect_open_rejected("reject zero sender static",
-            vector_recipient.ctx, zero_static, sizeof(zero_static));
-    close_test_identity(&vector_recipient);
+            vector_ctx, zero_static, sizeof(zero_static));
+    if (vector_ctx) kc_trust_close(vector_ctx);
+    crypto_wipe(vector_sk, sizeof(vector_sk));
     close_test_identity(&sender);
     close_test_identity(&recipient);
     close_test_identity(&wrong);
@@ -1105,11 +802,9 @@ static int case_kc_trust_multictx(void) {
 
     test_identity_t identity;
     if (open_test_identity(&identity, 0x51)) return 1;
-    kc_trust_options_t opts = kc_trust_options_default();
-    opts.key_path = identity.path;
     kc_trust_t *second = NULL;
     fail += expect_int("create independent context", KC_TRUST_OK,
-        kc_trust_create(&second, &opts));
+        kc_trust_create(&second, identity.sk));
     if (second) {
         fail += expect_true("contexts are distinct", identity.ctx != second);
         fail += expect_int("first context trusts", KC_TRUST_OK,
@@ -1165,9 +860,9 @@ static int case_kc_trust_message_limit(void) {
             trailing[payload_len] = 0;
             fail += expect_open_rejected("reject oversized maximum payload",
                 identity.ctx, trailing, payload_len + 1);
-            free(trailing);
+            kc_trust_free(trailing);
         } else {
-            free(payload);
+            kc_trust_free(payload);
         }
     }
     unsigned char *ignored = NULL;
@@ -1186,12 +881,8 @@ static int case_kc_trust_message_limit(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 19;
+    test_case_total = 16;
     test_case_current = 0;
-    run_case(&rc, case_kc_trust_options_default);
-    run_case(&rc, case_kc_trust_options_load_env);
-    run_case(&rc, case_kc_trust_options_free);
-    run_case(&rc, case_kc_trust_resolve_state_path);
     run_case(&rc, case_kc_trust_version);
     run_case(&rc, case_kc_trust_generate);
     run_case(&rc, case_kc_trust_create);
@@ -1199,6 +890,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_trust_public_key);
     run_case(&rc, case_kc_trust_seal);
     run_case(&rc, case_kc_trust_open);
+    run_case(&rc, case_kc_trust_free);
     run_case(&rc, case_kc_trust_result_free);
     run_case(&rc, case_kc_trust_trust);
     run_case(&rc, case_kc_trust_forget);
@@ -1223,10 +915,6 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_trust_options_default") == 0) return case_kc_trust_options_default();
-    if (strcmp(argv[1], "kc_trust_options_load_env") == 0) return case_kc_trust_options_load_env();
-    if (strcmp(argv[1], "kc_trust_options_free") == 0) return case_kc_trust_options_free();
-    if (strcmp(argv[1], "kc_trust_resolve_state_path") == 0) return case_kc_trust_resolve_state_path();
     if (strcmp(argv[1], "kc_trust_version") == 0) return case_kc_trust_version();
     if (strcmp(argv[1], "kc_trust_generate") == 0) return case_kc_trust_generate();
     if (strcmp(argv[1], "kc_trust_create") == 0) return case_kc_trust_create();
@@ -1234,6 +922,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_trust_public_key") == 0) return case_kc_trust_public_key();
     if (strcmp(argv[1], "kc_trust_seal") == 0) return case_kc_trust_seal();
     if (strcmp(argv[1], "kc_trust_open") == 0) return case_kc_trust_open();
+    if (strcmp(argv[1], "kc_trust_free") == 0) return case_kc_trust_free();
     if (strcmp(argv[1], "kc_trust_result_free") == 0) return case_kc_trust_result_free();
     if (strcmp(argv[1], "kc_trust_trust") == 0) return case_kc_trust_trust();
     if (strcmp(argv[1], "kc_trust_forget") == 0) return case_kc_trust_forget();

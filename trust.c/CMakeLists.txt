@@ -41,7 +41,20 @@ set_source_files_properties(src/libtrust.c PROPERTIES
     COMPILE_DEFINITIONS KC_TRUST_BUILD_VERSION=${TRUST_BUILD_VERSION}
 )
 
-if(NOT TRUST_TEST_EXTERNAL_ARTIFACTS)
+if(EMSCRIPTEN)
+    add_executable(trust_wasm ${TRUST_SOURCES})
+    target_include_directories(trust_wasm PRIVATE src lib/monocypher)
+    set_target_properties(trust_wasm PROPERTIES
+        OUTPUT_NAME "trust"
+        SUFFIX ".js"
+    )
+    target_link_options(trust_wasm PRIVATE
+        --no-entry
+        -sEXPORTED_FUNCTIONS=_kc_trust_generate,_kc_trust_create,_kc_trust_close,_kc_trust_public_key,_kc_trust_seal,_kc_trust_open,_kc_trust_free,_kc_trust_result_free,_kc_trust_trust,_kc_trust_forget,_kc_trust_version
+    )
+endif()
+
+if(NOT TRUST_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     add_executable(trust
         src/trust.c
         src/libtrust.c
@@ -67,7 +80,15 @@ endif()
 if(TRUST_BUILD_TESTS)
     enable_testing()
 
-    if(TRUST_TEST_SHARED_LIBRARY)
+    if(EMSCRIPTEN)
+        add_executable(trust_contract_test src/test.c ${TRUST_SOURCES})
+        target_include_directories(trust_contract_test PRIVATE src lib/monocypher)
+        target_link_options(trust_contract_test PRIVATE
+            -sALLOW_MEMORY_GROWTH=1
+            -sINITIAL_MEMORY=134217728
+            -sMAXIMUM_MEMORY=536870912
+        )
+    elseif(TRUST_TEST_SHARED_LIBRARY)
         add_library(trust_test_shared SHARED IMPORTED)
         set_target_properties(trust_test_shared PROPERTIES
             IMPORTED_LOCATION "${TRUST_TEST_SHARED_LIBRARY}"
@@ -81,18 +102,20 @@ if(TRUST_BUILD_TESTS)
         set(TRUST_TEST_SHARED_TARGET trust_shared)
     endif()
 
-    if(TARGET trust_test_shared)
-        set(TRUST_TEST_SHARED_TARGET trust_test_shared)
+    if(NOT EMSCRIPTEN)
+        if(TARGET trust_test_shared)
+            set(TRUST_TEST_SHARED_TARGET trust_test_shared)
+        endif()
+
+        add_executable(trust_contract_test src/test.c)
+        target_include_directories(trust_contract_test PRIVATE src lib/monocypher)
+        target_link_libraries(trust_contract_test PRIVATE ${TRUST_TEST_SHARED_TARGET})
+
+        add_custom_command(TARGET trust_contract_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:${TRUST_TEST_SHARED_TARGET}>
+                $<TARGET_FILE_DIR:trust_contract_test>
+        )
     endif()
-
-    add_executable(trust_contract_test src/test.c)
-    target_include_directories(trust_contract_test PRIVATE src lib/monocypher)
-    target_link_libraries(trust_contract_test PRIVATE ${TRUST_TEST_SHARED_TARGET})
-
-    add_custom_command(TARGET trust_contract_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:${TRUST_TEST_SHARED_TARGET}>
-            $<TARGET_FILE_DIR:trust_contract_test>
-    )
 
 endif()

@@ -138,8 +138,11 @@ persistent state root.
 
 The default identity is `<state>/id` and persisted CLI bindings are under
 `<state>/trust/`. `TRUST_KEY` overrides only the identity file and never moves
-the trust directory. Explicit values in `kc_trust_options_t` take precedence
-over environment values.
+the trust directory. The CLI reads these environment variables itself; `--key`
+overrides `TRUST_KEY`, which overrides the default `<state>/id` identity path,
+and `TRUST_STATE_DIR` overrides the platform default state directory. The
+library itself is memory-only and never reads the environment or the
+filesystem.
 
 ---
 
@@ -148,10 +151,10 @@ over environment values.
 ```c
 #include "libtrust.h"
 
-kc_trust_options_t opts = kc_trust_options_default();
+unsigned char sk[32], pk[32];
+kc_trust_generate(sk, pk);          /* random in-memory keypair */
 kc_trust_t *ctx = NULL;
-
-if (kc_trust_create(&ctx, &opts) == KC_TRUST_OK) {
+if (kc_trust_create(&ctx, sk) == KC_TRUST_OK) {
     unsigned char recipient_pk[32];
     /* ... load recipient_pk ... */
     unsigned char *payload = NULL;
@@ -159,29 +162,24 @@ if (kc_trust_create(&ctx, &opts) == KC_TRUST_OK) {
     kc_trust_seal(ctx, recipient_pk, message, message_len,
         &payload, &payload_len);
     /* payload contains the sealed message */
-    free(payload);
+    kc_trust_free(payload);
     kc_trust_close(ctx);
 }
-
-kc_trust_options_free(&opts);
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_trust_options_default()` - creates caller-owned default options.
-- `kc_trust_options_load_env()` - applies documented environment overrides.
-- `kc_trust_options_free()` - releases option-owned strings.
-- `kc_trust_generate()` - generates a new identity keypair and writes it to disk.
-- `kc_trust_create()` - allocates a caller-owned context and loads the identity.
+- `kc_trust_generate()` - generates a random in-memory keypair `[sk][pk]`.
+- `kc_trust_create()` - allocates a caller-owned context from a 32-byte secret key, deriving the public key.
 - `kc_trust_public_key()` - returns the context-owned 32-byte public key.
 - `kc_trust_seal()` - protects an outgoing message for a recipient.
 - `kc_trust_open()` - verifies and opens an incoming payload.
-- `kc_trust_trust()` - adds or replaces a peer trust binding.
-- `kc_trust_forget()` - removes a peer trust binding.
-- `kc_trust_result_free()` - releases a result and wipes sensitive data.
-- `kc_trust_close()` - releases the context and wipes all sensitive material.
+- `kc_trust_trust()` / `kc_trust_forget()` - maintain an in-memory peer trust binding.
+- `kc_trust_result_free()` - releases a result.
+- `kc_trust_free()` - standard release for `seal` payloads.
+- `kc_trust_close()` - releases the context and wipes all sensitive material (returns nothing).
 
 ## Trust Model
 
@@ -265,9 +263,34 @@ make mipsel/linux
 make mips64el/linux
 make s390x/linux
 make loongarch64/linux
+make wasm32/wasm
 ```
 
 Builds a single target only. Cross-compilation verifies compilation only; runtime validation requires the target environment.
+
+### WebAssembly
+
+A JS-hosted WebAssembly build of the library can be produced with the
+Emscripten SDK:
+
+```bash
+make wasm32/wasm
+```
+
+This builds the library to `bin/wasm32/wasm/trust.js` and
+`bin/wasm32/wasm/trust.wasm`. The CLI is not part of the WASM build. The
+library exports `_kc_trust_generate`, `_kc_trust_create`, `_kc_trust_close`,
+`_kc_trust_public_key`, `_kc_trust_seal`, `_kc_trust_open`, `_kc_trust_free`,
+`_kc_trust_result_free`, `_kc_trust_trust`, `_kc_trust_forget`, and
+`_kc_trust_version` through the generated `trust.js` glue. The toolchain is
+selected via `WASM_EMCMAKE`, `WASM_EMCC`, and `WASM_NODE` (defaults `emcmake`,
+`emcc`, and `node`).
+
+To run the same portable `src/test.c` contract suite under Node.js:
+
+```bash
+make test wasm
+```
 
 ---
 
@@ -303,10 +326,12 @@ Required only for multiarch builds:
 - `wine` for running Windows tests on Linux.
 - osxcross for macOS cross-compilation from Linux.
 - Android NDK for Android cross-compilation.
+- Emscripten SDK (`emcmake`/`emcc`) for WASM builds.
 
 ### Test Dependencies
 
-- No additional test dependencies required.
+- `node` for WASM contract tests (the Emscripten SDK bundles one via
+    `EMSDK_NODE`; otherwise set `WASM_NODE=...`).
 
 ---
 

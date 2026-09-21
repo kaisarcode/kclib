@@ -34,6 +34,7 @@
 #define KC_TRUST_CLI_MAX_KEY_PATH 1024
 #define KC_TRUST_CLI_MAX_TRUST_DIR 1024
 #define KC_TRUST_CLI_MAX_TRUST_PATH 1200
+#define KC_TRUST_CLI_IDENTITY_SIZE (KC_TRUST_SK_SIZE + KC_TRUST_PK_SIZE)
 
 /**
  * Converts bytes to a lowercase hex string.
@@ -218,18 +219,121 @@ static int kc_trust_cli_ensure_directory(const char *path, const char *label) {
 }
 
 /**
+ * Resolves the CLI state directory with exact precedence.
+ * POSIX: TRUST_STATE_DIR, then $XDG_DATA_HOME/trust, then
+ * $HOME/.local/share/trust, otherwise failure.
+ * Windows: TRUST_STATE_DIR, then %LOCALAPPDATA%\trust, then
+ * %USERPROFILE%\.trust, otherwise failure.
+ * @param state_path Destination state-directory path.
+ * @param state_path_cap Destination capacity.
+ * @return 0 on success, -1 on failure.
+ */
+static int kc_trust_cli_state_path(char *state_path, size_t state_path_cap) {
+    const char *value = getenv("TRUST_STATE_DIR");
+    if (value && value[0] != '\0') {
+        size_t len = strlen(value);
+        if (len >= state_path_cap) return -1;
+        memcpy(state_path, value, len + 1);
+        return 0;
+    }
+#ifdef _WIN32
+    value = getenv("LOCALAPPDATA");
+    if (value && value[0] != '\0')
+        return kc_trust_cli_join_path(value, "trust", state_path,
+            state_path_cap) == 0 ? 0 : -1;
+    value = getenv("USERPROFILE");
+    if (value && value[0] != '\0')
+        return kc_trust_cli_join_path(value, ".trust", state_path,
+            state_path_cap) == 0 ? 0 : -1;
+#else
+    value = getenv("XDG_DATA_HOME");
+    if (value && value[0] != '\0')
+        return kc_trust_cli_join_path(value, "trust", state_path,
+            state_path_cap) == 0 ? 0 : -1;
+    value = getenv("HOME");
+    if (value && value[0] != '\0')
+        return kc_trust_cli_join_path(value, ".local/share/trust",
+            state_path, state_path_cap) == 0 ? 0 : -1;
+#endif
+    return -1;
+}
+
+/**
+ * Resolves the CLI identity file path.
+ * Precedence: explicit key path, then TRUST_KEY, then <state>/id.
+ * TRUST_KEY affects only the identity path, never the trust directory.
+ * @param key_path Explicit key path (or NULL).
+ * @param identity_path Destination identity-file path.
+ * @param identity_path_cap Destination capacity.
+ * @param create_state Non-zero creates a missing default state directory.
+ * @return 0 on success, -1 on failure.
+ */
+static int kc_trust_cli_resolve_identity_path(const char *key_path,
+    char *identity_path, size_t identity_path_cap, int create_state) {
+    const char *value = key_path;
+    if (!value || value[0] == '\0') {
+        value = getenv("TRUST_KEY");
+        if (value && value[0] == '\0') value = NULL;
+    }
+    if (value) {
+        size_t len = strlen(value);
+        if (!identity_path_cap || len >= identity_path_cap) return -1;
+        memcpy(identity_path, value, len + 1);
+        return 0;
+    }
+    char state_path[KC_TRUST_CLI_MAX_TRUST_DIR];
+    if (kc_trust_cli_state_path(state_path, sizeof(state_path)) != 0)
+        return -1;
+    int state_status = kc_trust_cli_directory_status(state_path, "state");
+    if (state_status < 0) return -1;
+    if (state_status == 0) {
+        if (!create_state) return -1;
+        if (kc_trust_cli_ensure_directory(state_path, "state") != 0)
+            return -1;
+    }
+    return kc_trust_cli_join_path(state_path, "id", identity_path,
+        identity_path_cap) == 0 ? 0 : -1;
+}
+
+/**
+ * Loads the CLI identity and creates a library context from it.
+ * Requires exactly KC_TRUST_CLI_IDENTITY_SIZE bytes; the context is created
+ * from the first 32 secret bytes and the stored public half is not validated.
+ * @param key_path Explicit key path (or NULL).
+ * @param identity_path Destination resolved identity-file path.
+ * @param identity_path_cap Destination capacity.
+ * @param out Destination context pointer.
+ * @return 0 on success, -1 on failure.
+ */
+static int kc_trust_cli_load_identity(const char *key_path,
+    char *identity_path, size_t identity_path_cap, kc_trust_t **out) {
+    unsigned char identity[KC_TRUST_CLI_IDENTITY_SIZE];
+    size_t len = 0;
+    *out = NULL;
+    if (kc_trust_cli_resolve_identity_path(key_path, identity_path,
+        identity_path_cap, 0) != 0)
+        return -1;
+    if (kc_trust_cli_read_binary_file(identity_path, identity,
+        sizeof(identity), &len) != 0 || len != sizeof(identity)) {
+        crypto_wipe(identity, sizeof(identity));
+        return -1;
+    }
+    int status = kc_trust_create(out, identity);
+    crypto_wipe(identity, sizeof(identity));
+    return status == KC_TRUST_OK ? 0 : -1;
+}
+
+/**
  * Resolves and optionally creates the configured trust directory.
- * @param opts Configuration options.
  * @param trust_path Destination trust-directory path.
  * @param trust_path_cap Destination capacity.
  * @param create Non-zero creates missing directories.
  * @return 0 when available, 1 when absent, -1 on failure.
  */
-static int kc_trust_cli_trust_dir(const kc_trust_options_t *opts,
-    char *trust_path, size_t trust_path_cap, int create) {
+static int kc_trust_cli_trust_dir(char *trust_path, size_t trust_path_cap,
+    int create) {
     char state_path[KC_TRUST_CLI_MAX_KEY_PATH];
-    if (kc_trust_resolve_state_path(opts, state_path,
-        sizeof(state_path)) != KC_TRUST_OK) {
+    if (kc_trust_cli_state_path(state_path, sizeof(state_path)) != 0) {
         kc_trust_cli_diag(
             "trust: state directory unavailable; set TRUST_STATE_DIR");
         return -1;
@@ -321,21 +425,19 @@ static int kc_trust_cli_trust_entry_valid(const char *trust_dir,
 
 /**
  * Writes a trust binding to disk (atomic).
- * @param opts Configuration options.
  * @param peer_id Peer identifier bytes.
  * @param peer_id_len Peer identifier length.
  * @param peer_pk 32-byte public key.
  * @return 0 on success, -1 on failure.
  */
-static int kc_trust_cli_trust_write(const kc_trust_options_t *opts,
-    const unsigned char *peer_id, size_t peer_id_len,
-    const unsigned char peer_pk[KC_TRUST_PK_SIZE]) {
+static int kc_trust_cli_trust_write(const unsigned char *peer_id,
+    size_t peer_id_len, const unsigned char peer_pk[KC_TRUST_PK_SIZE]) {
     char trust_dir[KC_TRUST_CLI_MAX_TRUST_DIR];
     char hex[65];
     char path[KC_TRUST_CLI_MAX_TRUST_PATH];
     char temporary[KC_TRUST_CLI_MAX_TRUST_PATH + 32];
     int path_len;
-    if (kc_trust_cli_trust_dir(opts, trust_dir, sizeof(trust_dir), 1) != 0)
+    if (kc_trust_cli_trust_dir(trust_dir, sizeof(trust_dir), 1) != 0)
         return -1;
     kc_trust_cli_peer_id_hash(peer_id, peer_id_len, hex);
     if (!kc_trust_cli_trust_path(trust_dir, hex, path, sizeof(path)))
@@ -391,18 +493,17 @@ static int kc_trust_cli_trust_write(const kc_trust_options_t *opts,
 
 /**
  * Removes a trust binding from disk.
- * @param opts Configuration options.
  * @param peer_id Peer identifier bytes.
  * @param peer_id_len Peer identifier length.
  * @return 0 on success, -1 if not found or on failure.
  */
-static int kc_trust_cli_trust_remove(const kc_trust_options_t *opts,
-    const unsigned char *peer_id, size_t peer_id_len) {
+static int kc_trust_cli_trust_remove(const unsigned char *peer_id,
+    size_t peer_id_len) {
     char trust_dir[KC_TRUST_CLI_MAX_TRUST_DIR];
     int directory_status;
     char hex[65];
     char path[KC_TRUST_CLI_MAX_TRUST_PATH];
-    directory_status = kc_trust_cli_trust_dir(opts, trust_dir,
+    directory_status = kc_trust_cli_trust_dir(trust_dir,
         sizeof(trust_dir), 0);
     if (directory_status != 0)
         return directory_status < 0 ? -2 : -1;
@@ -414,21 +515,19 @@ static int kc_trust_cli_trust_remove(const kc_trust_options_t *opts,
 
 /**
  * Loads a trust binding from disk.
- * @param opts Configuration options.
  * @param peer_id Peer identifier bytes.
  * @param peer_id_len Peer identifier length.
  * @param peer_pk Destination for the 32-byte public key.
  * @return 0 on success, -2 on state error, -1 otherwise.
  */
-static int kc_trust_cli_trust_load(const kc_trust_options_t *opts,
-    const unsigned char *peer_id, size_t peer_id_len,
-    unsigned char peer_pk[KC_TRUST_PK_SIZE]) {
+static int kc_trust_cli_trust_load(const unsigned char *peer_id,
+    size_t peer_id_len, unsigned char peer_pk[KC_TRUST_PK_SIZE]) {
     char trust_dir[KC_TRUST_CLI_MAX_TRUST_DIR];
     int directory_status;
     char hex[65];
     char path[KC_TRUST_CLI_MAX_TRUST_PATH];
     size_t key_len = 0;
-    directory_status = kc_trust_cli_trust_dir(opts, trust_dir,
+    directory_status = kc_trust_cli_trust_dir(trust_dir,
         sizeof(trust_dir), 0);
     if (directory_status != 0)
         return directory_status < 0 ? -2 : -1;
@@ -442,13 +541,11 @@ static int kc_trust_cli_trust_load(const kc_trust_options_t *opts,
 
 /**
  * Lists persisted trust binding hashes.
- * @param opts Configuration options.
  * @param out Receives a malloc'd NULL-terminated array of hex strings.
  * @param count Receives the number of entries.
  * @return 0 on success, -1 on failure.
  */
-static int kc_trust_cli_list_peers(const kc_trust_options_t *opts,
-    char ***out, int *count) {
+static int kc_trust_cli_list_peers(char ***out, int *count) {
     char dir[KC_TRUST_CLI_MAX_TRUST_DIR];
     int capacity = 32;
     int n = 0;
@@ -456,7 +553,7 @@ static int kc_trust_cli_list_peers(const kc_trust_options_t *opts,
     int directory_status;
     *out = NULL;
     *count = 0;
-    directory_status = kc_trust_cli_trust_dir(opts, dir, sizeof(dir), 0);
+    directory_status = kc_trust_cli_trust_dir(dir, sizeof(dir), 0);
     if (directory_status != 0)
         return directory_status < 0 ? -1 : 0;
     list = (char **)malloc((size_t)capacity * sizeof(char *));
@@ -514,23 +611,6 @@ static int kc_trust_cli_list_peers(const kc_trust_options_t *opts,
 #endif
     *out = list;
     *count = n;
-    return 0;
-}
-
-/**
- * Builds options from command-line key path and environment.
- * @param key_path Optional key path override.
- * @param opts Destination options (must be freed with kc_trust_options_free).
- * @return 0 on success, 1 on allocation failure.
- */
-static int kc_trust_cli_options(const char *key_path,
-    kc_trust_options_t *opts) {
-    *opts = kc_trust_options_default();
-    kc_trust_options_load_env(opts);
-    if (key_path) {
-        opts->key_path = strdup(key_path);
-        if (!opts->key_path) return 1;
-    }
     return 0;
 }
 
@@ -621,7 +701,7 @@ static int kc_trust_cli_read_key_file(const char *key_file,
         fprintf(stderr, "trust: cannot open %s\n", key_file);
         return 1;
     }
-    unsigned char buf[KC_TRUST_IDENTITY_SIZE];
+    unsigned char buf[KC_TRUST_CLI_IDENTITY_SIZE];
     size_t done = 0;
     while (done < sizeof(buf)) {
         size_t n = fread(buf + done, 1, sizeof(buf) - done, kf);
@@ -635,7 +715,7 @@ static int kc_trust_cli_read_key_file(const char *key_file,
     int read_ok = !ferror(kf);
     if (fclose(kf) != 0) read_ok = 0;
     if (!read_ok || (done != KC_TRUST_PK_SIZE &&
-        done != KC_TRUST_IDENTITY_SIZE)) {
+        done != KC_TRUST_CLI_IDENTITY_SIZE)) {
         fprintf(stderr, "trust: key file must be 32 or 64 bytes\n");
         crypto_wipe(buf, sizeof(buf));
         return 1;
@@ -686,10 +766,80 @@ static void kc_print_version(void) {
  * @return 0 on success, 1 on failure.
  */
 static int cmd_init(const char *key_path) {
-    if (kc_trust_generate(key_path) != KC_TRUST_OK) {
+    char identity_path[KC_TRUST_CLI_MAX_KEY_PATH];
+    if (kc_trust_cli_resolve_identity_path(key_path, identity_path,
+        sizeof(identity_path), 1) != 0) {
         fprintf(stderr, "trust: failed to generate identity\n");
         return 1;
     }
+    unsigned char secret_key[KC_TRUST_SK_SIZE];
+    unsigned char public_key[KC_TRUST_PK_SIZE];
+    if (kc_trust_generate(secret_key, public_key) != KC_TRUST_OK) {
+        crypto_wipe(secret_key, sizeof(secret_key));
+        crypto_wipe(public_key, sizeof(public_key));
+        fprintf(stderr, "trust: failed to generate identity\n");
+        return 1;
+    }
+    unsigned char identity[KC_TRUST_CLI_IDENTITY_SIZE];
+    memcpy(identity, secret_key, KC_TRUST_SK_SIZE);
+    memcpy(identity + KC_TRUST_SK_SIZE, public_key, KC_TRUST_PK_SIZE);
+    crypto_wipe(secret_key, sizeof(secret_key));
+    crypto_wipe(public_key, sizeof(public_key));
+#ifdef _WIN32
+    if (GetFileAttributesA(identity_path) != INVALID_FILE_ATTRIBUTES) {
+        crypto_wipe(identity, sizeof(identity));
+        fprintf(stderr, "trust: failed to generate identity\n");
+        return 1;
+    }
+    {
+        FILE *f = fopen(identity_path, "wb");
+        size_t written;
+        int failed;
+        if (!f) {
+            crypto_wipe(identity, sizeof(identity));
+            fprintf(stderr, "trust: failed to generate identity\n");
+            return 1;
+        }
+        written = fwrite(identity, 1, sizeof(identity), f);
+        failed = written != sizeof(identity);
+        if (fclose(f) != 0) failed = 1;
+        crypto_wipe(identity, sizeof(identity));
+        if (failed) {
+            remove(identity_path);
+            fprintf(stderr, "trust: failed to generate identity\n");
+            return 1;
+        }
+    }
+#else
+    {
+        int fd = open(identity_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        FILE *f;
+        size_t written;
+        int failed;
+        if (fd < 0) {
+            crypto_wipe(identity, sizeof(identity));
+            fprintf(stderr, "trust: failed to generate identity\n");
+            return 1;
+        }
+        f = fdopen(fd, "wb");
+        if (!f) {
+            close(fd);
+            remove(identity_path);
+            crypto_wipe(identity, sizeof(identity));
+            fprintf(stderr, "trust: failed to generate identity\n");
+            return 1;
+        }
+        written = fwrite(identity, 1, sizeof(identity), f);
+        failed = written != sizeof(identity);
+        if (fclose(f) != 0) failed = 1;
+        crypto_wipe(identity, sizeof(identity));
+        if (failed) {
+            remove(identity_path);
+            fprintf(stderr, "trust: failed to generate identity\n");
+            return 1;
+        }
+    }
+#endif
     fprintf(stderr, "trust: identity generated\n");
     return 0;
 }
@@ -700,18 +850,13 @@ static int cmd_init(const char *key_path) {
  * @return 0 on success, 1 on failure.
  */
 static int cmd_pk(const char *key_path) {
-    kc_trust_options_t opts;
-    if (kc_trust_cli_options(key_path, &opts) != 0) {
-        fprintf(stderr, "trust: allocation failure\n");
-        return 1;
-    }
+    char identity_path[KC_TRUST_CLI_MAX_KEY_PATH];
     kc_trust_t *ctx = NULL;
-    if (kc_trust_create(&ctx, &opts) != KC_TRUST_OK) {
-        kc_trust_options_free(&opts);
+    if (kc_trust_cli_load_identity(key_path, identity_path,
+        sizeof(identity_path), &ctx) != 0) {
         fprintf(stderr, "trust: failed to load identity\n");
         return 1;
     }
-    kc_trust_options_free(&opts);
     const unsigned char *pk = kc_trust_public_key(ctx);
     if (!pk) {
         kc_trust_close(ctx);
@@ -749,22 +894,15 @@ static int cmd_seal(const char *key_path, const char *key_file) {
     size_t input_len = 0;
     if (kc_trust_cli_read_stdin_binary(&input, &input_len,
         KC_TRUST_MAX_MESSAGE, 1) != 0) return 1;
-    kc_trust_options_t opts;
-    if (kc_trust_cli_options(key_path, &opts) != 0) {
-        free(input);
-        crypto_wipe(peer_pk, sizeof(peer_pk));
-        fprintf(stderr, "trust: allocation failure\n");
-        return 1;
-    }
+    char identity_path[KC_TRUST_CLI_MAX_KEY_PATH];
     kc_trust_t *ctx = NULL;
-    if (kc_trust_create(&ctx, &opts) != KC_TRUST_OK) {
-        kc_trust_options_free(&opts);
+    if (kc_trust_cli_load_identity(key_path, identity_path,
+        sizeof(identity_path), &ctx) != 0) {
         free(input);
         crypto_wipe(peer_pk, sizeof(peer_pk));
         fprintf(stderr, "trust: failed to load identity\n");
         return 1;
     }
-    kc_trust_options_free(&opts);
     unsigned char *payload = NULL;
     size_t payload_len = 0;
     int rc = kc_trust_seal(ctx, peer_pk, input, input_len, &payload,
@@ -778,7 +916,7 @@ static int cmd_seal(const char *key_path, const char *key_file) {
     }
     size_t written = fwrite(payload, 1, payload_len, stdout);
     crypto_wipe(payload, payload_len);
-    free(payload);
+    kc_trust_free(payload);
     return written == payload_len ? 0 : 1;
 }
 
@@ -800,14 +938,10 @@ static int cmd_open(const char *key_path, const char *peer_id_str) {
     if (read_status != 0)
         return kc_trust_cli_error(read_status == -2 ?
             "message_too_large" : "invalid_input");
-    kc_trust_options_t opts;
-    if (kc_trust_cli_options(key_path, &opts) != 0) {
-        free(input);
-        return kc_trust_cli_error("invalid_input");
-    }
+    char identity_path[KC_TRUST_CLI_MAX_KEY_PATH];
     kc_trust_t *ctx = NULL;
-    if (kc_trust_create(&ctx, &opts) != KC_TRUST_OK) {
-        kc_trust_options_free(&opts);
+    if (kc_trust_cli_load_identity(key_path, identity_path,
+        sizeof(identity_path), &ctx) != 0) {
         free(input);
         return kc_trust_cli_error("identity_error");
     }
@@ -815,7 +949,7 @@ static int cmd_open(const char *key_path, const char *peer_id_str) {
     unsigned char loaded_pk[KC_TRUST_PK_SIZE];
     if (peer_id_str) {
         size_t peer_id_len = strlen(peer_id_str);
-        int load_status = kc_trust_cli_trust_load(&opts, 
+        int load_status = kc_trust_cli_trust_load(
             (const unsigned char *)peer_id_str, peer_id_len, loaded_pk);
         if (load_status == 0) {
             kc_trust_trust(ctx, (const unsigned char *)peer_id_str,
@@ -823,13 +957,11 @@ static int cmd_open(const char *key_path, const char *peer_id_str) {
             has_trust = 1;
         } else if (load_status == -2) {
             kc_trust_close(ctx);
-            kc_trust_options_free(&opts);
             free(input);
             return kc_trust_cli_error("state_error");
         }
     }
     crypto_wipe(loaded_pk, sizeof(loaded_pk));
-    kc_trust_options_free(&opts);
     kc_trust_result_t *result_lib = NULL;
     int rc = kc_trust_open(ctx, input, input_len,
         peer_id_str ? (const unsigned char *)peer_id_str : NULL,
@@ -875,6 +1007,7 @@ static int cmd_open(const char *key_path, const char *peer_id_str) {
  */
 static int cmd_trust(const char *key_path, const char *peer_id_str,
     const char *key_file) {
+    (void)key_path;
     if (!peer_id_str || !key_file) {
         fprintf(stderr, "trust: trust requires <peer_id> <key_file>\n");
         return 1;
@@ -887,20 +1020,12 @@ static int cmd_trust(const char *key_path, const char *peer_id_str,
     }
     unsigned char peer_pk[KC_TRUST_PK_SIZE];
     if (kc_trust_cli_read_key_file(key_file, peer_pk) != 0) return 1;
-    kc_trust_options_t opts;
-    if (kc_trust_cli_options(key_path, &opts) != 0) {
-        crypto_wipe(peer_pk, sizeof(peer_pk));
-        fprintf(stderr, "trust: allocation failure\n");
-        return 1;
-    }
-    if (kc_trust_cli_trust_write(&opts, (const unsigned char *)peer_id_str,
+    if (kc_trust_cli_trust_write((const unsigned char *)peer_id_str,
         peer_id_len, peer_pk) != 0) {
-        kc_trust_options_free(&opts);
         crypto_wipe(peer_pk, sizeof(peer_pk));
         fprintf(stderr, "trust: failed to write trust binding\n");
         return 1;
     }
-    kc_trust_options_free(&opts);
     crypto_wipe(peer_pk, sizeof(peer_pk));
     fprintf(stderr, "trust: trusted %s\n", peer_id_str);
     return 0;
@@ -913,6 +1038,7 @@ static int cmd_trust(const char *key_path, const char *peer_id_str,
  * @return 0 on success, 1 on failure.
  */
 static int cmd_forget(const char *key_path, const char *peer_id_str) {
+    (void)key_path;
     if (!peer_id_str) {
         fprintf(stderr, "trust: forget requires <peer_id>\n");
         return 1;
@@ -923,14 +1049,8 @@ static int cmd_forget(const char *key_path, const char *peer_id_str) {
             KC_TRUST_MAX_PEER_ID);
         return 1;
     }
-    kc_trust_options_t opts;
-    if (kc_trust_cli_options(key_path, &opts) != 0) {
-        fprintf(stderr, "trust: allocation failure\n");
-        return 1;
-    }
-    int remove_status = kc_trust_cli_trust_remove(&opts,
+    int remove_status = kc_trust_cli_trust_remove(
         (const unsigned char *)peer_id_str, peer_id_len);
-    kc_trust_options_free(&opts);
     if (remove_status != 0) {
         fprintf(stderr, "trust: %s\n", remove_status == -2 ?
             "state_error" : "peer not found");
@@ -946,15 +1066,10 @@ static int cmd_forget(const char *key_path, const char *peer_id_str) {
  * @return 0 on success.
  */
 static int cmd_peers(const char *key_path) {
-    kc_trust_options_t opts;
-    if (kc_trust_cli_options(key_path, &opts) != 0) {
-        fprintf(stderr, "trust: allocation failure\n");
-        return 1;
-    }
+    (void)key_path;
     char **list = NULL;
     int count = 0;
-    int rc = kc_trust_cli_list_peers(&opts, &list, &count);
-    kc_trust_options_free(&opts);
+    int rc = kc_trust_cli_list_peers(&list, &count);
     if (rc != 0) {
         for (int i = 0; i < count; i++) free(list[i]);
         free(list);
