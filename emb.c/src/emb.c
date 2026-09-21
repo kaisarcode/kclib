@@ -53,8 +53,8 @@ static void kc_print_version(void) {
  * @param dim Vector dimension.
  * @return None.
  */
-static void kc_emb_print_vector(const float *vec, int dim) {
-    for (int i = 0; i < dim; i++) {
+static void kc_emb_print_vector(const float *vec, size_t dim) {
+    for (size_t i = 0; i < dim; i++) {
         printf("%.6f%c", vec[i], (i == dim - 1) ? '\n' : ' ');
     }
     fflush(stdout);
@@ -122,7 +122,6 @@ static char *kc_read_line(FILE *stream) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    kc_emb_options_t opts = kc_emb_options_default();
     kc_emb_t *ctx = NULL;
     int status = 0;
 
@@ -137,25 +136,15 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (kc_emb_open(&ctx, &opts) != KC_EMB_OK) {
+    if (kc_emb_open(&ctx) != KC_EMB_OK) {
         fprintf(stderr, "emb: initialization failed\n");
-        kc_emb_options_free(&opts);
         return 1;
     }
 
-    int dim = kc_emb_dim(ctx);
-    if (dim <= 0) {
+    size_t dim = kc_emb_dim(ctx);
+    if (dim == 0) {
         fprintf(stderr, "emb: invalid dimension\n");
         kc_emb_close(ctx);
-        kc_emb_options_free(&opts);
-        return 1;
-    }
-
-    float *vec = (float *)malloc((size_t)dim * sizeof(float));
-    if (!vec) {
-        fprintf(stderr, "emb: out of memory\n");
-        kc_emb_close(ctx);
-        kc_emb_options_free(&opts);
         return 1;
     }
 
@@ -169,9 +158,7 @@ int main(int argc, char **argv) {
         char *input_text = (char *)malloc(total + 1);
         if (!input_text) {
             fprintf(stderr, "emb: out of memory\n");
-            free(vec);
             kc_emb_close(ctx);
-            kc_emb_options_free(&opts);
             return 1;
         }
 
@@ -186,17 +173,21 @@ int main(int argc, char **argv) {
         }
         *ptr = '\0';
 
-        if (kc_emb_exec(ctx, input_text, vec) != KC_EMB_OK) {
-            fprintf(stderr, "emb: execution failed\n");
+        float *vec = NULL;
+        size_t count = 0;
+        if (kc_emb_exec(ctx, input_text, &vec, &count) != KC_EMB_OK) {
+            const char *err = kc_emb_get_error(ctx);
+            if (err && err[0] != '\0') fprintf(stderr, "emb: %s\n", err);
+            else fprintf(stderr, "emb: execution failed\n");
+            kc_emb_free(vec);
             free(input_text);
-            free(vec);
             kc_emb_close(ctx);
-            kc_emb_options_free(&opts);
             return 1;
         }
 
         free(input_text);
-        kc_emb_print_vector(vec, dim);
+        kc_emb_print_vector(vec, count);
+        kc_emb_free(vec);
     } else {
         if (isatty(STDIN_FILENO)) {
             kc_print_help(argv[0]);
@@ -210,21 +201,25 @@ int main(int argc, char **argv) {
                 break;
             }
 
-            if (kc_emb_exec(ctx, line, vec) != KC_EMB_OK) {
-                fprintf(stderr, "emb: execution failed\n");
+            float *vec = NULL;
+            size_t count = 0;
+            if (kc_emb_exec(ctx, line, &vec, &count) != KC_EMB_OK) {
+                const char *err = kc_emb_get_error(ctx);
+                if (err && err[0] != '\0') fprintf(stderr, "emb: %s\n", err);
+                else fprintf(stderr, "emb: execution failed\n");
+                kc_emb_free(vec);
                 free(line);
                 status = 1;
                 continue;
             }
 
             free(line);
-            kc_emb_print_vector(vec, dim);
+            kc_emb_print_vector(vec, count);
+            kc_emb_free(vec);
         }
     }
 
 cleanup:
-    free(vec);
     kc_emb_close(ctx);
-    kc_emb_options_free(&opts);
     return status;
 }

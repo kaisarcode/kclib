@@ -10,6 +10,7 @@
 #ifndef KC_EMB_H
 #define KC_EMB_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -24,82 +25,78 @@ uint64_t kc_emb_version(void);
 
 typedef struct kc_emb kc_emb_t;
 
-#define KC_EMB_OK      0
-#define KC_EMB_ERROR  -1
-#define KC_EMB_ESTOP  -3
-
-/**
- * Embedding options.
- */
-typedef struct kc_emb_options {
-    int _unused;
-} kc_emb_options_t;
+#define KC_EMB_OK 0
+#define KC_EMB_ERROR -1
 
 /**
  * Initialize a new emb context.
- * Prepares one GGML inference context backed by the embedded model. The
- * worker uses a bounded CPU thread set for each embedding request.
  * @param out Pointer to receive the context pointer.
- * @param opts Options.
  * @return KC_EMB_OK on success, or KC_EMB_ERROR on failure.
  */
-int kc_emb_open(kc_emb_t **out, const kc_emb_options_t *opts);
+int kc_emb_open(kc_emb_t **out);
 
 /**
- * Release a emb context.
+ * Release an emb context.
  * Shuts down the worker thread and frees all resources.
  * Must not be called while kc_emb_exec() is active on any thread.
  * @param ctx Context pointer.
- * @return None.
+ * @return void
  */
 void kc_emb_close(kc_emb_t *ctx);
-
-/**
- * Request stop for a specific emb context.
- * @param ctx Context pointer.
- * @return KC_EMB_OK on success, or KC_EMB_ERROR on failure.
- */
-int kc_emb_stop(kc_emb_t *ctx);
-
-/**
- * Create an options struct initialized with default values.
- * @param none Unused.
- * @return Default-initialized options.
- */
-kc_emb_options_t kc_emb_options_default(void);
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_emb_options_load_env(kc_emb_options_t *opts);
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_emb_options_free(kc_emb_options_t *opts);
 
 /**
  * Retrieve the embedding dimension.
  * @param ctx Context pointer.
  * @return Dimension size, or 0 on invalid input.
  */
-int kc_emb_dim(kc_emb_t *ctx);
+size_t kc_emb_dim(const kc_emb_t *ctx);
 
 /**
  * Generate an embedding for the given input text.
  * Dispatches to the prepared worker and blocks until the result is ready.
- * Multiple callers on the same context are serialized. The result is written
- * into the caller-supplied buffer.
+ * Multiple callers on the same context are serialized.
+ *
+ * Ownership and lifetime:
+ * - input is borrowed for the duration of the call only; the library does
+ *   not retain it after return.
+ * - out_data is caller-owned on success; the library allocates a buffer
+ *   containing the embedding floats which the caller must free via
+ *   kc_emb_free(). Caller must not free with free().
+ * - out_count is set to the embedding dimension on success and equals
+ *   kc_emb_dim(ctx).
+ *
  * @param ctx Context pointer.
- * @param input Null-terminated input text.
- * @param out Caller-supplied buffer of at least kc_emb_dim(ctx) floats.
+ * @param input Null-terminated input text, borrowed for call.
+ * @param out_data Output pointer to receive caller-owned float
+ * buffer; free with kc_emb_free().
+ * @param out_count Output count, equals dim (kc_emb_dim(ctx)) on success.
  * @return KC_EMB_OK on success, KC_EMB_ERROR on failure.
  */
-int kc_emb_exec(kc_emb_t *ctx, const char *input, float *out);
+int kc_emb_exec(kc_emb_t *ctx, const char *input, float **out_data, size_t *out_count);
+
+/**
+ * Free memory allocated by the library.
+ * @param ptr Pointer previously returned by kc_emb_exec() via out_data.
+ * @return void
+ */
+void kc_emb_free(void *ptr);
+
+/**
+ * Retrieve the last error message for a context.
+ *
+ * Ownership and lifetime:
+ * - Returned string is borrowed and owned by ctx.
+ * - Caller must not free or modify the returned pointer.
+ * - Valid until the next operation that mutates the error state or until
+ *   kc_emb_close() closes the context.
+ * - A fresh context returns an empty string ("").
+ * - If ctx is NULL, returns NULL.
+ *
+ * @param ctx Context pointer, may be NULL.
+ * @return Borrowed error string owned by ctx, empty string for fresh
+ * context, or NULL if ctx is NULL.
+ */
+const char *kc_emb_get_error(const kc_emb_t *ctx);
 
 #ifdef __cplusplus
 }

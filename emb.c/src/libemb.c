@@ -15,8 +15,6 @@
 #endif
 #include <unistd.h>
 #endif
-#include <signal.h>
-
 #include "libemb.h"
 
 #include <stdio.h>
@@ -159,30 +157,10 @@ struct kc_emb_worker {
     int shutdown;
 };
 
-typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_FLOAT,
-    KC_ENV_TYPE_STR
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { NULL, 0, KC_ENV_TYPE_INT }
-};
-static const int env_config_table_n = 0;
-
 struct kc_emb {
     kc_emb_worker_t *workers;
     int n_workers;
     int n_embd;
-
-    kc_emb_options_t opts;
-    volatile sig_atomic_t stop_requested;
 
 #ifndef _WIN32
     pthread_mutex_t pool_mutex;
@@ -923,21 +901,20 @@ static void kc_emb_worker_destroy(kc_emb_worker_t *w) {
 /**
  * Initialize a new emb pool.
  * @param out Pointer to receive the context pointer.
- * @param opts Options.
  * @return KC_EMB_OK on success, or KC_EMB_ERROR on failure.
  */
-int kc_emb_open(kc_emb_t **out, const kc_emb_options_t *opts) {
+int kc_emb_open(kc_emb_t **out) {
     int n_workers;
     kc_emb_t *ctx;
 
-    if (!out || !opts) return KC_EMB_ERROR;
+    if (out) *out = NULL;
+    if (!out) return KC_EMB_ERROR;
 
     n_workers = 1;
 
     ctx = (kc_emb_t *)calloc(1, sizeof(kc_emb_t));
     if (!ctx) return KC_EMB_ERROR;
-
-    ctx->opts = *opts;
+    ctx->error[0] = '\0';
 
     ctx->workers = (kc_emb_worker_t *)calloc(n_workers, sizeof(kc_emb_worker_t));
     if (!ctx->workers) { kc_emb_set_error(ctx, "memory allocation failed"); free(ctx); return KC_EMB_ERROR; }
@@ -998,8 +975,17 @@ void kc_emb_close(kc_emb_t *ctx) {
 #endif
     free(ctx->workers);
     ctx->workers = NULL;
-    kc_emb_options_free(&ctx->opts);
     free(ctx);
+}
+
+/**
+ * Retrieve last error for context.
+ * @param ctx Context pointer.
+ * @return Borrowed error string or NULL.
+ */
+const char *kc_emb_get_error(const kc_emb_t *ctx) {
+    if (!ctx) return NULL;
+    return ctx->error;
 }
 
 /**
@@ -1007,22 +993,46 @@ void kc_emb_close(kc_emb_t *ctx) {
  * @param ctx Pool pointer.
  * @return Dimension size, or 0 on invalid input.
  */
-int kc_emb_dim(kc_emb_t *ctx) {
-    return ctx ? ctx->n_embd : 0;
+size_t kc_emb_dim(const kc_emb_t *ctx) {
+    return ctx ? (size_t)ctx->n_embd : 0;
 }
 
 /**
  * Generate an embedding for the given input text.
  * @param ctx Pool pointer.
  * @param input Null-terminated input text.
- * @param out Caller-supplied buffer of at least kc_emb_dim(ctx) floats.
+ * @param out_data Output pointer to receive caller-owned float
+ * buffer; free with kc_emb_free().
+ * @param out_count Output count, equals dim on success.
  * @return KC_EMB_OK on success, KC_EMB_ERROR on failure.
  */
-int kc_emb_exec(kc_emb_t *ctx, const char *input, float *out) {
+int kc_emb_exec(kc_emb_t *ctx, const char *input, float **out_data, size_t *out_count) {
     kc_emb_worker_t *w = NULL;
+    float *out = NULL;
+    size_t dim = 0;
+    int result = KC_EMB_ERROR;
 
-    if (!ctx || !input || !out) return KC_EMB_ERROR;
-    if (ctx->stop_requested) return KC_EMB_ESTOP;
+    if (out_data) *out_data = NULL;
+    if (out_count) *out_count = 0;
+
+    if (!ctx || !input || !out_data || !out_count) {
+        if (ctx) kc_emb_set_error(ctx, "invalid argument");
+        return KC_EMB_ERROR;
+    }
+
+    ctx->error[0] = '\0';
+
+    dim = kc_emb_dim(ctx);
+    if (dim == 0) {
+        kc_emb_set_error(ctx, "invalid argument");
+        return KC_EMB_ERROR;
+    }
+
+    out = (float *)malloc(dim * sizeof(float));
+    if (!out) {
+        kc_emb_set_error(ctx, "allocation failure");
+        return KC_EMB_ERROR;
+    }
 
 #ifdef __EMSCRIPTEN__
     w = &ctx->workers[0];
@@ -1033,7 +1043,7 @@ int kc_emb_exec(kc_emb_t *ctx, const char *input, float *out) {
     w->result  = kc_emb_ctx_exec(w->ectx, w->input, w->out);
     w->has_req = 0;
     w->done    = 1;
-    return w->result;
+    result = w->result;
 #elif !defined(_WIN32)
     pthread_mutex_lock(&ctx->pool_mutex);
     while (1) {
@@ -1060,14 +1070,12 @@ int kc_emb_exec(kc_emb_t *ctx, const char *input, float *out) {
     while (!w->done) {
         pthread_cond_wait(&w->cond_res, &w->mutex);
     }
-    int result = w->result;
+    result = w->result;
     pthread_mutex_unlock(&w->mutex);
 
     pthread_mutex_lock(&ctx->pool_mutex);
     pthread_cond_signal(&ctx->pool_cond);
     pthread_mutex_unlock(&ctx->pool_mutex);
-
-    return result;
 #else
     EnterCriticalSection(&ctx->pool_mutex);
     while (1) {
@@ -1094,81 +1102,30 @@ int kc_emb_exec(kc_emb_t *ctx, const char *input, float *out) {
     while (!w->done) {
         SleepConditionVariableCS(&w->cond_res, &w->mutex, INFINITE);
     }
-    int result = w->result;
+    result = w->result;
     LeaveCriticalSection(&w->mutex);
 
     EnterCriticalSection(&ctx->pool_mutex);
     WakeConditionVariable(&ctx->pool_cond);
     LeaveCriticalSection(&ctx->pool_mutex);
-
-    return result;
 #endif
-}
 
-/**
- * Create an options struct initialized with default values.
- * @param none Unused.
- * @return Default-initialized options.
- */
-kc_emb_options_t kc_emb_options_default(void) {
-    kc_emb_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    return opts;
-}
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_emb_options_load_env(kc_emb_options_t *opts) {
-    int i;
-    if (!opts) return;
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        char *end;
-        if (!val) continue;
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_FLOAT: {
-                float v = strtof(val, &end);
-                if (end != val && *end == '\0') {
-                    *(float *)((char *)opts + env_config_table[i].offset) = v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_STR: {
-                char **p = (char **)((char *)opts + env_config_table[i].offset);
-                free(*p);
-                *p = strdup(val);
-                break;
-            }
-        }
+    if (result != KC_EMB_OK) {
+        kc_emb_set_error(ctx, "worker execution failure");
+        free(out);
+        return KC_EMB_ERROR;
     }
-}
 
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_emb_options_free(kc_emb_options_t *opts) {
-    if (!opts) return;
-}
-
-/**
- * Request stop for a specific emb context.
- * @param ctx Context pointer.
- * @return KC_EMB_OK on success, or KC_EMB_ERROR on failure.
- */
-int kc_emb_stop(kc_emb_t *ctx) {
-    if (!ctx) return KC_EMB_ERROR;
-    ctx->stop_requested = 1;
+    *out_data = out;
+    *out_count = dim;
     return KC_EMB_OK;
+}
+
+/**
+ * Free memory allocated by library.
+ * @param ptr Pointer to free.
+ * @return void
+ */
+void kc_emb_free(void *ptr) {
+    if (ptr) free(ptr);
 }

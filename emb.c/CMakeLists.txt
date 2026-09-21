@@ -160,7 +160,7 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sINITIAL_MEMORY=268435456
         -sSTACK_SIZE=1048576
-        -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_open,_kc_emb_close,_kc_emb_stop,_kc_emb_options_default,_kc_emb_options_load_env,_kc_emb_options_free,_kc_emb_dim,_kc_emb_exec
+        -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_open,_kc_emb_close,_kc_emb_dim,_kc_emb_exec,_kc_emb_free,_kc_emb_get_error
     )
 endif()
 

@@ -51,9 +51,8 @@ Results are printed as space-separated floats, one line per input text:
 ```c
 typedef struct kc_emb kc_emb_t;
 
-#define KC_EMB_OK      0
-#define KC_EMB_ERROR  -1
-#define KC_EMB_ESTOP  -3
+#define KC_EMB_OK     0
+#define KC_EMB_ERROR -1
 ```
 
 ### Functions
@@ -61,46 +60,54 @@ typedef struct kc_emb kc_emb_t;
 | Function | Returns | Description |
 | :------- | :------ | :---------- |
 | `kc_emb_version(void)` | `uint64_t` | Return the build version timestamp. |
-| `kc_emb_options_default(void)` | `kc_emb_options_t` | Return default options. |
-| `kc_emb_options_load_env(opts)` | `void` | Load supported environment options. |
-| `kc_emb_options_free(opts)` | `void` | Release resources owned by options. |
-| `kc_emb_open(out, opts)` | `int` | Allocate and initialize an embedding context. |
-| `kc_emb_close(ctx)` | `void` | Release a context. |
-| `kc_emb_stop(ctx)` | `int` | Request stop for a context. |
-| `kc_emb_dim(ctx)` | `int` | Return the embedding dimension. |
-| `kc_emb_exec(ctx, input, out)` | `int` | Generate an embedding into a caller-owned float buffer. |
+| `kc_emb_open(kc_emb_t **out)` | `int` | Allocate and initialize embedding context. Heavyweight operation; embeds one local model (`lib/model.gguf`). Returns `KC_EMB_OK` on success, `KC_EMB_ERROR` on failure. |
+| `kc_emb_close(kc_emb_t *ctx)` | `void` | Release a context and all associated resources. |
+| `kc_emb_dim(const kc_emb_t *ctx)` | `size_t` | Return embedding dimension derived from the embedded model; 0 if `ctx` is NULL. Not a hardcoded constant. |
+| `kc_emb_exec(kc_emb_t *ctx, const char *input, float **vec, size_t *count)` | `int` | Generate embedding for `input`; on success sets `*vec` to caller-owned float array of `*count` floats, to be freed with `kc_emb_free`. Input is borrowed only during the call; empty string is valid. Blocking and serialized; multiple calls on one context are serialized. Returns `KC_EMB_OK` or `KC_EMB_ERROR`. Example: `kc_emb_exec(ctx, "hello", &vec, &count)`. |
+| `kc_emb_free(void *ptr)` | `void` | Free array returned by `kc_emb_exec`. Safe with NULL. |
+| `kc_emb_get_error(const kc_emb_t *ctx)` | `const char *` | Borrowed contextual error string; valid until next mutating operation on `ctx` or `kc_emb_close`. Empty string on fresh context with no error; NULL if `ctx` is NULL. |
 
 ### Example
 
 ```c
 #include "libemb.h"
 
-kc_emb_options_t opts = kc_emb_options_default();
 kc_emb_t *ctx = NULL;
-
-if (kc_emb_open(&ctx, &opts) == KC_EMB_OK) {
-    int dim = kc_emb_dim(ctx);
-    float *vec = malloc((size_t)dim * sizeof(float));
-
-    if (vec != NULL) {
-        kc_emb_exec(ctx, "The quick brown fox", vec);
-        free(vec);
+if (kc_emb_open(&ctx) == KC_EMB_OK) {
+    float *vec = NULL;
+    size_t count = 0;
+    if (kc_emb_exec(ctx, "The quick brown fox", &vec, &count) == KC_EMB_OK) {
+        // use vec[0..count-1]
     }
-
+    kc_emb_free(vec);
     kc_emb_close(ctx);
 }
+```
 
-kc_emb_options_free(&opts);
+Error details:
+
+```c
+if (kc_emb_exec(ctx, "hello", &vec, &count) != KC_EMB_OK) {
+    const char *msg = kc_emb_get_error(ctx);
+    // msg borrowed, valid until next mutating op or close
+}
 ```
 
 ---
 
 ## Lifecycle
 
-- `kc_emb_open()` - allocates and prepares a new embedding context.
-- `kc_emb_exec()` - generates an embedding for the given text. Multiple calls on the same context are serialized.
-- `kc_emb_stop()` - requests that future execution stop with `KC_EMB_ESTOP`.
-- `kc_emb_close()` - releases the context and all associated resources.
+- `kc_emb_open(&ctx)` - heavyweight allocation; parses the one embedded local model (`lib/model.gguf`), prepares GGML backend, tokenizer, and worker state. One embedded model only.
+- `kc_emb_dim(ctx)` - model-derived dimension; `size_t`, 0 for NULL.
+- `kc_emb_exec(ctx, input, &vec, &count)` - blocking, serialized execution; multiple calls on the same context are serialized. Input is borrowed only during the call; empty input remains valid. Returns owned `float` array via `*vec` with length `*count`; caller owns the array and must release it with `kc_emb_free`.
+- `kc_emb_get_error(ctx)` - borrowed contextual error string; valid until next mutating operation on the same context or `kc_emb_close`; empty string if no error; NULL for NULL `ctx`.
+- `kc_emb_close(ctx)` - releases the context and all associated resources.
+
+Notes:
+
+- One embedded local model (`lib/model.gguf`) linked into the artifact. No model downloads, no network dependency, no remote fallback.
+- No hidden vector allocations beyond the explicit owned array returned via `kc_emb_exec` and freed with `kc_emb_free`.
+- Input string lifetime is caller-owned before and after the call; only borrowed during `kc_emb_exec`.
 
 ---
 

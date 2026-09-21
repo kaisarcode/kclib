@@ -1,6 +1,6 @@
 /**
- * test.c - libemb public API contract tests.
- * Summary: Validates each exported libemb function through one dedicated test case.
+ * test.c - libemb public API tests.
+ * Summary: Tests each public libemb function through one CTest case.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -81,14 +81,9 @@ static int expect_true(const char *name, int condition) {
  * @return 0 on success, 1 on failure.
  */
 static int open_context(kc_emb_t **out) {
-    kc_emb_options_t opts;
-
-    opts = kc_emb_options_default();
-    if (kc_emb_open(out, &opts) != KC_EMB_OK) {
-        kc_emb_options_free(&opts);
+    if (kc_emb_open(out) != KC_EMB_OK) {
         return 1;
     }
-    kc_emb_options_free(&opts);
     return 0;
 }
 
@@ -99,14 +94,14 @@ static int open_context(kc_emb_t **out) {
  * @param dim Vector dimension.
  * @return 0 on success, 1 on failure.
  */
-static int expect_vector_valid(const char *name, const float *vec, int dim) {
-    int i;
+static int expect_vector_valid(const char *name, const float *vec, size_t dim) {
+    size_t i;
     int nonzero;
 
     nonzero = 0;
     for (i = 0; i < dim; i++) {
         if (!isfinite(vec[i])) {
-            printf("[FAIL] %s: non-finite value at %d\n", name, i);
+            printf("[FAIL] %s: non-finite value at %zu\n", name, i);
             return 1;
         }
         if (vec[i] != 0.0f) nonzero = 1;
@@ -122,8 +117,8 @@ static int expect_vector_valid(const char *name, const float *vec, int dim) {
  * @param dim Vector dimension.
  * @return 0 on success, 1 on failure.
  */
-static int expect_vectors_distinct(const char *name, const float *a, const float *b, int dim) {
-    int i;
+static int expect_vectors_distinct(const char *name, const float *a, const float *b, size_t dim) {
+    size_t i;
 
     for (i = 0; i < dim; i++) {
         if (fabsf(a[i] - b[i]) > 0.000001f) return expect_true(name, 1);
@@ -132,73 +127,36 @@ static int expect_vectors_distinct(const char *name, const float *a, const float
 }
 
 /**
+ * Verifies two vectors are close within tolerance.
+ * @param name Check description.
+ * @param a First vector.
+ * @param b Second vector.
+ * @param dim Vector dimension.
+ * @param tol Tolerance.
+ * @return 0 on success, 1 on failure.
+ */
+static int expect_vectors_close(const char *name, const float *a, const float *b, size_t dim, float tol) {
+    size_t i;
+
+    for (i = 0; i < dim; i++) {
+        if (fabsf(a[i] - b[i]) > tol) {
+            printf("[FAIL] %s: vectors differ at %zu: %f vs %f (diff %f > %f)\n", name, i, a[i], b[i], fabsf(a[i] - b[i]), tol);
+            return 1;
+        }
+    }
+    return expect_true(name, 1);
+}
+
+/**
  * Tests kc_emb_version.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_emb_version(void) {
     const char *name = "kc_emb_version";
-    const char *detail = "version returns non-zero build timestamp";
+    const char *detail = "version returns build timestamp";
     int fail = 0;
 
     fail += expect_true("version returns non-zero build timestamp", kc_emb_version() != 0U);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_emb_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_emb_options_default(void) {
-    const char *name = "kc_emb_options_default";
-    const char *detail = "options_default initializes unused field to zero";
-    kc_emb_options_t opts;
-    int fail = 0;
-
-    opts = kc_emb_options_default();
-    fail += expect_int("options_default initializes unused field to zero", 0, opts._unused);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_emb_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_emb_options_load_env(void) {
-    const char *name = "kc_emb_options_load_env";
-    const char *detail = "options_load_env leaves unused unchanged and tolerates NULL";
-    kc_emb_options_t opts;
-    int fail = 0;
-
-    fail = 0;
-    opts = kc_emb_options_default();
-    opts._unused = 7;
-    kc_emb_options_load_env(&opts);
-    fail += expect_int("load_env leaves unused field unchanged", 7, opts._unused);
-    kc_emb_options_load_env(NULL);
-    fail += expect_true("load_env(NULL) does not crash", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_emb_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_emb_options_free(void) {
-    const char *name = "kc_emb_options_free";
-    const char *detail = "options_free preserves unused and tolerates NULL";
-    kc_emb_options_t opts;
-    int fail = 0;
-
-    fail = 0;
-    opts = kc_emb_options_default();
-    opts._unused = 7;
-    kc_emb_options_free(&opts);
-    fail += expect_int("options_free keeps unused field", 7, opts._unused);
-    kc_emb_options_free(NULL);
-    fail += expect_true("options_free(NULL) does not crash", 1);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -209,23 +167,25 @@ static int case_kc_emb_options_free(void) {
  */
 static int case_kc_emb_open(void) {
     const char *name = "kc_emb_open";
-    const char *detail = "open rejects bad args and opens valid context";
-    kc_emb_options_t opts;
-    kc_emb_t *ctx;
+    const char *detail = "open validates and allocates context";
+    kc_emb_t *ctx = NULL;
+    kc_emb_t *sentinel = (kc_emb_t *)0xDEADBEEF;
     int fail = 0;
 
-    fail = 0;
-    opts = kc_emb_options_default();
+    fail += expect_int("open rejects NULL out", KC_EMB_ERROR, kc_emb_open(NULL));
+    ctx = sentinel;
+    fail += expect_int("open NULL out leaves sentinel untouched", KC_EMB_ERROR, kc_emb_open(NULL));
+    fail += expect_true("sentinel not overwritten by NULL open", ctx == sentinel);
     ctx = NULL;
-    fail += expect_int("open(NULL, opts) returns ERROR", KC_EMB_ERROR,
-        kc_emb_open(NULL, &opts));
-    fail += expect_int("open(out, NULL) returns ERROR", KC_EMB_ERROR,
-        kc_emb_open(&ctx, NULL));
-    fail += expect_true("open with NULL args leaves out as NULL", ctx == NULL);
-    fail += expect_int("open(out, opts) returns OK", KC_EMB_OK,
-        kc_emb_open(&ctx, &opts));
-    fail += expect_true("open sets context", ctx != NULL);
-    kc_emb_close(ctx);
+    fail += expect_int("open creates context", KC_EMB_OK, kc_emb_open(&ctx));
+    fail += expect_true("open sets output", ctx != NULL && ctx != sentinel);
+    if (ctx != NULL) {
+        const char *err = kc_emb_get_error(ctx);
+        fail += expect_true("fresh error not NULL", err != NULL);
+        fail += expect_true("fresh error empty", err != NULL && err[0] == '\0');
+        fail += expect_true("dim positive after open", kc_emb_dim(ctx) > 0);
+        kc_emb_close(ctx);
+    }
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -236,58 +196,16 @@ static int case_kc_emb_open(void) {
  */
 static int case_kc_emb_close(void) {
     const char *name = "kc_emb_close";
-    const char *detail = "close frees context and tolerates NULL";
-    kc_emb_t *ctx;
+    const char *detail = "close releases context";
+    kc_emb_t *ctx = NULL;
     int fail = 0;
 
-    fail = 0;
-    ctx = NULL;
-    if (open_context(&ctx) != 0) {
-        case_result(1, name, detail);
-        return 1;
-    }
     kc_emb_close(NULL);
-    fail += expect_true("close(NULL) does not crash", 1);
-    kc_emb_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_emb_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_emb_stop(void) {
-    const char *name = "kc_emb_stop";
-    const char *detail = "stop blocks future exec and tolerates NULL";
-    kc_emb_t *ctx;
-    float *vec;
-    int dim;
-    int fail = 0;
-
-    fail = 0;
-    ctx = NULL;
-    vec = NULL;
-    fail += expect_int("stop(NULL) returns ERROR", KC_EMB_ERROR, kc_emb_stop(NULL));
+    fail += expect_true("close NULL does not crash", 1);
     if (open_context(&ctx) != 0) {
         case_result(1, name, detail);
         return 1;
     }
-    dim = kc_emb_dim(ctx);
-    vec = (float *)calloc((size_t)dim, sizeof(float));
-    fail += expect_true("allocate vector", vec != NULL);
-    if (vec == NULL) {
-        kc_emb_close(ctx);
-        case_result(1, name, detail);
-        return 1;
-    }
-    fail += expect_int("exec before stop returns OK", KC_EMB_OK,
-        kc_emb_exec(ctx, "pre stop input", vec));
-    fail += expect_int("stop(ctx) returns OK", KC_EMB_OK, kc_emb_stop(ctx));
-    fail += expect_int("stop(ctx) second call returns OK", KC_EMB_OK, kc_emb_stop(ctx));
-    fail += expect_int("exec after stop returns ESTOP", KC_EMB_ESTOP,
-        kc_emb_exec(ctx, "post stop input", vec));
-    free(vec);
     kc_emb_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -299,19 +217,30 @@ static int case_kc_emb_stop(void) {
  */
 static int case_kc_emb_dim(void) {
     const char *name = "kc_emb_dim";
-    const char *detail = "dim returns 384 for valid context and zero for NULL";
-    kc_emb_t *ctx;
+    const char *detail = "dim returns model dimension and zero for NULL";
+    kc_emb_t *ctx = NULL;
+    kc_emb_t *ctx2 = NULL;
+    size_t dim = 0;
+    size_t dim2 = 0;
     int fail = 0;
 
-    fail = 0;
-    ctx = NULL;
-    fail += expect_int("dim(NULL) returns zero", 0, kc_emb_dim(NULL));
+    fail += expect_true("dim NULL returns 0", kc_emb_dim(NULL) == 0);
     if (open_context(&ctx) != 0) {
         case_result(1, name, detail);
         return 1;
     }
-    fail += expect_int("dim(ctx) returns 384", 384, kc_emb_dim(ctx));
+    dim = kc_emb_dim(ctx);
+    fail += expect_true("dim positive", dim > 0);
+    fail += expect_int("dim is 384", 384, (int)dim);
+    if (open_context(&ctx2) != 0) {
+        kc_emb_close(ctx);
+        case_result(1, name, detail);
+        return 1;
+    }
+    dim2 = kc_emb_dim(ctx2);
+    fail += expect_true("separate contexts dim equal", dim == dim2);
     kc_emb_close(ctx);
+    kc_emb_close(ctx2);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -322,51 +251,176 @@ static int case_kc_emb_dim(void) {
  */
 static int case_kc_emb_exec(void) {
     const char *name = "kc_emb_exec";
-    const char *detail = "exec produces valid distinct vectors for distinct inputs";
-    kc_emb_t *ctx;
-    float *first;
-    float *second;
-    int dim;
+    const char *detail = "exec validates and produces distinct vectors";
+    kc_emb_t *ctx = NULL;
+    kc_emb_t *ctx2 = NULL;
+    size_t dim = 0;
+    float *vec = NULL;
+    size_t count = 0;
+    float *vec2 = NULL;
+    size_t count2 = 0;
+    float *empty = NULL;
+    size_t empty_count = 0;
+    float *a = NULL;
+    float *b = NULL;
+    float *c = NULL;
+    float *d = NULL;
+    size_t ca = 0;
+    size_t cb = 0;
+    size_t cc = 0;
+    size_t cd = 0;
+    float *sentinel_vec = (float *)0xDEADBEEF;
+    size_t sentinel_count = 0xDEADBEEF;
     int fail = 0;
 
-    fail = 0;
-    ctx = NULL;
-    first = NULL;
-    second = NULL;
-    fail += expect_int("exec(NULL, input, out) returns ERROR", KC_EMB_ERROR,
-        kc_emb_exec(NULL, "input", (float *)&fail));
+    vec = sentinel_vec;
+    count = sentinel_count;
+    fail += expect_int("exec rejects NULL ctx", KC_EMB_ERROR, kc_emb_exec(NULL, "input", &vec, &count));
+    fail += expect_true("vec sanitized to NULL on NULL ctx", vec == NULL);
+    fail += expect_true("count sanitized to 0 on NULL ctx", count == 0);
     if (open_context(&ctx) != 0) {
         case_result(1, name, detail);
         return 1;
     }
     dim = kc_emb_dim(ctx);
-    first = (float *)calloc((size_t)dim, sizeof(float));
-    second = (float *)calloc((size_t)dim, sizeof(float));
-    fail += expect_true("allocate first vector", first != NULL);
-    fail += expect_true("allocate second vector", second != NULL);
-    if (first == NULL || second == NULL) {
-        free(first);
-        free(second);
+    vec = sentinel_vec;
+    count = sentinel_count;
+    fail += expect_int("exec rejects NULL input", KC_EMB_ERROR, kc_emb_exec(ctx, NULL, &vec, &count));
+    fail += expect_true("vec sanitized on NULL input", vec == NULL);
+    fail += expect_true("count sanitized on NULL input", count == 0);
+    count = sentinel_count;
+    fail += expect_int("exec rejects NULL out_data", KC_EMB_ERROR, kc_emb_exec(ctx, "input", NULL, &count));
+    fail += expect_true("count reset on NULL out_data", count == 0);
+    vec = sentinel_vec;
+    fail += expect_int("exec rejects NULL out_count", KC_EMB_ERROR, kc_emb_exec(ctx, "input", &vec, NULL));
+    fail += expect_true("vec reset on NULL out_count", vec == NULL);
+    fail += expect_int("exec representative returns OK", KC_EMB_OK, kc_emb_exec(ctx, "The quick brown fox", &vec, &count));
+    fail += expect_true("result non-NULL", vec != NULL);
+    fail += expect_true("count equals dim", count == dim);
+    if (vec != NULL) fail += expect_vector_valid("representative vector valid", vec, dim);
+    fail += expect_int("exec second input returns OK", KC_EMB_OK, kc_emb_exec(ctx, "incident response runbook", &vec2, &count2));
+    fail += expect_true("second result non-NULL", vec2 != NULL);
+    fail += expect_true("second count equals dim", count2 == dim);
+    if (vec2 != NULL) fail += expect_vector_valid("second vector valid", vec2, dim);
+    if (vec != NULL && vec2 != NULL) {
+        fail += expect_vectors_distinct("distinct inputs distinct", vec, vec2, dim);
+    } else {
+        fail += expect_true("distinct check requires vectors", 0);
+    }
+    fail += expect_int("exec empty returns OK", KC_EMB_OK, kc_emb_exec(ctx, "", &empty, &empty_count));
+    fail += expect_true("empty result non-NULL", empty != NULL);
+    fail += expect_true("empty count equals dim", empty_count == dim);
+    if (empty != NULL) fail += expect_vector_valid("empty vector valid", empty, dim);
+    fail += expect_int("exec same input first", KC_EMB_OK, kc_emb_exec(ctx, "The quick brown fox", &a, &ca));
+    fail += expect_int("exec same input second", KC_EMB_OK, kc_emb_exec(ctx, "The quick brown fox", &b, &cb));
+    fail += expect_true("counts equal dim", ca == dim && cb == dim);
+    if (a != NULL && b != NULL) {
+        fail += expect_vectors_close("same input same context identical", a, b, dim, 1e-6f);
+    } else {
+        fail += expect_true("determinism requires vectors", 0);
+    }
+    if (open_context(&ctx2) != 0) {
+        kc_emb_free(vec);
+        kc_emb_free(vec2);
+        kc_emb_free(empty);
+        kc_emb_free(a);
+        kc_emb_free(b);
         kc_emb_close(ctx);
         case_result(1, name, detail);
         return 1;
     }
-    fail += expect_int("exec(ctx, NULL, out) returns ERROR", KC_EMB_ERROR,
-        kc_emb_exec(ctx, NULL, first));
-    fail += expect_int("exec(ctx, input, NULL) returns ERROR", KC_EMB_ERROR,
-        kc_emb_exec(ctx, "input", NULL));
-    fail += expect_int("exec first input returns OK", KC_EMB_OK,
-        kc_emb_exec(ctx, "incident response runbook", first));
-    fail += expect_vector_valid("first vector is finite and nonzero", first, dim);
-    fail += expect_int("exec second input returns OK", KC_EMB_OK,
-        kc_emb_exec(ctx, "release rollback checklist", second));
-    fail += expect_vector_valid("second vector is finite and nonzero", second, dim);
-    fail += expect_vectors_distinct("distinct inputs produce distinct vectors", first, second, dim);
-    fail += expect_int("exec empty input returns OK", KC_EMB_OK,
-        kc_emb_exec(ctx, "", first));
-    fail += expect_vector_valid("empty input vector is finite and nonzero", first, dim);
-    free(first);
-    free(second);
+    fail += expect_int("exec ctx2 same input", KC_EMB_OK, kc_emb_exec(ctx2, "The quick brown fox", &c, &cc));
+    fail += expect_true("ctx2 count equals dim", cc == dim);
+    if (a != NULL && c != NULL) {
+        fail += expect_vectors_close("same input across contexts equivalent", a, c, dim, 1e-6f);
+    } else {
+        fail += expect_true("cross-context requires vectors", 0);
+    }
+    fail += expect_int("exec distinct input", KC_EMB_OK, kc_emb_exec(ctx, "incident response runbook", &d, &cd));
+    if (a != NULL && d != NULL) {
+        fail += expect_vectors_distinct("distinct inputs distinct second", a, d, dim);
+    }
+    kc_emb_free(vec);
+    kc_emb_free(vec2);
+    kc_emb_free(empty);
+    kc_emb_free(a);
+    kc_emb_free(b);
+    kc_emb_free(c);
+    kc_emb_free(d);
+    kc_emb_close(ctx);
+    kc_emb_close(ctx2);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_emb_free.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_emb_free(void) {
+    const char *name = "kc_emb_free";
+    const char *detail = "free releases caller-owned memory";
+    kc_emb_t *ctx = NULL;
+    float *vec = NULL;
+    size_t count = 0;
+    int fail = 0;
+
+    kc_emb_free(NULL);
+    fail += expect_true("free NULL does not crash", 1);
+    if (open_context(&ctx) != 0) {
+        case_result(1, name, detail);
+        return 1;
+    }
+    fail += expect_int("exec for free returns OK", KC_EMB_OK, kc_emb_exec(ctx, "The quick brown fox", &vec, &count));
+    fail += expect_true("vec non-NULL for free", vec != NULL);
+    fail += expect_true("count equals dim for free", count == kc_emb_dim(ctx));
+    kc_emb_free(vec);
+    vec = NULL;
+    kc_emb_free(NULL);
+    fail += expect_true("second free NULL does not crash", 1);
+    kc_emb_close(ctx);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_emb_get_error.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_emb_get_error(void) {
+    const char *name = "kc_emb_get_error";
+    const char *detail = "get_error returns contextual error string";
+    kc_emb_t *ctx = NULL;
+    const char *err = NULL;
+    float *vec = (float *)0xDEADBEEF;
+    size_t count = 0xDEADBEEF;
+    int fail = 0;
+
+    fail += expect_true("get_error NULL returns NULL", kc_emb_get_error(NULL) == NULL);
+    if (open_context(&ctx) != 0) {
+        case_result(1, name, detail);
+        return 1;
+    }
+    err = kc_emb_get_error(ctx);
+    fail += expect_true("fresh error not NULL", err != NULL);
+    fail += expect_true("fresh error empty", err != NULL && err[0] == '\0');
+    vec = (float *)0xDEADBEEF;
+    count = 0xDEADBEEF;
+    fail += expect_int("exec NULL input returns ERROR", KC_EMB_ERROR, kc_emb_exec(ctx, NULL, &vec, &count));
+    fail += expect_true("vec NULL after failure", vec == NULL);
+    fail += expect_true("count 0 after failure", count == 0);
+    err = kc_emb_get_error(ctx);
+    fail += expect_true("error non-empty after failure", err != NULL && strlen(err) > 0);
+    count = 0xDEADBEEF;
+    fail += expect_int("exec NULL out_data returns ERROR", KC_EMB_ERROR, kc_emb_exec(ctx, "input", NULL, &count));
+    fail += expect_true("count 0 after NULL out_data", count == 0);
+    err = kc_emb_get_error(ctx);
+    fail += expect_true("error non-empty after NULL out_data", err != NULL && strlen(err) > 0);
+    vec = (float *)0xDEADBEEF;
+    fail += expect_int("exec NULL out_count returns ERROR", KC_EMB_ERROR, kc_emb_exec(ctx, "input", &vec, NULL));
+    fail += expect_true("vec NULL after NULL out_count", vec == NULL);
+    err = kc_emb_get_error(ctx);
+    fail += expect_true("error non-empty after NULL out_count", err != NULL && strlen(err) > 0);
     kc_emb_close(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -379,19 +433,15 @@ static int case_kc_emb_exec(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 9;
+    test_case_total = 7;
     test_case_current = 0;
-
     run_case(&rc, case_kc_emb_version);
-    run_case(&rc, case_kc_emb_options_default);
-    run_case(&rc, case_kc_emb_options_load_env);
-    run_case(&rc, case_kc_emb_options_free);
     run_case(&rc, case_kc_emb_open);
     run_case(&rc, case_kc_emb_close);
-    run_case(&rc, case_kc_emb_stop);
     run_case(&rc, case_kc_emb_dim);
     run_case(&rc, case_kc_emb_exec);
-
+    run_case(&rc, case_kc_emb_free);
+    run_case(&rc, case_kc_emb_get_error);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -409,14 +459,12 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_emb_version") == 0) return case_kc_emb_version();
-    if (strcmp(argv[1], "kc_emb_options_default") == 0) return case_kc_emb_options_default();
-    if (strcmp(argv[1], "kc_emb_options_load_env") == 0) return case_kc_emb_options_load_env();
-    if (strcmp(argv[1], "kc_emb_options_free") == 0) return case_kc_emb_options_free();
     if (strcmp(argv[1], "kc_emb_open") == 0) return case_kc_emb_open();
     if (strcmp(argv[1], "kc_emb_close") == 0) return case_kc_emb_close();
-    if (strcmp(argv[1], "kc_emb_stop") == 0) return case_kc_emb_stop();
     if (strcmp(argv[1], "kc_emb_dim") == 0) return case_kc_emb_dim();
     if (strcmp(argv[1], "kc_emb_exec") == 0) return case_kc_emb_exec();
+    if (strcmp(argv[1], "kc_emb_free") == 0) return case_kc_emb_free();
+    if (strcmp(argv[1], "kc_emb_get_error") == 0) return case_kc_emb_get_error();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
