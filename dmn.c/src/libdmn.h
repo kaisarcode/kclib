@@ -28,9 +28,10 @@ typedef struct kc_dmn_conn kc_dmn_conn_t;
 /**
  * Callback type for kc_dmn_list.
  *
- * The callback is invoked synchronously during kc_dmn_list and is not
- * retained. The key and sock strings are borrowed and must not be freed or
- * retained after the callback returns.
+ * The callback is invoked synchronously during kc_dmn_list. The callback
+ * pointer and userdata pointer are not retained. The key and sock strings
+ * are borrowed only during callback invocation; callers must copy key or
+ * sock for a longer lifetime.
  *
  * @param key Borrowed daemon key name.
  * @param sock Borrowed socket or pipe path.
@@ -141,8 +142,9 @@ int kc_dmn_delete(
 /**
  * List registered daemons.
  *
- * The callback is synchronous and its borrowed key and sock arguments are
- * valid only while the callback is running.
+ * The callback is synchronous. The callback pointer and userdata pointer are
+ * not retained. The key and sock arguments are borrowed only during callback
+ * invocation; callers must copy key or sock for a longer lifetime.
  *
  * @param ctx Context pointer.
  * @param key Optional daemon key name, or NULL for all.

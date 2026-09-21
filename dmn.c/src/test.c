@@ -200,36 +200,6 @@ static int open_context(kc_dmn_t **out, char *dir, size_t cap,
     return rc == KC_DMN_OK ? 0 : 1;
 }
 
-/**
- * Performs one public connection exchange.
- * @param ctx Context owning the registration.
- * @param key Registration key to connect to.
- * @param input Bytes to send to the daemon.
- * @param out Destination response buffer.
- * @param cap Capacity of the response buffer.
- * @return API status.
- */
-static int relay_capture(kc_dmn_t *ctx, const char *key, const char *input,
-    char *out, size_t cap) {
-    kc_dmn_conn_t *conn = NULL;
-    void *data = NULL;
-    size_t data_size = 0;
-    int rc;
-    if (kc_dmn_connect(ctx, key, &conn) != KC_DMN_OK) return KC_DMN_ERROR;
-    if (kc_dmn_send(conn, input, strlen(input)) != KC_DMN_OK) {
-        kc_dmn_disconnect(conn);
-        return KC_DMN_ERROR;
-    }
-    rc = kc_dmn_recv(conn, cap - 1, &data, &data_size);
-    if (rc == KC_DMN_OK && data_size < cap) {
-        memcpy(out, data, data_size);
-        out[data_size] = '\0';
-    }
-    kc_dmn_free(data);
-    kc_dmn_disconnect(conn);
-    return rc;
-}
-
 #ifdef _WIN32
 
 /** Joins command arguments for the private Windows serve entrypoint.
@@ -365,7 +335,7 @@ static int test_serve_win32(const char *pipename, const char *cmd) {
  * Tests kc_dmn_version.
  * @return 0 on success, 1 on failure.
  */
-static int case_version(void) {
+static int case_kc_dmn_version(void) {
     int fail = expect_true("version returns build timestamp",
         kc_dmn_version() != 0U);
     case_result(fail, "kc_dmn_version", "version returns build timestamp");
@@ -376,12 +346,25 @@ static int case_version(void) {
  * Tests options allocation, setting, reset, ownership, and freeing.
  * @return 0 on success, 1 on failure.
  */
-static int case_options(void) {
+static int case_kc_dmn_options_default(void) {
+    kc_dmn_options_t *opts = kc_dmn_options_default();
+    int fail = 0;
+    fail += expect_true("options_default returns an object", opts != NULL);
+    kc_dmn_options_free(opts);
+    case_result(fail, "kc_dmn_options_default", "allocates default options");
+    return fail != 0;
+}
+
+/**
+ * Tests kc_dmn_options_set.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_dmn_options_set(void) {
     kc_dmn_options_t *opts = kc_dmn_options_default();
     kc_dmn_t *ctx = NULL;
     char dir[512];
     int fail = 0;
-    fail += expect_true("options_default returns an object", opts != NULL);
+    fail += expect_true("options are available", opts != NULL);
     fail += expect_int("options_set(NULL) returns ERROR", KC_DMN_ERROR,
         kc_dmn_options_set(NULL, "dir", "/tmp/invalid"));
     fail += expect_int("options_set unknown key returns ERROR", KC_DMN_ERROR,
@@ -408,22 +391,33 @@ static int case_options(void) {
         }
     }
     kc_dmn_options_free(opts);
-    kc_dmn_options_free(NULL);
-    case_result(fail, "kc_dmn_options_default/set/free",
-        "options are opaque, copied, resettable, and NULL-safe");
+    case_result(fail, "kc_dmn_options_set",
+        "sets copied, resettable opaque options");
     return fail != 0;
 }
 
 /**
- * Tests open output handling and kc_dmn_get_error.
+ * Tests kc_dmn_options_free.
  * @return 0 on success, 1 on failure.
  */
-static int case_open_error(void) {
+static int case_kc_dmn_options_free(void) {
+    kc_dmn_options_t *opts = kc_dmn_options_default();
+    int fail = expect_true("options are available for free", opts != NULL);
+    kc_dmn_options_free(opts);
+    kc_dmn_options_free(NULL);
+    case_result(fail, "kc_dmn_options_free", "releases options and accepts NULL");
+    return fail != 0;
+}
+
+/**
+ * Tests kc_dmn_open output handling.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_dmn_open(void) {
     kc_dmn_t *ctx = NULL;
     kc_dmn_t *failed = (kc_dmn_t *)(uintptr_t)1;
     kc_dmn_options_t *opts = NULL;
     char long_dir[1024];
-    const char *error;
     int fail = 0;
     fail += expect_int("open(NULL, NULL) returns ERROR", KC_DMN_ERROR,
         kc_dmn_open(NULL, NULL));
@@ -433,13 +427,6 @@ static int case_open_error(void) {
     if (ctx) {
         fail += expect_true("automatic path is available",
             kc_dmn_path(ctx) != NULL && kc_dmn_path(ctx)[0] != '\0');
-        fail += expect_true("fresh error is NULL",
-            kc_dmn_get_error(ctx) == NULL);
-        fail += expect_int("invalid update returns ERROR", KC_DMN_ERROR,
-            kc_dmn_update(ctx, NULL, "cat"));
-        error = kc_dmn_get_error(ctx);
-        if (error)
-            fail += expect_true("recorded error is non-empty", error[0] != '\0');
         kc_dmn_close(ctx);
     } else {
         fail++;
@@ -457,9 +444,34 @@ static int case_open_error(void) {
         fail += expect_true("failed open output is NULL", failed == NULL);
         kc_dmn_options_free(opts);
     }
+    case_result(fail, "kc_dmn_open", "initializes contexts and clears failed output");
+    return fail != 0;
+}
+
+/**
+ * Tests kc_dmn_get_error.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_dmn_get_error(void) {
+    kc_dmn_t *ctx = NULL;
+    const char *error;
+    int fail = 0;
     fail += expect_true("get_error(NULL) returns NULL",
         kc_dmn_get_error(NULL) == NULL);
-    case_result(fail, "kc_dmn_open/get_error", "open output and error access");
+    fail += expect_int("open for error test returns OK", KC_DMN_OK,
+        kc_dmn_open(&ctx, NULL));
+    if (ctx) {
+        fail += expect_true("fresh error is NULL", kc_dmn_get_error(ctx) == NULL);
+        fail += expect_int("invalid update returns ERROR", KC_DMN_ERROR,
+            kc_dmn_update(ctx, NULL, "cat"));
+        error = kc_dmn_get_error(ctx);
+        fail += expect_true("failed operation records a non-empty error",
+            error != NULL && error[0] != '\0');
+        kc_dmn_close(ctx);
+    } else {
+        fail++;
+    }
+    case_result(fail, "kc_dmn_get_error", "reports fresh and failed context state");
     return fail != 0;
 }
 
@@ -467,7 +479,7 @@ static int case_open_error(void) {
  * Tests kc_dmn_close.
  * @return 0 on success, 1 on failure.
  */
-static int case_close(void) {
+static int case_kc_dmn_close(void) {
     kc_dmn_t *ctx;
     char dir[512];
     kc_dmn_close(NULL);
@@ -481,7 +493,7 @@ static int case_close(void) {
  * Tests kc_dmn_path.
  * @return 0 on success, 1 on failure.
  */
-static int case_path(void) {
+static int case_kc_dmn_path(void) {
     kc_dmn_t *ctx;
     char dir[512];
     int fail = expect_true("path(NULL) returns NULL", kc_dmn_path(NULL) == NULL);
@@ -497,7 +509,7 @@ static int case_path(void) {
  * Tests kc_dmn_update.
  * @return 0 on success, 1 on failure.
  */
-static int case_update(void) {
+static int case_kc_dmn_update(void) {
     kc_dmn_t *ctx;
     char dir[512];
     int fail = expect_int("update(NULL) returns ERROR", KC_DMN_ERROR,
@@ -524,7 +536,7 @@ static int case_update(void) {
  * Tests kc_dmn_delete.
  * @return 0 on success, 1 on failure.
  */
-static int case_delete(void) {
+static int case_kc_dmn_delete(void) {
     kc_dmn_t *ctx;
     char dir[512];
     int fail = expect_int("delete(NULL) returns ERROR", KC_DMN_ERROR,
@@ -548,7 +560,7 @@ static int case_delete(void) {
  * Tests kc_dmn_list and its synchronous borrowed callback values.
  * @return 0 on success, 1 on failure.
  */
-static int case_list(void) {
+static int case_kc_dmn_list(void) {
     kc_dmn_t *ctx;
     list_state_t state;
     char dir[512];
@@ -584,7 +596,7 @@ static int case_list(void) {
  * Tests kc_dmn_connect and opaque ownership.
  * @return 0 on success, 1 on failure.
  */
-static int case_connect(void) {
+static int case_kc_dmn_connect(void) {
     kc_dmn_t *ctx;
     kc_dmn_conn_t *conn = (kc_dmn_conn_t *)(uintptr_t)1;
     char dir[512];
@@ -608,7 +620,7 @@ static int case_connect(void) {
  * Tests kc_dmn_send.
  * @return 0 on success, 1 on failure.
  */
-static int case_send(void) {
+static int case_kc_dmn_send(void) {
     kc_dmn_t *ctx;
     kc_dmn_conn_t *conn = NULL;
     char dir[512];
@@ -642,7 +654,7 @@ static int case_send(void) {
  * Tests recv buffers, reset outputs, exact bytes, and deterministic EOF.
  * @return 0 on success, 1 on failure.
  */
-static int case_recv(void) {
+static int case_kc_dmn_recv(void) {
     kc_dmn_t *ctx;
     kc_dmn_conn_t *conn = NULL;
     void *data = (void *)(uintptr_t)1;
@@ -715,7 +727,7 @@ static int case_recv(void) {
  * Tests NULL-safe connection release without stale handle reuse.
  * @return 0 on success, 1 on failure.
  */
-static int case_disconnect(void) {
+static int case_kc_dmn_disconnect(void) {
     kc_dmn_disconnect(NULL);
     case_result(0, "kc_dmn_disconnect", "opaque connection release is NULL-safe");
     return 0;
@@ -725,17 +737,48 @@ static int case_disconnect(void) {
  * Tests NULL-safe API buffer release.
  * @return 0 on success, 1 on failure.
  */
-static int case_free(void) {
+static int case_kc_dmn_free(void) {
+    kc_dmn_t *ctx;
+    kc_dmn_conn_t *conn = NULL;
+    void *data = NULL;
+    size_t data_size = 0;
+    char dir[512];
+    int fail = 0;
+    if (open_context(&ctx, dir, sizeof(dir), "free") != 0) return 1;
+#ifdef _WIN32
+    fail += expect_int("update free daemon returns OK", KC_DMN_OK,
+        kc_dmn_update(ctx, "free", "echo owned"));
+#else
+    fail += expect_int("update free daemon returns OK", KC_DMN_OK,
+        kc_dmn_update(ctx, "free", "while IFS= read -r l; do printf '%s\\004' \"$l\"; done"));
+#endif
+    short_sleep();
+    fail += expect_int("connect free daemon returns OK", KC_DMN_OK,
+        kc_dmn_connect(ctx, "free", &conn));
+    if (conn) {
+        fail += expect_int("send free request returns OK", KC_DMN_OK,
+            kc_dmn_send(conn, "owned\n", 6));
+        fail += expect_int("recv owned buffer returns OK", KC_DMN_OK,
+            kc_dmn_recv(conn, 64, &data, &data_size));
+        fail += expect_true("recv supplies API-owned data", data != NULL &&
+            data_size != 0);
+    } else {
+        fail++;
+    }
+    kc_dmn_free(data);
     kc_dmn_free(NULL);
-    case_result(0, "kc_dmn_free", "API-owned buffer release is NULL-safe");
-    return 0;
+    kc_dmn_disconnect(conn);
+    kc_dmn_delete(ctx, "free");
+    kc_dmn_close(ctx);
+    case_result(fail, "kc_dmn_free", "releases API-owned data and accepts NULL");
+    return fail != 0;
 }
 
 /**
  * Tests kc_dmn_signal.
  * @return 0 on success, 1 on failure.
  */
-static int case_signal(void) {
+static int case_kc_dmn_signal(void) {
     kc_dmn_t *ctx;
     char dir[512];
     int fail = expect_int("signal(NULL) returns ERROR", KC_DMN_ERROR,
@@ -751,59 +794,30 @@ static int case_signal(void) {
 }
 
 /**
- * Tests a genuine public daemon exchange.
- * @return 0 on success, 1 on failure.
- */
-static int case_integration(void) {
-    kc_dmn_t *ctx;
-    char dir[512];
-    char out[64] = {0};
-    int fail;
-    if (open_context(&ctx, dir, sizeof(dir), "integration") != 0) return 1;
-#ifdef _WIN32
-    fail = expect_int("update integration daemon returns OK", KC_DMN_OK,
-        kc_dmn_update(ctx, "integration", "echo hello"));
-#else
-    fail = expect_int("update integration daemon returns OK", KC_DMN_OK,
-        kc_dmn_update(ctx, "integration", "while IFS= read -r l; do printf '%s\\004' \"$l\"; done"));
-#endif
-    short_sleep();
-    fail += expect_int("public exchange returns OK", KC_DMN_OK,
-        relay_capture(ctx, "integration", "hello\n", out, sizeof(out)));
-#ifdef _WIN32
-    fail += expect_string("public exchange preserves command response", "hello\r\n", out);
-#else
-    fail += expect_string("public exchange preserves EOT", "hello\004", out);
-#endif
-    kc_dmn_delete(ctx, "integration");
-    kc_dmn_close(ctx);
-    case_result(fail, "public integration exchange", "daemon I/O through public API");
-    return fail != 0;
-}
-
-/**
  * Runs all test cases.
  * @return 0 on success, 1 on failure.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 15;
+    test_case_total = 17;
     test_case_current = 0;
-    run_case(&rc, case_version);
-    run_case(&rc, case_options);
-    run_case(&rc, case_open_error);
-    run_case(&rc, case_close);
-    run_case(&rc, case_path);
-    run_case(&rc, case_update);
-    run_case(&rc, case_delete);
-    run_case(&rc, case_list);
-    run_case(&rc, case_connect);
-    run_case(&rc, case_send);
-    run_case(&rc, case_recv);
-    run_case(&rc, case_disconnect);
-    run_case(&rc, case_free);
-    run_case(&rc, case_signal);
-    run_case(&rc, case_integration);
+    run_case(&rc, case_kc_dmn_options_default);
+    run_case(&rc, case_kc_dmn_options_set);
+    run_case(&rc, case_kc_dmn_options_free);
+    run_case(&rc, case_kc_dmn_open);
+    run_case(&rc, case_kc_dmn_close);
+    run_case(&rc, case_kc_dmn_path);
+    run_case(&rc, case_kc_dmn_update);
+    run_case(&rc, case_kc_dmn_delete);
+    run_case(&rc, case_kc_dmn_list);
+    run_case(&rc, case_kc_dmn_connect);
+    run_case(&rc, case_kc_dmn_send);
+    run_case(&rc, case_kc_dmn_recv);
+    run_case(&rc, case_kc_dmn_disconnect);
+    run_case(&rc, case_kc_dmn_free);
+    run_case(&rc, case_kc_dmn_signal);
+    run_case(&rc, case_kc_dmn_get_error);
+    run_case(&rc, case_kc_dmn_version);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -828,20 +842,23 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_dmn_version") == 0) return case_version();
-    if (strcmp(argv[1], "kc_dmn_options") == 0) return case_options();
-    if (strcmp(argv[1], "kc_dmn_open") == 0) return case_open_error();
-    if (strcmp(argv[1], "kc_dmn_close") == 0) return case_close();
-    if (strcmp(argv[1], "kc_dmn_path") == 0) return case_path();
-    if (strcmp(argv[1], "kc_dmn_update") == 0) return case_update();
-    if (strcmp(argv[1], "kc_dmn_delete") == 0) return case_delete();
-    if (strcmp(argv[1], "kc_dmn_list") == 0) return case_list();
-    if (strcmp(argv[1], "kc_dmn_connect") == 0) return case_connect();
-    if (strcmp(argv[1], "kc_dmn_send") == 0) return case_send();
-    if (strcmp(argv[1], "kc_dmn_recv") == 0) return case_recv();
-    if (strcmp(argv[1], "kc_dmn_disconnect") == 0) return case_disconnect();
-    if (strcmp(argv[1], "kc_dmn_free") == 0) return case_free();
-    if (strcmp(argv[1], "kc_dmn_signal") == 0) return case_signal();
+    if (strcmp(argv[1], "kc_dmn_options_default") == 0) return case_kc_dmn_options_default();
+    if (strcmp(argv[1], "kc_dmn_options_set") == 0) return case_kc_dmn_options_set();
+    if (strcmp(argv[1], "kc_dmn_options_free") == 0) return case_kc_dmn_options_free();
+    if (strcmp(argv[1], "kc_dmn_open") == 0) return case_kc_dmn_open();
+    if (strcmp(argv[1], "kc_dmn_close") == 0) return case_kc_dmn_close();
+    if (strcmp(argv[1], "kc_dmn_path") == 0) return case_kc_dmn_path();
+    if (strcmp(argv[1], "kc_dmn_update") == 0) return case_kc_dmn_update();
+    if (strcmp(argv[1], "kc_dmn_delete") == 0) return case_kc_dmn_delete();
+    if (strcmp(argv[1], "kc_dmn_list") == 0) return case_kc_dmn_list();
+    if (strcmp(argv[1], "kc_dmn_connect") == 0) return case_kc_dmn_connect();
+    if (strcmp(argv[1], "kc_dmn_send") == 0) return case_kc_dmn_send();
+    if (strcmp(argv[1], "kc_dmn_recv") == 0) return case_kc_dmn_recv();
+    if (strcmp(argv[1], "kc_dmn_disconnect") == 0) return case_kc_dmn_disconnect();
+    if (strcmp(argv[1], "kc_dmn_free") == 0) return case_kc_dmn_free();
+    if (strcmp(argv[1], "kc_dmn_signal") == 0) return case_kc_dmn_signal();
+    if (strcmp(argv[1], "kc_dmn_get_error") == 0) return case_kc_dmn_get_error();
+    if (strcmp(argv[1], "kc_dmn_version") == 0) return case_kc_dmn_version();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

@@ -105,7 +105,7 @@ library owns their internal state; callers use only the public functions below.
 | `kc_dmn_recv(conn, max_size, out_data, out_size)` | `int` | Receive binary data into newly allocated caller-owned memory. Returns `KC_DMN_EOF` at end of stream. |
 | `kc_dmn_disconnect(conn)` | `void` | Disconnect and destroy the owned connection object. |
 | `kc_dmn_free(ptr)` | `void` | Release memory returned by a dmn API, including receive data. |
-| `kc_dmn_get_error(ctx)` | `const char *` | Return a borrowed context error string, or `NULL` when unavailable. |
+| `kc_dmn_get_error(ctx)` | `const char *` | Return a borrowed context error string, or `NULL` when unavailable. It remains valid until the context closes or the library replaces the error. |
 
 ### Example
 
@@ -150,8 +150,9 @@ release each successful receive buffer with `kc_dmn_free()`, and call
 `kc_dmn_disconnect()` when finished. Disconnect destroys the connection
 object. `kc_dmn_path()` and `kc_dmn_get_error()` return borrowed strings.
 
-The list callback is synchronous and is not retained. Its `key` and `sock`
-arguments are borrowed and are valid only while the callback is running.
+The list callback and its `userdata` are synchronous and not retained. Its
+`key` and `sock` arguments are borrowed and are valid only while the callback
+is running.
 
 ### Runtime directory configuration
 

@@ -1054,11 +1054,19 @@ const char *kc_dmn_get_error(const kc_dmn_t *ctx) {
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
 int kc_dmn_update(kc_dmn_t *ctx, const char *key, const char *cmd) {
-    if (!ctx || !key || !cmd) {
+    if (!ctx) {
+        return KC_DMN_ERROR;
+    }
+    if (!key || !cmd) {
+        kc_dmn_set_error(ctx, "invalid update arguments");
         return KC_DMN_ERROR;
     }
 
-    return kc_dmn_run_update(ctx->dir, key, cmd) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
+    if (kc_dmn_run_update(ctx->dir, key, cmd) != 0) {
+        kc_dmn_set_error(ctx, "update failed");
+        return KC_DMN_ERROR;
+    }
+    return KC_DMN_OK;
 }
 
 /**
@@ -1068,11 +1076,19 @@ int kc_dmn_update(kc_dmn_t *ctx, const char *key, const char *cmd) {
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
 int kc_dmn_delete(kc_dmn_t *ctx, const char *key) {
-    if (!ctx || !key) {
+    if (!ctx) {
+        return KC_DMN_ERROR;
+    }
+    if (!key) {
+        kc_dmn_set_error(ctx, "invalid delete arguments");
         return KC_DMN_ERROR;
     }
 
-    return kc_dmn_run_delete(ctx->dir, key) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
+    if (kc_dmn_run_delete(ctx->dir, key) != 0) {
+        kc_dmn_set_error(ctx, "delete failed");
+        return KC_DMN_ERROR;
+    }
+    return KC_DMN_OK;
 }
 
 /**
@@ -1090,10 +1106,18 @@ int kc_dmn_list(kc_dmn_t *ctx, const char *key, kc_dmn_list_cb cb, void *userdat
     }
 
     if (key) {
-        return kc_dmn_run_list_one(ctx->dir, key, cb, userdata) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
+        if (kc_dmn_run_list_one(ctx->dir, key, cb, userdata) != 0) {
+            kc_dmn_set_error(ctx, "list failed");
+            return KC_DMN_ERROR;
+        }
+        return KC_DMN_OK;
     }
 
-    return kc_dmn_run_list(ctx->dir, cb, userdata) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
+    if (kc_dmn_run_list(ctx->dir, cb, userdata) != 0) {
+        kc_dmn_set_error(ctx, "list failed");
+        return KC_DMN_ERROR;
+    }
+    return KC_DMN_OK;
 }
 
 /**
@@ -1107,24 +1131,38 @@ int kc_dmn_connect(kc_dmn_t *ctx, const char *key, kc_dmn_conn_t **out) {
     char sock[KC_DMN_PATH];
     kc_dmn_conn_t *conn;
 
-    if (!out) return KC_DMN_ERROR;
-    *out = NULL;
-    if (!ctx || !key) return KC_DMN_ERROR;
-    if (kc_dmn_sock_path(ctx->dir, key, sock, sizeof(sock)) != 0)
+    if (!out) {
+        if (ctx) kc_dmn_set_error(ctx, "invalid connect arguments");
         return KC_DMN_ERROR;
+    }
+    *out = NULL;
+    if (!ctx) return KC_DMN_ERROR;
+    if (!key) {
+        kc_dmn_set_error(ctx, "invalid connect arguments");
+        return KC_DMN_ERROR;
+    }
+    if (kc_dmn_sock_path(ctx->dir, key, sock, sizeof(sock)) != 0) {
+        kc_dmn_set_error(ctx, "socket path failed");
+        return KC_DMN_ERROR;
+    }
     conn = (kc_dmn_conn_t *)calloc(1, sizeof(*conn));
-    if (!conn) return KC_DMN_ERROR;
+    if (!conn) {
+        kc_dmn_set_error(ctx, "connection allocation failed");
+        return KC_DMN_ERROR;
+    }
 #ifdef _WIN32
     conn->handle = CreateFileA(sock, GENERIC_READ | GENERIC_WRITE,
         0, NULL, OPEN_EXISTING, 0, NULL);
     if (conn->handle == INVALID_HANDLE_VALUE) {
         free(conn);
+        kc_dmn_set_error(ctx, "connect failed");
         return KC_DMN_ERROR;
     }
 #else
     conn->fd = kc_dmn_connect_posix(sock);
     if (conn->fd < 0) {
         free(conn);
+        kc_dmn_set_error(ctx, "connect failed");
         return KC_DMN_ERROR;
     }
 #endif
@@ -1267,9 +1305,17 @@ void kc_dmn_free(void *ptr) {
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
 int kc_dmn_signal(kc_dmn_t *ctx, const char *key, int signo) {
-    if (!ctx || !key) {
+    if (!ctx) {
+        return KC_DMN_ERROR;
+    }
+    if (!key) {
+        kc_dmn_set_error(ctx, "invalid signal arguments");
         return KC_DMN_ERROR;
     }
 
-    return kc_dmn_run_signal(ctx->dir, key, signo) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
+    if (kc_dmn_run_signal(ctx->dir, key, signo) != 0) {
+        kc_dmn_set_error(ctx, "signal failed");
+        return KC_DMN_ERROR;
+    }
+    return KC_DMN_OK;
 }
