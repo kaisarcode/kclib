@@ -223,9 +223,9 @@ static int case_kc_hnsw_free(void) {
 static int case_kc_hnsw_search(void) {
     const char *name = "kc_hnsw_search";
     const char *detail = "applies L2 thresholds and clears invalid outputs";
-    const float near[] = {0.0f, 0.0f};
+    const float nearest_values[] = {0.0f, 0.0f};
     const float middle[] = {1.0f, 0.0f};
-    const float far[] = {4.0f, 0.0f};
+    const float farthest_values[] = {4.0f, 0.0f};
     const float inner_low[] = {1.0f, 0.0f};
     const float inner_high[] = {3.0f, 0.0f};
     const float cosine_best[] = {2.0f, 0.0f};
@@ -241,11 +241,11 @@ static int case_kc_hnsw_search(void) {
         case_result(1, name, detail);
         return 1;
     }
-    fail |= expect(kc_hnsw_add(ctx, "near", near) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(ctx, "near", nearest_values) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_add(ctx, "middle", middle) == KC_HNSW_OK);
-    fail |= expect(kc_hnsw_add(ctx, "far", far) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(ctx, "far", farthest_values) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_build(ctx) == KC_HNSW_OK);
-    fail |= expect(kc_hnsw_search(ctx, near, 3, 1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_search(ctx, nearest_values, 3, 1.0, &results, &count) == KC_HNSW_OK);
     fail |= expect(count == 2 && results != NULL);
     if (results != NULL) {
         fail |= expect(strcmp(results[0].id, "near") == 0 && results[0].score == 0.0);
@@ -257,18 +257,18 @@ static int case_kc_hnsw_search(void) {
     fail |= expect(kc_hnsw_search(ctx, NULL, 1, 1.0, &results, &count) == KC_HNSW_EINVAL);
     fail |= expect(results == NULL && count == 0);
     count = 99;
-    fail |= expect(kc_hnsw_search(ctx, near, 1, 1.0, NULL, &count) == KC_HNSW_EINVAL);
+    fail |= expect(kc_hnsw_search(ctx, nearest_values, 1, 1.0, NULL, &count) == KC_HNSW_EINVAL);
     fail |= expect(count == 0);
     results = (kc_hnsw_result_t *)1;
-    fail |= expect(kc_hnsw_search(ctx, near, 1, 1.0, &results, NULL) == KC_HNSW_EINVAL);
+    fail |= expect(kc_hnsw_search(ctx, nearest_values, 1, 1.0, &results, NULL) == KC_HNSW_EINVAL);
     fail |= expect(results == NULL);
     results = (kc_hnsw_result_t *)1;
     count = 99;
-    fail |= expect(kc_hnsw_search(ctx, near, 0, 1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_search(ctx, nearest_values, 0, 1.0, &results, &count) == KC_HNSW_OK);
     fail |= expect(results == NULL && count == 0);
     results = (kc_hnsw_result_t *)1;
     count = 99;
-    fail |= expect(kc_hnsw_search(ctx, near, 3, -1.0, &results, &count) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_search(ctx, nearest_values, 3, -1.0, &results, &count) == KC_HNSW_OK);
     fail |= expect(results == NULL && count == 0);
     kc_hnsw_close(ctx);
 

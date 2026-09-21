@@ -393,7 +393,7 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
         return KC_HNSW_OK;
     }
 
-    kc_hnsw_item_t *tmp_items = (kc_hnsw_item_t *)malloc(hnsw->count * sizeof(kc_hnsw_item_t));
+    kc_hnsw_item_t *tmp_items = (kc_hnsw_item_t *)malloc(hnsw->capacity * sizeof(kc_hnsw_item_t));
     if (!tmp_items) {
         kc_hnsw_wunlock(hnsw);
         return KC_HNSW_ENOMEM;
