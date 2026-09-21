@@ -19,6 +19,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -690,11 +691,14 @@ static int kc_ngram_run_command(
 ) {
     int stdin_pipe[2];
     int stdout_pipe[2];
+    int error_pipe[2];
     pid_t pid;
     int status;
     kc_ngram_arg_list_t args;
     char output_buffer[256];
     ssize_t read_count;
+    ssize_t error_read;
+    unsigned char error_marker;
     int has_stdout;
     int i;
 
@@ -718,9 +722,7 @@ static int kc_ngram_run_command(
         return -1;
     }
 
-    pid = fork();
-
-    if (pid < 0) {
+    if (pipe(error_pipe) != 0) {
         close(stdin_pipe[0]);
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
@@ -729,8 +731,33 @@ static int kc_ngram_run_command(
         return -1;
     }
 
+    if (fcntl(error_pipe[1], F_SETFD, FD_CLOEXEC) < 0) {
+        close(stdin_pipe[0]);
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        close(error_pipe[0]);
+        close(error_pipe[1]);
+        kc_ngram_free_args(&args);
+        return -1;
+    }
+
+    pid = fork();
+
+    if (pid < 0) {
+        close(stdin_pipe[0]);
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        close(error_pipe[0]);
+        close(error_pipe[1]);
+        kc_ngram_free_args(&args);
+        return -1;
+    }
+
     if (pid == 0) {
         char **argv;
+        unsigned char marker = 1U;
 
         dup2(stdin_pipe[0], STDIN_FILENO);
         dup2(stdout_pipe[1], STDOUT_FILENO);
@@ -739,9 +766,11 @@ static int kc_ngram_run_command(
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
+        close(error_pipe[0]);
 
         argv = (char **)calloc((size_t)args.count + 1U, sizeof(char *));
         if (argv == NULL) {
+            (void)write(error_pipe[1], &marker, 1);
             _exit(127);
         }
 
@@ -750,11 +779,13 @@ static int kc_ngram_run_command(
         }
 
         execvp(argv[0], argv);
+        (void)write(error_pipe[1], &marker, 1);
         _exit(127);
     }
 
     close(stdin_pipe[0]);
     close(stdout_pipe[1]);
+    close(error_pipe[1]);
 
     if (
         kc_ngram_write_all(
@@ -765,6 +796,7 @@ static int kc_ngram_run_command(
     ) {
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
+        close(error_pipe[0]);
         waitpid(pid, NULL, 0);
         kc_ngram_free_args(&args);
         return -1;
@@ -773,6 +805,7 @@ static int kc_ngram_run_command(
     if (kc_ngram_write_all(stdin_pipe[1], "\n", 1U) != 0) {
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
+        close(error_pipe[0]);
         waitpid(pid, NULL, 0);
         kc_ngram_free_args(&args);
         return -1;
@@ -788,11 +821,23 @@ static int kc_ngram_run_command(
     close(stdout_pipe[0]);
 
     if (waitpid(pid, &status, 0) < 0) {
+        close(error_pipe[0]);
         kc_ngram_free_args(&args);
         return -1;
     }
 
+    error_read = read(error_pipe[0], &error_marker, 1);
+    close(error_pipe[0]);
+
     kc_ngram_free_args(&args);
+
+    if (error_read < 0) {
+        return -1;
+    }
+
+    if (error_read == 1) {
+        return -1;
+    }
 
     if (read_count < 0) {
         return -1;

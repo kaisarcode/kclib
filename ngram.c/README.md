@@ -25,7 +25,7 @@ Extraction with custom window size and separators:
 Execute a command for each chunk and close span on stdout:
 
 ```bash
-./bin/x86_64/linux/ngram "The quick brown fox" --cmd "grep -q fox"
+./bin/x86_64/linux/ngram "The quick brown fox" --cmd "grep fox"
 ```
 
 Standard input processing:
@@ -79,8 +79,8 @@ options.max_tokens = 3;
 
 size_t out_count;
 int rc = kc_ngram_execute("The quick brown fox", &options, my_visitor, NULL, &out_count);
-if (rc == KC_NGRAM_ERROR) {
-    // handle error
+if (rc != KC_NGRAM_OK) {
+    // handle error (KC_NGRAM_ERROR) or visitor abort (KC_NGRAM_EABORT)
 }
 ```
 
