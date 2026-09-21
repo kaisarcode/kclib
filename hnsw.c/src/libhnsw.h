@@ -1,5 +1,5 @@
 /**
- * hnsw.h - HNSW Vector Search
+ * libhnsw.h - HNSW Vector Search
  * Summary: HNSW-based approximate nearest neighbor search library.
  *
  * Author:  KaisarCode
@@ -7,8 +7,8 @@
  * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
-#ifndef HNSW_H
-#define HNSW_H
+#ifndef KC_HNSW_H
+#define KC_HNSW_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -30,10 +30,10 @@ typedef struct kc_hnsw kc_hnsw_t;
 #define KC_HNSW_METRIC_L2 3
 
 /**
- * One ranked search result.
- * @param id User-provided vector identifier.
- * @param score Similarity score or distance.
- * @return No return value.
+ * One ranked search result. Result IDs borrow context storage.
+ * @param id Vector identifier.
+ * @param score Similarity score or squared distance.
+ * @return None.
  */
 typedef struct {
     const char *id;
@@ -41,13 +41,13 @@ typedef struct {
 } kc_hnsw_result_t;
 
 /**
- * Configuration for one vector index instance.
+ * Configuration for one vector index instance. Options are plain caller-owned values.
  * @param dimension Fixed vector dimension for all entries.
  * @param metric Configured similarity metric.
  * @param m Maximum graph connections per level.
  * @param ef_construction Construction search budget.
  * @param ef_search Query search budget.
- * @return No return value.
+ * @return None.
  */
 typedef struct {
     size_t dimension;
@@ -64,117 +64,94 @@ typedef struct {
 kc_hnsw_options_t kc_hnsw_options_default(void);
 
 /**
- * Loads vector index options from environment variables.
- * @param opts Options to update.
- * @return No return value.
- */
-void kc_hnsw_options_load_env(kc_hnsw_options_t *opts);
-
-/**
- * Releases resources owned by vector index options.
- * @param opts Options to clean up.
- * @return No return value.
- */
-void kc_hnsw_options_free(kc_hnsw_options_t *opts);
-
-/**
  * Creates one vector index instance.
+ * @param out Receives the new index on success.
  * @param options Index configuration.
- * @return Index pointer or NULL on allocation failure.
- */
-kc_hnsw_t *kc_hnsw_open(const kc_hnsw_options_t *options);
-
-/**
- * Requests clean termination for one vector index context.
- * @param hnsw Index pointer.
  * @return Status code.
  */
-int kc_hnsw_stop(kc_hnsw_t *hnsw);
-
-/**
- * Returns whether one vector index has a pending stop request.
- * @param hnsw Index pointer.
- * @return 1 when stop was requested, or 0 otherwise.
- */
-int kc_hnsw_stop_requested(kc_hnsw_t *hnsw);
+int kc_hnsw_open(kc_hnsw_t **out, const kc_hnsw_options_t *options);
 
 /**
  * Releases one vector index instance.
- * Must not be called while any other thread holds the index.
- * @param hnsw Index pointer.
- * @return No return value.
+ * @param ctx Index pointer.
+ * @return None.
  */
-void kc_hnsw_close(kc_hnsw_t *hnsw);
+void kc_hnsw_close(kc_hnsw_t *ctx);
 
 /**
  * Reserves capacity for a target number of vectors.
- * Acquires an exclusive write lock internally.
- * @param hnsw Index pointer.
+ * @param ctx Index pointer.
  * @param capacity Target vector capacity.
  * @return Status code.
  */
-int kc_hnsw_reserve(kc_hnsw_t *hnsw, size_t capacity);
+int kc_hnsw_reserve(kc_hnsw_t *ctx, size_t capacity);
 
 /**
- * Inserts one vector and its identifier into the index.
- * Acquires an exclusive write lock internally.
- * @param hnsw Index pointer.
- * @param id User-defined identifier string.
+ * Inserts one vector. The index copies both the ID and vector.
+ * @param ctx Index pointer.
+ * @param id Vector identifier.
  * @param values Vector values with the configured dimension.
  * @return Status code.
  */
-int kc_hnsw_add(kc_hnsw_t *hnsw, const char *id, const float *values);
+int kc_hnsw_add(kc_hnsw_t *ctx, const char *id, const float *values);
 
 /**
- * Executes one top-K nearest-neighbor search.
- * Acquires a shared read lock internally. Concurrent calls from multiple
- * threads are safe after kc_hnsw_build() completes. Each caller must
- * supply its own output buffer.
- * @param hnsw Index pointer.
- * @param query Query vector.
- * @param limit Maximum number of results to write.
- * @param threshold Minimum score (cosine/inner) or maximum distance (L2)
- *                  to accept.
- * @param out Caller-provided output buffer.
- * @return Number of results written, or a negative status code on failure.
- */
-int kc_hnsw_search(
-    const kc_hnsw_t *hnsw,
-    const float *query,
-    size_t limit,
-    double threshold,
-    kc_hnsw_result_t *out
-);
-
-/**
- * Constructs the HNSW graph from previously added vectors.
- * Acquires an exclusive write lock internally. After a successful build
- * the index is ready for concurrent searches.
- * @param hnsw Index pointer.
+ * Constructs the HNSW graph. May return KC_HNSW_ESTOP.
+ * @param ctx Index pointer.
  * @return Status code.
  */
-int kc_hnsw_build(kc_hnsw_t *hnsw);
+int kc_hnsw_build(kc_hnsw_t *ctx);
+
+/**
+ * Searches an index. The query is borrowed. Results are caller-owned and must
+ * be released with kc_hnsw_free(). Thresholds are minimum similarity for
+ * cosine/inner and maximum squared distance for L2. May return KC_HNSW_ESTOP.
+ * @param ctx Index pointer.
+ * @param query Borrowed query vector.
+ * @param limit Maximum number of results.
+ * @param threshold Acceptance threshold.
+ * @param out_results Receives the allocated result array.
+ * @param out_count Receives the result count.
+ * @return Status code.
+ */
+int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
+                   double threshold, kc_hnsw_result_t **out_results,
+                   size_t *out_count);
+
+/**
+ * Releases memory returned by this library.
+ * @param ptr Allocation to release.
+ * @return None.
+ */
+void kc_hnsw_free(void *ptr);
+
+/**
+ * Requests clean termination for one vector index context.
+ * @param ctx Index pointer.
+ * @return Status code.
+ */
+int kc_hnsw_stop(kc_hnsw_t *ctx);
 
 /**
  * Returns the configured vector dimension.
- * @param hnsw Index pointer.
+ * @param ctx Index pointer.
  * @return Dimension value, or 0 on invalid input.
  */
-size_t kc_hnsw_dimension(const kc_hnsw_t *hnsw);
+size_t kc_hnsw_dimension(const kc_hnsw_t *ctx);
 
 /**
  * Returns the configured similarity metric.
- * @param hnsw Index pointer.
+ * @param ctx Index pointer.
  * @return Metric constant, or 0 on invalid input.
  */
-int kc_hnsw_metric(const kc_hnsw_t *hnsw);
+int kc_hnsw_metric(const kc_hnsw_t *ctx);
 
 /**
  * Returns the number of inserted vectors.
- * @param hnsw Index pointer.
+ * @param ctx Index pointer.
  * @return Vector count, or 0 on invalid input.
  */
-size_t kc_hnsw_count(const kc_hnsw_t *hnsw);
+size_t kc_hnsw_count(const kc_hnsw_t *ctx);
 
 /**
  * Resolves one metric name into a metric constant.

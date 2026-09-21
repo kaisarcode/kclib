@@ -85,7 +85,7 @@ Results are printed as:
 Available metrics:
 
 - `l2`: squared Euclidean distance
-- `cosine`: cosine distance
+- `cosine`: cosine similarity
 - `inner` (or `inner_product`): inner product similarity
 
 `l2` uses squared Euclidean distance:
@@ -104,26 +104,37 @@ Note: no square root is applied. Rankings are identical to Euclidean distance.
 #include "libhnsw.h"
 
 kc_hnsw_options_t opts = kc_hnsw_options_default();
+kc_hnsw_t *hnsw = NULL;
+kc_hnsw_result_t *results = NULL;
+size_t result_count = 0;
+
 opts.dimension = dimension;
 opts.metric = KC_HNSW_METRIC_COSINE;
 
-kc_hnsw_t *hnsw = kc_hnsw_open(&opts);
-kc_hnsw_add(hnsw, "id_1", values);
-kc_hnsw_build(hnsw);
-kc_hnsw_search(hnsw, query, limit, threshold, results);
-kc_hnsw_close(hnsw);
+if (kc_hnsw_open(&hnsw, &opts) == KC_HNSW_OK) {
+    kc_hnsw_reserve(hnsw, vector_count);
+    kc_hnsw_add(hnsw, "id_1", values);
+    kc_hnsw_build(hnsw);
+    kc_hnsw_search(hnsw, query, limit, threshold, &results, &result_count);
+    kc_hnsw_free(results);
+    kc_hnsw_close(hnsw);
+}
 ```
 
 ## Lifecycle
 
-- `kc_hnsw_options_default()` returns default index options.
-- `kc_hnsw_options_load_env()` applies `KC_HNSW_*` environment overrides.
-- `kc_hnsw_options_free()` releases option resources.
-- `kc_hnsw_open()` allocates a new index from options.
-- `kc_hnsw_add()` inserts vectors.
-- `kc_hnsw_build()` constructs the HNSW graph.
-- `kc_hnsw_search()` queries the index.
-- `kc_hnsw_close()` releases all resources.
+- `kc_hnsw_options_t` is a plain caller-owned value; initialize it with `kc_hnsw_options_default()` and do not free it.
+- `kc_hnsw_open(&index, &options)` returns a status code and stores the new index in `index` on success. Release an index with `kc_hnsw_close()`.
+- `kc_hnsw_reserve()` optionally reserves vector capacity before insertion.
+- `kc_hnsw_add()` copies both the identifier and vector values into the index. Adding a vector invalidates the built graph; call `kc_hnsw_build()` again before searching.
+- `kc_hnsw_build()` explicitly constructs the graph. `kc_hnsw_search()` explicitly queries a built graph and returns a status code plus an allocated result array and result count.
+- Search results are caller-owned and must be released with `kc_hnsw_free()`. Their IDs borrow index storage and remain valid only until the index is closed or mutated.
+- `kc_hnsw_stop()` can cancel an in-progress build or search, causing it to return `KC_HNSW_ESTOP`.
+- After a graph is built, concurrent searches are supported. Do not mutate or close the index while searches are in progress.
+
+Cosine and inner-product scores are similarities: their thresholds are minimum accepted scores. L2 scores are squared distances: their threshold is the maximum accepted distance.
+
+The library is in-memory only; it provides no persistence, network, or database integration.
 
 ---
 
@@ -132,7 +143,7 @@ kc_hnsw_close(hnsw);
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Multiarch Builds

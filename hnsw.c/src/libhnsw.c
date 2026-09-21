@@ -16,6 +16,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +25,6 @@
 #ifndef _WIN32
 #include <pthread.h>
 #endif
-#include <signal.h>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -73,7 +73,7 @@ struct kc_hnsw {
     SRWLOCK rwlock;
 #endif
     uint64_t rng_state;
-    volatile sig_atomic_t stop_requested;
+    atomic_int stop_requested;
 };
 
 typedef struct {
@@ -110,26 +110,9 @@ static int kc_hnsw_add_edge(kc_hnsw_t *hnsw, size_t src_idx, size_t dst_idx, int
 static void kc_hnsw_neighbor_list_init(kc_hnsw_neighbor_list_t *list);
 static void kc_hnsw_neighbor_list_free(kc_hnsw_neighbor_list_t *list);
 
-typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_SIZE,
-    KC_ENV_TYPE_METRIC
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_HNSW_DIM",             offsetof(kc_hnsw_options_t, dimension),       KC_ENV_TYPE_SIZE },
-    { "KC_HNSW_METRIC",          offsetof(kc_hnsw_options_t, metric),          KC_ENV_TYPE_METRIC },
-    { "KC_HNSW_M",               offsetof(kc_hnsw_options_t, m),               KC_ENV_TYPE_INT },
-    { "KC_HNSW_EF_CONSTRUCTION", offsetof(kc_hnsw_options_t, ef_construction), KC_ENV_TYPE_INT },
-    { "KC_HNSW_EF_SEARCH",       offsetof(kc_hnsw_options_t, ef_search),       KC_ENV_TYPE_INT }
-};
-static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
+static int kc_hnsw_is_stopped(const kc_hnsw_t *hnsw) {
+    return atomic_load_explicit(&hnsw->stop_requested, memory_order_relaxed);
+}
 
 /**
  * Creates default vector index options.
@@ -144,68 +127,6 @@ kc_hnsw_options_t kc_hnsw_options_default(void) {
     opts.ef_construction = KC_HNSW_HNSW_EF_CONSTRUCTION;
     opts.ef_search = KC_HNSW_HNSW_EF_SEARCH;
     return opts;
-}
-
-/**
- * Loads vector index options from environment variables.
- * @param opts Options to update.
- * @return No return value.
- */
-void kc_hnsw_options_load_env(kc_hnsw_options_t *opts) {
-    int i;
-
-    if (opts == NULL) {
-        return;
-    }
-
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val;
-        char *end;
-
-        val = getenv(env_config_table[i].env_var);
-        if (val == NULL) {
-            continue;
-        }
-
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v;
-
-                v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_SIZE: {
-                unsigned long v;
-
-                v = strtoul(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(size_t *)((char *)opts + env_config_table[i].offset) = (size_t)v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_METRIC: {
-                int metric;
-
-                metric = kc_hnsw_metric_from_string(val);
-                if (metric != 0) {
-                    *(int *)((char *)opts + env_config_table[i].offset) = metric;
-                }
-                break;
-            }
-        }
-    }
-}
-
-/**
- * Releases resources owned by vector index options.
- * @param opts Options to clean up.
- * @return No return value.
- */
-void kc_hnsw_options_free(kc_hnsw_options_t *opts) {
-    (void)opts;
 }
 
 /**
@@ -264,23 +185,29 @@ static void kc_hnsw_wunlock(kc_hnsw_t *hnsw) {
 
 /**
  * Creates one vector index instance.
+ * @param out Receives the new index on success.
  * @param options Index configuration.
- * @return Index pointer or NULL on allocation failure.
+ * @return Status code.
  */
-kc_hnsw_t *kc_hnsw_open(const kc_hnsw_options_t *options) {
+int kc_hnsw_open(kc_hnsw_t **out, const kc_hnsw_options_t *options) {
     kc_hnsw_t *hnsw;
-    if (options == NULL ||
+
+    if (out != NULL) {
+        *out = NULL;
+    }
+    if (out == NULL ||
+        options == NULL ||
         options->dimension == 0 ||
         !kc_hnsw_metric_valid(options->metric) ||
         options->m <= 0 ||
         options->ef_construction <= 0 ||
         options->ef_search <= 0) {
-        return NULL;
+        return KC_HNSW_EINVAL;
     }
 
     hnsw = (kc_hnsw_t *)calloc(1, sizeof(*hnsw));
     if (hnsw == NULL) {
-        return NULL;
+        return KC_HNSW_ENOMEM;
     }
 
     hnsw->dimension = options->dimension;
@@ -290,10 +217,11 @@ kc_hnsw_t *kc_hnsw_open(const kc_hnsw_options_t *options) {
     hnsw->M = options->m;
     hnsw->ef_construction = options->ef_construction;
     hnsw->ef_search = options->ef_search;
+    atomic_init(&hnsw->stop_requested, 0);
 #ifndef _WIN32
     if (pthread_rwlock_init(&hnsw->rwlock, NULL) != 0) {
         free(hnsw);
-        return NULL;
+        return KC_HNSW_EINVAL;
     }
 #else
     InitializeSRWLock(&hnsw->rwlock);
@@ -302,7 +230,8 @@ kc_hnsw_t *kc_hnsw_open(const kc_hnsw_options_t *options) {
     hnsw->rng_state = (uint64_t)time(NULL) ^ (uint64_t)(uintptr_t)hnsw;
     if (hnsw->rng_state == 0) hnsw->rng_state = 1;
 
-    return hnsw;
+    *out = hnsw;
+    return KC_HNSW_OK;
 }
 
 /**
@@ -343,21 +272,8 @@ void kc_hnsw_close(kc_hnsw_t *hnsw) {
  */
 int kc_hnsw_stop(kc_hnsw_t *hnsw) {
     if (hnsw == NULL) return KC_HNSW_EINVAL;
-    hnsw->stop_requested = 1;
+    atomic_store_explicit(&hnsw->stop_requested, 1, memory_order_relaxed);
     return KC_HNSW_OK;
-}
-
-/**
- * Returns whether one vector index has a pending stop request.
- * @param hnsw Index pointer.
- * @return 1 when stop was requested, or 0 otherwise.
- */
-int kc_hnsw_stop_requested(kc_hnsw_t *hnsw) {
-    if (hnsw == NULL) {
-        return 0;
-    }
-
-    return hnsw->stop_requested ? 1 : 0;
 }
 
 /**
@@ -465,7 +381,7 @@ int kc_hnsw_add(kc_hnsw_t *hnsw, const char *id, const float *values) {
 int kc_hnsw_build(kc_hnsw_t *hnsw) {
     if (hnsw == NULL) return KC_HNSW_EINVAL;
     if (kc_hnsw_wlock(hnsw) != KC_HNSW_OK) return KC_HNSW_EINVAL;
-    if (hnsw->stop_requested) {
+    if (kc_hnsw_is_stopped(hnsw)) {
         kc_hnsw_wunlock(hnsw);
         return KC_HNSW_ESTOP;
     }
@@ -502,7 +418,7 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
     int rc = KC_HNSW_OK;
 
     for (size_t i = 0; i < tmp_hnsw.count; i++) {
-        if (hnsw->stop_requested) {
+        if (kc_hnsw_is_stopped(hnsw)) {
             rc = KC_HNSW_ESTOP;
             goto fail;
         }
@@ -531,7 +447,7 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
         for (int l = tmp_hnsw.max_level; l > level; l--) {
             int changed = 1;
             while (changed) {
-                if (hnsw->stop_requested) {
+                if (kc_hnsw_is_stopped(hnsw)) {
                     rc = KC_HNSW_ESTOP;
                     goto fail;
                 }
@@ -552,7 +468,7 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
 
         for (int l = (level < tmp_hnsw.max_level ? level : tmp_hnsw.max_level); l >= 0; l--) {
             kc_hnsw_heap_t *candidates = kc_hnsw_heap_create(tmp_hnsw.ef_construction, tmp_hnsw.metric, 1);
-            if (hnsw->stop_requested) {
+            if (kc_hnsw_is_stopped(hnsw)) {
                 rc = KC_HNSW_ESTOP;
                 goto fail;
             }
@@ -563,7 +479,7 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
             if (kc_hnsw_search_level(&tmp_hnsw, tmp_items[i].values, tmp_items[i].norm, curr_idx, l,
                     tmp_hnsw.ef_construction, candidates) != KC_HNSW_OK) {
                 kc_hnsw_heap_destroy(candidates);
-                rc = hnsw->stop_requested ? KC_HNSW_ESTOP : KC_HNSW_ENOMEM;
+                rc = kc_hnsw_is_stopped(hnsw) ? KC_HNSW_ESTOP : KC_HNSW_ENOMEM;
                 goto fail;
             }
             
@@ -650,24 +566,36 @@ fail:
 
 /**
  * HNSW Search logic.
- * @param hnsw Index pointer.
+ * @param ctx Index pointer.
  * @param query Query vector.
- * @param limit Maximum number of results to write.
+ * @param limit Maximum number of results.
  * @param threshold Minimum score or maximum distance to accept.
- * @param out Caller-provided output buffer.
- * @return Number of results written, or a negative status code on failure.
+ * @param out_results Receives the allocated result array.
+ * @param out_count Receives the result count.
+ * @return Status code.
  */
-int kc_hnsw_search(const kc_hnsw_t *hnsw, const float *query, size_t limit, double threshold, kc_hnsw_result_t *out) {
-    kc_hnsw_t *mhnsw = (kc_hnsw_t *)(uintptr_t)hnsw;
-    if (hnsw == NULL || query == NULL || (limit > 0 && out == NULL)) return KC_HNSW_EINVAL;
+int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
+                   double threshold, kc_hnsw_result_t **out_results,
+                   size_t *out_count) {
+    const kc_hnsw_t *hnsw = ctx;
+    kc_hnsw_t *mhnsw = (kc_hnsw_t *)(uintptr_t)ctx;
+    kc_hnsw_result_t *out;
+
+    if (out_results != NULL) {
+        *out_results = NULL;
+    }
+    if (out_count != NULL) {
+        *out_count = 0;
+    }
+    if (ctx == NULL || query == NULL || out_results == NULL || out_count == NULL) return KC_HNSW_EINVAL;
     if (kc_hnsw_rlock(mhnsw) != KC_HNSW_OK) return KC_HNSW_EINVAL;
-    if (mhnsw->stop_requested) {
+    if (kc_hnsw_is_stopped(mhnsw)) {
         kc_hnsw_runlock(mhnsw);
         return KC_HNSW_ESTOP;
     }
     if (limit == 0 || hnsw->count == 0) {
         kc_hnsw_runlock(mhnsw);
-        return 0;
+        return KC_HNSW_OK;
     }
     if (hnsw->count > 0 && !hnsw->entry_point_set) {
         kc_hnsw_runlock(mhnsw);
@@ -690,7 +618,7 @@ int kc_hnsw_search(const kc_hnsw_t *hnsw, const float *query, size_t limit, doub
             return KC_HNSW_ENOMEM;
         }
         for (size_t i = 0; i < hnsw->count; i++) {
-            if (mhnsw->stop_requested) {
+            if (kc_hnsw_is_stopped(mhnsw)) {
                 free(results);
                 kc_hnsw_runlock(mhnsw);
                 return KC_HNSW_ESTOP;
@@ -708,7 +636,7 @@ int kc_hnsw_search(const kc_hnsw_t *hnsw, const float *query, size_t limit, doub
         for (int l = hnsw->max_level; l > 0; l--) {
             int changed = 1;
             while (changed) {
-                if (mhnsw->stop_requested) {
+                if (kc_hnsw_is_stopped(mhnsw)) {
                     kc_hnsw_runlock(mhnsw);
                     return KC_HNSW_ESTOP;
                 }
@@ -734,7 +662,7 @@ int kc_hnsw_search(const kc_hnsw_t *hnsw, const float *query, size_t limit, doub
         if (kc_hnsw_search_level(hnsw, query, q_norm, curr_idx, 0, ef, top_k) != KC_HNSW_OK) {
             kc_hnsw_heap_destroy(top_k);
             kc_hnsw_runlock(mhnsw);
-            return mhnsw->stop_requested ? KC_HNSW_ESTOP : KC_HNSW_ENOMEM;
+            return kc_hnsw_is_stopped(mhnsw) ? KC_HNSW_ESTOP : KC_HNSW_ENOMEM;
         }
         candidates_count = top_k->size;
         results = (kc_hnsw_node_score_t *)malloc(candidates_count * sizeof(kc_hnsw_node_score_t));
@@ -753,7 +681,7 @@ int kc_hnsw_search(const kc_hnsw_t *hnsw, const float *query, size_t limit, doub
     }
 
     for (size_t x = 0; x < candidates_count; x++) {
-        if (mhnsw->stop_requested) {
+        if (kc_hnsw_is_stopped(mhnsw)) {
             free(results);
             kc_hnsw_runlock(mhnsw);
             return KC_HNSW_ESTOP;
@@ -769,7 +697,7 @@ int kc_hnsw_search(const kc_hnsw_t *hnsw, const float *query, size_t limit, doub
 
     size_t written = 0;
     for (size_t i = 0; i < candidates_count && written < limit; i++) {
-        if (mhnsw->stop_requested) {
+        if (kc_hnsw_is_stopped(mhnsw)) {
             free(results);
             kc_hnsw_runlock(mhnsw);
             return KC_HNSW_ESTOP;
@@ -782,15 +710,37 @@ int kc_hnsw_search(const kc_hnsw_t *hnsw, const float *query, size_t limit, doub
             if (results[i].score >= threshold) match = 1;
         }
         if (match) {
-            out[written].id = hnsw->items[results[i].idx].id;
-            out[written].score = results[i].score;
+            results[written] = results[i];
             written++;
         }
     }
 
+    if (written != 0) {
+        out = (kc_hnsw_result_t *)malloc(written * sizeof(*out));
+        if (out == NULL) {
+            free(results);
+            kc_hnsw_runlock(mhnsw);
+            return KC_HNSW_ENOMEM;
+        }
+        for (size_t i = 0; i < written; i++) {
+            out[i].id = hnsw->items[results[i].idx].id;
+            out[i].score = results[i].score;
+        }
+        *out_results = out;
+        *out_count = written;
+    }
     free(results);
     kc_hnsw_runlock(mhnsw);
-    return (int)written;
+    return KC_HNSW_OK;
+}
+
+/**
+ * Releases memory returned by this library.
+ * @param ptr Allocation to release.
+ * @return None.
+ */
+void kc_hnsw_free(void *ptr) {
+    free(ptr);
 }
 
 /**
@@ -824,7 +774,7 @@ static int kc_hnsw_search_level(const kc_hnsw_t *hnsw, const float *query, doubl
     visited[entry_idx] = 1;
 
     while (candidates->size > 0) {
-        if (((kc_hnsw_t *)(uintptr_t)hnsw)->stop_requested) {
+        if (kc_hnsw_is_stopped(hnsw)) {
             free(visited);
             kc_hnsw_heap_destroy(candidates);
             return KC_HNSW_ESTOP;
@@ -839,7 +789,7 @@ static int kc_hnsw_search_level(const kc_hnsw_t *hnsw, const float *query, doubl
 
         kc_hnsw_neighbor_list_t *neighbors = &hnsw->items[c.idx].neighbors[level];
         for (size_t n = 0; n < neighbors->count; n++) {
-            if (((kc_hnsw_t *)(uintptr_t)hnsw)->stop_requested) {
+            if (kc_hnsw_is_stopped(hnsw)) {
                 free(visited);
                 kc_hnsw_heap_destroy(candidates);
                 return KC_HNSW_ESTOP;

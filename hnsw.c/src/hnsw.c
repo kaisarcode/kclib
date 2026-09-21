@@ -227,8 +227,8 @@ static int hnsw_parse_vector(const char *text, size_t dimension, float *out) {
  * @param count Number of results.
  * @return No return value.
  */
-static void hnsw_print_results(const kc_hnsw_result_t *results, int count) {
-    for (int i = 0; i < count; i++) {
+static void hnsw_print_results(const kc_hnsw_result_t *results, size_t count) {
+    for (size_t i = 0; i < count; i++) {
         printf("%s: %.6f\n", results[i].id, results[i].score);
     }
 }
@@ -435,10 +435,9 @@ int main(int argc, char **argv) {
         opts.ef_construction = ef_construction;
         opts.ef_search = ef_search;
 
-        hnsw = kc_hnsw_open(&opts);
-        kc_hnsw_options_free(&opts);
-        if (hnsw == NULL) {
-            fprintf(stderr, "hnsw: open failed\n");
+        int rc = kc_hnsw_open(&hnsw, &opts);
+        if (rc != KC_HNSW_OK) {
+            fprintf(stderr, "hnsw: open failed: %s\n", kc_hnsw_strerror(rc));
             status = 1;
             goto cleanup;
         }
@@ -523,25 +522,20 @@ int main(int argc, char **argv) {
     }
 
     {
-        results = (kc_hnsw_result_t *)malloc((size_t)limit * sizeof(kc_hnsw_result_t));
-        if (results == NULL) {
-            fprintf(stderr, "hnsw: out of memory\n");
+        size_t result_count = 0;
+        int rc = kc_hnsw_search(hnsw, query, (size_t)limit, threshold,
+                                &results, &result_count);
+        if (rc != KC_HNSW_OK) {
+            fprintf(stderr, "hnsw: search failed: %s\n", kc_hnsw_strerror(rc));
             status = 1;
             goto cleanup;
         }
 
-        int count = kc_hnsw_search(hnsw, query, (size_t)limit, threshold, results);
-        if (count < 0) {
-            fprintf(stderr, "hnsw: search failed: %s\n", kc_hnsw_strerror(count));
-            status = 1;
-            goto cleanup;
-        }
-
-        hnsw_print_results(results, count);
+        hnsw_print_results(results, result_count);
     }
 
 cleanup:
-    free(results);
+    kc_hnsw_free(results);
     free(stdin_text);
     if (hnsw) kc_hnsw_close(hnsw);
     return status;
