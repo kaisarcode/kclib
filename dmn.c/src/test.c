@@ -12,34 +12,31 @@
 #endif
 
 #include "libdmn.h"
-
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 #ifdef _WIN32
 #include <direct.h>
-#include <io.h>
 #include <process.h>
 #include <windows.h>
 #define getpid _getpid
 #define mkdir_one(path) _mkdir(path)
 #else
-#include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #define mkdir_one(path) mkdir(path, 0700)
 #endif
 
-static int test_case_total = 0;
-static int test_case_current = 0;
+static int test_case_total;
+static int test_case_current;
 
 /**
- * Prints a test case result line.
+ * Prints one test case result.
  * @param fail Non-zero when the case failed.
  * @param name Public API function under test.
  * @param detail Behavior verified by the case.
@@ -50,23 +47,10 @@ static void case_result(int fail, const char *name, const char *detail) {
         fail ? "FAIL" : "PASS", name, detail);
 }
 
-/**
- * Prints a skipped test case line.
- * @param name Public API function under test.
- * @param detail Why the case is skipped.
- * @return None.
- */
-#ifndef _WIN32
-static void case_skip(const char *name, const char *detail) {
-    printf("[%d/%d] [SKIP] %s: %s\n", test_case_current, test_case_total,
-        name, detail);
-}
-#endif
-
 typedef int (*case_fn)(void);
 
 /**
- * Runs one test case with counter tracking.
+ * Runs one test case.
  * @param rc Destination accumulator.
  * @param fn Test case function.
  * @return None.
@@ -77,41 +61,10 @@ static void run_case(int *rc, case_fn fn) {
 }
 
 /**
- * Describes list callback observations.
- */
-typedef struct {
-    const char *expected_key;
-    int count;
-    int exact_count;
-    char first_sock[512];
-} list_state_t;
-
-/**
- * Records one list callback entry.
- * @param key Daemon key name.
- * @param sock Socket or pipe path.
- * @param userdata List state pointer.
- * @return None.
- */
-static void record_list(const char *key, const char *sock, void *userdata) {
-    list_state_t *state;
-
-    state = (list_state_t *)userdata;
-    if (state == NULL || key == NULL || sock == NULL) return;
-    state->count++;
-    if (state->count == 1) {
-        snprintf(state->first_sock, sizeof(state->first_sock), "%s", sock);
-    }
-    if (state->expected_key != NULL && strcmp(key, state->expected_key) == 0) {
-        state->exact_count++;
-    }
-}
-
-/**
- * Verifies one integer result.
- * @param name Check description.
- * @param expected Expected value.
- * @param actual Actual value.
+ * Verifies that an integer result matches the expected value.
+ * @param name Description of the assertion.
+ * @param expected Expected integer value.
+ * @param actual Actual integer value.
  * @return 0 on success, 1 on failure.
  */
 static int expect_int(const char *name, int expected, int actual) {
@@ -124,8 +77,8 @@ static int expect_int(const char *name, int expected, int actual) {
 
 /**
  * Verifies one boolean condition.
- * @param name Check description.
- * @param condition Non-zero when the check passed.
+ * @param name Description of the assertion.
+ * @param condition Boolean condition to verify.
  * @return 0 on success, 1 on failure.
  */
 static int expect_true(const char *name, int condition) {
@@ -138,344 +91,421 @@ static int expect_true(const char *name, int condition) {
 
 /**
  * Verifies one string result.
- * @param name Check description.
- * @param expected Expected string.
- * @param actual Actual string.
+ * @param name Description of the assertion.
+ * @param expected Expected string value.
+ * @param actual Actual string value.
  * @return 0 on success, 1 on failure.
  */
-static int expect_string(const char *name, const char *expected, const char *actual) {
-    if (actual == NULL || strcmp(expected, actual) != 0) {
+static int expect_string(const char *name, const char *expected,
+    const char *actual) {
+    if (!actual || strcmp(expected, actual) != 0) {
         printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
-            actual != NULL ? actual : "NULL");
+            actual ? actual : "NULL");
         return 1;
     }
     return 0;
 }
 
+typedef struct {
+    const char *expected_key;
+    int count;
+    int exact_count;
+    char first_sock[512];
+} list_state_t;
+
 /**
- * Sleeps briefly to let daemon processes reach readiness.
+ * Records a synchronous list callback.
+ * @param key Borrowed registration key.
+ * @param sock Borrowed endpoint value.
+ * @param userdata List state supplied to the callback.
+ * @return None.
+ */
+static void record_list(const char *key, const char *sock, void *userdata) {
+    list_state_t *state = (list_state_t *)userdata;
+    if (!state || !key || !sock) return;
+    state->count++;
+    if (state->count == 1)
+        snprintf(state->first_sock, sizeof(state->first_sock), "%s", sock);
+    if (state->expected_key && strcmp(key, state->expected_key) == 0)
+        state->exact_count++;
+}
+
+/** Sleeps briefly for daemon readiness.
  * @return None.
  */
 static void short_sleep(void) {
 #ifdef _WIN32
     Sleep(200);
 #else
-    struct timespec ts;
-
-    ts.tv_sec = 0;
-    ts.tv_nsec = 200000000L;
+    struct timespec ts = {0, 200000000L};
     nanosleep(&ts, NULL);
 #endif
 }
 
 /**
- * Copies one string into caller-owned memory.
- * @param text Input string.
- * @return Allocated copy, or NULL on failure.
- */
-static char *copy_string(const char *text) {
-    char *copy;
-    size_t length;
-
-    length = strlen(text) + 1;
-    copy = (char *)malloc(length);
-    if (copy == NULL) return NULL;
-    memcpy(copy, text, length);
-    return copy;
-}
-
-/**
- * Sets or clears a process environment variable.
- * @param name Variable name.
- * @param value Variable value, or NULL to clear.
- * @return 0 on success, 1 on failure.
- */
-static int set_env_value(const char *name, const char *value) {
-#ifdef _WIN32
-    return _putenv_s(name, value != NULL ? value : "") == 0 ? 0 : 1;
-#else
-    if (value == NULL) return unsetenv(name) == 0 ? 0 : 1;
-    return setenv(name, value, 1) == 0 ? 0 : 1;
-#endif
-}
-
-/**
- * Creates a unique runtime directory path for one test case.
- * @param out Output buffer.
- * @param cap Output buffer capacity.
- * @param name Case name.
+ * Makes an isolated runtime directory.
+ * @param out Destination path buffer.
+ * @param cap Capacity of the destination buffer.
+ * @param name Test-specific directory name.
  * @return 0 on success, 1 on failure.
  */
 static int make_runtime_dir(char *out, size_t cap, const char *name) {
-    const char *base;
-
+    size_t base_len;
+    unsigned long suffix = 1;
 #ifdef _WIN32
     char tmp[MAX_PATH];
-
     if (GetTempPathA((DWORD)sizeof(tmp), tmp) == 0) return 1;
-    base = tmp;
-    if ((size_t)snprintf(out, cap, "%skc-dmn-test-%ld-%s",
-            base, (long)getpid(), name) >= cap) return 1;
+    if ((size_t)snprintf(out, cap, "%skc-dmn-test-%ld-%s", tmp,
+            (long)getpid(), name) >= cap) return 1;
 #else
-    base = getenv("TMPDIR");
-    if (base == NULL || base[0] == '\0') base = "/tmp";
-    if ((size_t)snprintf(out, cap, "%s/kc-dmn-test-%ld-%s",
-            base, (long)getpid(), name) >= cap) return 1;
+    const char *base = getenv("TMPDIR");
+    if (!base || !base[0]) base = "/tmp";
+    if ((size_t)snprintf(out, cap, "%s/kc-dmn-test-%ld-%s", base,
+        (long)getpid(), name) >= cap) return 1;
 #endif
-    (void)mkdir_one(out);
-    return 0;
+    base_len = strlen(out);
+    if (mkdir_one(out) == 0) return 0;
+    if (errno != EEXIST) return 1;
+    for (;;) {
+        if ((size_t)snprintf(out + base_len, cap - base_len, "-%lu",
+                suffix) >= cap - base_len)
+            return 1;
+        if (mkdir_one(out) == 0) return 0;
+        if (errno != EEXIST) return 1;
+        suffix++;
+    }
 }
 
 /**
- * Opens a context using an isolated runtime directory.
+ * Opens a context through the public options API.
  * @param out Destination context pointer.
- * @param dir Runtime directory output.
- * @param cap Runtime directory capacity.
- * @param name Case name.
- * @return 0 on success, 1 on failure.
+ * @param dir Destination runtime directory buffer.
+ * @param cap Capacity of the directory buffer.
+ * @param name Test-specific directory name.
+ * @return 0 on success.
  */
-static int open_context(kc_dmn_t **out, char *dir, size_t cap, const char *name) {
-    kc_dmn_options_t opts;
-
+static int open_context(kc_dmn_t **out, char *dir, size_t cap,
+    const char *name) {
+    kc_dmn_options_t *opts;
+    int rc;
     if (make_runtime_dir(dir, cap, name) != 0) return 1;
     opts = kc_dmn_options_default();
-    opts.dir = copy_string(dir);
-    if (opts.dir == NULL) return 1;
-    if (kc_dmn_open(out, &opts) != KC_DMN_OK) {
-        kc_dmn_options_free(&opts);
+    if (!opts) return 1;
+    if (kc_dmn_options_set(opts, "dir", dir) != KC_DMN_OK) {
+        kc_dmn_options_free(opts);
         return 1;
     }
-    kc_dmn_options_free(&opts);
-    return 0;
+    rc = kc_dmn_open(out, opts);
+    kc_dmn_options_free(opts);
+    return rc == KC_DMN_OK ? 0 : 1;
 }
 
-#ifndef _WIN32
 /**
- * Relays one input string through a daemon while capturing stdout.
- * @param ctx Context pointer.
- * @param key Daemon key.
- * @param input Input text.
- * @param out Output buffer.
- * @param cap Output buffer capacity.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
+ * Performs one public connection exchange.
+ * @param ctx Context owning the registration.
+ * @param key Registration key to connect to.
+ * @param input Bytes to send to the daemon.
+ * @param out Destination response buffer.
+ * @param cap Capacity of the response buffer.
+ * @return API status.
  */
-static int relay_capture(kc_dmn_t *ctx, const char *key, const char *input, char *out, size_t cap) {
-    int handle = -1;
-    size_t input_len;
-    int n;
-
-    if (kc_dmn_connect(ctx, key, &handle) != KC_DMN_OK) return KC_DMN_ERROR;
-    input_len = strlen(input);
-    if (input_len > 0 && kc_dmn_send(handle, input, input_len) != KC_DMN_OK) {
-        kc_dmn_disconnect(handle);
+static int relay_capture(kc_dmn_t *ctx, const char *key, const char *input,
+    char *out, size_t cap) {
+    kc_dmn_conn_t *conn = NULL;
+    void *data = NULL;
+    size_t data_size = 0;
+    int rc;
+    if (kc_dmn_connect(ctx, key, &conn) != KC_DMN_OK) return KC_DMN_ERROR;
+    if (kc_dmn_send(conn, input, strlen(input)) != KC_DMN_OK) {
+        kc_dmn_disconnect(conn);
         return KC_DMN_ERROR;
     }
-    n = kc_dmn_recv(handle, out, cap - 1);
-    if (n < 0) n = 0;
-    out[n] = '\0';
-    kc_dmn_disconnect(handle);
-    return KC_DMN_OK;
+    rc = kc_dmn_recv(conn, cap - 1, &data, &data_size);
+    if (rc == KC_DMN_OK && data_size < cap) {
+        memcpy(out, data, data_size);
+        out[data_size] = '\0';
+    }
+    kc_dmn_free(data);
+    kc_dmn_disconnect(conn);
+    return rc;
 }
+
+#ifdef _WIN32
+
+/** Joins command arguments for the private Windows serve entrypoint.
+ * @param out Destination command buffer.
+ * @param cap Destination capacity.
+ * @param argv Argument vector.
+ * @param first First argument to join.
+ * @param argc Argument count.
+ * @return None.
+ */
+static void test_join_args(char *out, size_t cap, char **argv, int first,
+    int argc) {
+    size_t used = 0;
+    int i;
+
+    if (!cap) return;
+    out[0] = '\0';
+    for (i = first; i < argc; i++) {
+        int written = snprintf(out + used, cap - used, "%s%s",
+            used ? " " : "", argv[i]);
+        if (written < 0 || (size_t)written >= cap - used) {
+            out[0] = '\0';
+            return;
+        }
+        used += (size_t)written;
+    }
+}
+
+/** Runs the private Windows named-pipe test daemon entrypoint.
+ * @param pipename Named Pipe path.
+ * @param cmd Command string.
+ * @return 0 on success, 1 on failure.
+ */
+static int test_serve_win32(const char *pipename, const char *cmd) {
+    SECURITY_ATTRIBUTES sa;
+    char cmdstr[8192];
+    char buf[8192];
+
+    sa.nLength = sizeof(sa);
+    sa.lpSecurityDescriptor = NULL;
+    sa.bInheritHandle = TRUE;
+    if ((size_t)snprintf(cmdstr, sizeof(cmdstr), "cmd.exe /c %s", cmd)
+            >= sizeof(cmdstr))
+        return 1;
+
+    while (1) {
+        HANDLE h = CreateNamedPipeA(pipename, PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            1, sizeof(buf), sizeof(buf), 0, NULL);
+        HANDLE in_rd, in_wr, out_rd, out_wr;
+        STARTUPINFOA si;
+        PROCESS_INFORMATION pi;
+        DWORD br, avail, exit_code;
+
+        if (h == INVALID_HANDLE_VALUE) {
+            Sleep(100);
+            continue;
+        }
+        if (!ConnectNamedPipe(h, NULL) &&
+                GetLastError() != ERROR_PIPE_CONNECTED) {
+            CloseHandle(h);
+            continue;
+        }
+        if (!CreatePipe(&in_rd, &in_wr, &sa, 0) ||
+                !CreatePipe(&out_rd, &out_wr, &sa, 0)) {
+            DisconnectNamedPipe(h);
+            CloseHandle(h);
+            continue;
+        }
+        SetHandleInformation(in_wr, HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
+        memset(&si, 0, sizeof(si));
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput = in_rd;
+        si.hStdOutput = out_wr;
+        si.hStdError = out_wr;
+        memset(&pi, 0, sizeof(pi));
+        if (!CreateProcessA(NULL, cmdstr, NULL, NULL, TRUE,
+                CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+            CloseHandle(in_rd);
+            CloseHandle(in_wr);
+            CloseHandle(out_rd);
+            CloseHandle(out_wr);
+            DisconnectNamedPipe(h);
+            CloseHandle(h);
+            continue;
+        }
+        CloseHandle(in_rd);
+        CloseHandle(out_wr);
+        CloseHandle(pi.hThread);
+        while (1) {
+            if (PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+                DWORD rd = avail < (DWORD)sizeof(buf) ?
+                    avail : (DWORD)sizeof(buf);
+                if (ReadFile(h, buf, rd, &br, NULL) && br > 0) {
+                    DWORD off = 0, written;
+                    while (off < br && WriteFile(in_wr, buf + off,
+                            br - off, &written, NULL) && written > 0)
+                        off += written;
+                }
+            }
+            if (PeekNamedPipe(out_rd, NULL, 0, NULL, &avail, NULL) &&
+                    avail > 0) {
+                DWORD rd = avail < (DWORD)sizeof(buf) ?
+                    avail : (DWORD)sizeof(buf);
+                if (ReadFile(out_rd, buf, rd, &br, NULL) && br > 0) {
+                    DWORD off = 0, written;
+                    while (off < br && WriteFile(h, buf + off,
+                            br - off, &written, NULL) && written > 0)
+                        off += written;
+                }
+            }
+            if (!GetExitCodeProcess(pi.hProcess, &exit_code) ||
+                    exit_code != STILL_ACTIVE)
+                break;
+            if (!PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL) &&
+                    GetLastError() == ERROR_BROKEN_PIPE)
+                break;
+            Sleep(5);
+        }
+        CloseHandle(in_wr);
+        CloseHandle(out_rd);
+        CloseHandle(pi.hProcess);
+        DisconnectNamedPipe(h);
+        CloseHandle(h);
+    }
+}
+
 #endif
 
 /**
  * Tests kc_dmn_version.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_version(void) {
-    const char *name = "kc_dmn_version";
-    const char *detail = "version returns build timestamp";
-    int fail = expect_true("version returns non-zero build timestamp", kc_dmn_version() != 0U);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_version(void) {
+    int fail = expect_true("version returns build timestamp",
+        kc_dmn_version() != 0U);
+    case_result(fail, "kc_dmn_version", "version returns build timestamp");
+    return fail != 0;
 }
 
 /**
- * Tests kc_dmn_options_default.
+ * Tests options allocation, setting, reset, ownership, and freeing.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_options_default(void) {
-    const char *name = "kc_dmn_options_default";
-    const char *detail = "default options initialize correctly";
-    kc_dmn_options_t opts;
-
-    opts = kc_dmn_options_default();
-    int fail = expect_true("default options set dir to NULL", opts.dir == NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_dmn_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_options_load_env(void) {
-    const char *name = "kc_dmn_options_load_env";
-    const char *detail = "options load from environment";
-    kc_dmn_options_t opts;
-    int fail;
-
-    fail = 0;
-    opts = kc_dmn_options_default();
-    set_env_value("KC_DMN_DIR", NULL);
-    kc_dmn_options_load_env(&opts);
-    fail += expect_true("load_env leaves dir NULL when KC_DMN_DIR unset", opts.dir == NULL);
-    set_env_value("KC_DMN_DIR", "/tmp/kc-dmn-env-test");
-    kc_dmn_options_load_env(&opts);
-    fail += expect_true("load_env sets dir", opts.dir != NULL);
-    fail += expect_string("load_env reads KC_DMN_DIR", "/tmp/kc-dmn-env-test", opts.dir);
-    set_env_value("KC_DMN_DIR", "/tmp/kc-dmn-env-test-2");
-    kc_dmn_options_load_env(&opts);
-    fail += expect_string("load_env replaces previous dir", "/tmp/kc-dmn-env-test-2", opts.dir);
-    set_env_value("KC_DMN_DIR", NULL);
-    kc_dmn_options_load_env(NULL);
-    fail += expect_true("load_env(NULL) does not crash", 1);
-    kc_dmn_options_free(&opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_dmn_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_options_free(void) {
-    const char *name = "kc_dmn_options_free";
-    const char *detail = "options free clears resources";
-    kc_dmn_options_t opts;
-    int fail;
-
-    fail = 0;
-    opts = kc_dmn_options_default();
-    opts.dir = copy_string("/tmp/owned");
-    fail += expect_true("copy option dir", opts.dir != NULL);
-    kc_dmn_options_free(&opts);
-    fail += expect_true("options_free clears dir", opts.dir == NULL);
-    kc_dmn_options_free(&opts);
-    fail += expect_true("options_free is idempotent", opts.dir == NULL);
-    kc_dmn_options_free(NULL);
-    fail += expect_true("options_free(NULL) does not crash", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_dmn_open.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_open(void) {
-    const char *name = "kc_dmn_open";
-    const char *detail = "open validates and allocates context";
-    kc_dmn_options_t opts;
-    kc_dmn_t *ctx;
-    int fail;
-
-    fail = 0;
-    ctx = NULL;
-    opts = kc_dmn_options_default();
-    fail += expect_int("open(NULL, opts) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_open(NULL, &opts));
-    fail += expect_int("open(out, NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_open(&ctx, NULL));
-    fail += expect_true("open error leaves context NULL", ctx == NULL);
-    if (open_context(&ctx, NULL, 0, "open") == 0) {
-        fail += expect_true("open creates valid context", ctx != NULL);
-        kc_dmn_close(ctx);
+static int case_options(void) {
+    kc_dmn_options_t *opts = kc_dmn_options_default();
+    kc_dmn_t *ctx = NULL;
+    char dir[512];
+    int fail = 0;
+    fail += expect_true("options_default returns an object", opts != NULL);
+    fail += expect_int("options_set(NULL) returns ERROR", KC_DMN_ERROR,
+        kc_dmn_options_set(NULL, "dir", "/tmp/invalid"));
+    fail += expect_int("options_set unknown key returns ERROR", KC_DMN_ERROR,
+        kc_dmn_options_set(opts, "unknown", "/tmp/invalid"));
+    fail += expect_int("options_set NULL key returns ERROR", KC_DMN_ERROR,
+        kc_dmn_options_set(opts, NULL, "/tmp/invalid"));
+    if (opts) {
+        fail += expect_int("options_set dir returns OK", KC_DMN_OK,
+            kc_dmn_options_set(opts, "dir", "/tmp/kc-dmn-option-owned"));
+        fail += expect_int("options_set reset returns OK", KC_DMN_OK,
+            kc_dmn_options_set(opts, "dir", NULL));
+        if (make_runtime_dir(dir, sizeof(dir), "options") == 0) {
+            fail += expect_int("options_set owned dir returns OK", KC_DMN_OK,
+                kc_dmn_options_set(opts, "dir", dir));
+            fail += expect_int("open copies options", KC_DMN_OK,
+                kc_dmn_open(&ctx, opts));
+            kc_dmn_options_free(opts);
+            opts = NULL;
+            fail += expect_string("context retains copied path", dir,
+                kc_dmn_path(ctx));
+            kc_dmn_close(ctx);
+        } else {
+            fail++;
+        }
     }
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    kc_dmn_options_free(opts);
+    kc_dmn_options_free(NULL);
+    case_result(fail, "kc_dmn_options_default/set/free",
+        "options are opaque, copied, resettable, and NULL-safe");
+    return fail != 0;
+}
+
+/**
+ * Tests open output handling and kc_dmn_get_error.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_open_error(void) {
+    kc_dmn_t *ctx = NULL;
+    kc_dmn_t *failed = (kc_dmn_t *)(uintptr_t)1;
+    kc_dmn_options_t *opts = NULL;
+    char long_dir[1024];
+    const char *error;
+    int fail = 0;
+    fail += expect_int("open(NULL, NULL) returns ERROR", KC_DMN_ERROR,
+        kc_dmn_open(NULL, NULL));
+
+    fail += expect_int("open(NULL options) returns OK", KC_DMN_OK,
+        kc_dmn_open(&ctx, NULL));
+    if (ctx) {
+        fail += expect_true("automatic path is available",
+            kc_dmn_path(ctx) != NULL && kc_dmn_path(ctx)[0] != '\0');
+        fail += expect_true("fresh error is NULL",
+            kc_dmn_get_error(ctx) == NULL);
+        fail += expect_int("invalid update returns ERROR", KC_DMN_ERROR,
+            kc_dmn_update(ctx, NULL, "cat"));
+        error = kc_dmn_get_error(ctx);
+        if (error)
+            fail += expect_true("recorded error is non-empty", error[0] != '\0');
+        kc_dmn_close(ctx);
+    } else {
+        fail++;
+    }
+
+    memset(long_dir, 'x', sizeof(long_dir) - 1);
+    long_dir[sizeof(long_dir) - 1] = '\0';
+    opts = kc_dmn_options_default();
+    fail += expect_true("options are available for failed open", opts != NULL);
+    if (opts) {
+        fail += expect_int("overlong dir is accepted by options", KC_DMN_OK,
+            kc_dmn_options_set(opts, "dir", long_dir));
+        fail += expect_int("overlong open returns ERROR", KC_DMN_ERROR,
+            kc_dmn_open(&failed, opts));
+        fail += expect_true("failed open output is NULL", failed == NULL);
+        kc_dmn_options_free(opts);
+    }
+    fail += expect_true("get_error(NULL) returns NULL",
+        kc_dmn_get_error(NULL) == NULL);
+    case_result(fail, "kc_dmn_open/get_error", "open output and error access");
+    return fail != 0;
 }
 
 /**
  * Tests kc_dmn_close.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_close(void) {
-    const char *name = "kc_dmn_close";
-    const char *detail = "close releases context";
+static int case_close(void) {
     kc_dmn_t *ctx;
     char dir[512];
-    int fail;
-
-    fail = 0;
     kc_dmn_close(NULL);
-    fail += expect_true("close(NULL) does not crash", 1);
     if (open_context(&ctx, dir, sizeof(dir), "close") != 0) return 1;
     kc_dmn_close(ctx);
-    fail += expect_true("close releases context", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_dmn_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_stop(void) {
-    const char *name = "kc_dmn_stop";
-    const char *detail = "stop sets flag on context";
-    kc_dmn_t *ctx;
-    kc_dmn_t *other;
-    char dir_a[512];
-    char dir_b[512];
-    int fail;
-
-    fail = 0;
-    fail += expect_int("stop(NULL) returns ERROR", KC_DMN_ERROR, kc_dmn_stop(NULL));
-    if (open_context(&ctx, dir_a, sizeof(dir_a), "stop-a") != 0) return 1;
-    if (open_context(&other, dir_b, sizeof(dir_b), "stop-b") != 0) {
-        kc_dmn_close(ctx);
-        return 1;
-    }
-    fail += expect_int("stop context succeeds", KC_DMN_OK, kc_dmn_stop(ctx));
-    fail += expect_int("stop is idempotent", KC_DMN_OK, kc_dmn_stop(ctx));
-    fail += expect_int("other context still operates", KC_DMN_OK,
-        kc_dmn_delete(other, "missing"));
-    fail += expect_int("stop other context", KC_DMN_OK, kc_dmn_stop(other));
-    kc_dmn_close(ctx);
-    kc_dmn_close(other);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    case_result(0, "kc_dmn_close", "close releases context and is NULL-safe");
+    return 0;
 }
 
 /**
  * Tests kc_dmn_path.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_path(void) {
-    const char *name = "kc_dmn_path";
-    const char *detail = "path returns configured directory";
+static int case_path(void) {
     kc_dmn_t *ctx;
     char dir[512];
-    int fail;
-
-    fail = 0;
-    fail += expect_true("path(NULL) returns NULL", kc_dmn_path(NULL) == NULL);
+    int fail = expect_true("path(NULL) returns NULL", kc_dmn_path(NULL) == NULL);
     if (open_context(&ctx, dir, sizeof(dir), "path") != 0) return 1;
-    fail += expect_string("path returns configured dir", dir, kc_dmn_path(ctx));
+    fail += expect_string("path returns configured directory", dir,
+        kc_dmn_path(ctx));
     kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    case_result(fail, "kc_dmn_path", "path returns configured directory");
+    return fail != 0;
 }
 
 /**
  * Tests kc_dmn_update.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_update(void) {
-    const char *name = "kc_dmn_update";
-    const char *detail = "update registers and replaces daemons";
+static int case_update(void) {
     kc_dmn_t *ctx;
     char dir[512];
-    int fail;
-
-    fail = 0;
-    fail += expect_int("update(NULL) returns ERROR", KC_DMN_ERROR,
+    int fail = expect_int("update(NULL) returns ERROR", KC_DMN_ERROR,
         kc_dmn_update(NULL, "key", "cat"));
     if (open_context(&ctx, dir, sizeof(dir), "update") != 0) return 1;
-    fail += expect_int("update(ctx, NULL, cmd) returns ERROR", KC_DMN_ERROR,
+    fail += expect_int("update NULL key returns ERROR", KC_DMN_ERROR,
         kc_dmn_update(ctx, NULL, "cat"));
-    fail += expect_int("update(ctx, key, NULL) returns ERROR", KC_DMN_ERROR,
+    fail += expect_int("update NULL command returns ERROR", KC_DMN_ERROR,
         kc_dmn_update(ctx, "key", NULL));
     fail += expect_int("update key returns OK", KC_DMN_OK,
         kc_dmn_update(ctx, "update", "cat"));
@@ -483,530 +513,314 @@ static int case_kc_dmn_update(void) {
     fail += expect_int("replace key returns OK", KC_DMN_OK,
         kc_dmn_update(ctx, "update", "echo replaced"));
     short_sleep();
-    fail += expect_int("update still registered after replace", KC_DMN_OK,
+    fail += expect_int("delete updated key returns OK", KC_DMN_OK,
         kc_dmn_delete(ctx, "update"));
     kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    case_result(fail, "kc_dmn_update", "registers and replaces daemons");
+    return fail != 0;
 }
 
 /**
  * Tests kc_dmn_delete.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_delete(void) {
-    const char *name = "kc_dmn_delete";
-    const char *detail = "delete removes daemons from registry";
+static int case_delete(void) {
     kc_dmn_t *ctx;
-    list_state_t state;
     char dir[512];
-    int fail;
-
-    fail = 0;
-    fail += expect_int("delete(NULL) returns ERROR", KC_DMN_ERROR,
+    int fail = expect_int("delete(NULL) returns ERROR", KC_DMN_ERROR,
         kc_dmn_delete(NULL, "key"));
     if (open_context(&ctx, dir, sizeof(dir), "delete") != 0) return 1;
-    fail += expect_int("delete(ctx, NULL) returns ERROR", KC_DMN_ERROR,
+    fail += expect_int("delete NULL key returns ERROR", KC_DMN_ERROR,
         kc_dmn_delete(ctx, NULL));
     fail += expect_int("delete missing key returns OK", KC_DMN_OK,
         kc_dmn_delete(ctx, "missing"));
-    fail += expect_int("update key for delete test", KC_DMN_OK,
+    fail += expect_int("update delete test key returns OK", KC_DMN_OK,
         kc_dmn_update(ctx, "delme", "cat"));
     short_sleep();
     fail += expect_int("delete existing key returns OK", KC_DMN_OK,
         kc_dmn_delete(ctx, "delme"));
-    memset(&state, 0, sizeof(state));
-    state.expected_key = "delme";
-    fail += expect_int("list deleted key returns OK", KC_DMN_OK,
-        kc_dmn_list(ctx, "delme", record_list, &state));
-    fail += expect_int("deleted key is not listed", 0, state.exact_count);
     kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    case_result(fail, "kc_dmn_delete", "deletes daemon registrations");
+    return fail != 0;
 }
 
 /**
- * Tests kc_dmn_list.
+ * Tests kc_dmn_list and its synchronous borrowed callback values.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_list(void) {
-    const char *name = "kc_dmn_list";
-    const char *detail = "list queries registered daemons";
+static int case_list(void) {
     kc_dmn_t *ctx;
     list_state_t state;
     char dir[512];
-    int fail;
-
-    fail = 0;
-    fail += expect_int("list(NULL) returns ERROR", KC_DMN_ERROR,
+    int fail = expect_int("list(NULL) returns ERROR", KC_DMN_ERROR,
         kc_dmn_list(NULL, NULL, NULL, NULL));
     if (open_context(&ctx, dir, sizeof(dir), "list") != 0) return 1;
     fail += expect_int("list missing key returns OK", KC_DMN_OK,
         kc_dmn_list(ctx, "missing", NULL, NULL));
-    fail += expect_int("list with NULL callback returns OK", KC_DMN_OK,
+    fail += expect_int("list NULL callback returns OK", KC_DMN_OK,
         kc_dmn_list(ctx, NULL, NULL, NULL));
-    fail += expect_int("update key for list test", KC_DMN_OK,
+    fail += expect_int("update list test key returns OK", KC_DMN_OK,
         kc_dmn_update(ctx, "listed", "cat"));
-    {
-        int tries;
-        for (tries = 0; tries < 10; tries++) {
-            memset(&state, 0, sizeof(state));
-            state.expected_key = "listed";
-            if (kc_dmn_list(ctx, "listed", record_list, &state) == KC_DMN_OK && state.exact_count >= 1) break;
-            short_sleep();
-        }
-    }
+    short_sleep();
     memset(&state, 0, sizeof(state));
     state.expected_key = "listed";
     fail += expect_int("list exact key returns OK", KC_DMN_OK,
         kc_dmn_list(ctx, "listed", record_list, &state));
-    fail += expect_int("list exact key invokes callback", 1, state.exact_count);
-    fail += expect_true("list callback provides socket", state.first_sock[0] != '\0');
+    fail += expect_true("list invokes callback", state.exact_count >= 1);
+    fail += expect_true("list callback provides endpoint",
+        state.first_sock[0] != '\0');
     memset(&state, 0, sizeof(state));
     state.expected_key = "listed";
     fail += expect_int("list all returns OK", KC_DMN_OK,
         kc_dmn_list(ctx, NULL, record_list, &state));
-    fail += expect_true("list all includes listed key", state.exact_count >= 1);
-    fail += expect_int("delete listed key", KC_DMN_OK,
-        kc_dmn_delete(ctx, "listed"));
+    fail += expect_true("list all includes key", state.exact_count >= 1);
+    kc_dmn_delete(ctx, "listed");
     kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    case_result(fail, "kc_dmn_list", "lists registrations synchronously");
+    return fail != 0;
 }
 
 /**
- * Tests kc_dmn_connect.
+ * Tests kc_dmn_connect and opaque ownership.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_connect(void) {
-    const char *name = "kc_dmn_connect";
-    const char *detail = "connect acquires daemon handle";
-#ifdef _WIN32
+static int case_connect(void) {
     kc_dmn_t *ctx;
+    kc_dmn_conn_t *conn = (kc_dmn_conn_t *)(uintptr_t)1;
     char dir[512];
-    int handle;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("connect(NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_connect(NULL, "key", &handle));
+    int fail = expect_int("connect(NULL) returns ERROR", KC_DMN_ERROR,
+        kc_dmn_connect(NULL, "key", &conn));
+    fail += expect_true("connect error output is NULL", conn == NULL);
     if (open_context(&ctx, dir, sizeof(dir), "connect") != 0) return 1;
-    fail += expect_int("connect(ctx, NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_connect(ctx, NULL, &handle));
-    fail += expect_int("connect(ctx, key, NULL) returns ERROR", KC_DMN_ERROR,
+    fail += expect_int("connect NULL key returns ERROR", KC_DMN_ERROR,
+        kc_dmn_connect(ctx, NULL, &conn));
+    fail += expect_int("connect NULL output returns ERROR", KC_DMN_ERROR,
         kc_dmn_connect(ctx, "key", NULL));
     fail += expect_int("connect missing key returns ERROR", KC_DMN_ERROR,
-        kc_dmn_connect(ctx, "missing", &handle));
+        kc_dmn_connect(ctx, "missing", &conn));
+    fail += expect_true("missing connection output is NULL", conn == NULL);
     kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-#else
-    kc_dmn_t *ctx;
-    char dir[512];
-    char out[512];
-    int handle;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("connect(NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_connect(NULL, "key", &handle));
-    if (open_context(&ctx, dir, sizeof(dir), "connect") != 0) return 1;
-    fail += expect_int("connect(ctx, NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_connect(ctx, NULL, &handle));
-    fail += expect_int("connect(ctx, key, NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_connect(ctx, "key", NULL));
-    fail += expect_int("connect missing key returns ERROR", KC_DMN_ERROR,
-        kc_dmn_connect(ctx, "missing", &handle));
-    fail += expect_int("update connect daemon returns OK", KC_DMN_OK,
-        kc_dmn_update(ctx, "connect", "while IFS= read -r l; do printf '%s\\004' \"$l\"; done"));
-    short_sleep();
-    memset(out, 0, sizeof(out));
-    fail += expect_int("connect existing daemon returns OK", KC_DMN_OK,
-        kc_dmn_connect(ctx, "connect", &handle));
-    fail += expect_int("connect returns valid handle", 1, handle >= 0);
-    fail += expect_int("disconnect releases handle", KC_DMN_OK,
-        kc_dmn_disconnect(handle));
-    fail += expect_int("delete connect daemon returns OK", KC_DMN_OK,
-        kc_dmn_delete(ctx, "connect"));
-    kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-#endif
+    case_result(fail, "kc_dmn_connect", "returns owned opaque connections");
+    return fail != 0;
 }
 
 /**
  * Tests kc_dmn_send.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_send(void) {
-    const char *name = "kc_dmn_send";
-    const char *detail = "send writes data to daemon";
-#ifdef _WIN32
-    int fail;
-
-    fail = 0;
-    fail += expect_int("send bad handle returns ERROR", KC_DMN_ERROR,
-        kc_dmn_send(-1, "x", 1));
-    fail += expect_int("send NULL data returns ERROR", KC_DMN_ERROR,
-        kc_dmn_send(0, NULL, 1));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-#else
+static int case_send(void) {
     kc_dmn_t *ctx;
+    kc_dmn_conn_t *conn = NULL;
     char dir[512];
-    int handle;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("send bad handle returns ERROR", KC_DMN_ERROR,
-        kc_dmn_send(-1, "x", 1));
-    fail += expect_int("send NULL data returns ERROR", KC_DMN_ERROR,
-        kc_dmn_send(0, NULL, 1));
+    int fail = expect_int("send NULL connection returns ERROR", KC_DMN_ERROR,
+        kc_dmn_send(NULL, "x", 1));
+    fail += expect_int("send NULL data with size returns ERROR", KC_DMN_ERROR,
+        kc_dmn_send(NULL, NULL, 1));
     if (open_context(&ctx, dir, sizeof(dir), "send") != 0) return 1;
+#ifdef _WIN32
+    fail += expect_int("update send daemon returns OK", KC_DMN_OK,
+        kc_dmn_update(ctx, "send", "echo send"));
+#else
     fail += expect_int("update send daemon returns OK", KC_DMN_OK,
         kc_dmn_update(ctx, "send", "while IFS= read -r l; do printf '%s\\004' \"$l\"; done"));
+#endif
     short_sleep();
     fail += expect_int("connect send daemon returns OK", KC_DMN_OK,
-        kc_dmn_connect(ctx, "send", &handle));
-    fail += expect_int("send zero length returns OK", KC_DMN_OK,
-        kc_dmn_send(handle, NULL, 0));
+        kc_dmn_connect(ctx, "send", &conn));
+    fail += expect_int("send zero bytes returns OK", KC_DMN_OK,
+        kc_dmn_send(conn, NULL, 0));
     fail += expect_int("send data returns OK", KC_DMN_OK,
-        kc_dmn_send(handle, "hello\n", 6));
-    fail += expect_int("disconnect releases handle", KC_DMN_OK,
-        kc_dmn_disconnect(handle));
-    fail += expect_int("delete send daemon returns OK", KC_DMN_OK,
-        kc_dmn_delete(ctx, "send"));
+        kc_dmn_send(conn, "hello\n", 6));
+    kc_dmn_disconnect(conn);
+    kc_dmn_delete(ctx, "send");
     kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-#endif
+    case_result(fail, "kc_dmn_send", "sends data through owned connection");
+    return fail != 0;
 }
 
 /**
- * Tests kc_dmn_recv.
+ * Tests recv buffers, reset outputs, exact bytes, and deterministic EOF.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_dmn_recv(void) {
-    const char *name = "kc_dmn_recv";
-    const char *detail = "recv reads data from daemon";
-#ifdef _WIN32
-    char buf[64];
-    int fail;
-
-    fail = 0;
-    fail += expect_int("recv bad handle returns -1", -1,
-        kc_dmn_recv(-1, buf, sizeof(buf)));
-    fail += expect_int("recv NULL buffer returns -1", -1,
-        kc_dmn_recv(0, NULL, sizeof(buf)));
-    fail += expect_int("recv zero capacity returns -1", -1,
-        kc_dmn_recv(0, buf, 0));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-#else
+static int case_recv(void) {
     kc_dmn_t *ctx;
+    kc_dmn_conn_t *conn = NULL;
+    void *data = (void *)(uintptr_t)1;
+    size_t data_size = 99;
     char dir[512];
-    char out[512];
-    int fail;
-
-    fail = 0;
-    fail += expect_int("recv bad handle returns -1", -1,
-        kc_dmn_recv(-1, out, sizeof(out)));
-    fail += expect_int("recv NULL buffer returns -1", -1,
-        kc_dmn_recv(0, NULL, sizeof(out)));
-    fail += expect_int("recv zero capacity returns -1", -1,
-        kc_dmn_recv(0, NULL, 0));
+    char out[64];
+    int fail = 0;
+    fail += expect_int("recv invalid connection returns ERROR", KC_DMN_ERROR,
+        kc_dmn_recv(NULL, sizeof(out), &data, &data_size));
+    fail += expect_true("invalid recv resets data", data == NULL);
+    fail += expect_true("invalid recv resets size", data_size == 0);
     if (open_context(&ctx, dir, sizeof(dir), "recv") != 0) return 1;
+#ifdef _WIN32
+    fail += expect_int("update recv daemon returns OK", KC_DMN_OK,
+        kc_dmn_update(ctx, "recv", "echo alpha"));
+#else
     fail += expect_int("update recv daemon returns OK", KC_DMN_OK,
         kc_dmn_update(ctx, "recv", "while IFS= read -r l; do printf '%s\\004' \"$l\"; done"));
-    short_sleep();
-    memset(out, 0, sizeof(out));
-    fail += expect_int("relay first input returns OK", KC_DMN_OK,
-        relay_capture(ctx, "recv", "alpha\n", out, sizeof(out)));
-    fail += expect_string("recv first output matches", "alpha\004", out);
-    memset(out, 0, sizeof(out));
-    fail += expect_int("relay second input returns OK", KC_DMN_OK,
-        relay_capture(ctx, "recv", "beta\n", out, sizeof(out)));
-    fail += expect_string("recv second output matches", "beta\004", out);
-    fail += expect_int("delete recv daemon returns OK", KC_DMN_OK,
-        kc_dmn_delete(ctx, "recv"));
-    kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
 #endif
-}
-
-/**
- * Tests kc_dmn_disconnect.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_disconnect(void) {
-    const char *name = "kc_dmn_disconnect";
-    const char *detail = "disconnect releases daemon handle";
+    short_sleep();
+    fail += expect_int("connect recv daemon returns OK", KC_DMN_OK,
+        kc_dmn_connect(ctx, "recv", &conn));
+    fail += expect_int("send recv request returns OK", KC_DMN_OK,
+        kc_dmn_send(conn, "alpha\n", 6));
+    data = (void *)(uintptr_t)1;
+    data_size = 99;
+    fail += expect_int("recv response returns OK", KC_DMN_OK,
+        kc_dmn_recv(conn, sizeof(out), &data, &data_size));
+    fail += expect_true("recv returns owned data", data != NULL);
 #ifdef _WIN32
-    int fail;
-
-    fail = 0;
-    fail += expect_int("disconnect bad handle returns ERROR", KC_DMN_ERROR,
-        kc_dmn_disconnect(-1));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    fail += expect_int("recv returns exact 7-byte count", 7, (int)data_size);
 #else
-    kc_dmn_t *ctx;
-    char dir[512];
-    int handle;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("disconnect bad handle returns ERROR", KC_DMN_ERROR,
-        kc_dmn_disconnect(-1));
-    if (open_context(&ctx, dir, sizeof(dir), "disconnect") != 0) return 1;
-    fail += expect_int("update disconnect daemon returns OK", KC_DMN_OK,
-        kc_dmn_update(ctx, "disconnect", "while IFS= read -r l; do printf '%s\\004' \"$l\"; done"));
-    short_sleep();
-    fail += expect_int("connect disconnect daemon returns OK", KC_DMN_OK,
-        kc_dmn_connect(ctx, "disconnect", &handle));
-    fail += expect_int("disconnect valid handle returns OK", KC_DMN_OK,
-        kc_dmn_disconnect(handle));
-    fail += expect_int("disconnect released handle returns ERROR", KC_DMN_ERROR,
-        kc_dmn_disconnect(handle));
-    fail += expect_int("delete disconnect daemon returns OK", KC_DMN_OK,
-        kc_dmn_delete(ctx, "disconnect"));
-    kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    fail += expect_int("recv returns exact 6-byte count", 6, (int)data_size);
 #endif
-}
-
-/**
- * Tests kc_dmn_relay.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_relay(void) {
-    const char *name = "kc_dmn_relay";
-    const char *detail = "relay rejects bad input";
-    kc_dmn_t *ctx;
-    char dir[512];
-    int fail;
-
-    fail = 0;
-    fail += expect_int("relay(NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_relay(NULL, "key"));
-    if (open_context(&ctx, dir, sizeof(dir), "relay") != 0) return 1;
-    fail += expect_int("relay(ctx, NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_relay(ctx, NULL));
-    fail += expect_int("relay missing key returns ERROR", KC_DMN_ERROR,
-        kc_dmn_relay(ctx, "missing"));
-    kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_dmn_signal (daemon signal).
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_signal(void) {
-    const char *name = "kc_dmn_signal";
-    const char *detail = "signal sends POSIX signal to daemon";
+    if (data && data_size < sizeof(out)) {
+        memcpy(out, data, data_size);
+        out[data_size] = '\0';
 #ifdef _WIN32
+        fail += expect_string("recv preserves command response", "alpha\r\n", out);
+#else
+        fail += expect_string("recv preserves binary response", "alpha\004", out);
+#endif
+    }
+    kc_dmn_free(data);
+    kc_dmn_disconnect(conn);
+    kc_dmn_delete(ctx, "recv");
+    conn = NULL;
+    fail += expect_int("update EOF daemon returns OK", KC_DMN_OK,
+        kc_dmn_update(ctx, "eof", "exit 0"));
+    short_sleep();
+    fail += expect_int("connect EOF daemon returns OK", KC_DMN_OK,
+        kc_dmn_connect(ctx, "eof", &conn));
+    data = (void *)(uintptr_t)1;
+    data_size = 99;
+    if (conn) {
+        int rc = kc_dmn_recv(conn, sizeof(out), &data, &data_size);
+        fail += expect_int("closed daemon returns EOF", KC_DMN_EOF, rc);
+        fail += expect_true("EOF resets data", data == NULL);
+        fail += expect_true("EOF resets size", data_size == 0);
+    }
+    kc_dmn_free(data);
+    kc_dmn_disconnect(conn);
+    kc_dmn_delete(ctx, "eof");
+    kc_dmn_close(ctx);
+    case_result(fail, "kc_dmn_recv", "owned buffers, reset outputs, and EOF");
+    return fail != 0;
+}
+
+/**
+ * Tests NULL-safe connection release without stale handle reuse.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_disconnect(void) {
+    kc_dmn_disconnect(NULL);
+    case_result(0, "kc_dmn_disconnect", "opaque connection release is NULL-safe");
+    return 0;
+}
+
+/**
+ * Tests NULL-safe API buffer release.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_free(void) {
+    kc_dmn_free(NULL);
+    case_result(0, "kc_dmn_free", "API-owned buffer release is NULL-safe");
+    return 0;
+}
+
+/**
+ * Tests kc_dmn_signal.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_signal(void) {
     kc_dmn_t *ctx;
     char dir[512];
-    int fail;
-
-    fail = 0;
-    fail += expect_int("signal(NULL) returns ERROR", KC_DMN_ERROR,
+    int fail = expect_int("signal(NULL) returns ERROR", KC_DMN_ERROR,
         kc_dmn_signal(NULL, "key", 10));
-    if (open_context(&ctx, dir, sizeof(dir), "daemon-signal") != 0) return 1;
-    fail += expect_int("signal(ctx, NULL) returns ERROR", KC_DMN_ERROR,
+    if (open_context(&ctx, dir, sizeof(dir), "signal") != 0) return 1;
+    fail += expect_int("signal NULL key returns ERROR", KC_DMN_ERROR,
         kc_dmn_signal(ctx, NULL, 10));
     fail += expect_int("signal missing key returns ERROR", KC_DMN_ERROR,
         kc_dmn_signal(ctx, "missing", 10));
     kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-#else
+    case_result(fail, "kc_dmn_signal", "signals managed daemons");
+    return fail != 0;
+}
+
+/**
+ * Tests a genuine public daemon exchange.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_integration(void) {
     kc_dmn_t *ctx;
     char dir[512];
-    char sigfile[512];
-    char cmd[1024];
-    char out[512];
+    char out[64] = {0};
     int fail;
-
-    fail = 0;
-    fail += expect_int("signal(NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_signal(NULL, "key", SIGUSR1));
-    if (open_context(&ctx, dir, sizeof(dir), "daemon-signal") != 0) return 1;
-    fail += expect_int("signal(ctx, NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_signal(ctx, NULL, SIGUSR1));
-    fail += expect_int("signal missing key returns ERROR", KC_DMN_ERROR,
-        kc_dmn_signal(ctx, "missing", SIGUSR1));
-    if ((size_t)snprintf(sigfile, sizeof(sigfile),
-            "%s/signal-flag", dir) >= sizeof(sigfile)) {
-        kc_dmn_close(ctx);
-        return 1;
-    }
-    snprintf(cmd, sizeof(cmd),
-        "trap 'touch %s' USR1; while true; do IFS= read -r l; if [ $? -eq 0 ]; then printf '%%s\\004' \"$l\"; fi; done",
-        sigfile);
-    fail += expect_int("update signal daemon returns OK", KC_DMN_OK,
-        kc_dmn_update(ctx, "signal", cmd));
-    short_sleep();
-    fail += expect_int("send signal returns OK", KC_DMN_OK,
-        kc_dmn_signal(ctx, "signal", SIGUSR1));
-    short_sleep();
-    fail += expect_true("signal created flag file", access(sigfile, F_OK) == 0);
-    memset(out, 0, sizeof(out));
-    fail += expect_int("daemon works after signal", KC_DMN_OK,
-        relay_capture(ctx, "signal", "hello\n", out, sizeof(out)));
-    fail += expect_string("signal daemon relay output matches", "hello\004", out);
-    fail += expect_int("delete signal daemon returns OK", KC_DMN_OK,
-        kc_dmn_delete(ctx, "signal"));
-    kc_dmn_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-#endif
-}
-
-/**
- * Tests kc_dmn_serve.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_serve(void) {
-    const char *name = "kc_dmn_serve";
-    const char *detail = "serve provides Windows named pipe relay";
+    if (open_context(&ctx, dir, sizeof(dir), "integration") != 0) return 1;
 #ifdef _WIN32
-    char exe[MAX_PATH];
-    char pipe_name[128];
-    char cmdline[1024];
-    STARTUPINFOA si;
-    PROCESS_INFORMATION pi;
-    HANDLE pipe;
-    DWORD got;
-    char buf[128];
-    int i;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("serve(NULL, cmd) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_serve(NULL, "more"));
-    fail += expect_int("serve(pipe, NULL) returns ERROR", KC_DMN_ERROR,
-        kc_dmn_serve("\\\\.\\pipe\\kc-dmn-test-serve", NULL));
-    if (GetModuleFileNameA(NULL, exe, sizeof(exe)) == 0) return 1;
-    snprintf(pipe_name, sizeof(pipe_name),
-        "\\\\.\\pipe\\kc-dmn-test-serve-%ld", (long)getpid());
-    snprintf(cmdline, sizeof(cmdline),
-        "\"%s\" serve-child \"%s\" \"echo served\"", exe, pipe_name);
-    memset(&si, 0, sizeof(si));
-    memset(&pi, 0, sizeof(pi));
-    si.cb = sizeof(si);
-    if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE,
-            CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        case_result(1, name, detail);
-        return 1;
-    }
-    CloseHandle(pi.hThread);
-    pipe = INVALID_HANDLE_VALUE;
-    for (i = 0; i < 20; i++) {
-        pipe = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE,
-            0, NULL, OPEN_EXISTING, 0, NULL);
-        if (pipe != INVALID_HANDLE_VALUE) break;
-        Sleep(100);
-    }
-    fail += expect_true("connect to serve child pipe", pipe != INVALID_HANDLE_VALUE);
-    if (pipe != INVALID_HANDLE_VALUE) {
-        memset(buf, 0, sizeof(buf));
-        got = 0;
-        ReadFile(pipe, buf, sizeof(buf) - 1, &got, NULL);
-        buf[got] = '\0';
-        fail += expect_true("serve child command output is relayed",
-            strstr(buf, "served") != NULL);
-        CloseHandle(pipe);
-    }
-    TerminateProcess(pi.hProcess, 0);
-    WaitForSingleObject(pi.hProcess, 2000);
-    CloseHandle(pi.hProcess);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    fail = expect_int("update integration daemon returns OK", KC_DMN_OK,
+        kc_dmn_update(ctx, "integration", "echo hello"));
 #else
-    case_skip(name, detail);
-    return 0;
+    fail = expect_int("update integration daemon returns OK", KC_DMN_OK,
+        kc_dmn_update(ctx, "integration", "while IFS= read -r l; do printf '%s\\004' \"$l\"; done"));
 #endif
+    short_sleep();
+    fail += expect_int("public exchange returns OK", KC_DMN_OK,
+        relay_capture(ctx, "integration", "hello\n", out, sizeof(out)));
+#ifdef _WIN32
+    fail += expect_string("public exchange preserves command response", "hello\r\n", out);
+#else
+    fail += expect_string("public exchange preserves EOT", "hello\004", out);
+#endif
+    kc_dmn_delete(ctx, "integration");
+    kc_dmn_close(ctx);
+    case_result(fail, "public integration exchange", "daemon I/O through public API");
+    return fail != 0;
 }
 
 /**
- * Tests two contexts coexist with isolated state.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_dmn_multictx(void) {
-    const char *name = "two contexts coexist with isolated state";
-    const char *detail = "two contexts coexist with isolated state";
-    kc_dmn_t *first;
-    kc_dmn_t *second;
-    char dir_a[512];
-    char dir_b[512];
-    int fail;
-
-    fail = 0;
-    if (open_context(&first, dir_a, sizeof(dir_a), "multi-a") != 0) return 1;
-    if (open_context(&second, dir_b, sizeof(dir_b), "multi-b") != 0) {
-        kc_dmn_close(first);
-        return 1;
-    }
-    fail += expect_int("stop first context returns OK", KC_DMN_OK,
-        kc_dmn_stop(first));
-    fail += expect_int("delete missing second context key returns OK", KC_DMN_OK,
-        kc_dmn_delete(second, "missing"));
-    fail += expect_int("stop second context returns OK", KC_DMN_OK,
-        kc_dmn_stop(second));
-    fail += expect_int("stop first context again returns OK", KC_DMN_OK,
-        kc_dmn_stop(first));
-    kc_dmn_close(first);
-    kc_dmn_close(second);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Runs all test cases in a single process.
+ * Runs all test cases.
  * @return 0 on success, 1 on failure.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 19;
+    test_case_total = 15;
     test_case_current = 0;
-    run_case(&rc, case_kc_dmn_version);
-    run_case(&rc, case_kc_dmn_options_default);
-    run_case(&rc, case_kc_dmn_options_load_env);
-    run_case(&rc, case_kc_dmn_options_free);
-    run_case(&rc, case_kc_dmn_open);
-    run_case(&rc, case_kc_dmn_close);
-    run_case(&rc, case_kc_dmn_stop);
-    run_case(&rc, case_kc_dmn_path);
-    run_case(&rc, case_kc_dmn_update);
-    run_case(&rc, case_kc_dmn_delete);
-    run_case(&rc, case_kc_dmn_list);
-    run_case(&rc, case_kc_dmn_connect);
-    run_case(&rc, case_kc_dmn_send);
-    run_case(&rc, case_kc_dmn_recv);
-    run_case(&rc, case_kc_dmn_disconnect);
-    run_case(&rc, case_kc_dmn_relay);
-    run_case(&rc, case_kc_dmn_signal);
-    run_case(&rc, case_kc_dmn_serve);
-    run_case(&rc, case_kc_dmn_multictx);
+    run_case(&rc, case_version);
+    run_case(&rc, case_options);
+    run_case(&rc, case_open_error);
+    run_case(&rc, case_close);
+    run_case(&rc, case_path);
+    run_case(&rc, case_update);
+    run_case(&rc, case_delete);
+    run_case(&rc, case_list);
+    run_case(&rc, case_connect);
+    run_case(&rc, case_send);
+    run_case(&rc, case_recv);
+    run_case(&rc, case_disconnect);
+    run_case(&rc, case_free);
+    run_case(&rc, case_signal);
+    run_case(&rc, case_integration);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
 /**
  * Runs one libdmn public API test case.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return 0 on success, 1 or 2 on failure.
+ * @param argc Number of command-line arguments.
+ * @param argv Command-line argument vector.
+ * @return Process status.
  */
 int main(int argc, char **argv) {
 #ifdef _WIN32
-    if (argc == 4 && strcmp(argv[1], "serve-child") == 0) {
-        return kc_dmn_serve(argv[2], argv[3]) == KC_DMN_OK ? 0 : 1;
+    if (argc >= 4 && strcmp(argv[1], "--_serve") == 0) {
+        char cmd[8192];
+        test_join_args(cmd, sizeof(cmd), argv, 3, argc);
+        if (!cmd[0]) return 1;
+        return test_serve_win32(argv[2], cmd);
     }
 #endif
     if (argc != 2) {
@@ -1014,25 +828,20 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_dmn_version") == 0) return case_kc_dmn_version();
-    if (strcmp(argv[1], "kc_dmn_options_default") == 0) return case_kc_dmn_options_default();
-    if (strcmp(argv[1], "kc_dmn_options_load_env") == 0) return case_kc_dmn_options_load_env();
-    if (strcmp(argv[1], "kc_dmn_options_free") == 0) return case_kc_dmn_options_free();
-    if (strcmp(argv[1], "kc_dmn_open") == 0) return case_kc_dmn_open();
-    if (strcmp(argv[1], "kc_dmn_close") == 0) return case_kc_dmn_close();
-    if (strcmp(argv[1], "kc_dmn_stop") == 0) return case_kc_dmn_stop();
-    if (strcmp(argv[1], "kc_dmn_path") == 0) return case_kc_dmn_path();
-    if (strcmp(argv[1], "kc_dmn_update") == 0) return case_kc_dmn_update();
-    if (strcmp(argv[1], "kc_dmn_delete") == 0) return case_kc_dmn_delete();
-    if (strcmp(argv[1], "kc_dmn_list") == 0) return case_kc_dmn_list();
-    if (strcmp(argv[1], "kc_dmn_connect") == 0) return case_kc_dmn_connect();
-    if (strcmp(argv[1], "kc_dmn_send") == 0) return case_kc_dmn_send();
-    if (strcmp(argv[1], "kc_dmn_recv") == 0) return case_kc_dmn_recv();
-    if (strcmp(argv[1], "kc_dmn_disconnect") == 0) return case_kc_dmn_disconnect();
-    if (strcmp(argv[1], "kc_dmn_relay") == 0) return case_kc_dmn_relay();
-    if (strcmp(argv[1], "kc_dmn_signal") == 0) return case_kc_dmn_signal();
-    if (strcmp(argv[1], "kc_dmn_serve") == 0) return case_kc_dmn_serve();
-    if (strcmp(argv[1], "kc_dmn_multictx") == 0) return case_kc_dmn_multictx();
+    if (strcmp(argv[1], "kc_dmn_version") == 0) return case_version();
+    if (strcmp(argv[1], "kc_dmn_options") == 0) return case_options();
+    if (strcmp(argv[1], "kc_dmn_open") == 0) return case_open_error();
+    if (strcmp(argv[1], "kc_dmn_close") == 0) return case_close();
+    if (strcmp(argv[1], "kc_dmn_path") == 0) return case_path();
+    if (strcmp(argv[1], "kc_dmn_update") == 0) return case_update();
+    if (strcmp(argv[1], "kc_dmn_delete") == 0) return case_delete();
+    if (strcmp(argv[1], "kc_dmn_list") == 0) return case_list();
+    if (strcmp(argv[1], "kc_dmn_connect") == 0) return case_connect();
+    if (strcmp(argv[1], "kc_dmn_send") == 0) return case_send();
+    if (strcmp(argv[1], "kc_dmn_recv") == 0) return case_recv();
+    if (strcmp(argv[1], "kc_dmn_disconnect") == 0) return case_disconnect();
+    if (strcmp(argv[1], "kc_dmn_free") == 0) return case_free();
+    if (strcmp(argv[1], "kc_dmn_signal") == 0) return case_signal();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

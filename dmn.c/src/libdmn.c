@@ -19,7 +19,6 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <signal.h>
 #include <stdarg.h>
 
 #ifndef KC_DMN_BUILD_VERSION
@@ -55,28 +54,12 @@ uint64_t kc_dmn_version(void) {
 #define KC_DMN_BUF     4096
 #define KC_DMN_PATH    512
 
-typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_FLOAT,
-    KC_ENV_TYPE_STR
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
-static const kc_env_map_t env_config_table[] = {
-    { "KC_DMN_DIR", offsetof(kc_dmn_options_t, dir), KC_ENV_TYPE_STR },
+struct kc_dmn_options {
+    char *dir;
 };
-static const int env_config_table_n =
-    sizeof(env_config_table) / sizeof(env_config_table[0]);
 
 struct kc_dmn {
     char dir[KC_DMN_PATH];
-    kc_dmn_options_t opts;
-    volatile sig_atomic_t stop_requested;
     char error[256];
 };
 
@@ -105,134 +88,13 @@ typedef struct {
 } kc_dmn_backend_t;
 #endif
 
-typedef struct {
+struct kc_dmn_conn {
 #ifdef _WIN32
-    HANDLE h;
+    HANDLE handle;
 #else
     int fd;
 #endif
-    int used;
-    char key[KC_DMN_PATH];
-} kc_dmn_runner_slot_t;
-
-static kc_dmn_runner_slot_t *g_runner_slots = NULL;
-static size_t g_runner_slots_cap = 0;
-static int g_runner_slots_initialized = 0;
-
-/**
- * Initializes the global handle table once.
- * @return None.
- */
-static void kc_dmn_runner_slots_init(void) {
-    if (g_runner_slots_initialized) return;
-    g_runner_slots_cap = 16;
-    g_runner_slots = (kc_dmn_runner_slot_t *)calloc(g_runner_slots_cap, sizeof(kc_dmn_runner_slot_t));
-    if (g_runner_slots) {
-        size_t i;
-        for (i = 0; i < g_runner_slots_cap; i++) {
-#ifdef _WIN32
-            g_runner_slots[i].h = INVALID_HANDLE_VALUE;
-#else
-            g_runner_slots[i].fd = -1;
-#endif
-            g_runner_slots[i].used = 0;
-            g_runner_slots[i].key[0] = '\0';
-        }
-    }
-    g_runner_slots_initialized = 1;
-}
-
-/**
- * Allocates a handle entry for a new connection.
- * @param key Daemon key name.
- * @param fd Socket descriptor (POSIX).
- * @param h  Windows handle (Win32).
- * @return Handle index on success, or -1 on failure.
- */
-static int kc_dmn_runner_slot_alloc(const char *key, int fd
-#ifdef _WIN32
-    , HANDLE h
-#endif
-) {
-    size_t i;
-    (void)fd;
-    kc_dmn_runner_slots_init();
-    if (!g_runner_slots) return -1;
-
-    for (i = 0; i < g_runner_slots_cap; i++) {
-        if (!g_runner_slots[i].used) {
-#ifdef _WIN32
-            g_runner_slots[i].h = h;
-#else
-            g_runner_slots[i].fd = fd;
-#endif
-            g_runner_slots[i].used = 1;
-            snprintf(g_runner_slots[i].key, sizeof(g_runner_slots[i].key), "%s", key);
-            return (int)i;
-        }
-    }
-
-    {
-        size_t new_cap = g_runner_slots_cap * 2;
-        kc_dmn_runner_slot_t *new_handles = (kc_dmn_runner_slot_t *)realloc(g_runner_slots, new_cap * sizeof(kc_dmn_runner_slot_t));
-        if (!new_handles) return -1;
-        g_runner_slots = new_handles;
-
-        for (i = g_runner_slots_cap; i < new_cap; i++) {
-#ifdef _WIN32
-            g_runner_slots[i].h = INVALID_HANDLE_VALUE;
-#else
-            g_runner_slots[i].fd = -1;
-#endif
-            g_runner_slots[i].used = 0;
-            g_runner_slots[i].key[0] = '\0';
-        }
-
-        i = g_runner_slots_cap;
-        g_runner_slots_cap = new_cap;
-#ifdef _WIN32
-        g_runner_slots[i].h = h;
-#else
-        g_runner_slots[i].fd = fd;
-#endif
-        g_runner_slots[i].used = 1;
-        snprintf(g_runner_slots[i].key, sizeof(g_runner_slots[i].key), "%s", key);
-        return (int)i;
-    }
-}
-
-/**
- * Returns the handle entry for a given handle index.
- * @param handle Handle index.
- * @return Pointer to handle entry, or NULL if invalid.
- */
-static kc_dmn_runner_slot_t *kc_dmn_runner_slot_get(int handle) {
-    if (handle < 0 || (size_t)handle >= g_runner_slots_cap) return NULL;
-    if (!g_runner_slots[handle].used) return NULL;
-    return &g_runner_slots[handle];
-}
-
-/**
- * Frees a handle entry and closes its descriptor.
- * @param handle Handle index.
- * @return None.
- */
-static void kc_dmn_runner_slot_free(int handle) {
-    if (handle < 0 || (size_t)handle >= g_runner_slots_cap) return;
-#ifdef _WIN32
-    if (g_runner_slots[handle].h != INVALID_HANDLE_VALUE) {
-        CloseHandle(g_runner_slots[handle].h);
-        g_runner_slots[handle].h = INVALID_HANDLE_VALUE;
-    }
-#else
-    if (g_runner_slots[handle].fd >= 0) {
-        close(g_runner_slots[handle].fd);
-        g_runner_slots[handle].fd = -1;
-    }
-#endif
-    g_runner_slots[handle].used = 0;
-    g_runner_slots[handle].key[0] = '\0';
-}
+};
 
 /**
  * Resolves the runtime directory for socket and PID files.
@@ -486,6 +348,7 @@ static int kc_dmn_write_all(int fd, const char *buf, size_t len) {
 
     while (off < len) {
         ssize_t n = write(fd, buf + off, len - off);
+        if (n < 0 && errno == EINTR) continue;
         if (n <= 0) return 1;
         off += (size_t)n;
     }
@@ -758,141 +621,6 @@ static int kc_dmn_update_posix(
 #ifdef _WIN32
 
 /**
- * Writes all bytes to a Windows handle.
- * @param h   Destination handle.
- * @param buf Source buffer.
- * @param len Byte count.
- * @return 0 on success, 1 on error.
- */
-static int kc_dmn_write_all_handle(
-    HANDLE h, const char *buf, DWORD len
-) {
-    DWORD off = 0, bw = 0;
-
-    while (off < len) {
-        if (!WriteFile(h, buf + off, len - off, &bw, NULL) ||
-                bw == 0)
-            return 1;
-        off += bw;
-    }
-    return 0;
-}
-
-/**
- * Named Pipe serve loop. Accepts one connection at a time,
- * spawns the command process, and bridges I/O until the child
- * exits or the pipe breaks.
- * @param pipename Named Pipe path.
- * @param cmd      Command string passed to cmd.exe /c.
- * @return 0 on success, 1 on failure.
- */
-static int kc_dmn_serve_win32(
-    const char *pipename, const char *cmd
-) {
-    SECURITY_ATTRIBUTES sa;
-    char cmdstr[KC_DMN_BUF];
-    char buf[KC_DMN_BUF];
-    char evname[64];
-    HANDLE hSignalEvent;
-
-    sa.nLength = sizeof(sa);
-    sa.lpSecurityDescriptor = NULL;
-    sa.bInheritHandle = TRUE;
-
-    if ((size_t)snprintf(cmdstr, sizeof(cmdstr),
-            "cmd.exe /c %s", cmd) >= sizeof(cmdstr))
-        return 1;
-
-    {
-        DWORD pid = GetCurrentProcessId();
-        snprintf(evname, sizeof(evname),
-            "Global\\DmnSignal_%lu", pid);
-        hSignalEvent = CreateEventA(NULL, FALSE, FALSE, evname);
-        (void)hSignalEvent;
-    }
-
-    while (1) {
-        HANDLE h = CreateNamedPipeA(
-            pipename,
-            PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-            1, KC_DMN_BUF, KC_DMN_BUF, 0, NULL
-        );
-        HANDLE in_rd, in_wr, out_rd, out_wr;
-        STARTUPINFOA si;
-        PROCESS_INFORMATION pi;
-        DWORD br, avail, exit_code;
-
-        if (h == INVALID_HANDLE_VALUE) {
-            Sleep(100);
-            continue;
-        }
-        if (!ConnectNamedPipe(h, NULL) &&
-                GetLastError() != ERROR_PIPE_CONNECTED) {
-            CloseHandle(h);
-            continue;
-        }
-        if (!CreatePipe(&in_rd, &in_wr, &sa, 0) ||
-                !CreatePipe(&out_rd, &out_wr, &sa, 0)) {
-            DisconnectNamedPipe(h);
-            CloseHandle(h);
-            continue;
-        }
-        SetHandleInformation(in_wr, HANDLE_FLAG_INHERIT, 0);
-        SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
-        memset(&si, 0, sizeof(si));
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdInput  = in_rd;
-        si.hStdOutput = out_wr;
-        si.hStdError  = out_wr;
-        memset(&pi, 0, sizeof(pi));
-        if (!CreateProcessA(NULL, cmdstr, NULL, NULL, TRUE,
-                CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-            CloseHandle(in_rd);
-            CloseHandle(in_wr);
-            CloseHandle(out_rd);
-            CloseHandle(out_wr);
-            DisconnectNamedPipe(h);
-            CloseHandle(h);
-            continue;
-        }
-        CloseHandle(in_rd);
-        CloseHandle(out_wr);
-        CloseHandle(pi.hThread);
-        while (1) {
-            if (PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL)
-                    && avail > 0) {
-                DWORD rd = avail < (DWORD)sizeof(buf)
-                    ? avail : (DWORD)sizeof(buf);
-                if (ReadFile(h, buf, rd, &br, NULL) && br > 0)
-                    (void)kc_dmn_write_all_handle(in_wr, buf, br);
-            }
-            if (PeekNamedPipe(out_rd, NULL, 0, NULL, &avail, NULL)
-                    && avail > 0) {
-                DWORD rd = avail < (DWORD)sizeof(buf)
-                    ? avail : (DWORD)sizeof(buf);
-                if (ReadFile(out_rd, buf, rd, &br, NULL) && br > 0)
-                    (void)kc_dmn_write_all_handle(h, buf, br);
-            }
-            if (!GetExitCodeProcess(pi.hProcess, &exit_code) ||
-                    exit_code != STILL_ACTIVE)
-                break;
-            if (!PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL) &&
-                    GetLastError() == ERROR_BROKEN_PIPE)
-                break;
-            Sleep(5);
-        }
-        CloseHandle(in_wr);
-        CloseHandle(out_rd);
-        CloseHandle(pi.hProcess);
-        DisconnectNamedPipe(h);
-        CloseHandle(h);
-    }
-    return 0;
-}
-
-/**
  * Starts a daemon for one key by self-spawning as a detached
  * background process with the --_serve flag.
  * @param dir Runtime directory for PID files.
@@ -1158,88 +886,6 @@ static int kc_dmn_run_list(const char *dir, kc_dmn_list_cb cb, void *userdata) {
 }
 
 /**
- * Relays stdin to a registered daemon key and prints the response.
- * @param dir Runtime directory.
- * @param key Daemon key name.
- * @return 0 on success, 1 on failure.
- */
-static int kc_dmn_run_relay(const char *dir, const char *key, kc_dmn_t *ctx) {
-#ifdef _WIN32
-    char pipename[KC_DMN_PATH];
-    char buf[KC_DMN_BUF];
-    HANDLE h, hin, hout;
-    DWORD br, bw, avail;
-
-    (void)dir;
-    (void)ctx;
-    if (kc_dmn_sock_path(NULL, key, pipename, sizeof(pipename)) != 0)
-        return 1;
-    h = CreateFileA(pipename, GENERIC_READ | GENERIC_WRITE,
-        0, NULL, OPEN_EXISTING, 0, NULL);
-    if (h == INVALID_HANDLE_VALUE) return 1;
-    hin  = GetStdHandle(STD_INPUT_HANDLE);
-    hout = GetStdHandle(STD_OUTPUT_HANDLE);
-    while (ReadFile(hin, buf, sizeof(buf), &br, NULL) && br > 0) {
-        if (!WriteFile(h, buf, br, &bw, NULL)) break;
-    }
-    while (PeekNamedPipe(h, NULL, 0, NULL, &avail, NULL) &&
-            avail > 0) {
-        DWORD rd = avail < (DWORD)sizeof(buf)
-            ? avail : (DWORD)sizeof(buf);
-        if (!ReadFile(h, buf, rd, &br, NULL) || br == 0) break;
-        (void)kc_dmn_write_all_handle(hout, buf, br);
-    }
-    CloseHandle(h);
-    return 0;
-#else
-    char sock[KC_DMN_PATH];
-    char buf[KC_DMN_BUF];
-    int fd;
-    int stdin_open;
-    ssize_t n;
-    fd_set fds;
-    int max_fd;
-
-    if (kc_dmn_sock_path(dir, key, sock, sizeof(sock)) != 0)
-        return 1;
-    fd = kc_dmn_connect_posix(sock);
-    if (fd < 0) return 1;
-    stdin_open = 1;
-    max_fd = fd > STDIN_FILENO ? fd : STDIN_FILENO;
-    while (1) {
-        int ready;
-
-        if (ctx && ctx->stop_requested) break;
-        FD_ZERO(&fds);
-        FD_SET(fd, &fds);
-        if (stdin_open) FD_SET(STDIN_FILENO, &fds);
-        ready = select(max_fd + 1, &fds, NULL, NULL, NULL);
-        if (ready < 0) break;
-        if (stdin_open && FD_ISSET(STDIN_FILENO, &fds)) {
-            n = read(STDIN_FILENO, buf, sizeof(buf));
-            if (n <= 0) {
-                stdin_open = 0;
-                shutdown(fd, SHUT_WR);
-            } else if (kc_dmn_write_all(fd, buf, (size_t)n) != 0) {
-                break;
-            } else if (memchr(buf, 4, (size_t)n) != NULL) {
-                stdin_open = 0;
-            }
-        }
-        if (FD_ISSET(fd, &fds)) {
-            n = read(fd, buf, sizeof(buf));
-            if (n <= 0) break;
-            if (kc_dmn_write_all(
-                    STDOUT_FILENO, buf, (size_t)n) != 0)
-                break;
-        }
-    }
-    close(fd);
-    return 0;
-#endif
-}
-
-/**
  * Sends a signal to a managed daemon process.
  * @param dir   Runtime directory.
  * @param key   Daemon key name.
@@ -1294,22 +940,22 @@ static int kc_dmn_run_signal(const char *dir, const char *key, int signo) {
 int kc_dmn_open(kc_dmn_t **out, const kc_dmn_options_t *opts) {
     kc_dmn_t *ctx;
 
-    if (!out || !opts) return KC_DMN_ERROR;
+    if (!out) return KC_DMN_ERROR;
+    *out = NULL;
 
     ctx = (kc_dmn_t *)calloc(1, sizeof(*ctx));
     if (!ctx) return KC_DMN_ERROR;
 
-    ctx->opts = *opts;
-    ctx->opts.dir = opts->dir ? strdup(opts->dir) : NULL;
-
-    if (ctx->opts.dir && ctx->opts.dir[0]) {
-        if ((size_t)snprintf(ctx->dir, sizeof(ctx->dir), "%s", ctx->opts.dir) >= sizeof(ctx->dir)) {
+    if (opts && opts->dir && opts->dir[0]) {
+        if ((size_t)snprintf(ctx->dir, sizeof(ctx->dir), "%s", opts->dir) >= sizeof(ctx->dir)) {
             kc_dmn_set_error(ctx, "path too long");
+            free(ctx);
             return KC_DMN_ERROR;
         }
     } else {
         if (kc_dmn_runtime_dir(ctx->dir, sizeof(ctx->dir)) != 0) {
             kc_dmn_set_error(ctx, "runtime directory unavailable");
+            free(ctx);
             return KC_DMN_ERROR;
         }
     }
@@ -1325,56 +971,45 @@ int kc_dmn_open(kc_dmn_t **out, const kc_dmn_options_t *opts) {
  */
 void kc_dmn_close(kc_dmn_t *ctx) {
     if (!ctx) return;
-    kc_dmn_options_free(&ctx->opts);
     free(ctx);
 }
 
 /**
- * Create an options struct initialized with default values.
- * @param none Unused.
- * @return Default-initialized options.
+ * Allocate an options struct initialized with default values.
+ * @return Owned options object, or NULL on allocation failure.
  */
-kc_dmn_options_t kc_dmn_options_default(void) {
-    kc_dmn_options_t opts;
-    memset(&opts, 0, sizeof(opts));
+kc_dmn_options_t *kc_dmn_options_default(void) {
+    kc_dmn_options_t *opts = (kc_dmn_options_t *)calloc(1, sizeof(*opts));
     return opts;
 }
 
 /**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
+ * Set an options value.
+ * @param opts Options object.
+ * @param key Option key.
+ * @param value Option value, or NULL to reset it.
+ * @return KC_DMN_OK on success, KC_DMN_ERROR on failure.
  */
-void kc_dmn_options_load_env(kc_dmn_options_t *opts) {
-    int i;
-    if (!opts) return;
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        char *end;
-        if (!val) continue;
-        switch (env_config_table[i].type) {
-            case KC_ENV_TYPE_INT: {
-                long v = strtol(val, &end, 10);
-                if (end != val && *end == '\0') {
-                    *(int *)((char *)opts + env_config_table[i].offset) = (int)v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_FLOAT: {
-                float v = strtof(val, &end);
-                if (end != val && *end == '\0') {
-                    *(float *)((char *)opts + env_config_table[i].offset) = v;
-                }
-                break;
-            }
-            case KC_ENV_TYPE_STR: {
-                char **p = (char **)((char *)opts + env_config_table[i].offset);
-                free(*p);
-                *p = strdup(val);
-                break;
-            }
-        }
+int kc_dmn_options_set(
+    kc_dmn_options_t *opts,
+    const char *key,
+    const char *value
+) {
+    char *copy;
+
+    if (!opts || !key || strcmp(key, "dir") != 0) return KC_DMN_ERROR;
+    if (!value) {
+        free(opts->dir);
+        opts->dir = NULL;
+        return KC_DMN_OK;
     }
+
+    copy = (char *)malloc(strlen(value) + 1);
+    if (!copy) return KC_DMN_ERROR;
+    memcpy(copy, value, strlen(value) + 1);
+    free(opts->dir);
+    opts->dir = copy;
+    return KC_DMN_OK;
 }
 
 /**
@@ -1385,18 +1020,7 @@ void kc_dmn_options_load_env(kc_dmn_options_t *opts) {
 void kc_dmn_options_free(kc_dmn_options_t *opts) {
     if (!opts) return;
     free(opts->dir);
-    opts->dir = NULL;
-}
-
-/**
- * Request stop for a specific dmn context.
- * @param ctx Context pointer.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_stop(kc_dmn_t *ctx) {
-    if (!ctx) return KC_DMN_ERROR;
-    ctx->stop_requested = 1;
-    return KC_DMN_OK;
+    free(opts);
 }
 
 /**
@@ -1404,7 +1028,7 @@ int kc_dmn_stop(kc_dmn_t *ctx) {
  * @param ctx Context pointer.
  * @return Runtime directory path, or NULL on invalid input.
  */
-const char *kc_dmn_path(kc_dmn_t *ctx) {
+const char *kc_dmn_path(const kc_dmn_t *ctx) {
     if (!ctx) {
         return NULL;
     }
@@ -1412,21 +1036,15 @@ const char *kc_dmn_path(kc_dmn_t *ctx) {
     return ctx->dir;
 }
 
-#ifdef _WIN32
 /**
- * Serve one Windows named pipe daemon process.
- * @param pipename Named Pipe path.
- * @param cmd Command string.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
+ * Return the last error message for a dmn context.
+ * @param ctx Context pointer.
+ * @return Borrowed error string, or NULL when no error is available.
  */
-int kc_dmn_serve(const char *pipename, const char *cmd) {
-    if (!pipename || !cmd) {
-        return KC_DMN_ERROR;
-    }
-
-    return kc_dmn_serve_win32(pipename, cmd) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
+const char *kc_dmn_get_error(const kc_dmn_t *ctx) {
+    if (!ctx || ctx->error[0] == '\0') return NULL;
+    return ctx->error;
 }
-#endif
 
 /**
  * Register or replace a named daemon command.
@@ -1479,114 +1097,166 @@ int kc_dmn_list(kc_dmn_t *ctx, const char *key, kc_dmn_list_cb cb, void *userdat
 }
 
 /**
- * Relay stdin/stdout through a named daemon.
- * @param ctx Context pointer.
- * @param key Daemon key name.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_relay(kc_dmn_t *ctx, const char *key) {
-    if (!ctx || !key) {
-        return KC_DMN_ERROR;
-    }
-
-    return kc_dmn_run_relay(ctx->dir, key, ctx) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
-}
-
-/**
  * Connect to a named daemon for relay.
  * @param ctx Context pointer.
  * @param key Daemon key name.
- * @param out_handle Pointer to receive the handle.
+ * @param out Pointer to receive the connection object.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_connect(kc_dmn_t *ctx, const char *key, int *out_handle) {
+int kc_dmn_connect(kc_dmn_t *ctx, const char *key, kc_dmn_conn_t **out) {
     char sock[KC_DMN_PATH];
+    kc_dmn_conn_t *conn;
 
-    if (!ctx || !key || !out_handle) return KC_DMN_ERROR;
-    *out_handle = -1;
+    if (!out) return KC_DMN_ERROR;
+    *out = NULL;
+    if (!ctx || !key) return KC_DMN_ERROR;
     if (kc_dmn_sock_path(ctx->dir, key, sock, sizeof(sock)) != 0)
         return KC_DMN_ERROR;
+    conn = (kc_dmn_conn_t *)calloc(1, sizeof(*conn));
+    if (!conn) return KC_DMN_ERROR;
 #ifdef _WIN32
-    {
-        HANDLE h = CreateFileA(sock, GENERIC_READ | GENERIC_WRITE,
-            0, NULL, OPEN_EXISTING, 0, NULL);
-        if (h == INVALID_HANDLE_VALUE) return KC_DMN_ERROR;
-        *out_handle = kc_dmn_runner_slot_alloc(key, -1, h);
-        if (*out_handle < 0) { CloseHandle(h); return KC_DMN_ERROR; }
+    conn->handle = CreateFileA(sock, GENERIC_READ | GENERIC_WRITE,
+        0, NULL, OPEN_EXISTING, 0, NULL);
+    if (conn->handle == INVALID_HANDLE_VALUE) {
+        free(conn);
+        return KC_DMN_ERROR;
     }
 #else
-    {
-        int fd = kc_dmn_connect_posix(sock);
-        if (fd < 0) return KC_DMN_ERROR;
-        *out_handle = kc_dmn_runner_slot_alloc(key, fd);
-        if (*out_handle < 0) { close(fd); return KC_DMN_ERROR; }
+    conn->fd = kc_dmn_connect_posix(sock);
+    if (conn->fd < 0) {
+        free(conn);
+        return KC_DMN_ERROR;
     }
 #endif
+    *out = conn;
     return KC_DMN_OK;
 }
 
 /**
  * Send data to a connected daemon.
- * @param handle Connection handle from kc_dmn_connect.
+ * @param conn Connection object from kc_dmn_connect.
  * @param data Data to send.
- * @param len Data length.
+ * @param data_size Data length.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_send(int handle, const void *data, size_t len) {
-    kc_dmn_runner_slot_t *h;
-
-    if (!data && len > 0) return KC_DMN_ERROR;
-    h = kc_dmn_runner_slot_get(handle);
-    if (!h) return KC_DMN_ERROR;
-    if (len == 0) return KC_DMN_OK;
+int kc_dmn_send(kc_dmn_conn_t *conn, const void *data, size_t data_size) {
 #ifdef _WIN32
-    {
-        DWORD bw;
-        if (!WriteFile(h->h, data, (DWORD)len, &bw, NULL) || bw != len)
+    size_t off = 0;
+#endif
+
+    if (!conn || (!data && data_size > 0)) return KC_DMN_ERROR;
+    if (data_size == 0) return KC_DMN_OK;
+#ifdef _WIN32
+    while (off < data_size) {
+        size_t chunk = data_size - off;
+        DWORD written;
+        if (chunk > (size_t)(DWORD)-1) chunk = (size_t)(DWORD)-1;
+        if (!WriteFile(conn->handle, (const char *)data + off,
+                (DWORD)chunk, &written, NULL) || written == 0)
             return KC_DMN_ERROR;
+        off += (size_t)written;
     }
 #else
-    if (kc_dmn_write_all(h->fd, data, len) != 0) return KC_DMN_ERROR;
+    if (kc_dmn_write_all(conn->fd, (const char *)data, data_size) != 0)
+        return KC_DMN_ERROR;
 #endif
     return KC_DMN_OK;
 }
 
 /**
  * Receive data from a connected daemon.
- * @param handle Connection handle from kc_dmn_connect.
- * @param buf Output buffer.
- * @param cap Output buffer capacity.
- * @return Number of bytes received, or -1 on failure.
+ * @param conn Connection object from kc_dmn_connect.
+ * @param max_size Maximum receive size.
+ * @param out_data Pointer to receive owned data.
+ * @param out_size Pointer to receive the received size.
+ * @return KC_DMN_OK, KC_DMN_EOF, or KC_DMN_ERROR.
  */
-int kc_dmn_recv(int handle, void *buf, size_t cap) {
-    kc_dmn_runner_slot_t *h;
+int kc_dmn_recv(kc_dmn_conn_t *conn, size_t max_size,
+    void **out_data, size_t *out_size) {
+    void *buffer;
+    size_t received;
 
-    if (!buf || cap == 0) return -1;
-    h = kc_dmn_runner_slot_get(handle);
-    if (!h) return -1;
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
+    if (!conn || !out_data || !out_size || max_size == 0)
+        return KC_DMN_ERROR;
+    buffer = malloc(max_size);
+    if (!buffer) return KC_DMN_ERROR;
 #ifdef _WIN32
     {
         DWORD br;
-        if (!ReadFile(h->h, buf, (DWORD)cap, &br, NULL)) return -1;
-        return (int)br;
+        if (max_size > (size_t)(DWORD)-1) {
+            free(buffer);
+            return KC_DMN_ERROR;
+        }
+        if (!ReadFile(conn->handle, buffer, (DWORD)max_size, &br, NULL)) {
+            DWORD error = GetLastError();
+            free(buffer);
+            if (error == ERROR_BROKEN_PIPE ||
+                    error == ERROR_PIPE_NOT_CONNECTED ||
+                    error == ERROR_NO_DATA || error == ERROR_HANDLE_EOF)
+                return KC_DMN_EOF;
+            return KC_DMN_ERROR;
+        }
+        received = (size_t)br;
     }
 #else
     {
-        ssize_t n = read(h->fd, buf, cap);
-        return (int)n;
+        ssize_t n;
+        do {
+            n = read(conn->fd, buffer, max_size);
+        } while (n < 0 && errno == EINTR);
+        if (n < 0) {
+            free(buffer);
+            return KC_DMN_ERROR;
+        }
+        if (n == 0) {
+            free(buffer);
+            return KC_DMN_EOF;
+        }
+        received = (size_t)n;
     }
 #endif
+    if (received == 0) {
+        free(buffer);
+        return KC_DMN_EOF;
+    }
+    {
+        void *result = malloc(received);
+        if (!result) {
+            free(buffer);
+            return KC_DMN_ERROR;
+        }
+        memcpy(result, buffer, received);
+        free(buffer);
+        *out_data = result;
+        *out_size = received;
+    }
+    return KC_DMN_OK;
 }
 
 /**
  * Disconnect from a daemon.
- * @param handle Connection handle from kc_dmn_connect.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
+ * @param conn Connection object from kc_dmn_connect.
+ * @return None.
  */
-int kc_dmn_disconnect(int handle) {
-    if (kc_dmn_runner_slot_get(handle) == NULL) return KC_DMN_ERROR;
-    kc_dmn_runner_slot_free(handle);
-    return KC_DMN_OK;
+void kc_dmn_disconnect(kc_dmn_conn_t *conn) {
+    if (!conn) return;
+#ifdef _WIN32
+    if (conn->handle != INVALID_HANDLE_VALUE) CloseHandle(conn->handle);
+#else
+    if (conn->fd >= 0) close(conn->fd);
+#endif
+    free(conn);
+}
+
+/**
+ * Free memory returned by a dmn API.
+ * @param ptr API-owned pointer, or NULL.
+ * @return None.
+ */
+void kc_dmn_free(void *ptr) {
+    free(ptr);
 }
 
 /**

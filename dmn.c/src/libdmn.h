@@ -18,171 +18,242 @@ extern "C" {
 #endif
 
 typedef struct kc_dmn kc_dmn_t;
+typedef struct kc_dmn_options kc_dmn_options_t;
+typedef struct kc_dmn_conn kc_dmn_conn_t;
 
 #define KC_DMN_OK      0
 #define KC_DMN_ERROR  -1
-#define KC_DMN_ESTOP  -3
-
-/**
- * Daemon Manager options.
- * @param dir Optional runtime directory override.
- */
-typedef struct kc_dmn_options {
-    char *dir;
-} kc_dmn_options_t;
+#define KC_DMN_EOF     1
 
 /**
  * Callback type for kc_dmn_list.
- * @param key Daemon key name.
- * @param sock Socket path.
+ *
+ * The callback is invoked synchronously during kc_dmn_list and is not
+ * retained. The key and sock strings are borrowed and must not be freed or
+ * retained after the callback returns.
+ *
+ * @param key Borrowed daemon key name.
+ * @param sock Borrowed socket or pipe path.
  * @param userdata Opaque pointer.
  */
-typedef void (*kc_dmn_list_cb)(const char *key, const char *sock, void *userdata);
+typedef void (*kc_dmn_list_cb)(
+    const char *key,
+    const char *sock,
+    void *userdata
+);
+
+/**
+ * Allocate options initialized with default values.
+ *
+ * The returned options object is owned by the caller and must be released
+ * with kc_dmn_options_free().
+ *
+ * @return Owned options object, or NULL on allocation failure.
+ */
+kc_dmn_options_t *kc_dmn_options_default(void);
+
+/**
+ * Set an option.
+ *
+ * The options object remains owned by the caller. Supported keys and values
+ * are copied by the library; passing NULL as the value for "dir" restores
+ * automatic runtime-directory resolution.
+ *
+ * @param opts Options object.
+ * @param key Option key; currently "dir".
+ * @param value Option value, or NULL to reset "dir".
+ * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
+ */
+int kc_dmn_options_set(
+    kc_dmn_options_t *opts,
+    const char *key,
+    const char *value
+);
+
+/**
+ * Free an options object.
+ *
+ * @param opts Options object, or NULL.
+ * @return None.
+ */
+void kc_dmn_options_free(kc_dmn_options_t *opts);
 
 /**
  * Initialize a new dmn context.
+ *
+ * The context copies the options it needs; the caller retains ownership of
+ * opts and may free it after this call returns.
+ *
  * @param out Pointer to receive the context pointer.
- * @param opts Options.
+ * @param opts Optional options object, borrowed for the duration of the call.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_open(kc_dmn_t **out, const kc_dmn_options_t *opts);
+int kc_dmn_open(
+    kc_dmn_t **out,
+    const kc_dmn_options_t *opts
+);
 
 /**
  * Release a dmn context.
+ *
  * @param ctx Context pointer.
  * @return None.
  */
 void kc_dmn_close(kc_dmn_t *ctx);
 
 /**
- * Request stop for a specific dmn context.
- * @param ctx Context pointer.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_stop(kc_dmn_t *ctx);
-
-/**
- * Create an options struct initialized with default values.
- * @param none Unused.
- * @return Default-initialized options.
- */
-kc_dmn_options_t kc_dmn_options_default(void);
-
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_dmn_options_load_env(kc_dmn_options_t *opts);
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_dmn_options_free(kc_dmn_options_t *opts);
-
-/**
- * Returns the build version generated at compile time.
- * @return Unix timestamp for the current build.
- */
-uint64_t kc_dmn_version(void);
-
-/**
  * Return the resolved runtime directory for a dmn context.
+ *
+ * The returned string is borrowed from ctx and remains valid until ctx is
+ * closed or otherwise changed by the library.
+ *
  * @param ctx Context pointer.
- * @return Runtime directory path, or NULL on invalid input.
+ * @return Borrowed runtime directory path, or NULL on invalid input.
  */
-const char *kc_dmn_path(kc_dmn_t *ctx);
+const char *kc_dmn_path(const kc_dmn_t *ctx);
 
 /**
  * Register or replace a named daemon command.
+ *
  * @param ctx Context pointer.
  * @param key Daemon key name.
  * @param cmd Shell command string for the resident backend.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_update(kc_dmn_t *ctx, const char *key, const char *cmd);
+int kc_dmn_update(
+    kc_dmn_t *ctx,
+    const char *key,
+    const char *cmd
+);
 
 /**
  * Delete a named daemon.
+ *
  * @param ctx Context pointer.
  * @param key Daemon key name.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_delete(kc_dmn_t *ctx, const char *key);
+int kc_dmn_delete(
+    kc_dmn_t *ctx,
+    const char *key
+);
 
 /**
  * List registered daemons.
- * Calls cb(key, sock, userdata) per entry.
+ *
+ * The callback is synchronous and its borrowed key and sock arguments are
+ * valid only while the callback is running.
+ *
  * @param ctx Context pointer.
  * @param key Optional daemon key name, or NULL for all.
  * @param cb Callback invoked per entry, or NULL.
  * @param userdata Opaque pointer passed to cb.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_list(kc_dmn_t *ctx, const char *key, kc_dmn_list_cb cb, void *userdata);
+int kc_dmn_list(
+    kc_dmn_t *ctx,
+    const char *key,
+    kc_dmn_list_cb cb,
+    void *userdata
+);
 
 /**
- * Relay stdin/stdout through a named daemon.
+ * Connect to a named daemon.
+ *
+ * On success, the connection object is owned by the caller and must be
+ * released with kc_dmn_disconnect().
+ *
  * @param ctx Context pointer.
  * @param key Daemon key name.
+ * @param out Pointer to receive the owned connection object.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_relay(kc_dmn_t *ctx, const char *key);
-
-/**
- * Connect to a named daemon for relay.
- * @param ctx Context pointer.
- * @param key Daemon key name.
- * @param out_handle Pointer to receive the handle.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_connect(kc_dmn_t *ctx, const char *key, int *out_handle);
+int kc_dmn_connect(
+    kc_dmn_t *ctx,
+    const char *key,
+    kc_dmn_conn_t **out
+);
 
 /**
  * Send data to a connected daemon.
- * @param handle Connection handle from kc_dmn_connect.
+ *
+ * @param conn Owned connection object.
  * @param data Data to send.
- * @param len Data length.
+ * @param data_size Data size.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_send(int handle, const void *data, size_t len);
+int kc_dmn_send(
+    kc_dmn_conn_t *conn,
+    const void *data,
+    size_t data_size
+);
 
 /**
- * Receive data from a connected daemon.
- * @param handle Connection handle from kc_dmn_connect.
- * @param buf Output buffer.
- * @param cap Output buffer capacity.
- * @return Number of bytes received, or -1 on failure.
+ * Receive owned binary data from a connected daemon.
+ *
+ * On success, *out_data is owned by the caller and must be released with
+ * kc_dmn_free(). The returned size is stored in *out_size.
+ *
+ * @param conn Owned connection object.
+ * @param max_size Maximum number of bytes to receive.
+ * @param out_data Pointer to receive owned data.
+ * @param out_size Pointer to receive the data size.
+ * @return KC_DMN_OK, KC_DMN_EOF, or KC_DMN_ERROR.
  */
-int kc_dmn_recv(int handle, void *buf, size_t cap);
+int kc_dmn_recv(
+    kc_dmn_conn_t *conn,
+    size_t max_size,
+    void **out_data,
+    size_t *out_size
+);
 
 /**
- * Disconnect from a daemon.
- * @param handle Connection handle from kc_dmn_connect.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
+ * Disconnect and release a connection object.
+ *
+ * @param conn Connection object, or NULL.
+ * @return None.
  */
-int kc_dmn_disconnect(int handle);
+void kc_dmn_disconnect(kc_dmn_conn_t *conn);
+
+/**
+ * Free memory returned by a dmn API.
+ *
+ * @param ptr API-owned pointer, or NULL.
+ * @return None.
+ */
+void kc_dmn_free(void *ptr);
 
 /**
  * Send a signal to a managed daemon process.
+ *
  * @param ctx Context pointer.
  * @param key Daemon key name.
  * @param signo Signal number (POSIX) or ignored on Windows.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_signal(kc_dmn_t *ctx, const char *key, int signo);
+int kc_dmn_signal(
+    kc_dmn_t *ctx,
+    const char *key,
+    int signo
+);
 
-#ifdef _WIN32
 /**
- * Serve one Windows named pipe daemon process.
- * @param pipename Named Pipe path.
- * @param cmd Command string.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
+ * Return the last error message for a dmn context.
+ *
+ * The returned string is borrowed from ctx and remains valid until ctx is
+ * closed or the library replaces the error.
+ *
+ * @param ctx Context pointer.
+ * @return Borrowed error string, or NULL when no error is available.
  */
-int kc_dmn_serve(const char *pipename, const char *cmd);
-#endif
+const char *kc_dmn_get_error(const kc_dmn_t *ctx);
+
+/**
+ * Return the build version generated at compile time.
+ *
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_dmn_version(void);
 
 #ifdef __cplusplus
 }

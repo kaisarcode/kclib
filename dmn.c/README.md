@@ -1,6 +1,6 @@
 # dmn.c - IPC Daemon Manager
 
-`dmn.c` provides a small C library and CLI for daemonizing named application processes behind local IPC endpoints. Applications can register a command under a name, keep it resident, relay stdin/stdout through it, list active registrations, remove them, and dispatch signals to managed processes.
+`dmn.c` provides a small C library and CLI for daemonizing named application processes behind local IPC endpoints. Applications can register a command under a name, keep it resident, connect to it, list active registrations, remove them, and dispatch signals to managed processes.
 
 On POSIX, `dmn.c` uses Unix Domain Sockets and signals (`kill`). On Windows, it uses Named Pipes and named kernel events (`CreateEvent`/`SetEvent`). The CLI keeps the direct named-runtime workflow and is implemented on top of `libdmn`.
 
@@ -74,56 +74,92 @@ via `WaitForSingleObject`.
 
 ```c
 typedef struct kc_dmn kc_dmn_t;
+typedef struct kc_dmn_options kc_dmn_options_t;
+typedef struct kc_dmn_conn kc_dmn_conn_t;
 
 #define KC_DMN_OK      0
 #define KC_DMN_ERROR  -1
-#define KC_DMN_ESTOP  -3
+#define KC_DMN_EOF     1
 ```
+
+`kc_dmn_t`, `kc_dmn_options_t`, and `kc_dmn_conn_t` are opaque types. The
+library owns their internal state; callers use only the public functions below.
 
 ### Functions
 
 | Function | Returns | Description |
 | :------- | :------ | :---------- |
 | `kc_dmn_version(void)` | `uint64_t` | Return the build version timestamp. |
-| `kc_dmn_options_default(void)` | `kc_dmn_options_t` | Return default options. |
-| `kc_dmn_options_load_env(opts)` | `void` | Load `KC_DMN_DIR` into options. |
-| `kc_dmn_options_free(opts)` | `void` | Release resources owned by options. |
-| `kc_dmn_open(out, opts)` | `int` | Allocate and initialize a daemon manager context. |
+| `kc_dmn_options_default(void)` | `kc_dmn_options_t *` | Allocate options with automatic runtime-directory resolution. |
+| `kc_dmn_options_set(opts, key, value)` | `int` | Set the supported `"dir"` option; values are copied. Passing `NULL` for `value` resets it. |
+| `kc_dmn_options_free(opts)` | `void` | Release an options object. |
+| `kc_dmn_open(out, opts)` | `int` | Allocate and initialize an opaque daemon manager context. `opts` may be `NULL`; the context copies the selected directory. |
 | `kc_dmn_close(ctx)` | `void` | Release a context. |
-| `kc_dmn_stop(ctx)` | `int` | Request stop for a context. |
-| `kc_dmn_path(ctx)` | `const char *` | Return the resolved runtime directory. |
+| `kc_dmn_path(ctx)` | `const char *` | Return the borrowed resolved runtime directory. |
 | `kc_dmn_update(ctx, key, cmd)` | `int` | Register or replace a named daemon command. |
 | `kc_dmn_delete(ctx, key)` | `int` | Remove a named daemon registration. |
-| `kc_dmn_list(ctx, key, cb, userdata)` | `int` | List one or all daemon registrations. |
-| `kc_dmn_relay(ctx, key)` | `int` | Relay stdin/stdout through a named daemon. |
+| `kc_dmn_list(ctx, key, cb, userdata)` | `int` | Synchronously list one or all daemon registrations. Callback `key` and `sock` strings are borrowed for the callback duration. |
 | `kc_dmn_signal(ctx, key, signo)` | `int` | Signal a managed daemon process. |
-| `kc_dmn_connect(ctx, key, out_handle)` | `int` | Connect to a daemon for manual relay. |
-| `kc_dmn_send(handle, data, len)` | `int` | Send data to a connected daemon. |
-| `kc_dmn_recv(handle, buf, cap)` | `int` | Receive data from a connected daemon. |
-| `kc_dmn_disconnect(handle)` | `int` | Disconnect from a daemon. |
+| `kc_dmn_connect(ctx, key, out)` | `int` | Allocate an opaque connection object owned by the caller. |
+| `kc_dmn_send(conn, data, data_size)` | `int` | Send binary data through a connection. |
+| `kc_dmn_recv(conn, max_size, out_data, out_size)` | `int` | Receive binary data into newly allocated caller-owned memory. Returns `KC_DMN_EOF` at end of stream. |
+| `kc_dmn_disconnect(conn)` | `void` | Disconnect and destroy the owned connection object. |
+| `kc_dmn_free(ptr)` | `void` | Release memory returned by a dmn API, including receive data. |
+| `kc_dmn_get_error(ctx)` | `const char *` | Return a borrowed context error string, or `NULL` when unavailable. |
 
 ### Example
 
 ```c
 #include "libdmn.h"
 
-void on_entry(const char *key, const char *sock, void *userdata) {
+static void on_entry(const char *key, const char *sock, void *userdata) {
     printf("%s\t%s\n", key, sock);
+    (void)userdata;
 }
 
-kc_dmn_options_t opts = kc_dmn_options_default();
+kc_dmn_options_t *opts = kc_dmn_options_default();
 kc_dmn_t *ctx = NULL;
+kc_dmn_conn_t *conn = NULL;
+void *data = NULL;
+size_t data_size = 0;
 
-if (kc_dmn_open(&ctx, &opts) == KC_DMN_OK) {
+if (opts &&
+    kc_dmn_options_set(opts, "dir", "/tmp/dmn-example") == KC_DMN_OK &&
+    kc_dmn_open(&ctx, opts) == KC_DMN_OK) {
     kc_dmn_update(ctx, "app", "/bin/cat");
     kc_dmn_list(ctx, "app", on_entry, NULL);
+    if (kc_dmn_connect(ctx, "app", &conn) == KC_DMN_OK) {
+        if (kc_dmn_send(conn, "hello\n", 6) == KC_DMN_OK &&
+            kc_dmn_recv(conn, 4096, &data, &data_size) == KC_DMN_OK) {
+            fwrite(data, 1, data_size, stdout);
+            kc_dmn_free(data);
+        }
+        kc_dmn_disconnect(conn);
+    }
     kc_dmn_signal(ctx, "app", 10);
     kc_dmn_delete(ctx, "app");
     kc_dmn_close(ctx);
 }
 
-kc_dmn_options_free(&opts);
+kc_dmn_options_free(opts);
 ```
+
+For a secondary connection, `kc_dmn_connect()` returns an owned opaque
+`kc_dmn_conn_t *`. Send with `kc_dmn_send()`, receive with `kc_dmn_recv()`,
+release each successful receive buffer with `kc_dmn_free()`, and call
+`kc_dmn_disconnect()` when finished. Disconnect destroys the connection
+object. `kc_dmn_path()` and `kc_dmn_get_error()` return borrowed strings.
+
+The list callback is synchronous and is not retained. Its `key` and `sock`
+arguments are borrowed and are valid only while the callback is running.
+
+### Runtime directory configuration
+
+The library does not read environment variables. API callers may set the
+`"dir"` option with `kc_dmn_options_set()`; that explicit option takes
+precedence over automatic runtime-directory resolution. The CLI reads
+`KC_DMN_DIR` and applies it to its options before opening a context. Thus,
+for CLI invocations, `KC_DMN_DIR` takes precedence over automatic resolution.
 
 ---
 
@@ -131,11 +167,14 @@ kc_dmn_options_free(&opts);
 
 - `kc_dmn_open()` - resolves runtime state and returns a context owned by the caller.
 - `kc_dmn_update()` - starts or replaces a named resident daemon command.
-- `kc_dmn_relay()` - relays stdin/stdout through a named daemon.
+- `kc_dmn_connect()` / `kc_dmn_send()` / `kc_dmn_recv()` - exchange binary
+    data through an opaque secondary connection.
 - `kc_dmn_signal()` - sends a signal (POSIX) or fires a named event (Windows) to a daemon.
-- `kc_dmn_list()` - lists all daemon registrations or one named registration.
+- `kc_dmn_list()` - synchronously lists all daemon registrations or one named registration; callback strings are borrowed.
 - `kc_dmn_delete()` - removes a named daemon registration and terminates its process.
-- `kc_dmn_path()` - returns the resolved runtime directory for diagnostics.
+- `kc_dmn_path()` - returns the borrowed resolved runtime directory for diagnostics.
+- `kc_dmn_get_error()` - returns a borrowed context error string for diagnostics.
+- `kc_dmn_disconnect()` - disconnects and destroys a secondary connection.
 - `kc_dmn_close()` - releases the context.
 
 ---
@@ -145,7 +184,7 @@ kc_dmn_options_free(&opts);
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests
