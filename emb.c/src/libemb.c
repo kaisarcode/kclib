@@ -1115,7 +1115,7 @@ int kc_emb_exec(kc_emb_t *ctx, const char *input, float **out_data, size_t *out_
         free(out);
         return KC_EMB_ERROR;
     }
-
+    ctx->error[0] = '\0';
     *out_data = out;
     *out_count = dim;
     return KC_EMB_OK;
