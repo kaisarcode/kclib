@@ -646,23 +646,31 @@ static int http1_read_chunked(http_src_t *src, http_msg_t *msg) {
                 char  *tline = NULL;
                 size_t tlen  = 0;
                 int    r     = http_read_line(src, &tline, &tlen);
-                if (r <= 0) { free(tline); break; }
+                const char *colon;
+                char       *tname;
+                char       *tvalue;
+
+                if (r <= 0) { free(tline); free(body); return -1; }
                 if (tlen == 0) { free(tline); break; }
-                if (msg->ntrailer < HTTP_HDR_MAX) {
-                    const char *colon = strchr(tline, ':');
-                    if (colon) {
-                        char *tname = (char *)malloc((size_t)(colon - tline) + 1);
-                        char *tval  = http_strdup(colon + 1);
-                        if (tname && tval) {
-                            memcpy(tname, tline, (size_t)(colon - tline));
-                            tname[colon - tline] = '\0';
-                            msg->trailers[msg->ntrailer].name  = http_strdup_lower(tname);
-                            msg->trailers[msg->ntrailer].value = http_trim(tval);
-                            msg->ntrailer++;
-                        }
-                        free(tname);
-                    }
+                if (msg->ntrailer >= HTTP_HDR_MAX) {
+                    free(tline); free(body); return -1;
                 }
+                colon = strchr(tline, ':');
+                if (!colon) { free(tline); free(body); return -1; }
+                tname = (char *)malloc((size_t)(colon - tline) + 1);
+                tvalue = http_strdup(colon + 1);
+                if (!tname || !tvalue) {
+                    free(tname); free(tvalue); free(tline); free(body); return -1;
+                }
+                memcpy(tname, tline, (size_t)(colon - tline));
+                tname[colon - tline] = '\0';
+                msg->trailers[msg->ntrailer].name = http_strdup_lower(tname);
+                msg->trailers[msg->ntrailer].value = http_trim(tvalue);
+                free(tname);
+                if (!msg->trailers[msg->ntrailer].name) {
+                    free(tvalue); free(tline); free(body); return -1;
+                }
+                msg->ntrailer++;
                 free(tline);
             }
             break;
@@ -674,7 +682,9 @@ static int http1_read_chunked(http_src_t *src, http_msg_t *msg) {
             free(chunk_data); free(body); return -1;
         }
 
-        http_read_line(src, &crlf, &clen);
+        if (http_read_line(src, &crlf, &clen) <= 0 || clen != 0) {
+            free(crlf); free(chunk_data); free(body); return -1;
+        }
         free(crlf);
 
         nbody = (unsigned char *)realloc(body, total + chunk_size + 1);
@@ -726,7 +736,10 @@ static int http1_parse(http_src_t *src, http_msg_t *msg) {
             r = http_read_line(src, &line, &llen);
             if (r <= 0) { free(line); break; }
             if (llen == 0) { free(line); got_blank = 1; break; }
-            http1_add_header(line, msg);
+            if (http1_add_header(line, msg) != 0) {
+                free(line);
+                return -1;
+            }
             free(line);
         }
         if (!got_blank) return -1;
@@ -2658,12 +2671,12 @@ int kc_http_parse(kc_http_t *ctx, const void *data, size_t data_size, int all,
 void **out_data, size_t *out_size) {
     http_buf_t buf;
 
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
     if (!out_data || !out_size) {
         if (ctx) http_set_error(ctx, "parse output parameters are required");
         return KC_HTTP_ERROR;
     }
-    *out_data = NULL;
-    *out_size = 0;
     if (!ctx) return KC_HTTP_ERROR;
     if (!data && data_size != 0) {
         http_set_error(ctx, "parse input data is required");
@@ -2695,12 +2708,12 @@ int kc_http_build_request(kc_http_t *ctx, const void *body, size_t body_size,
 void **out_data, size_t *out_size) {
     http_buf_t buf;
 
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
     if (!out_data || !out_size) {
         if (ctx) http_set_error(ctx, "build output parameters are required");
         return KC_HTTP_ERROR;
     }
-    *out_data = NULL;
-    *out_size = 0;
     if (!ctx) return KC_HTTP_ERROR;
     if (!body && body_size != 0) {
         http_set_error(ctx, "build body data is required");
@@ -2732,12 +2745,12 @@ int kc_http_build_response(kc_http_t *ctx, const void *body, size_t body_size,
 void **out_data, size_t *out_size) {
     http_buf_t buf;
 
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
     if (!out_data || !out_size) {
         if (ctx) http_set_error(ctx, "build output parameters are required");
         return KC_HTTP_ERROR;
     }
-    *out_data = NULL;
-    *out_size = 0;
     if (!ctx) return KC_HTTP_ERROR;
     if (!body && body_size != 0) {
         http_set_error(ctx, "build body data is required");

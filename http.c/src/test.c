@@ -399,8 +399,12 @@ static int case_kc_http_parse(void) {
     const char *messages = "GET /a HTTP/1.1\r\n\r\nGET /b HTTP/1.1\r\n\r\n";
     const char *bad[] = {
         "GET / HTTP/1.1\r\nHost: x\r\n",
+        "GET / HTTP/1.1\r\nBroken\r\n\r\n",
         "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nab",
         "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nZ\r\n",
+        "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n1\r\naX\r\n",
+        "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n",
+        "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Sum: yes\r\n",
         "POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\na",
         "POST / HTTP/1.1\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"
     };
@@ -412,8 +416,16 @@ static int case_kc_http_parse(void) {
         kc_http_parse(NULL, "GET / HTTP/1.1\r\n\r\n", 18, 0, &data, &size));
     ctx = test_context(&fail);
     if (ctx) {
-        fail += expect_int("destinations", KC_HTTP_ERROR,
+        data = (void *)1;
+        size = 1;
+        fail += expect_int("NULL output data", KC_HTTP_ERROR,
             kc_http_parse(ctx, "GET / HTTP/1.1\r\n\r\n", 18, 0, NULL, &size));
+        fail += expect_true("NULL output data clears size", size == 0);
+        data = (void *)1;
+        size = 1;
+        fail += expect_int("NULL output size", KC_HTTP_ERROR,
+            kc_http_parse(ctx, "GET / HTTP/1.1\r\n\r\n", 18, 0, &data, NULL));
+        fail += expect_true("NULL output size clears data", data == NULL);
         fail += expect_int("chunk extensions", KC_HTTP_OK,
             kc_http_parse(ctx, chunked, strlen(chunked), 0, &data, &size));
         fail += expect_contains("query", data, size, "request.query=q=1\n");
@@ -464,7 +476,16 @@ static int case_kc_http_build_request(void) {
         kc_http_build_request(NULL, NULL, 0, &data, &size));
     ctx = test_context(&fail);
     if (ctx) {
-        fail += expect_int("destinations", KC_HTTP_ERROR, kc_http_build_request(ctx, NULL, 0, NULL, &size));
+        data = (void *)1;
+        size = 1;
+        fail += expect_int("NULL output data", KC_HTTP_ERROR,
+            kc_http_build_request(ctx, NULL, 0, NULL, &size));
+        fail += expect_true("NULL output data clears size", size == 0);
+        data = (void *)1;
+        size = 1;
+        fail += expect_int("NULL output size", KC_HTTP_ERROR,
+            kc_http_build_request(ctx, NULL, 0, &data, NULL));
+        fail += expect_true("NULL output size clears data", data == NULL);
         fail += expect_int("missing body", KC_HTTP_ERROR, kc_http_build_request(ctx, NULL, 1, &data, &size));
         fail += expect_int("binary HTTP 1", KC_HTTP_OK, kc_http_build_request(ctx, body, sizeof(body), &data, &size));
         fail += expect_suffix("binary body", data, size, body, sizeof(body));
@@ -507,6 +528,16 @@ static int case_kc_http_build_response(void) {
         kc_http_build_response(NULL, NULL, 0, &data, &size));
     ctx = test_context(&fail);
     if (ctx) {
+        data = (void *)1;
+        size = 1;
+        fail += expect_int("NULL output data", KC_HTTP_ERROR,
+            kc_http_build_response(ctx, NULL, 0, NULL, &size));
+        fail += expect_true("NULL output data clears size", size == 0);
+        data = (void *)1;
+        size = 1;
+        fail += expect_int("NULL output size", KC_HTTP_ERROR,
+            kc_http_build_response(ctx, NULL, 0, &data, NULL));
+        fail += expect_true("NULL output size clears data", data == NULL);
         fail += expect_int("status", KC_HTTP_OK, kc_http_set_status(ctx, 204));
         fail += expect_int("HTTP 1", KC_HTTP_OK, kc_http_build_response(ctx, NULL, 0, &data, &size));
         fail += expect_prefix("HTTP 1 response", data, size, "HTTP/1.1 204 No Content\r\n");
