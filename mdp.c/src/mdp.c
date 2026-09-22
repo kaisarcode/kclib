@@ -78,11 +78,9 @@ static void kc_print_version(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    int mode = KC_MDP_MODE_HTML;
     char *src = NULL;
-    kc_mdp_t *ctx = NULL;
-    unsigned char *out = NULL;
-    size_t out_len = 0;
+    char *out = NULL;
+    char *(*operation)(const char *) = kc_mdp_html;
     int i;
 
     for (i = 1; i < argc; i++) {
@@ -96,13 +94,15 @@ int main(int argc, char **argv) {
             return 0;
         }
 
-        {
-            int next_mode = kc_mdp_mode(argv[i]);
-            if (next_mode == KC_MDP_MODE_NONE) {
-                fprintf(stderr, "mdp: unknown option '%s'\n", argv[i]);
-                return 1;
-            }
-            mode = next_mode;
+        if (strcmp(argv[i], "html") == 0 || strcmp(argv[i], "--html") == 0) {
+            operation = kc_mdp_html;
+        } else if (strcmp(argv[i], "body") == 0 || strcmp(argv[i], "--body") == 0) {
+            operation = kc_mdp_body;
+        } else if (strcmp(argv[i], "meta") == 0 || strcmp(argv[i], "--meta") == 0) {
+            operation = kc_mdp_meta;
+        } else {
+            fprintf(stderr, "mdp: unknown option '%s'\n", argv[i]);
+            return 1;
         }
     }
 
@@ -111,28 +111,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (kc_mdp_open(&ctx) != KC_MDP_OK) {
-        fprintf(stderr, "mdp: out of memory\n");
-        kc_mdp_close(ctx);
-        free(src);
-        return 1;
-    }
-    kc_mdp_set_mode(ctx, mode);
-
-    if (kc_mdp_exec(ctx, src, &out, &out_len) != KC_MDP_OK) {
+    out = operation(src);
+    if (!out) {
         fprintf(stderr, "mdp: execution failed\n");
-        kc_mdp_free(out);
-        kc_mdp_close(ctx);
         free(src);
         return 1;
     }
 
-    if (out != NULL) {
-        fputs((const char *)out, stdout);
-    }
+    fputs(out, stdout);
 
     kc_mdp_free(out);
-    kc_mdp_close(ctx);
     free(src);
     return 0;
 }
