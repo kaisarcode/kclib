@@ -1,3 +1,12 @@
+/**
+ * libgrd.h - Grid relations.
+ * Summary: Declares the passive hierarchical relation API.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+
 #ifndef KC_GRD_H
 #define KC_GRD_H
 

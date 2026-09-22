@@ -106,6 +106,10 @@ static int case_kc_grd_grid_open(void) {
     return failed != 0;
 }
 
+/**
+ * Tests region direction behavior.
+ * @return Nonzero when a check fails.
+ */
 static int case_kc_grd_region_direction(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *region;
@@ -127,6 +131,10 @@ static int case_kc_grd_region_direction(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies Box weight normalization.
+ * @return Zero on success.
+ */
 static int case_kc_grd_box_weight(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *region;
@@ -159,6 +167,10 @@ static int case_kc_grd_box_weight(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies deterministic Box insertion.
+ * @return Zero on success.
+ */
 static int case_kc_grd_region_insert_box(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *region;
@@ -212,6 +224,10 @@ static int case_kc_grd_region_insert_box(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies Separator size normalization.
+ * @return Zero on success.
+ */
 static int case_kc_grd_separator_size(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *region;
@@ -245,6 +261,10 @@ static int case_kc_grd_separator_size(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies Separator neighbor relationships.
+ * @return Zero on success.
+ */
 static int case_kc_grd_separator_neighbors(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *region;
@@ -282,6 +302,10 @@ static int case_kc_grd_separator_neighbors(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies Box subdivision.
+ * @return Zero on success.
+ */
 static int case_kc_grd_box_subdivide(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *outer_region;
@@ -322,6 +346,10 @@ static int case_kc_grd_box_subdivide(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies Content identity through subdivision.
+ * @return Zero on success.
+ */
 static int case_kc_grd_content_identity(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *region;
@@ -349,6 +377,10 @@ static int case_kc_grd_content_identity(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies middle Box removal.
+ * @return Zero on success.
+ */
 static int case_kc_grd_box_remove_middle(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *region;
@@ -384,6 +416,10 @@ static int case_kc_grd_box_remove_middle(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies edge Box removal.
+ * @return Zero on success.
+ */
 static int case_kc_grd_box_remove_edges(void) {
     kc_grd_grid_t *front_grid = NULL;
     kc_grd_grid_t *back_grid = NULL;
@@ -424,6 +460,10 @@ static int case_kc_grd_box_remove_edges(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies final Box removal rejection.
+ * @return Zero on success.
+ */
 static int case_kc_grd_box_remove_last_rejected(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *root_region;
@@ -460,6 +500,10 @@ static int case_kc_grd_box_remove_last_rejected(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies independent nested Regions.
+ * @return Zero on success.
+ */
 static int case_kc_grd_nested_tree(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *root;
@@ -505,6 +549,10 @@ static int case_kc_grd_nested_tree(void) {
     return failed != 0;
 }
 
+/**
+ * Verifies invalid input handling.
+ * @return Zero on success.
+ */
 static int case_kc_grd_invalid_inputs(void) {
     kc_grd_grid_t *grid = NULL;
     kc_grd_region_t *region;
@@ -553,6 +601,10 @@ static int case_kc_grd_invalid_inputs(void) {
     return failed != 0;
 }
 
+/**
+ * Runs every contract test.
+ * @return Zero on success.
+ */
 static int run_all(void) {
     int failed = 0;
 
@@ -576,12 +628,20 @@ static int run_all(void) {
     return failed != 0;
 }
 
+/**
+ * Runs one contract test.
+ * @return Test result.
+ */
 static int run_individual(case_fn function) {
     test_case_total = 1;
     test_case_current = 1;
     return function();
 }
 
+/**
+ * Dispatches contract test selectors.
+ * @return Process exit status.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "expected one test selector\n");
