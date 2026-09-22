@@ -410,19 +410,19 @@ static int test_cli_run_input(char *const argv[], const char *input,
  */
 static int case_kc_libr_version(void) {
     const char *name = "kc_libr_version";
-    const char *detail = "version returns build timestamp";
-    int fail = expect_true("version returns build value", kc_libr_version() != 0U);
+    const char *detail = "returns a nonzero generated build version";
+    int fail = expect_true("version is a nonzero generated build value", kc_libr_version() != 0U);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests the libr CLI flags, verbs, params, and diagnostics.
+ * Tests the libr CLI flags, verbs, params, diagnostics, and stdin framing.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_libr_cli(void) {
     const char *name = "libr CLI";
-    const char *detail = "help, version, set/get, params, and error diagnostics";
+    const char *detail = "help, version, set/get, params, diagnostics, and stdin framing";
     int cli_enabled = KC_LIBR_TEST_CLI[0] != '\0';
     int fail = 0;
 
@@ -491,29 +491,6 @@ static int case_kc_libr_cli(void) {
             strstr(err, "unknown option") != NULL);
     }
 
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests libr CLI stdin request framing.
- * Verifies EOT-delimited, EOF-terminated, and empty framed requests.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_libr_cli_stdin(void) {
-    const char *name = "libr CLI stdin";
-    const char *detail = "EOT-delimited and EOF-terminated request framing";
-    int cli_enabled = KC_LIBR_TEST_CLI[0] != '\0';
-    int fail = 0;
-
-#ifdef _WIN32
-    cli_enabled = 1;
-#endif
-    if (!cli_enabled) {
-        case_result(fail, name, detail);
-        return 0;
-    }
-
     {
         char out[4096];
         char err[4096];
@@ -565,12 +542,11 @@ static int case_all(void) {
 #ifdef _WIN32
     cli_enabled = 1;
 #endif
-    test_case_total = cli_enabled ? 3 : 1;
+    test_case_total = cli_enabled ? 2 : 1;
     test_case_current = 0;
     run_case(&rc, case_kc_libr_version);
     if (cli_enabled) {
         run_case(&rc, case_kc_libr_cli);
-        run_case(&rc, case_kc_libr_cli_stdin);
     }
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -590,7 +566,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_libr_version") == 0) return case_kc_libr_version();
     if (strcmp(argv[1], "kc_libr_cli") == 0) return case_kc_libr_cli();
-    if (strcmp(argv[1], "kc_libr_cli_stdin") == 0) return case_kc_libr_cli_stdin();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

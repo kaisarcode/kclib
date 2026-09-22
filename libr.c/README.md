@@ -1,6 +1,6 @@
-# libr.c - C Library Blueprint
+# libr.c - Small C Library and CLI Example
 
-`libr.c` is a template for creating small, high-performance C libraries and CLI tools. It serves as a blueprint for the composable native primitives in the KaisarCode ecosystem. The CLI reads requests from stdin and can stay resident, processing multiple requests framed by the EOT delimiter byte (value 4).
+`libr.c` is an example/template project showing a small C library and CLI structure. The CLI reads requests from stdin and can stay resident, processing multiple requests framed by the EOT delimiter byte (value 4).
 
 ---
 
@@ -121,7 +121,7 @@ make wasm32/wasm
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (e.g. `source emsdk_env.sh`).
 - The module exports the single public entry point `kc_libr_version`. It represents the reusable library, not the `libr` CLI: `src/libr.c` is not compiled into the module.
 
-`make test wasm` compiles `src/test.c` for Emscripten and runs the same public-contract test cases under Node.js. It requires `bin/wasm32/wasm/libr.wasm` and fails with instructions if it is missing.
+`make test wasm` validates the reusable library contract under Emscripten/Node.js. The WASM module does not contain the CLI, so CLI tests are not executed in the WASM test run. It requires `bin/wasm32/wasm/libr.wasm` and fails with instructions if it is missing.
 
 `wasm32/wasm` is included in `make all`.
 
