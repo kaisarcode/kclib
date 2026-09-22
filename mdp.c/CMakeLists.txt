@@ -44,7 +44,7 @@ if(EMSCRIPTEN)
     target_link_options(mdp_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_mdp_open,_kc_mdp_close,_kc_mdp_set_mode,_kc_mdp_mode,_kc_mdp_exec,_kc_mdp_free,_kc_mdp_version
+        -sEXPORTED_FUNCTIONS=_kc_mdp_html,_kc_mdp_body,_kc_mdp_meta,_kc_mdp_free,_kc_mdp_version
     )
 endif()
 
@@ -106,4 +106,15 @@ if(MDP_BUILD_TESTS)
                 $<TARGET_FILE_DIR:mdp_contract_test>
         )
     endif()
+endif()
+
+if(MDP_BUILD_TESTS)
+    if(MDP_TEST_CLI)
+        set(MDP_TEST_CLI_TARGET_PATH "${MDP_TEST_CLI}")
+    else()
+        set(MDP_TEST_CLI_TARGET_PATH "")
+    endif()
+    target_compile_definitions(mdp_contract_test PRIVATE
+        MDP_TEST_CLI="${MDP_TEST_CLI_TARGET_PATH}"
+    )
 endif()
