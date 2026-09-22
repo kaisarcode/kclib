@@ -17,6 +17,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MDP_OK     0
+#define MDP_ERROR -1
+
+typedef enum {
+    MDP_MODE_HTML = 1,
+    MDP_MODE_BODY = 2,
+    MDP_MODE_META = 3
+} mdp_mode_t;
+
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
@@ -24,9 +33,6 @@
 #  include <windows.h>
 #endif
 
-struct kc_mdp {
-    int mode;
-};
 
 /**
  * Growable output buffer for rendered results.
@@ -116,7 +122,7 @@ static char *kc_mdp_dup(const char *start, size_t len) {
  * @param src Document source string.
  * @param meta Receives allocated metadata buffer.
  * @param body Receives allocated body buffer.
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on allocation failure.
+ * @return MDP_OK on success, or MDP_ERROR on allocation failure.
  */
 static int kc_mdp_split(const char *src, char **meta, char **body) {
     const char *head_end;
@@ -129,14 +135,14 @@ static int kc_mdp_split(const char *src, char **meta, char **body) {
     if (!*meta || !*body) {
         free(*meta);
         free(*body);
-        return KC_MDP_ERROR;
+        return MDP_ERROR;
     }
 
     if (strncmp(src, "---\n", 4) == 0) {
         head_end = src + 4;
         tail = strstr(head_end, "\n---\n");
         if (!tail) {
-            return KC_MDP_OK;
+            return MDP_OK;
         }
         meta_len = (size_t)(tail - head_end);
         body_start = tail + 5;
@@ -144,12 +150,12 @@ static int kc_mdp_split(const char *src, char **meta, char **body) {
         head_end = src + 5;
         tail = strstr(head_end, "\r\n---\r\n");
         if (!tail) {
-            return KC_MDP_OK;
+            return MDP_OK;
         }
         meta_len = (size_t)(tail - head_end);
         body_start = tail + 7;
     } else {
-        return KC_MDP_OK;
+        return MDP_OK;
     }
 
     free(*meta);
@@ -160,10 +166,10 @@ static int kc_mdp_split(const char *src, char **meta, char **body) {
     if (!*meta || !*body) {
         free(*meta);
         free(*body);
-        return KC_MDP_ERROR;
+        return MDP_ERROR;
     }
 
-    return KC_MDP_OK;
+    return MDP_OK;
 }
 
 /**
@@ -596,7 +602,7 @@ static void kc_mdp_flush(mdp_buf_t *out, char **par) {
  * Appends a line into a paragraph buffer with a space separator.
  * @param par Pointer to the allocated paragraph buffer.
  * @param line Line to append.
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on allocation failure.
+ * @return MDP_OK on success, or MDP_ERROR on allocation failure.
  */
 static int kc_mdp_join(char **par, const char *line) {
     size_t old = *par ? strlen(*par) : 0;
@@ -605,7 +611,7 @@ static int kc_mdp_join(char **par, const char *line) {
 
     grown = (char *)realloc(*par, old + add + 2);
     if (!grown) {
-        return KC_MDP_ERROR;
+        return MDP_ERROR;
     }
 
     *par = grown;
@@ -613,7 +619,7 @@ static int kc_mdp_join(char **par, const char *line) {
         (*par)[old++] = ' ';
     }
     memcpy(*par + old, line, add + 1);
-    return KC_MDP_OK;
+    return MDP_OK;
 }
 
 /**
@@ -699,7 +705,7 @@ static int kc_mdp_is_sep(const char *s, size_t len) {
  * @param s Row text.
  * @param len Byte count.
  * @param tag Cell tag name (th or td).
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on allocation failure.
+ * @return MDP_OK on success, or MDP_ERROR on allocation failure.
  */
 static int kc_mdp_table_row(mdp_buf_t *out, const char *s, size_t len, const char *tag) {
     size_t i, cs, ce;
@@ -730,7 +736,7 @@ static int kc_mdp_table_row(mdp_buf_t *out, const char *s, size_t len, const cha
             cell = kc_mdp_dup(s + cs, ce - cs);
             if (!cell) {
                 mdp_buf_puts(out, "</tr>\n");
-                return KC_MDP_ERROR;
+                return MDP_ERROR;
             }
             kc_mdp_inline(out, cell);
             free(cell);
@@ -744,14 +750,14 @@ static int kc_mdp_table_row(mdp_buf_t *out, const char *s, size_t len, const cha
     }
 
     mdp_buf_puts(out, "</tr>\n");
-    return KC_MDP_OK;
+    return MDP_OK;
 }
 
 /**
  * Renders a Markdown body string as an HTML fragment to a stream.
  * @param out Target stream.
  * @param body Markdown body text.
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on allocation failure.
+ * @return MDP_OK on success, or MDP_ERROR on allocation failure.
  */
 static int kc_mdp_render(mdp_buf_t *out, const char *body) {
     const char *line = body;
@@ -764,7 +770,7 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
     char *table_hdr = NULL;
 
     if (!par) {
-        return KC_MDP_ERROR;
+        return MDP_ERROR;
     }
 
     while (*line) {
@@ -781,7 +787,7 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
         if (!tmp) {
             free(table_hdr);
             free(par);
-            return KC_MDP_ERROR;
+            return MDP_ERROR;
         }
 
         do {
@@ -808,11 +814,11 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
                     mdp_buf_puts(out, "</tbody>\n</table>\n");
                     in_table = 0;
                 } else if (in_table == 1) {
-                    if (kc_mdp_join(&par, table_hdr) != KC_MDP_OK) {
+                    if (kc_mdp_join(&par, table_hdr) != MDP_OK) {
                         free(tmp);
                         free(table_hdr);
                         free(par);
-                        return KC_MDP_ERROR;
+                        return MDP_ERROR;
                     }
                     free(table_hdr);
                     table_hdr = NULL;
@@ -827,32 +833,32 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
                 kc_mdp_flush(out, &par);
                 kc_mdp_close_blocks(out, &in_list, &in_quote);
                 mdp_buf_puts(out, "<table>\n<thead>\n");
-                if (kc_mdp_table_row(out, table_hdr, strlen(table_hdr), "th") != KC_MDP_OK) {
+                if (kc_mdp_table_row(out, table_hdr, strlen(table_hdr), "th") != MDP_OK) {
                     free(tmp);
                     free(table_hdr);
                     free(par);
-                    return KC_MDP_ERROR;
+                    return MDP_ERROR;
                 }
                 mdp_buf_puts(out, "</thead>\n<tbody>\n");
                 free(table_hdr);
                 table_hdr = NULL;
                 in_table = 2;
             } else if (in_table == 2 && tmp[0] == '|') {
-                if (kc_mdp_table_row(out, tmp, len, "td") != KC_MDP_OK) {
+                if (kc_mdp_table_row(out, tmp, len, "td") != MDP_OK) {
                     free(tmp);
                     free(par);
-                    return KC_MDP_ERROR;
+                    return MDP_ERROR;
                 }
             } else if (in_table == 2) {
                 mdp_buf_puts(out, "</tbody>\n</table>\n");
                 in_table = 0;
                 reprocess = 1;
             } else if (in_table == 1) {
-                if (kc_mdp_join(&par, table_hdr) != KC_MDP_OK) {
+                if (kc_mdp_join(&par, table_hdr) != MDP_OK) {
                     free(tmp);
                     free(table_hdr);
                     free(par);
-                    return KC_MDP_ERROR;
+                    return MDP_ERROR;
                 }
                 free(table_hdr);
                 table_hdr = NULL;
@@ -882,7 +888,7 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
                     if (!in_html) {
                         free(tmp);
                         free(par);
-                        return KC_MDP_ERROR;
+                        return MDP_ERROR;
                     }
                     if (kc_mdp_has_close(tmp, len, html_name, html_name_len)) {
                         free(in_html);
@@ -936,15 +942,15 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
                         if (!table_hdr) {
                             free(tmp);
                             free(par);
-                            return KC_MDP_ERROR;
+                            return MDP_ERROR;
                         }
                         in_table = 1;
                     } else {
                         kc_mdp_close_blocks(out, &in_list, &in_quote);
-                        if (kc_mdp_join(&par, tmp) != KC_MDP_OK) {
+                        if (kc_mdp_join(&par, tmp) != MDP_OK) {
                             free(tmp);
                             free(par);
-                            return KC_MDP_ERROR;
+                            return MDP_ERROR;
                         }
                     }
                 }
@@ -975,37 +981,83 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
     free(table_hdr);
     free(in_html);
     free(par);
-    return KC_MDP_OK;
+    return MDP_OK;
 }
 
 /**
- * Initialize a new mdp context.
- * @param out Pointer to receive the context pointer.
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on failure.
+ * Process one document using a private output mode.
+ * @param input Null-terminated Markdown input.
+ * @param mode Processing mode.
+ * @return Owned NUL-terminated output buffer, or NULL on failure.
  */
-int kc_mdp_open(kc_mdp_t **out) {
-    kc_mdp_t *ctx;
+static char *kc_mdp_process(const char *input, mdp_mode_t mode) {
+    char *meta = NULL;
+    char *body = NULL;
+    mdp_buf_t buf;
+    int rc = MDP_OK;
 
-    if (!out) return KC_MDP_ERROR;
-
-    ctx = (kc_mdp_t *)calloc(1, sizeof(kc_mdp_t));
-    if (!ctx) {
-        return KC_MDP_ERROR;
+    if (!input) {
+        return NULL;
     }
 
-    ctx->mode = KC_MDP_MODE_HTML;
+    memset(&buf, 0, sizeof(buf));
 
-    *out = ctx;
-    return KC_MDP_OK;
+    if (kc_mdp_split(input, &meta, &body) != MDP_OK) {
+        return NULL;
+    }
+
+    if (mode == MDP_MODE_META) {
+        mdp_buf_puts(&buf, meta);
+    } else if (mode == MDP_MODE_BODY) {
+        mdp_buf_puts(&buf, body);
+    } else {
+        rc = kc_mdp_render(&buf, body);
+    }
+
+    free(meta);
+    free(body);
+
+    if (rc != MDP_OK || buf.oom) {
+        free(buf.data);
+        return NULL;
+    }
+
+    if (!buf.data) {
+        buf.data = (unsigned char *)malloc(1);
+        if (!buf.data) {
+            return NULL;
+        }
+        buf.data[0] = '\0';
+    }
+
+    return (char *)buf.data;
 }
 
 /**
- * Release a mdp context.
- * @param ctx Context pointer.
- * @return None.
+ * Render the Markdown body as an HTML fragment.
+ * @param input Null-terminated Markdown input.
+ * @return Owned NUL-terminated HTML buffer, or NULL on failure.
  */
-void kc_mdp_close(kc_mdp_t *ctx) {
-    free(ctx);
+char *kc_mdp_html(const char *input) {
+    return kc_mdp_process(input, MDP_MODE_HTML);
+}
+
+/**
+ * Return the document body after recognized frontmatter.
+ * @param input Null-terminated Markdown input.
+ * @return Owned NUL-terminated body buffer, or NULL on failure.
+ */
+char *kc_mdp_body(const char *input) {
+    return kc_mdp_process(input, MDP_MODE_BODY);
+}
+
+/**
+ * Return recognized raw frontmatter content.
+ * @param input Null-terminated Markdown input.
+ * @return Owned NUL-terminated metadata buffer, or NULL on failure.
+ */
+char *kc_mdp_meta(const char *input) {
+    return kc_mdp_process(input, MDP_MODE_META);
 }
 
 /**
@@ -1015,107 +1067,6 @@ void kc_mdp_close(kc_mdp_t *ctx) {
  */
 void kc_mdp_free(void *ptr) {
     free(ptr);
-}
-
-/**
- * Select the output mode for a context.
- * @param ctx Context pointer.
- * @param mode Output mode.
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on invalid input.
- */
-int kc_mdp_set_mode(kc_mdp_t *ctx, int mode) {
-    if (!ctx) {
-        return KC_MDP_ERROR;
-    }
-
-    if (mode != KC_MDP_MODE_HTML && mode != KC_MDP_MODE_BODY && mode != KC_MDP_MODE_META) {
-        return KC_MDP_ERROR;
-    }
-
-    ctx->mode = mode;
-    return KC_MDP_OK;
-}
-
-/**
- * Convert a mode name to an output mode.
- * @param name Mode name.
- * @return Output mode, or KC_MDP_MODE_NONE for invalid input.
- */
-int kc_mdp_mode(const char *name) {
-    if (!name) {
-        return KC_MDP_MODE_NONE;
-    }
-
-    if (strcmp(name, "html") == 0 || strcmp(name, "--html") == 0) {
-        return KC_MDP_MODE_HTML;
-    }
-
-    if (strcmp(name, "body") == 0 || strcmp(name, "--body") == 0) {
-        return KC_MDP_MODE_BODY;
-    }
-
-    if (strcmp(name, "meta") == 0 || strcmp(name, "--meta") == 0) {
-        return KC_MDP_MODE_META;
-    }
-
-    return KC_MDP_MODE_NONE;
-}
-
-/**
- * Execute Markdown processing using the selected context mode.
- * @param ctx Context pointer.
- * @param input Null-terminated Markdown input.
- * @param out Receives a NUL-terminated output buffer owned by the caller, or
- *     NULL on failure. Release it with kc_mdp_free(), never raw free().
- * @param out_len Receives the output byte count excluding the terminator.
- * @return KC_MDP_OK on success, or KC_MDP_ERROR on failure.
- */
-int kc_mdp_exec(kc_mdp_t *ctx, const char *input, unsigned char **out,
-    size_t *out_len) {
-    char *meta = NULL;
-    char *body = NULL;
-    mdp_buf_t buf;
-    int rc = KC_MDP_OK;
-
-    if (!ctx || !input || !out || !out_len) {
-        return KC_MDP_ERROR;
-    }
-    *out = NULL;
-    *out_len = 0;
-
-    memset(&buf, 0, sizeof(buf));
-
-    if (kc_mdp_split(input, &meta, &body) != KC_MDP_OK) {
-        return KC_MDP_ERROR;
-    }
-
-    if (ctx->mode == KC_MDP_MODE_META) {
-        mdp_buf_puts(&buf, meta);
-    } else if (ctx->mode == KC_MDP_MODE_BODY) {
-        mdp_buf_puts(&buf, body);
-    } else if (ctx->mode == KC_MDP_MODE_HTML) {
-        rc = kc_mdp_render(&buf, body);
-    } else {
-        rc = KC_MDP_ERROR;
-    }
-
-    free(meta);
-    free(body);
-
-    if (rc != KC_MDP_OK || buf.oom) {
-        free(buf.data);
-        return KC_MDP_ERROR;
-    }
-    if (!buf.data) {
-        buf.data = (unsigned char *)malloc(1);
-        if (!buf.data) {
-            return KC_MDP_ERROR;
-        }
-        buf.data[0] = '\0';
-    }
-    *out = buf.data;
-    *out_len = buf.len;
-    return KC_MDP_OK;
 }
 
 #ifndef KC_MDP_BUILD_VERSION
