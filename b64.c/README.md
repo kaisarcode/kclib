@@ -77,7 +77,7 @@ kc_b64_free(decoded);
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests
@@ -96,9 +96,16 @@ make x86_64/windows
 make test wine
 ```
 
+To run the reusable library contract tests under Emscripten/Node (native CLI is not executed):
+
+```bash
+make wasm32/wasm
+make test wasm
+```
+
 The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
 
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
+Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test`, `make test wine`, or `make test wasm`.
 
 ### Multiarch Builds
 

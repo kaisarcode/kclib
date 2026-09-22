@@ -13,11 +13,13 @@
 
 #include "libb64.h"
 
+#ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 #endif
 
 #include <stdio.h>
@@ -100,6 +102,7 @@ static int expect_str(const char *name, const char *expected, const char *actual
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Verifies stdout carries exactly the expected byte string.
  * @param name Check description.
@@ -126,7 +129,9 @@ static int expect_bytes(const char *name, const char *out,
     }
     return 0;
 }
+#endif
 
+#ifndef __EMSCRIPTEN__
 /**
  * Append one argument to a Windows command line with quoting.
  * @param cmd Destination wide command line.
@@ -419,6 +424,7 @@ static int test_cli_run_input(char *const argv[], const char *input,
     return 0;
 }
 #endif
+#endif
 
 /**
  * Tests encoding empty input.
@@ -599,6 +605,7 @@ static int case_kc_b64_version(void) {
     return fail == 0 ? 0 : 1;
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Tests the b64 CLI flags, verbs, diagnostics, and stdin framing.
  * @return 0 on success, 1 on failure.
@@ -819,14 +826,31 @@ static int case_kc_b64_cli(void) {
         "help, version, encode/decode, stdin, binary output, and diagnostics");
     return fail == 0 ? 0 : 1;
 }
+#endif
 
 /**
  * Runs all test cases in a single process.
  * @return 0 on success, 1 on failure.
  */
 static int case_all(void) {
-    int cli_enabled;
     int rc = 0;
+
+#ifdef __EMSCRIPTEN__
+    test_case_total = 11;
+    test_case_current = 0;
+    run_case(&rc, case_kc_b64_encode_empty);
+    run_case(&rc, case_kc_b64_encode_hello);
+    run_case(&rc, case_kc_b64_encode_binary);
+    run_case(&rc, case_kc_b64_decode_empty);
+    run_case(&rc, case_kc_b64_decode_hello);
+    run_case(&rc, case_kc_b64_roundtrip);
+    run_case(&rc, case_kc_b64_decode_invalid);
+    run_case(&rc, case_kc_b64_decode_bad_length);
+    run_case(&rc, case_kc_b64_null_args);
+    run_case(&rc, case_kc_b64_free);
+    run_case(&rc, case_kc_b64_version);
+#else
+    int cli_enabled;
 
     cli_enabled = KC_B64_TEST_CLI[0] != '\0';
 #ifdef _WIN32
@@ -848,6 +872,7 @@ static int case_all(void) {
     if (cli_enabled) {
         run_case(&rc, case_kc_b64_cli);
     }
+#endif
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -875,7 +900,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_b64_null_args") == 0) return case_kc_b64_null_args();
     if (strcmp(argv[1], "kc_b64_free") == 0) return case_kc_b64_free();
     if (strcmp(argv[1], "kc_b64_version") == 0) return case_kc_b64_version();
+#ifndef __EMSCRIPTEN__
     if (strcmp(argv[1], "kc_b64_cli") == 0) return case_kc_b64_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
