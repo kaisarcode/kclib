@@ -29,7 +29,7 @@ else()
 endif()
 
 set(TPM_SOURCES src/libtpm.c)
-set(TPM_HEADERS src/tpm.h)
+set(TPM_HEADERS src/libtpm.h)
 
 set_source_files_properties(src/libtpm.c PROPERTIES
     COMPILE_DEFINITIONS KC_TPM_BUILD_VERSION=${KC_TPM_BUILD_VERSION}
