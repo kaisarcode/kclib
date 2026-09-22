@@ -38,6 +38,7 @@ struct kc_tpm {
     int profile_size;
     long total;
     int ngram_size;
+    int built;
 };
 
 /**
@@ -230,6 +231,7 @@ int kc_tpm_build(kc_tpm_t *tpm, const char *map_text, int ngram_size) {
         return KC_TPM_ERROR;
     }
 
+    tpm->built = 0;
     tpm->profile_size = 0;
     tpm->total = 0;
     tpm->ngram_size = ngram_size;
@@ -245,16 +247,20 @@ int kc_tpm_build(kc_tpm_t *tpm, const char *map_text, int ngram_size) {
     );
 
     free(norm);
+    if (rc == KC_TPM_OK) {
+        tpm->built = 1;
+    }
     return rc;
 }
 
 /**
  * Score input text against the built profile.
- * @param tpm Context pointer with built profile.
+ * @param tpm Context pointer with a successfully built profile.
  * @param input_text Text to score.
- * @return Score in [0.0, 1.0].
+ * @param out_score Destination for the score in [0.0, 1.0].
+ * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
  */
-double kc_tpm_score(kc_tpm_t *tpm, const char *input_text) {
+int kc_tpm_score(const kc_tpm_t *tpm, const char *input_text, double *out_score) {
     char *norm;
     size_t len;
     kc_tpm_gram_t input_profile[KC_TPM_MAX_GRAMS];
@@ -263,25 +269,31 @@ double kc_tpm_score(kc_tpm_t *tpm, const char *input_text) {
     int i;
     double log_sum;
 
-    if (!tpm || !input_text || tpm->profile_size <= 0 || tpm->total <= 0) {
-        return 0.0;
+    if (!tpm || !input_text || !out_score || !tpm->built) {
+        return KC_TPM_ERROR;
+    }
+
+    *out_score = 0.0;
+
+    if (tpm->profile_size <= 0 || tpm->total <= 0) {
+        return KC_TPM_OK;
     }
 
     norm = kc_tpm_norm(input_text, &len);
     if (!norm) {
-        return 0.0;
+        return KC_TPM_ERROR;
     }
 
     if (kc_tpm_grams(norm, len, tpm->ngram_size,
             input_profile, &input_size, &input_total) != KC_TPM_OK) {
         free(norm);
-        return 0.0;
+        return KC_TPM_ERROR;
     }
 
     free(norm);
 
     if (input_total <= 0) {
-        return 0.0;
+        return KC_TPM_OK;
     }
 
     log_sum = 0.0;
@@ -315,7 +327,8 @@ double kc_tpm_score(kc_tpm_t *tpm, const char *input_text) {
     if (score < 0.0) score = 0.0;
     if (score > 1.0) score = 1.0;
 
-    return score;
+    *out_score = score;
+    return KC_TPM_OK;
 }
 
 /**
