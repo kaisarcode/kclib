@@ -10,7 +10,6 @@
 #ifndef KC_TPM_H
 #define KC_TPM_H
 
-#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -41,11 +40,16 @@ int kc_tpm_build(kc_tpm_t *tpm, const char *map_text, int ngram_size);
 
 /**
  * Score input text against the built profile.
- * @param tpm Context pointer with built profile.
+ * @param tpm Context pointer with a successfully built profile.
  * @param input_text Text to score.
- * @return Score in [0.0, 1.0].
+ * @param out_score Destination for the score in [0.0, 1.0].
+ * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
  */
-double kc_tpm_score(kc_tpm_t *tpm, const char *input_text);
+int kc_tpm_score(
+    const kc_tpm_t *tpm,
+    const char *input_text,
+    double *out_score
+);
 
 /**
  * Release a tpm context.
