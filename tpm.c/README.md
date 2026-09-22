@@ -271,47 +271,6 @@ If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Plea
 
 ---
 
-## Runner Contract
-
-The library exposes an in-process runner for programmatic and bridge composition
-through the generic `kcrun` runner. `kcrun` auto-discovers the standard C API
-symbols via `dlsym` and dispatches JSON commands to them. The public header
-declares no runner symbol; bridges load `libtpm.so` in solitude via the
-`kcrun` host face (`kcr_load` + `kcr_call`).
-
-### Request
-```json
-{
-  "cmd": "score",
-  "args": {
-    "map_text": "reference text...",
-    "input_text": "text to score...",
-    "ngram_size": 3
-  }
-}
-```
-
-All fields in `args` are optional except `map_text` and `input_text`. `ngram_size` defaults to 3.
-
-### Success Response
-```json
-{
-  "result": { "score": 0.763264 },
-  "handle": 0
-}
-```
-
-### Error Response
-Returns `NULL` and sets `*out_err` to a malloc'd error message.
-
-### Handle
-
-Always `0` (stateless operation).
-
-The CLI does not invoke the runner; it calls the public C API directly.
-
----
-
 ## License
 
 [![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
