@@ -432,7 +432,11 @@ static int case_kc_mdp_cli(void) {
         char *args[] = { (char *)MDP_TEST_CLI, (char *)NULL };
         fail += expect_int("CLI default exits 0", 0,
             test_cli_run_input(args, "# Hello", 7, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+#ifdef _WIN32
+        fail += expect_string("CLI default renders HTML", "<h1>Hello</h1>\r\n", out);
+#else
         fail += expect_string("CLI default renders HTML", "<h1>Hello</h1>\n", out);
+#endif
         fail += expect_string("CLI default stderr empty", "", err);
     }
 
