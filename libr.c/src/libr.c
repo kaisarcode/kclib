@@ -134,12 +134,6 @@ static void kc_print_version(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    kc_libr_options_t *opts = kc_libr_options_default();
-    if (!opts) {
-        fprintf(stderr, "libr: failed to allocate options\n");
-        return 1;
-    }
-
     const char *text = NULL;
     int i = 1;
 
@@ -162,51 +156,31 @@ int main(int argc, char **argv) {
 
         if (is_help) {
             kc_print_help(argv[0]);
-            kc_libr_options_free(opts);
             return 0;
         }
         if (is_version) {
             kc_print_version();
-            kc_libr_options_free(opts);
             return 0;
         }
         if (is_param) {
             if (++i >= argc) {
                 fprintf(stderr, "libr: missing value for %s\n", argv[i - 1]);
-                kc_libr_options_free(opts);
                 return 1;
             }
-            if (kc_libr_options_set(opts, "param", argv[i]) != KC_LIBR_OK) {
-                fprintf(stderr, "libr: failed to set param\n");
-                kc_libr_options_free(opts);
-                return 1;
-            }
+            i++;
+            continue;
         } else {
             fprintf(stderr, "libr: unknown option '%s'\n", argv[i]);
-            kc_libr_options_free(opts);
             return 1;
         }
-        i++;
     }
-
-    kc_libr_t *ctx = NULL;
-    if (kc_libr_open(&ctx, opts) != KC_LIBR_OK) {
-        fprintf(stderr, "libr: open failed\n");
-        kc_libr_options_free(opts);
-        return 1;
-    }
-    kc_libr_options_free(opts);
 
     int rc = 0;
     const int delimiter = 4;
 
     if (text) {
-        const bool exec_failed = kc_libr_exec(ctx, text) != KC_LIBR_OK;
         const bool delim_failed = kc_libr_write_response_delimiter(delimiter) != 0;
-        if (exec_failed) {
-            fprintf(stderr, "libr: exec failed\n");
-            rc = 1;
-        } else if (delim_failed) {
+        if (delim_failed) {
             fprintf(stderr, "libr: failed to write delimiter\n");
             rc = 1;
         }
@@ -232,13 +206,7 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            const bool exec_failed = kc_libr_exec(ctx, request) != KC_LIBR_OK;
             free(request);
-            if (exec_failed) {
-                fprintf(stderr, "libr: exec failed\n");
-                rc = 1;
-                break;
-            }
 
             const bool delim_failed = kc_libr_write_response_delimiter(delimiter) != 0;
             if (delim_failed) {
@@ -253,6 +221,5 @@ int main(int argc, char **argv) {
         }
     }
 
-    kc_libr_close(ctx);
     return rc;
 }

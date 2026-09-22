@@ -1,6 +1,7 @@
 /**
- * test.c - liblibr public API tests.
- * Summary: Tests each public liblibr function through one CTest case.
+ * test.c - liblibr public API and libr CLI tests.
+ * Summary: Tests the surviving public liblibr function and the libr CLI
+ * contract through one CTest case each.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -13,9 +14,20 @@
 
 #include "liblibr.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef KC_LIBR_TEST_CLI
+#define KC_LIBR_TEST_CLI ""
+#endif
 
 static int test_case_total = 0;
 static int test_case_current = 0;
@@ -23,7 +35,7 @@ static int test_case_current = 0;
 /**
  * Prints a test case result line.
  * @param fail Non-zero when the case failed.
- * @param name Public API function under test.
+ * @param name Contract under test.
  * @param detail Behavior verified by the case.
  * @return None.
  */
@@ -75,81 +87,322 @@ static int expect_true(const char *name, int condition) {
 }
 
 /**
- * Opens one context for tests.
- * @param out Destination context pointer.
+ * Verifies stdout carries exactly a run of EOT delimiter bytes.
+ * @param name Check description.
+ * @param out Captured child stdout.
+ * @param count Expected number of delimiter bytes.
  * @return 0 on success, 1 on failure.
  */
-static int open_context(kc_libr_t **out) {
-    kc_libr_options_t *opts = kc_libr_options_default();
-    if (!opts) return 1;
-    if (kc_libr_open(out, opts) != KC_LIBR_OK) {
-        kc_libr_options_free(opts);
+static int expect_eot_payload(const char *name, const char *out, size_t count) {
+    size_t len = strlen(out);
+    size_t i;
+
+    if (len != count) {
+        printf("[FAIL] %s: expected %zu EOT bytes, got %zu\n",
+            name, count, len);
         return 1;
     }
-    kc_libr_options_free(opts);
+    for (i = 0; i < count; i++) {
+        if ((unsigned char)out[i] != 4) {
+            printf("[FAIL] %s: byte %zu is not EOT\n", name, i);
+            return 1;
+        }
+    }
     return 0;
 }
 
 /**
- * Tests kc_libr_options_default.
+ * Append one argument to a Windows command line with quoting.
+ * @param cmd Destination wide command line.
+ * @param cap Capacity in wchar_t units.
+ * @param arg Argument to append.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_libr_options_default(void) {
-    const char *name = "kc_libr_options_default";
-    const char *detail = "default options initialize correctly";
-    kc_libr_options_t *opts;
+#ifdef _WIN32
+static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
+    size_t n = wcslen(cmd);
+    size_t len = wcslen(arg);
+    int quote = len == 0 || wcschr(arg, L' ') != NULL || wcschr(arg, L'\t') != NULL ||
+        wcschr(arg, L'"') != NULL;
+    int i;
 
-    opts = kc_libr_options_default();
-    int fail = expect_true("default options returns non-NULL", opts != NULL);
-    kc_libr_options_free(opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    if (n > 0) {
+        if (n + 1 >= cap) return 1;
+        cmd[n++] = L' ';
+    }
+    if (quote) {
+        if (n + 1 >= cap) return 1;
+        cmd[n++] = L'"';
+        for (i = 0; i < (int)len; i++) {
+            if (arg[i] == L'"') {
+                if (n + 1 >= cap) return 1;
+                cmd[n++] = L'\\';
+            }
+            if (n + 1 >= cap) return 1;
+            cmd[n++] = arg[i];
+        }
+        if (n + 1 >= cap) return 1;
+        cmd[n++] = L'"';
+    } else {
+        if (n + len >= cap) return 1;
+        memcpy(cmd + n, arg, len * sizeof(wchar_t));
+        n += len;
+    }
+    cmd[n] = L'\0';
+    return 0;
 }
 
 /**
- * Tests kc_libr_options_set.
+ * Convert one UTF-8 string to a wide buffer.
+ * @param in UTF-8 input string.
+ * @param out Wide output buffer.
+ * @param cap Output buffer capacity in wchar_t units.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_libr_options_set(void) {
-    const char *name = "kc_libr_options_set";
-    const char *detail = "options set works correctly";
-    kc_libr_options_t *opts = kc_libr_options_default();
-    int fail = 0;
-
-    if (!opts) return 1;
-
-    fail += expect_int("options_set accepts valid key", KC_LIBR_OK,
-        kc_libr_options_set(opts, "param", "test_value"));
-    fail += expect_int("options_set rejects unknown key", KC_LIBR_ERROR,
-        kc_libr_options_set(opts, "unknown", "value"));
-    fail += expect_int("options_set accepts NULL value", KC_LIBR_OK,
-        kc_libr_options_set(opts, "param", NULL));
-
-    kc_libr_options_free(opts);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int test_cli_to_wide(const char *in, wchar_t *out, size_t cap) {
+    return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_libr_options_free.
+ * Read one inherited pipe into a NUL-terminated buffer.
+ * @param pipe Pipe read handle.
+ * @param buf Destination buffer.
+ * @param size Destination buffer size.
+ * @return 0 on success.
+ */
+static int test_cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
+    DWORD count;
+    size_t used = 0;
+
+    while (used + 1 < size &&
+            ReadFile(pipe, buf + used, (DWORD)(size - used - 1), &count, NULL) &&
+            count > 0) {
+        used += count;
+    }
+    buf[used] = '\0';
+    return 0;
+}
+
+/**
+ * Runs the libr CLI through CreateProcessW and captures its output.
+ * @param argv CLI argument vector, NULL-terminated.
+ * @param input Byte string piped to the child stdin.
+ * @param input_len Length of the piped byte string.
+ * @param out Output buffer.
+ * @param out_size Output buffer size.
+ * @param err Error buffer.
+ * @param err_size Error buffer size.
+ * @param out_status Receives the CLI exit status.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_libr_options_free(void) {
-    const char *name = "kc_libr_options_free";
-    const char *detail = "options free clears resources";
-    kc_libr_options_t *opts;
-    int fail = 0;
+static int test_cli_run_input(char *const argv[], const char *input,
+        size_t input_len, char *out, size_t out_size, char *err,
+        size_t err_size, int *out_status) {
+    wchar_t exe[MAX_PATH];
+    wchar_t cmd[32768];
+    wchar_t wide[4096];
+    HANDLE in_pipe[2];
+    HANDLE out_pipe[2];
+    HANDLE err_pipe[2];
+    SECURITY_ATTRIBUTES sa;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    DWORD exit_code;
+    DWORD written;
+    size_t n;
+    int i;
 
-    fail += expect_true("options_free accepts NULL", 1);
-    kc_libr_options_free(NULL);
+    if (test_cli_to_wide(KC_LIBR_TEST_CLI, exe, sizeof(exe) / sizeof(wchar_t))) {
+        return 1;
+    }
 
-    opts = kc_libr_options_default();
-    fail += expect_true("default options non-NULL", opts != NULL);
-    kc_libr_options_free(opts);
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+    if (!CreatePipe(&in_pipe[0], &in_pipe[1], &sa, 0)) return 1;
+    if (!CreatePipe(&out_pipe[0], &out_pipe[1], &sa, 0)) {
+        CloseHandle(in_pipe[0]);
+        CloseHandle(in_pipe[1]);
+        return 1;
+    }
+    if (!CreatePipe(&err_pipe[0], &err_pipe[1], &sa, 0)) {
+        CloseHandle(in_pipe[0]);
+        CloseHandle(in_pipe[1]);
+        CloseHandle(out_pipe[0]);
+        CloseHandle(out_pipe[1]);
+        return 1;
+    }
+    SetHandleInformation(in_pipe[1], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(out_pipe[0], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(err_pipe[0], HANDLE_FLAG_INHERIT, 0);
 
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = in_pipe[0];
+    si.hStdOutput = out_pipe[1];
+    si.hStdError = err_pipe[1];
+
+    cmd[0] = L'"';
+    cmd[1] = L'\0';
+    if (test_cli_append_arg(cmd, sizeof(cmd) / sizeof(wchar_t), exe)) {
+        CloseHandle(in_pipe[0]);
+        CloseHandle(in_pipe[1]);
+        CloseHandle(out_pipe[0]);
+        CloseHandle(out_pipe[1]);
+        CloseHandle(err_pipe[0]);
+        CloseHandle(err_pipe[1]);
+        return 1;
+    }
+    n = wcslen(cmd);
+    cmd[n] = L'"';
+    cmd[n + 1] = L'\0';
+
+    for (i = 0; argv[i]; i++) {
+        if (i == 0) continue;
+        if (test_cli_to_wide(argv[i], wide, sizeof(wide) / sizeof(wchar_t))) {
+            CloseHandle(in_pipe[0]);
+            CloseHandle(in_pipe[1]);
+            CloseHandle(out_pipe[0]);
+            CloseHandle(out_pipe[1]);
+            CloseHandle(err_pipe[0]);
+            CloseHandle(err_pipe[1]);
+            return 1;
+        }
+        if (test_cli_append_arg(cmd, sizeof(cmd) / sizeof(wchar_t), wide)) {
+            CloseHandle(in_pipe[0]);
+            CloseHandle(in_pipe[1]);
+            CloseHandle(out_pipe[0]);
+            CloseHandle(out_pipe[1]);
+            CloseHandle(err_pipe[0]);
+            CloseHandle(err_pipe[1]);
+            return 1;
+        }
+    }
+
+    if (!CreateProcessW(exe, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(in_pipe[0]);
+        CloseHandle(in_pipe[1]);
+        CloseHandle(out_pipe[0]);
+        CloseHandle(out_pipe[1]);
+        CloseHandle(err_pipe[0]);
+        CloseHandle(err_pipe[1]);
+        return 1;
+    }
+
+    CloseHandle(in_pipe[0]);
+    CloseHandle(out_pipe[1]);
+    CloseHandle(err_pipe[1]);
+    written = 0;
+    if (input_len > 0) {
+        (void)WriteFile(in_pipe[1], input, (DWORD)input_len, &written, NULL);
+    }
+    CloseHandle(in_pipe[1]);
+    test_cli_read_pipe(out_pipe[0], out, out_size);
+    test_cli_read_pipe(err_pipe[0], err, err_size);
+    CloseHandle(out_pipe[0]);
+    CloseHandle(err_pipe[0]);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    *out_status = (int)exit_code;
+    return 0;
 }
+#else
+/**
+ * Runs the libr CLI through a forked child and captures its output.
+ * @param argv CLI argument vector, NULL-terminated.
+ * @param input Byte string piped to the child stdin.
+ * @param input_len Length of the piped byte string.
+ * @param out Output buffer.
+ * @param out_size Output buffer size.
+ * @param err Error buffer.
+ * @param err_size Error buffer size.
+ * @param out_status Receives the CLI exit status.
+ * @return 0 on success, 1 on failure.
+ */
+static int test_cli_run_input(char *const argv[], const char *input,
+        size_t input_len, char *out, size_t out_size, char *err,
+        size_t err_size, int *out_status) {
+    int in_pipe[2];
+    int out_pipe[2];
+    int err_pipe[2];
+    pid_t pid;
+    ssize_t count;
+    size_t written = 0;
+    size_t pos = 0;
+    int status;
+
+    if (pipe(in_pipe) != 0) return 1;
+    if (pipe(out_pipe) != 0) {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        return 1;
+    }
+    if (pipe(err_pipe) != 0) {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        return 1;
+    }
+    pid = fork();
+    if (pid < 0) {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        return 1;
+    }
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        dup2(err_pipe[1], STDERR_FILENO);
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        execv(argv[0], argv);
+        _exit(127);
+    }
+
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+    while (written < input_len) {
+        count = write(in_pipe[1], input + written, input_len - written);
+        if (count < 0) break;
+        written += (size_t)count;
+    }
+    close(in_pipe[1]);
+
+    memset(out, 0, out_size);
+    while (pos + 1 < out_size &&
+            (count = read(out_pipe[0], out + pos, out_size - pos - 1)) > 0) {
+        pos += (size_t)count;
+    }
+    close(out_pipe[0]);
+
+    pos = 0;
+    memset(err, 0, err_size);
+    while (pos + 1 < err_size &&
+            (count = read(err_pipe[0], err + pos, err_size - pos - 1)) > 0) {
+        pos += (size_t)count;
+    }
+    close(err_pipe[0]);
+
+    if (waitpid(pid, &status, 0) < 0) {
+        return 1;
+    }
+    *out_status = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    return 0;
+}
+#endif
 
 /**
  * Tests kc_libr_version.
@@ -164,158 +417,137 @@ static int case_kc_libr_version(void) {
 }
 
 /**
- * Tests kc_libr_open.
+ * Tests the libr CLI flags, verbs, params, and diagnostics.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_libr_open(void) {
-    const char *name = "kc_libr_open";
-    const char *detail = "open validates and allocates context";
-    kc_libr_options_t *opts;
-    kc_libr_t *ctx = NULL;
+static int case_kc_libr_cli(void) {
+    const char *name = "libr CLI";
+    const char *detail = "help, version, set/get, params, and error diagnostics";
+    int cli_enabled = KC_LIBR_TEST_CLI[0] != '\0';
     int fail = 0;
 
-    fail += expect_int("open rejects NULL out", KC_LIBR_ERROR,
-        kc_libr_open(NULL, NULL));
-    fail += expect_int("open rejects NULL opts", KC_LIBR_ERROR,
-        kc_libr_open(&ctx, NULL));
-    fail += expect_true("open error clears output", ctx == NULL);
-
-    opts = kc_libr_options_default();
-    fail += expect_int("open creates context", KC_LIBR_OK,
-        kc_libr_open(&ctx, opts));
-    fail += expect_true("open sets output", ctx != NULL);
-    kc_libr_options_free(opts);
-
-    fail += expect_int("opened context still executes", KC_LIBR_OK,
-        kc_libr_exec(ctx, "input"));
-    kc_libr_close(ctx);
-
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_libr_close.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_libr_close(void) {
-    const char *name = "kc_libr_close";
-    const char *detail = "close releases context";
-    kc_libr_t *ctx;
-    int fail = 0;
-
-    kc_libr_close(NULL);
-    if (open_context(&ctx) != 0) return 1;
-    kc_libr_close(ctx);
-
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_libr_exec.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_libr_exec(void) {
-    const char *name = "kc_libr_exec";
-    const char *detail = "exec validates and processes input";
-    kc_libr_t *ctx;
-    int fail = 0;
-
-    fail += expect_int("exec rejects NULL ctx", KC_LIBR_ERROR,
-        kc_libr_exec(NULL, "input"));
-    if (open_context(&ctx) != 0) return 1;
-    fail += expect_int("exec rejects NULL input", KC_LIBR_ERROR,
-        kc_libr_exec(ctx, NULL));
-    fail += expect_int("exec accepts empty input", KC_LIBR_OK,
-        kc_libr_exec(ctx, ""));
-    fail += expect_int("exec accepts normal input", KC_LIBR_OK,
-        kc_libr_exec(ctx, "input"));
-    fail += expect_int("exec remains usable after stop", KC_LIBR_OK,
-        kc_libr_stop(ctx));
-    fail += expect_int("exec after stop returns OK", KC_LIBR_OK,
-        kc_libr_exec(ctx, "post-stop"));
-    kc_libr_close(ctx);
-
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_libr_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_libr_stop(void) {
-    const char *name = "kc_libr_stop";
-    const char *detail = "stop sets flag on context";
-    kc_libr_t *ctx;
-    kc_libr_t *other;
-    int fail = 0;
-
-    fail += expect_int("stop rejects NULL", KC_LIBR_ERROR, kc_libr_stop(NULL));
-    if (open_context(&ctx) != 0) return 1;
-    if (open_context(&other) != 0) {
-        kc_libr_close(ctx);
-        return 1;
+#ifdef _WIN32
+    cli_enabled = 1;
+#endif
+    if (!cli_enabled) {
+        case_result(fail, name, detail);
+        return 0;
     }
-    fail += expect_int("stop context succeeds", KC_LIBR_OK, kc_libr_stop(ctx));
-    fail += expect_int("stop is idempotent", KC_LIBR_OK, kc_libr_stop(ctx));
-    fail += expect_int("other context still executes", KC_LIBR_OK,
-        kc_libr_exec(other, "input"));
-    kc_libr_close(ctx);
-    kc_libr_close(other);
 
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
+    {
+        char out[4096];
+        char err[4096];
+        int status = 0;
+        char *help[] = { (char *)KC_LIBR_TEST_CLI, "-h", (char *)NULL };
+        char *long_help[] = { (char *)KC_LIBR_TEST_CLI, "--help", (char *)NULL };
+        char *version[] = { (char *)KC_LIBR_TEST_CLI, "-v", (char *)NULL };
+        char *long_version[] = { (char *)KC_LIBR_TEST_CLI, "--version", (char *)NULL };
+        char *set_pos[] = { (char *)KC_LIBR_TEST_CLI, "set", "example input", (char *)NULL };
+        char *get_pos[] = { (char *)KC_LIBR_TEST_CLI, "get", "example input", (char *)NULL };
+        char *param[] = { (char *)KC_LIBR_TEST_CLI, "set", "example input", "-p", "value", (char *)NULL };
+        char *long_param[] = { (char *)KC_LIBR_TEST_CLI, "get", "example input", "--param", "value", (char *)NULL };
+        char *no_param_value[] = { (char *)KC_LIBR_TEST_CLI, "set", "-p", (char *)NULL };
+        char *no_long_param_value[] = { (char *)KC_LIBR_TEST_CLI, "set", "--param", (char *)NULL };
+        char *unknown[] = { (char *)KC_LIBR_TEST_CLI, "set", "--nope", (char *)NULL };
 
-/**
- * Tests kc_libr_stop_requested.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_libr_stop_requested(void) {
-    const char *name = "kc_libr_stop_requested";
-    const char *detail = "stop state is context-local and observable";
-    kc_libr_t *ctx;
-    kc_libr_t *other;
-    int fail = 0;
+        fail += expect_int("CLI -h exits 0", 0,
+            test_cli_run_input(help, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI -h prints usage", strstr(out, "Usage:") != NULL);
+        fail += expect_int("CLI --help exits 0", 0,
+            test_cli_run_input(long_help, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI --help prints usage", strstr(out, "Usage:") != NULL);
+        fail += expect_int("CLI -v exits 0", 0,
+            test_cli_run_input(version, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI -v prints build", strstr(out, "libr build") != NULL);
+        fail += expect_int("CLI --version exits 0", 0,
+            test_cli_run_input(long_version, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI --version prints build", strstr(out, "libr build") != NULL);
 
-    fail += expect_int("stop_requested rejects NULL", 0, kc_libr_stop_requested(NULL));
-    if (open_context(&ctx) != 0) return 1;
-    if (open_context(&other) != 0) {
-        kc_libr_close(ctx);
-        return 1;
+        fail += expect_int("CLI set with positional input exits 0", 0,
+            test_cli_run_input(set_pos, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_eot_payload("CLI set emits one EOT byte", out, 1);
+        fail += expect_int("CLI get with positional input exits 0", 0,
+            test_cli_run_input(get_pos, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_eot_payload("CLI get emits one EOT byte", out, 1);
+
+        fail += expect_int("CLI -p with value exits 0", 0,
+            test_cli_run_input(param, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_eot_payload("CLI -p keeps one EOT byte", out, 1);
+        fail += expect_int("CLI --param with value exits 0", 0,
+            test_cli_run_input(long_param, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_eot_payload("CLI --param keeps one EOT byte", out, 1);
+
+        fail += expect_int("CLI -p without value exits 1", 1,
+            test_cli_run_input(no_param_value, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI missing -p diagnostic",
+            strstr(err, "missing value for -p") != NULL);
+        fail += expect_int("CLI --param without value exits 1", 1,
+            test_cli_run_input(no_long_param_value, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI missing --param diagnostic",
+            strstr(err, "missing value for --param") != NULL);
+        fail += expect_int("CLI unknown option exits 1", 1,
+            test_cli_run_input(unknown, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI unknown option diagnostic",
+            strstr(err, "unknown option") != NULL);
     }
-    fail += expect_int("fresh ctx returns 0", 0, kc_libr_stop_requested(ctx));
-    fail += expect_int("fresh other returns 0", 0, kc_libr_stop_requested(other));
-    fail += expect_int("stop context succeeds", KC_LIBR_OK, kc_libr_stop(ctx));
-    fail += expect_int("stopped ctx returns 1", 1, kc_libr_stop_requested(ctx));
-    fail += expect_int("other context still returns 0", 0, kc_libr_stop_requested(other));
-    fail += expect_int("stop is idempotent", KC_LIBR_OK, kc_libr_stop(ctx));
-    fail += expect_int("stopped ctx still returns 1", 1, kc_libr_stop_requested(ctx));
-    kc_libr_close(ctx);
-    kc_libr_close(other);
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_libr_get_error.
+ * Tests libr CLI stdin request framing.
+ * Verifies EOT-delimited, EOF-terminated, and empty framed requests.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_libr_get_error(void) {
-    const char *name = "kc_libr_get_error";
-    const char *detail = "get_error returns NULL when no error";
-    kc_libr_t *ctx;
+static int case_kc_libr_cli_stdin(void) {
+    const char *name = "libr CLI stdin";
+    const char *detail = "EOT-delimited and EOF-terminated request framing";
+    int cli_enabled = KC_LIBR_TEST_CLI[0] != '\0';
     int fail = 0;
 
-    fail += expect_true("get_error returns NULL for NULL ctx",
-        kc_libr_get_error(NULL) == NULL);
-    if (open_context(&ctx) != 0) return 1;
-    fail += expect_true("get_error returns NULL initially",
-        kc_libr_get_error(ctx) == NULL);
-    kc_libr_close(ctx);
+#ifdef _WIN32
+    cli_enabled = 1;
+#endif
+    if (!cli_enabled) {
+        case_result(fail, name, detail);
+        return 0;
+    }
+
+    {
+        char out[4096];
+        char err[4096];
+        int status = 0;
+        static const char one_request[] = "hello\004";
+        static const char multiple_requests[] = "first\004second\004";
+        static const char eof_request[] = "tail";
+        static const char empty_requests[] = "\004\004data\004";
+        char *cli[] = { (char *)KC_LIBR_TEST_CLI, "set", (char *)NULL };
+
+        fail += expect_int("CLI one stdin request exits 0", 0,
+            test_cli_run_input(cli, one_request, sizeof(one_request) - 1,
+                out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_eot_payload("CLI one stdin request emits one EOT byte", out, 1);
+
+        fail += expect_int("CLI multiple stdin requests exit 0", 0,
+            test_cli_run_input(cli, multiple_requests, sizeof(multiple_requests) - 1,
+                out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_eot_payload("CLI two stdin requests emit two EOT bytes", out, 2);
+
+        fail += expect_int("CLI EOF-terminated stdin request exits 0", 0,
+            test_cli_run_input(cli, eof_request, sizeof(eof_request) - 1,
+                out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_eot_payload("CLI EOF-terminated request emits one EOT byte", out, 1);
+
+        fail += expect_int("CLI empty delimited requests exit 0", 0,
+            test_cli_run_input(cli, empty_requests, sizeof(empty_requests) - 1,
+                out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_eot_payload("CLI empty requests emit one EOT byte", out, 1);
+
+        fail += expect_int("CLI empty stdin exits 0", 0,
+            test_cli_run_input(cli, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI empty stdin produces no payload", out[0] == '\0');
+    }
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -326,25 +558,26 @@ static int case_kc_libr_get_error(void) {
  * @return 0 on success, 1 on failure.
  */
 static int case_all(void) {
+    int cli_enabled;
     int rc = 0;
-    test_case_total = 10;
+
+    cli_enabled = KC_LIBR_TEST_CLI[0] != '\0';
+#ifdef _WIN32
+    cli_enabled = 1;
+#endif
+    test_case_total = cli_enabled ? 3 : 1;
     test_case_current = 0;
-    run_case(&rc, case_kc_libr_options_default);
-    run_case(&rc, case_kc_libr_options_set);
-    run_case(&rc, case_kc_libr_options_free);
     run_case(&rc, case_kc_libr_version);
-    run_case(&rc, case_kc_libr_open);
-    run_case(&rc, case_kc_libr_close);
-    run_case(&rc, case_kc_libr_exec);
-    run_case(&rc, case_kc_libr_stop);
-    run_case(&rc, case_kc_libr_stop_requested);
-    run_case(&rc, case_kc_libr_get_error);
+    if (cli_enabled) {
+        run_case(&rc, case_kc_libr_cli);
+        run_case(&rc, case_kc_libr_cli_stdin);
+    }
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
 /**
- * Runs one liblibr public API test case.
+ * Runs one liblibr or libr CLI test case.
  * @param argc Argument count.
  * @param argv Argument vector.
  * @return 0 on success, 1 or 2 on failure.
@@ -355,16 +588,9 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_libr_options_default") == 0) return case_kc_libr_options_default();
-    if (strcmp(argv[1], "kc_libr_options_set") == 0) return case_kc_libr_options_set();
-    if (strcmp(argv[1], "kc_libr_options_free") == 0) return case_kc_libr_options_free();
     if (strcmp(argv[1], "kc_libr_version") == 0) return case_kc_libr_version();
-    if (strcmp(argv[1], "kc_libr_open") == 0) return case_kc_libr_open();
-    if (strcmp(argv[1], "kc_libr_close") == 0) return case_kc_libr_close();
-    if (strcmp(argv[1], "kc_libr_exec") == 0) return case_kc_libr_exec();
-    if (strcmp(argv[1], "kc_libr_stop") == 0) return case_kc_libr_stop();
-    if (strcmp(argv[1], "kc_libr_stop_requested") == 0) return case_kc_libr_stop_requested();
-    if (strcmp(argv[1], "kc_libr_get_error") == 0) return case_kc_libr_get_error();
+    if (strcmp(argv[1], "kc_libr_cli") == 0) return case_kc_libr_cli();
+    if (strcmp(argv[1], "kc_libr_cli_stdin") == 0) return case_kc_libr_cli_stdin();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

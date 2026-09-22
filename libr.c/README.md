@@ -1,12 +1,12 @@
 # libr.c - C Library Blueprint
 
-`libr.c` is a template for creating small, high-performance C libraries and CLI tools. It serves as a blueprint for the composable native primitives in the KaisarCode ecosystem. The CLI reads requests from stdin and can stay resident, processing multiple requests separated by the `--until` delimiter byte.
+`libr.c` is a template for creating small, high-performance C libraries and CLI tools. It serves as a blueprint for the composable native primitives in the KaisarCode ecosystem. The CLI reads requests from stdin and can stay resident, processing multiple requests framed by the EOT delimiter byte (value 4).
 
 ---
 
 ## CLI
 
-Example CLI interface provided by the blueprint.
+The `libr` CLI accepts an optional verb, optional positional input, and options. Results are framed on stdout with the EOT delimiter byte (value 4).
 
 ### Examples
 
@@ -35,8 +35,6 @@ Process multiple requests in one resident run using EOT (byte 4):
 printf 'first\004second\004' | ./bin/x86_64/linux/libr set
 ```
 
----
-
 ### Parameters
 
 | Command/Flag | Description |
@@ -44,15 +42,25 @@ printf 'first\004second\004' | ./bin/x86_64/linux/libr set
 | `set` | Example verb for setting data |
 | `get` | Example verb for getting data |
 | `-p`, `--param <val>` | Set parameter value |
-| `--until N` | Request/response delimiter byte | `4` (EOT) |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
-CLI flags override environment variables, which override built-in defaults.
+### Operating Modes
 
-The following environment variables map to the parameters above:
+When positional input is provided, the CLI writes one EOT delimiter byte to stdout and exits.
 
-`KC_LIBR_PARAM`, `KC_LIBR_UNTIL`
+When no positional input is provided, the CLI reads requests from standard input:
+
+- reads bytes until the EOT delimiter (byte 4) or EOF;
+- writes the EOT delimiter byte to stdout after each response;
+- flushes stdout after each response;
+- ignores empty framed requests;
+- processes a final non-empty request that ends at EOF;
+- exits when stdin reaches EOF.
+
+When stdout is a terminal, a newline is appended after the EOT delimiter for operator readability. Redirected and piped stdout remains byte-exact.
+
+Unknown or malformed options fail directly with a diagnostic on stderr and exit status 1.
 
 ---
 
@@ -60,47 +68,24 @@ The following environment variables map to the parameters above:
 
 ```c
 #include "liblibr.h"
-
-kc_libr_options_t opts = kc_libr_options_default();
-kc_libr_t *ctx = NULL;
-
-if (kc_libr_open(&ctx, &opts) == KC_LIBR_OK) {
-    kc_libr_exec(ctx, "example input");
-    kc_libr_close(ctx);
-}
-
-kc_libr_options_free(&opts);
 ```
 
-### Runner
+The library exposes one function:
 
 ```c
-char *err = NULL;
-char *result = kc_libr_run("{\"cmd\":\"open\",\"args\":{\"until\":4}}", &err);
-/* result contains JSON with "handle" field */
-free(result);
-
-result = kc_libr_run("{\"cmd\":\"exec\",\"args\":{\"input\":\"hello\"},\"handle\":1}", &err);
-free(result);
-
-result = kc_libr_run("{\"cmd\":\"close\",\"handle\":1}", &err);
-free(result);
+uint64_t kc_libr_version(void);
 ```
 
+`kc_libr_version()` returns the build version generated at compile time (a Unix timestamp).
+
 ---
-
-## Lifecycle
-
-- `kc_libr_open()` - allocates and returns a new context owned by the caller.
-- `kc_libr_exec()` - performs the core library operation.
-- `kc_libr_close()` - releases the context and all associated resources.
 
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests
@@ -134,7 +119,7 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/libr.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (e.g. `source emsdk_env.sh`).
-- The module exports the public `kc_libr_*` API with the existing signatures, ownership, lifecycle, and status codes. It represents the reusable library, not the `libr` CLI: `src/libr.c` is not compiled into the module.
+- The module exports the single public entry point `kc_libr_version`. It represents the reusable library, not the `libr` CLI: `src/libr.c` is not compiled into the module.
 
 `make test wasm` compiles `src/test.c` for Emscripten and runs the same public-contract test cases under Node.js. It requires `bin/wasm32/wasm/libr.wasm` and fails with instructions if it is missing.
 
