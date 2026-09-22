@@ -777,16 +777,16 @@ static int case_kc_tpm_cli(void) {
         fail += expect_true("CLI normal score has no stderr", err[0] == '\0');
 
         fail += expect_int("CLI -n before map exits 0", 0,
-            test_cli_run_input(before_n, "hello world", 11, out, sizeof(out), err,
+            test_cli_run_input(before_n, "zzzz qqqq", 9, out, sizeof(out), err,
                 sizeof(err), &status) ? 1 : status);
         fail += expect_int("CLI -n after map exits 0", 0,
-            test_cli_run_input(after_n, "hello world", 11, out_alt,
+            test_cli_run_input(after_n, "zzzz qqqq", 9, out_alt,
                 sizeof(out_alt), err, sizeof(err), &status) ? 1 : status);
         fail += expect_true("CLI argument order preserves score",
             strcmp(out, out_alt) == 0);
 
         fail += expect_int("CLI n=1 exits 0", 0,
-            test_cli_run_input(n_one, "hello world", 11, out_alt,
+            test_cli_run_input(n_one, "zzzz qqqq", 9, out_alt,
                 sizeof(out_alt), err, sizeof(err), &status) ? 1 : status);
         fail += expect_true("CLI n option affects scoring",
             strcmp(out, out_alt) != 0);
