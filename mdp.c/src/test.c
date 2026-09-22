@@ -53,6 +53,7 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
 static int expect_int(const char *name, int expected, int actual) {
     if (expected != actual) {
         printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
@@ -60,6 +61,7 @@ static int expect_int(const char *name, int expected, int actual) {
     }
     return 0;
 }
+#endif
 
 static int expect_string(const char *name, const char *expected, const char *actual) {
     if (!actual || strcmp(expected, actual) != 0) {
