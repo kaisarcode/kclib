@@ -268,7 +268,10 @@ int main(int argc, char **argv) {
             return 1;
         }
 
-        double score = kc_tpm_score(tpm, stdin_text);
+        double score = 0.0;
+        if (kc_tpm_score(tpm, stdin_text, &score) != KC_TPM_OK) {
+            score = 0.0;
+        }
         kc_tpm_close(tpm);
 
         printf("%.6f\n", score);
