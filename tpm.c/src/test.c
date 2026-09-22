@@ -642,9 +642,9 @@ static int test_cli_run_input(
 static int case_kc_tpm_cli(void) {
     const char *name = "kc_tpm_cli";
     const char *detail = "help, version, arguments, stdin, scoring, and diagnostics";
-    char map_path[4096];
-    char empty_map_path[4096];
-    char missing_path[4096];
+    char map_path[4096] = "";
+    char empty_map_path[4096] = "";
+    char missing_path[4096] = "";
     char out[4096];
     char out_alt[4096];
     char err[4096];
@@ -792,8 +792,8 @@ static int case_kc_tpm_cli(void) {
             strcmp(out, out_alt) != 0);
     }
 
-    test_remove_map(map_path);
-    test_remove_map(empty_map_path);
+    if (map_path[0] != '\0') test_remove_map(map_path);
+    if (empty_map_path[0] != '\0') test_remove_map(empty_map_path);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
