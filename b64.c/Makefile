@@ -59,6 +59,9 @@ OSXCROSS_IOSSIM_AARCH64_CC := $(OSXCROSS_ROOT)/bin/iossim64-clang
 OSXCROSS_IOSSIM_X86_64_CC := $(OSXCROSS_ROOT)/bin/iossimx64-clang
 WINE ?= wine
 WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
+WASM_EMCMAKE ?= emcmake
+WASM_EMCC    ?= emcc
+WASM_NODE    ?= node
 
 BUILD_DIR := .build
 BIN_DIR   := bin
@@ -157,7 +160,7 @@ endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
-.PHONY: all test wine clean \
+.PHONY: all test wine wasm clean \
 	x86_64/linux x86_64/windows x86_64/macos \
 	x86_64/iossim \
 	i686/linux i686/windows \
@@ -168,7 +171,8 @@ endif
 	powerpc64le/linux \
 	mips/linux mipsel/linux mips64el/linux \
 	s390x/linux \
-	loongarch64/linux
+	loongarch64/linux \
+	wasm32/wasm
 
 all: \
 	x86_64/linux x86_64/windows x86_64/macos \
@@ -181,7 +185,8 @@ all: \
 	powerpc64le/linux \
 	mips/linux mipsel/linux mips64el/linux \
 	s390x/linux \
-	loongarch64/linux
+	loongarch64/linux \
+	wasm32/wasm
 
 ## Linux
 
@@ -395,6 +400,30 @@ aarch64/android:
 armv7/android:
 	$(call android_target,armv7,armeabi-v7a)
 
+## WebAssembly
+
+define wasm_target
+	@mkdir -p $(BIN_DIR)/wasm32/wasm
+	@if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1 || ! command -v $(WASM_EMCC) >/dev/null 2>&1; then \
+		echo "Missing Emscripten SDK toolchain: $(WASM_EMCMAKE)/$(WASM_EMCC)" >&2; \
+		echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt ]; then \
+		$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DB64_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,true)
+	@cp $(BUILD_DIR)/wasm32-wasm/out/b64.wasm $(BIN_DIR)/wasm32/wasm/b64.wasm
+	@echo "OK wasm32/wasm"
+endef
+
+wasm32/wasm:
+	$(call wasm_target)
+
 ## Utility
 
 test:
@@ -411,7 +440,7 @@ test:
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -q '^B64_TEST_CLI:' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
@@ -420,10 +449,31 @@ test:
 				-DB64_BUILD_VERSION=$(BUILD_VERSION) \
 				-DB64_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libb64.dll \
 				-DB64_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libb64.dll.a \
+				-DB64_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/b64.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target b64_contract_test || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/b64_contract_test.exe all; \
+	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
+		if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1 || ! command -v $(WASM_EMCC) >/dev/null 2>&1; then \
+			echo "Missing Emscripten SDK toolchain: $(WASM_EMCMAKE)/$(WASM_EMCC)" >&2; \
+			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/b64.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/b64.wasm. Run 'make wasm32/wasm' first." >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
+			$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/test-wasm \
+				-DCMAKE_BUILD_TYPE=Release \
+				-DB64_BUILD_TESTS=ON \
+				-DB64_BUILD_VERSION=$(BUILD_VERSION) \
+				-G Ninja -Wno-dev > /dev/null; \
+		fi; \
+		cmake --build $(BUILD_DIR)/test-wasm --target b64_contract_test || exit 1; \
+		if [ -n "$(EMSDK_NODE)" ]; then node="$(EMSDK_NODE)"; else node="$(WASM_NODE)"; fi; \
+		"$$node" $(BUILD_DIR)/test-wasm/b64_contract_test.js all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
@@ -433,12 +483,13 @@ test:
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -q '^B64_TEST_CLI:' $(BUILD_DIR)/test/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DB64_BUILD_TESTS=ON \
 				-DB64_BUILD_VERSION=$(BUILD_VERSION) \
 				-DB64_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DB64_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/b64$(NATIVE_EXE_EXT) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target b64_contract_test || exit 1; \
@@ -448,6 +499,13 @@ test:
 wine:
 	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
 		echo "Use 'make test wine' to run tests through Wine." >&2; \
+		exit 1; \
+	fi
+	@:
+
+wasm:
+	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
+		echo "Use 'make test wasm' to run tests through Emscripten and Node.js." >&2; \
 		exit 1; \
 	fi
 	@:

@@ -421,7 +421,7 @@ static int case_kc_libr_version(void) {
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_libr_cli(void) {
-    const char *name = "libr CLI";
+    const char *name = "kc_libr_cli";
     const char *detail = "help, version, set/get, params, diagnostics, and stdin framing";
     int cli_enabled = KC_LIBR_TEST_CLI[0] != '\0';
     int fail = 0;

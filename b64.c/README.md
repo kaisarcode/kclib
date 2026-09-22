@@ -82,7 +82,7 @@ make clean && make
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile only test executables, link dynamically against the generated shared library, and run through CTest.
+The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile the contract-test executable, link it dynamically against the generated shared library, and run it directly, covering the public API and one grouped CLI test case that exercises the shipped CLI contract.
 
 ```bash
 make
