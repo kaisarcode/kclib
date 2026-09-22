@@ -89,40 +89,27 @@ HTML, such as `2 < 3` or `<3`, stays escaped.
 ```c
 #include "libmdp.h"
 
-kc_mdp_t *ctx = NULL;
+char *html = kc_mdp_html("# Hello");
 
-if (kc_mdp_open(&ctx) == KC_MDP_OK) {
-    kc_mdp_set_mode(ctx, KC_MDP_MODE_HTML);
-
-    unsigned char *out = NULL;
-    size_t out_len = 0;
-
-    if (kc_mdp_exec(ctx, "# Hello", &out, &out_len) == KC_MDP_OK) {
-        /* Use out and out_len. */
-        kc_mdp_free(out);
-    }
-    kc_mdp_close(ctx);
+if (html != NULL) {
+    /* Use html. */
+    kc_mdp_free(html);
 }
 ```
 
-New contexts default to `KC_MDP_MODE_HTML`; call `kc_mdp_set_mode()` to select
-body or metadata output. `kc_mdp_exec()` allocates the output buffer. The
-caller owns that returned buffer and must release it with `kc_mdp_free()`,
-never raw `free()`.
+The public API is stateless:
 
----
+- `kc_mdp_html()` renders the Markdown body as an HTML fragment.
+- `kc_mdp_body()` returns the body after recognized frontmatter.
+- `kc_mdp_meta()` returns recognized raw frontmatter content.
+- `kc_mdp_free()` releases any successful returned allocation and accepts `NULL`.
+- `kc_mdp_version()` returns the generated build version.
 
-## Lifecycle
-
-- `kc_mdp_open()` - creates a context with `KC_MDP_MODE_HTML` selected by default.
-- `kc_mdp_set_mode()` - optionally selects HTML, body, or metadata output for that context.
-- `kc_mdp_mode()` - converts a CLI mode name or flag to an API mode constant.
-- `kc_mdp_exec()` - parses a null-terminated Markdown string and returns a NUL-terminated output buffer allocated by `mdp.c`.
-- `kc_mdp_free()` - releases an output buffer returned by `kc_mdp_exec()`; never use raw `free()` for that buffer.
-- `kc_mdp_close()` - releases the context after all returned output has been freed.
-
-The lifecycle is: open a context, optionally set its mode, execute, free every
-returned output buffer with `kc_mdp_free()`, then close the context.
+All processing functions accept one null-terminated document. On success they
+return an owned NUL-terminated string, including an allocated empty string for
+an empty result. The caller must release successful results with
+`kc_mdp_free()`, never raw `free()`. A `NULL` return means invalid input or
+allocation/processing failure.
 
 ---
 
@@ -165,9 +152,9 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/mdp.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_mdp_*` API with its existing signatures, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `mdp` CLI: `src/mdp.c` is not compiled into the module.
+- The module exports the stateless public API: `kc_mdp_html`, `kc_mdp_body`, `kc_mdp_meta`, `kc_mdp_free`, and `kc_mdp_version`. It contains the reusable library capability, not the `mdp` CLI: `src/mdp.c` is not compiled into the module.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the same public-contract tests under Node.js. It requires `bin/wasm32/wasm/mdp.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles the reusable public-contract cases in `src/test.c` with Emscripten and runs them under Node.js. Native and Wine test runs additionally execute one grouped `kc_mdp_cli` case against the shipped CLI. It requires `bin/wasm32/wasm/mdp.wasm` and reports how to build it when it is absent.
 
 `wasm32/wasm` is included in `make all`.
 
