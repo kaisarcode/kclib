@@ -51,7 +51,7 @@ index is the summary, not the contract.
 | [`init`](https://github.com/kaisarcode/kclib/init.c) | Registers persistent startup commands through native system mechanisms. | Automatic startup at boot or login. |
 | [`wch`](https://github.com/kaisarcode/kclib/wch.c) | Watches files and directories and emits `add`, `upd`, and `del` without polling. | Reacting to filesystem changes. |
 | [`mmap`](https://github.com/kaisarcode/kclib/mmap.c) | Stores bytes in files and later exposes them as mapped memory. | File-backed storage or shared memory. |
-| [`grd`](https://github.com/kaisarcode/kclib/grd.c) | Calculates hierarchical row and column layouts with weights, gaps, and minimums. | Computing UI layouts. |
+| [`grd`](https://github.com/kaisarcode/kclib/grd.c) | Models hierarchical 2D regions, boxes, separators, and relative weights. | Representing nested relational layouts independently of rendering or physical geometry. |
 | [`wvw`](https://github.com/kaisarcode/kclib/wvw.c) | Opens a native WebView window with an explicit optional JavaScript bridge. | A GUI window that renders HTML. |
 | [`tray`](https://github.com/kaisarcode/kclib/tray.c) | Shows a native system tray icon and menu and runs a configured local program on activation. | A tray/notification-area status entry with a lightweight menu. |
 
