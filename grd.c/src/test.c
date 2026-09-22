@@ -1,6 +1,6 @@
 /**
- * test.c - libgrd public API tests.
- * Summary: Tests each public libgrd function through one CTest case.
+ * test.c - Grid tests.
+ * Summary: Tests the grd public API.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -9,741 +9,599 @@
 
 #include "libgrd.h"
 
+#include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#include <io.h>
-#include <process.h>
-#define getpid _getpid
-#else
-#include <unistd.h>
-#endif
-
-static int test_case_total = 0;
-static int test_case_current = 0;
-
-/**
- * Prints a test case result line.
- * @param fail Non-zero when the case failed.
- * @param name Public API function under test.
- * @param detail Behavior verified by the case.
- * @return None.
- */
-static void case_result(int fail, const char *name, const char *detail) {
-    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        fail ? "FAIL" : "PASS", name, detail);
-}
+static int test_case_total;
+static int test_case_current;
 
 typedef int (*case_fn)(void);
 
 /**
- * Runs one test case with counter tracking.
- * @param rc Destination accumulator.
- * @param fn Test case function.
- * @return None.
+ * Reports a test case result.
+ * @return void
  */
-static void run_case(int *rc, case_fn fn) {
-    test_case_current++;
-    *rc += fn();
+static void case_result(int failed, const char *name, const char *description) {
+    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
+        failed ? "FAIL" : "PASS", name, description);
 }
 
 /**
- * Verifies one integer result.
- * @param name Check description.
- * @param expected Expected value.
- * @param actual Actual value.
- * @return 0 on success, 1 on failure.
+ * Returns whether a condition fails.
+ * @return Zero when the condition passes, otherwise one.
  */
-static int expect_int(const char *name, int expected, int actual) {
-    if (expected != actual) {
-        printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
-        return 1;
-    }
-    return 0;
+static int check(int condition) {
+    return condition ? 0 : 1;
 }
 
 /**
- * Verifies one boolean condition.
- * @param name Check description.
- * @param condition Non-zero when the check passed.
- * @return 0 on success, 1 on failure.
+ * Returns whether floating-point values differ.
+ * @return Zero when the values match, otherwise one.
  */
-static int expect_true(const char *name, int condition) {
-    if (!condition) {
-        printf("[FAIL] %s\n", name);
-        return 1;
-    }
-    return 0;
+static int check_float(float actual, float expected) {
+    return actual == expected ? 0 : 1;
 }
 
 /**
- * Tests kc_grd_version.
- * @return 0 on success, 1 on failure.
+ * Runs a test case and accumulates failures.
+ * @return void
  */
-static int case_version(void) {
-    const char *name = "kc_grd_version";
-    const char *detail = "version returns non-zero";
-    int fail = 0;
-    fail = expect_true(name, kc_grd_version() != 0U);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static void run_case(int *failed, case_fn function) {
+    ++test_case_current;
+    *failed += function();
 }
 
 /**
- * Tests kc_grd_options_default.
- * @return 0 on success, 1 on failure.
+ * Tests that the grid version is nonzero.
+ * @return Nonzero when the test fails.
  */
-static int case_options_default(void) {
-    const char *name = "kc_grd_options_default";
-    const char *detail = "default options zeroed";
-    kc_grd_options_t opts;
-    opts = kc_grd_options_default();
-    int fail = 0;
-    fail = expect_true(name, opts.width == 0 && opts.height == 0);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_version(void) {
+    int failed = check(kc_grd_version() != 0U);
+
+    case_result(failed, "kc_grd_version", "returns a nonzero build version");
+    return failed != 0;
 }
 
 /**
- * Tests kc_grd_options_load_env.
- * @return 0 on success, 1 on failure.
+ * Tests opening independent X and Y grids.
+ * @return Nonzero when the test fails.
  */
-static int case_options_load_env(void) {
-    const char *name = "kc_grd_options_load_env";
-    const char *detail = "load_env does not crash";
-    kc_grd_options_t opts = {0};
-    kc_grd_options_load_env(&opts);
-    kc_grd_options_load_env(NULL);
-    int fail = 0;
-    fail = expect_true(name, 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_grid_open(void) {
+    kc_grd_grid_t *x_grid = NULL;
+    kc_grd_grid_t *y_grid = NULL;
+    kc_grd_region_t *x_region;
+    kc_grd_region_t *y_region;
+    kc_grd_box_t *x_box;
+    kc_grd_content_t *x_content;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&x_grid, KC_GRD_X) == 0);
+    x_region = kc_grd_grid_get_region(x_grid);
+    failed |= check(x_region != NULL);
+    failed |= check(kc_grd_region_get_direction(x_region) == KC_GRD_X);
+    failed |= check(kc_grd_region_get_box_count(x_region) == 1U);
+    failed |= check(kc_grd_region_get_separator_count(x_region) == 0U);
+    x_box = kc_grd_region_get_box(x_region, 0);
+    x_content = kc_grd_box_get_content(x_box);
+    failed |= check(x_box != NULL);
+    failed |= check(check_float(kc_grd_box_get_weight(x_box), 1.0f) == 0);
+    failed |= check(x_content != NULL);
+    failed |= check(kc_grd_box_get_region(x_box) == NULL);
+    failed |= check(kc_grd_content_get_box(x_content) == x_box);
+
+    failed |= check(kc_grd_grid_open(&y_grid, KC_GRD_Y) == 0);
+    y_region = kc_grd_grid_get_region(y_grid);
+    failed |= check(y_region != NULL);
+    failed |= check(kc_grd_region_get_direction(y_region) == KC_GRD_Y);
+    failed |= check(kc_grd_region_get_box_count(y_region) == 1U);
+    failed |= check(kc_grd_region_get_box_count(x_region) == 1U);
+    failed |= check(kc_grd_region_insert_box(x_region, 1, 2.0f, 3.0f) != NULL);
+    failed |= check(kc_grd_region_get_box_count(x_region) == 2U);
+    failed |= check(kc_grd_region_get_box_count(y_region) == 1U);
+
+    kc_grd_grid_close(x_grid);
+    kc_grd_grid_close(y_grid);
+    case_result(failed, "kc_grd_grid_open", "opens independent X and Y grids");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_options_free(void) {
-    const char *name = "kc_grd_options_free";
-    const char *detail = "options_free does not crash";
-    kc_grd_options_t opts = {0};
-    kc_grd_options_free(&opts);
-    kc_grd_options_free(NULL);
-    int fail = 0;
-    fail = expect_true(name, 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_region_direction(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *region;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(grid);
+    failed |= check(kc_grd_region_set_direction(region, KC_GRD_Y) == 0);
+    failed |= check(kc_grd_region_get_direction(region) == KC_GRD_Y);
+    failed |= check(kc_grd_region_set_direction(region, KC_GRD_X) == 0);
+    failed |= check(kc_grd_region_get_direction(region) == KC_GRD_X);
+    failed |= check(kc_grd_region_set_direction(region, (kc_grd_direction_t)0) == -1);
+    failed |= check(kc_grd_region_get_direction(region) == KC_GRD_X);
+    failed |= check(kc_grd_region_set_direction(region, (kc_grd_direction_t)3) == -1);
+    failed |= check(kc_grd_region_get_direction(region) == KC_GRD_X);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_region_direction", "validates mutable directions without invalid mutation");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_box_new.
- * @return 0 on success, 1 on failure.
- */
-static int case_box_new(void) {
-    const char *name = "kc_grd_box_new";
-    const char *detail = "box_new creates valid box";
+static int case_kc_grd_box_weight(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *region;
+    kc_grd_box_t *first;
+    kc_grd_box_t *second;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(grid);
+    first = kc_grd_region_get_box(region, 0);
+    second = kc_grd_region_insert_box(region, 1, 4.0f, 1.0f);
+    failed |= check(first != NULL && second != NULL);
+    failed |= check(kc_grd_box_set_weight(first, 2.5f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(first), 2.5f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(second), 4.0f) == 0);
+    failed |= check(kc_grd_box_set_weight(first, 0.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(first), 0.0f) == 0);
+    failed |= check(kc_grd_box_set_weight(first, -1.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(first), 0.0f) == 0);
+    failed |= check(kc_grd_box_set_weight(first, NAN) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(first), 0.0f) == 0);
+    failed |= check(kc_grd_box_set_weight(first, INFINITY) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(first), 0.0f) == 0);
+    failed |= check(kc_grd_box_set_weight(first, -INFINITY) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(first), 0.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(second), 4.0f) == 0);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_box_weight", "normalizes invalid weights and keeps siblings independent");
+    return failed != 0;
+}
+
+static int case_kc_grd_region_insert_box(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *region;
+    kc_grd_box_t *a;
     kc_grd_box_t *b;
-    b = kc_grd_box_new();
-    if (!b) return 1;
-    int fail = 0;
-    fail |= expect_true("new box border=1", b->border == 1);
-    fail |= expect_true("new box padding=1", b->padding == 1);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    kc_grd_box_t *c;
+    kc_grd_box_t *d;
+    kc_grd_content_t *b_content;
+    kc_grd_separator_t *ab;
+    kc_grd_separator_t *cb;
+    kc_grd_separator_t *da;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(grid);
+    a = kc_grd_region_get_box(region, 0);
+    b = kc_grd_region_insert_box(region, 1, 2.0f, 2.0f);
+    ab = kc_grd_region_get_separator(region, 0);
+    b_content = kc_grd_box_get_content(b);
+    failed |= check(a != NULL && b != NULL && ab != NULL);
+    failed |= check(kc_grd_region_get_box_count(region) == 2U);
+    failed |= check(kc_grd_region_get_separator_count(region) == 1U);
+    failed |= check(kc_grd_region_get_box(region, 0) == a);
+    failed |= check(kc_grd_region_get_box(region, 1) == b);
+    failed |= check(check_float(kc_grd_box_get_weight(b), 2.0f) == 0);
+    failed |= check(b_content != NULL);
+    failed |= check(check_float(kc_grd_separator_get_size(ab), 2.0f) == 0);
+    failed |= check(kc_grd_separator_get_before(ab) == a);
+    failed |= check(kc_grd_separator_get_after(ab) == b);
+    c = kc_grd_region_insert_box(region, 1, 3.0f, 3.0f);
+    cb = kc_grd_region_get_separator(region, 1);
+    d = kc_grd_region_insert_box(region, 0, 4.0f, 4.0f);
+    da = kc_grd_region_get_separator(region, 0);
+    failed |= check(a != NULL && b != NULL && c != NULL && d != NULL);
+    failed |= check(kc_grd_region_get_box_count(region) == 4U);
+    failed |= check(kc_grd_region_get_box(region, 0) == d);
+    failed |= check(kc_grd_region_get_box(region, 1) == a);
+    failed |= check(kc_grd_region_get_box(region, 2) == c);
+    failed |= check(kc_grd_region_get_box(region, 3) == b);
+    failed |= check(kc_grd_region_get_separator_count(region) == 3U);
+    failed |= check(kc_grd_region_get_separator(region, 0) == da);
+    failed |= check(kc_grd_region_get_separator(region, 1) == ab);
+    failed |= check(kc_grd_region_get_separator(region, 2) == cb);
+    failed |= check(check_float(kc_grd_separator_get_size(da), 4.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(ab), 2.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(cb), 3.0f) == 0);
+    failed |= check(kc_grd_content_get_box(b_content) == b);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_region_insert_box", "inserts front, middle, and append positions deterministically");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_box_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_box_free(void) {
-    const char *name = "kc_grd_box_free";
-    const char *detail = "free(NULL) does not crash";
-    kc_grd_box_free(NULL);
-    int fail = 0;
-    fail = expect_true(name, 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_separator_size(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *region;
+    kc_grd_separator_t *first;
+    kc_grd_separator_t *second;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(grid);
+    failed |= check(kc_grd_region_insert_box(region, 1, 1.0f, 2.0f) != NULL);
+    failed |= check(kc_grd_region_insert_box(region, 2, 1.0f, 3.0f) != NULL);
+    first = kc_grd_region_get_separator(region, 0);
+    second = kc_grd_region_get_separator(region, 1);
+    failed |= check(kc_grd_separator_set_size(first, 5.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(first), 5.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(second), 3.0f) == 0);
+    failed |= check(kc_grd_separator_set_size(first, 0.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(first), 0.0f) == 0);
+    failed |= check(kc_grd_separator_set_size(first, -1.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(first), 0.0f) == 0);
+    failed |= check(kc_grd_separator_set_size(first, NAN) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(first), 0.0f) == 0);
+    failed |= check(kc_grd_separator_set_size(first, INFINITY) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(first), 0.0f) == 0);
+    failed |= check(kc_grd_separator_set_size(first, -INFINITY) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(first), 0.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(second), 3.0f) == 0);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_separator_size", "normalizes invalid sizes independently");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_split_set.
- * @return 0 on success, 1 on failure.
- */
-static int case_split_set(void) {
-    const char *name = "kc_grd_split_set";
-    const char *detail = "split_set creates and replaces splits";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_split_t *s;
-    int fail = 0;
-    s = kc_grd_split_set(NULL, KC_GRD_ROW);
-    fail |= expect_true("split_set(NULL) returns NULL", s == NULL);
-    s = kc_grd_split_set(b, KC_GRD_ROW);
-    fail |= expect_true("split_set creates split", s != NULL);
-    fail |= expect_true("split kind is ROW", s->kind == KC_GRD_ROW);
-    fail |= expect_true("box has split", b->split == s);
-    s = kc_grd_split_set(b, KC_GRD_COL);
-    fail |= expect_true("split_set replaces", s->kind == KC_GRD_COL);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_separator_neighbors(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *region;
+    kc_grd_box_t *a;
+    kc_grd_box_t *b;
+    kc_grd_box_t *c;
+    kc_grd_box_t *d;
+    kc_grd_separator_t *first;
+    kc_grd_separator_t *middle;
+    kc_grd_separator_t *last;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(grid);
+    a = kc_grd_region_get_box(region, 0);
+    b = kc_grd_region_insert_box(region, 1, 1.0f, 1.0f);
+    c = kc_grd_region_insert_box(region, 2, 1.0f, 2.0f);
+    first = kc_grd_region_get_separator(region, 0);
+    last = kc_grd_region_get_separator(region, 1);
+    failed |= check(kc_grd_separator_get_before(first) == a);
+    failed |= check(kc_grd_separator_get_after(first) == b);
+    failed |= check(kc_grd_separator_get_before(last) == b);
+    failed |= check(kc_grd_separator_get_after(last) == c);
+    d = kc_grd_region_insert_box(region, 1, 1.0f, 3.0f);
+    middle = kc_grd_region_get_separator(region, 1);
+    failed |= check(kc_grd_separator_get_before(first) == a);
+    failed |= check(kc_grd_separator_get_after(first) == d);
+    failed |= check(kc_grd_separator_get_before(middle) == d);
+    failed |= check(kc_grd_separator_get_after(middle) == b);
+    failed |= check(kc_grd_separator_get_before(last) == b);
+    failed |= check(kc_grd_separator_get_after(last) == c);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_separator_neighbors", "reports every separator neighbor after middle insertion");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_split_add.
- * @return 0 on success, 1 on failure.
- */
-static int case_split_add(void) {
-    const char *name = "kc_grd_split_add";
-    const char *detail = "split_add adds children to split";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_box_t *c2 = kc_grd_box_new();
-    int fail = 0;
-    fail |= expect_int("split_add(NULL) returns -1", -1, kc_grd_split_add(NULL, c1, 1.0f));
-    fail |= expect_int("split_add child NULL returns -1", -1, kc_grd_split_add(s, NULL, 1.0f));
-    fail |= expect_int("split_add c1 returns 0", 0, kc_grd_split_add(s, c1, 1.0f));
-    fail |= expect_int("split_add c2 returns 0", 0, kc_grd_split_add(s, c2, 2.0f));
-    fail |= expect_int("split count is 2", 2, s->count);
-    fail |= expect_true("c1 parent set", c1->parent == b);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_box_subdivide(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *outer_region;
+    kc_grd_box_t *outer;
+    kc_grd_content_t *content;
+    kc_grd_region_t *inner_region;
+    kc_grd_box_t *inner;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    outer_region = kc_grd_grid_get_region(grid);
+    outer = kc_grd_region_get_box(outer_region, 0);
+    content = kc_grd_box_get_content(outer);
+    failed |= check(kc_grd_box_set_weight(outer, 7.0f) == 0);
+    inner_region = kc_grd_box_subdivide(outer, KC_GRD_Y);
+    inner = kc_grd_region_get_box(inner_region, 0);
+    failed |= check(inner_region != NULL && inner != NULL);
+    failed |= check(kc_grd_box_get_region(outer) == inner_region);
+    failed |= check(kc_grd_region_get_direction(inner_region) == KC_GRD_Y);
+    failed |= check(kc_grd_region_get_separator_count(inner_region) == 0U);
+    failed |= check(check_float(kc_grd_box_get_weight(inner), 1.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(outer), 7.0f) == 0);
+    failed |= check(kc_grd_box_get_content(outer) == NULL);
+    failed |= check(kc_grd_box_get_content(inner) == content);
+    failed |= check(kc_grd_content_get_box(content) == inner);
+    failed |= check(kc_grd_box_subdivide(outer, KC_GRD_X) == NULL);
+    failed |= check(kc_grd_box_get_region(outer) == inner_region);
+    failed |= check(kc_grd_region_get_direction(inner_region) == KC_GRD_Y);
+    failed |= check(kc_grd_region_get_box_count(inner_region) == 1U);
+    failed |= check(kc_grd_region_get_separator_count(inner_region) == 0U);
+    failed |= check(kc_grd_region_get_box(inner_region, 0) == inner);
+    failed |= check(check_float(kc_grd_box_get_weight(outer), 7.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(inner), 1.0f) == 0);
+    failed |= check(kc_grd_box_get_content(inner) == content);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_box_subdivide", "preserves outer weight and rejects repeated subdivision");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_split_weight.
- * @return 0 on success, 1 on failure.
- */
-static int case_split_weight(void) {
-    const char *name = "kc_grd_split_weight";
-    const char *detail = "split_weight updates weights";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_split_add(s, c1, 1.0f);
-    int fail = 0;
-    fail |= expect_int("split_weight NULL returns -1", -1, kc_grd_split_weight(NULL, 0, 1.0f));
-    fail |= expect_int("split_weight invalid idx returns -1", -1, kc_grd_split_weight(s, 5, 1.0f));
-    fail |= expect_int("split_weight valid returns 0", 0, kc_grd_split_weight(s, 0, 3.0f));
-    fail |= expect_true("weight updated", s->weights[0] == 3.0f);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_content_identity(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *region;
+    kc_grd_box_t *box;
+    kc_grd_content_t *content;
+    kc_grd_region_t *nested;
+    kc_grd_box_t *owner;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(grid);
+    box = kc_grd_region_get_box(region, 0);
+    content = kc_grd_box_get_content(box);
+    failed |= check(content != NULL);
+    failed |= check(kc_grd_content_get_box(content) == box);
+    nested = kc_grd_box_subdivide(box, KC_GRD_Y);
+    owner = kc_grd_region_get_box(nested, 0);
+    failed |= check(content != NULL && nested != NULL && owner != NULL);
+    failed |= check(kc_grd_box_get_content(owner) == content);
+    failed |= check(kc_grd_content_get_box(content) == owner);
+    failed |= check(kc_grd_box_get_content(box) == NULL);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_content_identity", "moves content ownership without replacement");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_box_bounds.
- * @return 0 on success, 1 on failure.
- */
-static int case_box_bounds(void) {
-    const char *name = "kc_grd_box_bounds";
-    const char *detail = "box_bounds sets coordinates";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_box_bounds(NULL, 0, 0, 100, 100);
-    kc_grd_box_bounds(b, 10, 20, 200, 300);
-    int fail = 0;
-    fail |= expect_int("box x set", 10, b->x);
-    fail |= expect_int("box y set", 20, b->y);
-    fail |= expect_int("box w set", 200, b->w);
-    fail |= expect_int("box h set", 300, b->h);
-    fail |= expect_true("inner_x computed", b->inner_x >= b->x);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_box_remove_middle(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *region;
+    kc_grd_box_t *a;
+    kc_grd_box_t *b;
+    kc_grd_box_t *c;
+    kc_grd_separator_t *pre_b;
+    kc_grd_separator_t *post_b;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(grid);
+    a = kc_grd_region_get_box(region, 0);
+    b = kc_grd_region_insert_box(region, 1, 1.0f, 2.0f);
+    c = kc_grd_region_insert_box(region, 2, 1.0f, 3.0f);
+    pre_b = kc_grd_region_get_separator(region, 0);
+    post_b = kc_grd_region_get_separator(region, 1);
+    failed |= check(pre_b != NULL && post_b != NULL);
+    failed |= check(kc_grd_box_remove(b) == 0);
+    failed |= check(kc_grd_region_get_box_count(region) == 2U);
+    failed |= check(kc_grd_region_get_box(region, 0) == a);
+    failed |= check(kc_grd_region_get_box(region, 1) == c);
+    failed |= check(kc_grd_region_get_separator_count(region) == 1U);
+    failed |= check(kc_grd_region_get_separator(region, 0) == post_b);
+    failed |= check(check_float(kc_grd_box_get_weight(a), 1.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(c), 1.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(post_b), 3.0f) == 0);
+    failed |= check(kc_grd_separator_get_before(post_b) == a);
+    failed |= check(kc_grd_separator_get_after(post_b) == c);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_box_remove_middle", "removes the preceding separator and retains the following separator");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_box_layout.
- * @return 0 on success, 1 on failure.
- */
-static int case_box_layout(void) {
-    const char *name = "kc_grd_box_layout";
-    const char *detail = "box_layout computes child sizes";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_box_layout(NULL);
-    kc_grd_box_bounds(b, 0, 0, 100, 100);
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_box_t *c2 = kc_grd_box_new();
-    kc_grd_split_add(s, c1, 1.0f);
-    kc_grd_split_add(s, c2, 1.0f);
-    kc_grd_box_layout(b);
-    int fail = 0;
-    fail |= expect_true("c1 has width", c1->w > 0);
-    fail |= expect_true("c2 has width", c2->w > 0);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_box_remove_edges(void) {
+    kc_grd_grid_t *front_grid = NULL;
+    kc_grd_grid_t *back_grid = NULL;
+    kc_grd_region_t *region;
+    kc_grd_box_t *a;
+    kc_grd_box_t *b;
+    kc_grd_box_t *c;
+    kc_grd_separator_t *retained;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&front_grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(front_grid);
+    a = kc_grd_region_get_box(region, 0);
+    b = kc_grd_region_insert_box(region, 1, 1.0f, 2.0f);
+    c = kc_grd_region_insert_box(region, 2, 1.0f, 3.0f);
+    retained = kc_grd_region_get_separator(region, 1);
+    failed |= check(kc_grd_box_remove(a) == 0);
+    failed |= check(kc_grd_region_get_box(region, 0) == b);
+    failed |= check(kc_grd_region_get_box(region, 1) == c);
+    failed |= check(kc_grd_region_get_separator(region, 0) == retained);
+    failed |= check(check_float(kc_grd_separator_get_size(retained), 3.0f) == 0);
+
+    failed |= check(kc_grd_grid_open(&back_grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(back_grid);
+    a = kc_grd_region_get_box(region, 0);
+    b = kc_grd_region_insert_box(region, 1, 1.0f, 2.0f);
+    c = kc_grd_region_insert_box(region, 2, 1.0f, 3.0f);
+    retained = kc_grd_region_get_separator(region, 0);
+    failed |= check(kc_grd_box_remove(c) == 0);
+    failed |= check(kc_grd_region_get_box(region, 0) == a);
+    failed |= check(kc_grd_region_get_box(region, 1) == b);
+    failed |= check(kc_grd_region_get_separator(region, 0) == retained);
+    failed |= check(check_float(kc_grd_separator_get_size(retained), 2.0f) == 0);
+
+    kc_grd_grid_close(front_grid);
+    kc_grd_grid_close(back_grid);
+    case_result(failed, "kc_grd_box_remove_edges", "removes front and back edges in separate trees");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_split_gap.
- * @return 0 on success, 1 on failure.
- */
-static int case_split_gap(void) {
-    const char *name = "kc_grd_split_gap";
-    const char *detail = "split_gap sets gap and min_px";
-    kc_grd_split_gap(NULL, 5, 10);
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_split_gap(s, 5, 10);
-    int fail = 0;
-    fail |= expect_int("gap set", 5, s->gap);
-    fail |= expect_int("min_px set", 10, s->min_px);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int case_kc_grd_box_remove_last_rejected(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *root_region;
+    kc_grd_box_t *root_box;
+    kc_grd_content_t *root_content;
+    kc_grd_region_t *nested;
+    kc_grd_box_t *first;
+    kc_grd_box_t *second;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    root_region = kc_grd_grid_get_region(grid);
+    root_box = kc_grd_region_get_box(root_region, 0);
+    root_content = kc_grd_box_get_content(root_box);
+    failed |= check(root_content != NULL);
+    failed |= check(kc_grd_box_remove(root_box) == -1);
+    failed |= check(kc_grd_region_get_box_count(root_region) == 1U);
+    failed |= check(kc_grd_region_get_box(root_region, 0) == root_box);
+    failed |= check(kc_grd_box_get_content(root_box) == root_content);
+    failed |= check(kc_grd_content_get_box(root_content) == root_box);
+    nested = kc_grd_box_subdivide(root_box, KC_GRD_Y);
+    first = kc_grd_region_get_box(nested, 0);
+    second = kc_grd_region_insert_box(nested, 1, 1.0f, 2.0f);
+    failed |= check(nested != NULL && first != NULL && second != NULL);
+    failed |= check(kc_grd_box_remove(second) == 0);
+    failed |= check(kc_grd_region_get_box_count(nested) == 1U);
+    failed |= check(kc_grd_box_get_region(root_box) == nested);
+    failed |= check(kc_grd_box_remove(first) == -1);
+    failed |= check(kc_grd_region_get_box_count(nested) == 1U);
+    failed |= check(kc_grd_box_get_region(root_box) == nested);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_box_remove_last_rejected", "rejects final removal without collapsing a nested region");
+    return failed != 0;
 }
 
-/**
- * Tests kc_grd_gap_hit.
- * @return 0 on success, 1 on failure.
- */
-static int case_gap_hit(void) {
-    const char *name = "kc_grd_gap_hit";
-    const char *detail = "gap_hit detects gap position";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_gap_t gap;
-    int fail = 0;
-
-    fail |= expect_int("gap_hit(NULL) returns 0", 0, kc_grd_gap_hit(NULL, 0, 0, &gap));
-    fail |= expect_int("gap_hit no split returns 0", 0, kc_grd_gap_hit(b, 0, 0, &gap));
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_box_t *c2 = kc_grd_box_new();
-    kc_grd_split_add(s, c1, 1.0f);
-    kc_grd_split_add(s, c2, 1.0f);
-    kc_grd_split_gap(s, 4, 4);
-    kc_grd_box_bounds(b, 0, 0, 200, 100);
-    kc_grd_box_layout(b);
-    int hit = kc_grd_gap_hit(b, c1->x + c1->w + 1, 50, &gap);
-    fail |= expect_true("gap_hit finds gap", hit == 1);
-    fail |= expect_true("gap hit has split", gap.split == s);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_grd_drag_begin.
- * @return 0 on success, 1 on failure.
- */
-static int case_drag_begin(void) {
-    const char *name = "kc_grd_drag_begin";
-    const char *detail = "drag_begin arms drag state";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_box_t *c2 = kc_grd_box_new();
-    kc_grd_split_add(s, c1, 1.0f);
-    kc_grd_split_add(s, c2, 1.0f);
-    kc_grd_split_gap(s, 4, 4);
-    kc_grd_box_bounds(b, 0, 0, 200, 100);
-    kc_grd_box_layout(b);
-    kc_grd_gap_t gap;
-    kc_grd_gap_hit(b, c1->x + c1->w + 1, 50, &gap);
-    int fail = 0;
-    fail |= expect_int("drag_begin returns 0", 0, kc_grd_drag_begin(&gap, gap.x, gap.y));
-    fail |= expect_true("drag_on set", s->drag_on == 1);
-    fail |= expect_int("drag_begin NULL returns -1", -1, kc_grd_drag_begin(NULL, 0, 0));
-    kc_grd_drag_end(s);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_grd_drag_update.
- * @return 0 on success, 1 on failure.
- */
-static int case_drag_update(void) {
-    const char *name = "kc_grd_drag_update";
-    const char *detail = "drag_update adjusts weights";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_box_t *c2 = kc_grd_box_new();
-    kc_grd_split_add(s, c1, 1.0f);
-    kc_grd_split_add(s, c2, 1.0f);
-    kc_grd_split_gap(s, 4, 4);
-    kc_grd_box_bounds(b, 0, 0, 200, 100);
-    kc_grd_box_layout(b);
-    kc_grd_gap_t gap;
-    kc_grd_gap_hit(b, c1->x + c1->w + 1, 50, &gap);
-    int fail = 0;
-    fail |= expect_int("drag_begin returns 0", 0, kc_grd_drag_begin(&gap, gap.x, gap.y));
-    fail |= expect_int("drag_update returns 0", 0, kc_grd_drag_update(s, gap.x + 10, gap.y));
-    kc_grd_drag_end(s);
-    fail |= expect_int("drag_update no drag returns -1", -1, kc_grd_drag_update(s, 0, 0));
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_grd_drag_end.
- * @return 0 on success, 1 on failure.
- */
-static int case_drag_end(void) {
-    const char *name = "kc_grd_drag_end";
-    const char *detail = "drag_end clears drag state";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_box_t *c2 = kc_grd_box_new();
-    kc_grd_split_add(s, c1, 1.0f);
-    kc_grd_split_add(s, c2, 1.0f);
-    kc_grd_split_gap(s, 4, 4);
-    kc_grd_box_bounds(b, 0, 0, 200, 100);
-    kc_grd_box_layout(b);
-    kc_grd_gap_t gap;
-    kc_grd_gap_hit(b, c1->x + c1->w + 1, 50, &gap);
-    int fail = 0;
-    kc_grd_drag_end(NULL);
-    fail |= expect_int("drag_begin returns 0", 0, kc_grd_drag_begin(&gap, gap.x, gap.y));
-    kc_grd_drag_end(s);
-    fail |= expect_int("drag_on cleared", 0, s->drag_on);
-    fail |= expect_true("drag_end(NULL) does not crash", 1);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_grd_box_close.
- * @return 0 on success, 1 on failure.
- */
-static int case_box_close(void) {
-    const char *name = "kc_grd_box_close";
-    const char *detail = "box_close removes child from split";
-    kc_grd_box_t *root = kc_grd_box_new();
-    int fail = 0;
-    fail |= expect_int("box_close no parent returns -1", -1, kc_grd_box_close(NULL));
-    fail |= expect_int("box_close no parent returns -1", -1, kc_grd_box_close(root));
-    kc_grd_split_t *s = kc_grd_split_set(root, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_box_t *c2 = kc_grd_box_new();
-    kc_grd_box_t *c3 = kc_grd_box_new();
-    kc_grd_split_add(s, c1, 1.0f);
-    kc_grd_split_add(s, c2, 1.0f);
-    kc_grd_split_add(s, c3, 1.0f);
-    fail |= expect_int("close c1 returns 0", 0, kc_grd_box_close(c1));
-    fail |= expect_int("remaining count is 2", 2, s->count);
-    kc_grd_box_free(root);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_grd_split_at.
- * @return 0 on success, 1 on failure.
- */
-static int case_split_at(void) {
-    const char *name = "kc_grd_split_at";
-    const char *detail = "split_at returns child at index";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(b, KC_GRD_ROW);
-    kc_grd_box_t *c1 = kc_grd_box_new();
-    kc_grd_split_add(s, c1, 1.0f);
-    int fail = 0;
-    fail |= expect_true("split_at(NULL) returns NULL", kc_grd_split_at(NULL, 0) == NULL);
-    fail |= expect_true("split_at invalid returns NULL", kc_grd_split_at(s, 5) == NULL);
-    fail |= expect_true("split_at(0) returns c1", kc_grd_split_at(s, 0) == c1);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_grd_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_stop(void) {
-    const char *name = "kc_grd_stop";
-    const char *detail = "stop sets stop_requested flag";
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_stop(NULL);
-    int fail = 0;
-    fail |= expect_true("stop(NULL) no crash", 1);
-    fail |= expect_true("stop not requested", b->stop_requested == 0);
-    kc_grd_stop(b);
-    fail |= expect_true("stop requested", b->stop_requested == 1);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests two contexts coexist.
- * @return 0 on success, 1 on failure.
- */
-static int case_multictx(void) {
-    const char *name = "two contexts coexist independently";
-    const char *detail = "two contexts coexist independently";
-    kc_grd_box_t *a = kc_grd_box_new();
-    kc_grd_box_t *b = kc_grd_box_new();
-    kc_grd_stop(a); kc_grd_stop(b);
-    kc_grd_stop(a);
-    int fail = 0;
-    fail |= expect_true("a stop_requested", a->stop_requested);
-    fail |= expect_true("b stop_requested", b->stop_requested);
-    kc_grd_box_free(a);
-    kc_grd_box_free(b);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_grd_split_set + add + layout for row split.
- * @return 0 on success, 1 on failure.
- */
-static int case_split_compute_row(void) {
-    const char *name = "split row layout via public API";
-    const char *detail = "row layout computes widths by weight";
-    kc_grd_box_t *root = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(root, KC_GRD_ROW);
-    float weights[] = {1.0f, 2.0f, 1.0f};
-    int fail = 0;
-    if (!root || !s) {
-        kc_grd_box_free(root);
-        case_result(1, name, detail);
-        return 1;
-    }
-    kc_grd_split_gap(s, 0, 1);
-    int i;
-    for (i = 0; i < 3; i++) {
-        kc_grd_box_t *child = kc_grd_box_new();
-        if (!child || kc_grd_split_add(s, child, weights[i]) != 0) {
-            kc_grd_box_free(root);
-            case_result(1, name, detail);
-            return 1;
-        }
-        child->border = 0;
-        child->padding = 0;
-    }
-    kc_grd_box_bounds(root, 0, 0, 1920, 1080);
-    kc_grd_box_layout(root);
-    fail |= expect_int("child 0 w", 480, root->split->children[0]->w);
-    fail |= expect_int("child 1 w", 959, root->split->children[1]->w);
-    fail |= expect_int("child 2 w", 479, root->split->children[2]->w);
-    kc_grd_box_free(root);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests split column with gap via public API.
- * @return 0 on success, 1 on failure.
- */
-static int case_split_compute_col_gap(void) {
-    const char *name = "split col gap layout via public API";
-    const char *detail = "col layout with gap positions children";
-    kc_grd_box_t *root = kc_grd_box_new();
-    kc_grd_split_t *s = kc_grd_split_set(root, KC_GRD_COL);
-    float weights[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    int fail = 0;
-    if (!root || !s) {
-        kc_grd_box_free(root);
-        case_result(1, name, detail);
-        return 1;
-    }
-    kc_grd_split_gap(s, 4, 1);
-    int i;
-    for (i = 0; i < 4; i++) {
-        kc_grd_box_t *child = kc_grd_box_new();
-        if (!child || kc_grd_split_add(s, child, weights[i]) != 0) {
-            kc_grd_box_free(root);
-            case_result(1, name, detail);
-            return 1;
-        }
-        child->border = 0;
-        child->padding = 0;
-    }
-    kc_grd_box_bounds(root, 0, 0, 800, 600);
-    kc_grd_box_layout(root);
-    fail |= expect_int("child 0 h", 147, root->split->children[0]->h);
-    fail |= expect_int("child 1 y", 152, root->split->children[1]->y);
-    kc_grd_box_free(root);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests invalid inputs via public API.
- * @return 0 on success, 1 on failure.
- */
-static int case_split_compute_errors(void) {
-    const char *name = "public API rejects bad inputs";
-    const char *detail = "bad inputs rejected";
-    int fail = 0;
-    fail |= expect_true("split_set NULL returns NULL", kc_grd_split_set(NULL, KC_GRD_ROW) == NULL);
-    fail |= expect_true("split_add NULL split returns -1", kc_grd_split_add(NULL, NULL, 1.0f) == -1);
-    fail |= expect_true("split_add NULL child returns -1", kc_grd_split_add(&(kc_grd_split_t){0}, NULL, 1.0f) == -1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests a nested mixed-axis tree via the public API.
- * @return 0 on success, 1 on failure.
- */
-static int case_nested_layout(void) {
-    const char *name = "nested mixed-axis layout via public API";
-    const char *detail = "three levels preserve gaps, minimums, and child order";
-    kc_grd_box_t *root = kc_grd_box_new();
-    kc_grd_split_t *root_split;
-    kc_grd_split_t *left_split;
-    kc_grd_split_t *deep_split;
+static int case_kc_grd_nested_tree(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *root;
     kc_grd_box_t *left;
     kc_grd_box_t *right;
-    int fail = 0;
+    kc_grd_region_t *nested;
+    kc_grd_box_t *top;
+    kc_grd_box_t *bottom;
+    kc_grd_separator_t *root_separator;
+    kc_grd_separator_t *nested_separator;
+    int failed = 0;
 
-    if (!root) {
-        case_result(1, name, detail);
-        return 1;
-    }
-    root->border = 0;
-    root->padding = 0;
-    root_split = kc_grd_split_set(root, KC_GRD_ROW);
-    left = kc_grd_box_new();
-    right = kc_grd_box_new();
-    if (!root_split || !left || !right) {
-        kc_grd_box_free(left);
-        kc_grd_box_free(right);
-        kc_grd_box_free(root);
-        case_result(1, name, detail);
-        return 1;
-    }
-    if (kc_grd_split_add(root_split, left, 1.0f) != 0) {
-        kc_grd_box_free(left);
-        kc_grd_box_free(right);
-        kc_grd_box_free(root);
-        case_result(1, name, detail);
-        return 1;
-    }
-    if (kc_grd_split_add(root_split, right, 2.0f) != 0) {
-        kc_grd_box_free(right);
-        kc_grd_box_free(root);
-        case_result(1, name, detail);
-        return 1;
-    }
-    left->border = left->padding = 0;
-    right->border = right->padding = 0;
-    kc_grd_split_gap(root_split, 3, 1);
-    left_split = kc_grd_split_set(left, KC_GRD_COL);
-    if (!left_split ||
-        kc_grd_split_add(left_split, kc_grd_box_new(), 1.0f) != 0 ||
-        kc_grd_split_add(left_split, kc_grd_box_new(), 2.0f) != 0) {
-        kc_grd_box_free(root);
-        case_result(1, name, detail);
-        return 1;
-    }
-    left_split->children[0]->border = left_split->children[0]->padding = 0;
-    left_split->children[1]->border = left_split->children[1]->padding = 0;
-    kc_grd_split_gap(left_split, 5, 10);
-    deep_split = kc_grd_split_set(left_split->children[1], KC_GRD_ROW);
-    if (!deep_split ||
-        kc_grd_split_add(deep_split, kc_grd_box_new(), 1.0f) != 0 ||
-        kc_grd_split_add(deep_split, kc_grd_box_new(), 1.0f) != 0) {
-        kc_grd_box_free(root);
-        case_result(1, name, detail);
-        return 1;
-    }
-    deep_split->children[0]->border = deep_split->children[0]->padding = 0;
-    deep_split->children[1]->border = deep_split->children[1]->padding = 0;
-    kc_grd_split_gap(deep_split, 4, 10);
-    kc_grd_box_bounds(root, 7, 11, 100, 90);
-    kc_grd_box_layout(root);
-    fail |= expect_int("root x", 7, root->x);
-    fail |= expect_int("left width", 33, left->w);
-    fail |= expect_int("right x after root gap", 43, right->x);
-    fail |= expect_int("left child 0 height", 29, left_split->children[0]->h);
-    fail |= expect_int("left child 1 y after nested gap", 45, left_split->children[1]->y);
-    fail |= expect_int("deep child 0 width", 15, deep_split->children[0]->w);
-    fail |= expect_int("deep child 1 x after gap", 26, deep_split->children[1]->x);
-    kc_grd_box_free(root);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    root = kc_grd_grid_get_region(grid);
+    left = kc_grd_region_get_box(root, 0);
+    right = kc_grd_region_insert_box(root, 1, 5.0f, 4.0f);
+    root_separator = kc_grd_region_get_separator(root, 0);
+    nested = kc_grd_box_subdivide(left, KC_GRD_Y);
+    top = kc_grd_region_get_box(nested, 0);
+    bottom = kc_grd_region_insert_box(nested, 1, 7.0f, 6.0f);
+    nested_separator = kc_grd_region_get_separator(nested, 0);
+    failed |= check(right != NULL && nested != NULL && top != NULL && bottom != NULL);
+    failed |= check(kc_grd_region_get_direction(root) == KC_GRD_X);
+    failed |= check(kc_grd_region_get_direction(nested) == KC_GRD_Y);
+    failed |= check(kc_grd_box_set_weight(left, 2.0f) == 0);
+    failed |= check(kc_grd_box_set_weight(top, 3.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(left), 2.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(right), 5.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(top), 3.0f) == 0);
+    failed |= check(check_float(kc_grd_box_get_weight(bottom), 7.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(root_separator), 4.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(nested_separator), 6.0f) == 0);
+    failed |= check(kc_grd_separator_set_size(nested_separator, 8.0f) == 0);
+    failed |= check(check_float(kc_grd_separator_get_size(root_separator), 4.0f) == 0);
+    failed |= check(kc_grd_region_insert_box(nested, 2, 11.0f, 9.0f) != NULL);
+    failed |= check(kc_grd_region_get_box_count(nested) == 3U);
+    failed |= check(kc_grd_region_get_box_count(root) == 2U);
+    failed |= check(kc_grd_region_set_direction(nested, KC_GRD_X) == 0);
+    failed |= check(kc_grd_region_get_direction(root) == KC_GRD_X);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_nested_tree", "keeps mixed nested regions independent and closes recursively");
+    return failed != 0;
 }
 
-/**
- * Runs all test cases in a single process.
- * @return 0 on success, 1 on failure.
- */
-static int case_all(void) {
-    int rc = 0;
-    test_case_total = 24;
+static int case_kc_grd_invalid_inputs(void) {
+    kc_grd_grid_t *grid = NULL;
+    kc_grd_region_t *region;
+    kc_grd_box_t *box;
+    kc_grd_content_t *content;
+    int failed = 0;
+
+    failed |= check(kc_grd_grid_open(NULL, KC_GRD_X) == -1);
+    failed |= check(kc_grd_grid_open(&grid, (kc_grd_direction_t)0) == -1);
+    failed |= check(grid == NULL);
+    kc_grd_grid_close(NULL);
+    failed |= check(kc_grd_grid_get_region(NULL) == NULL);
+    failed |= check(kc_grd_region_get_direction(NULL) == 0);
+    failed |= check(kc_grd_region_set_direction(NULL, KC_GRD_X) == -1);
+    failed |= check(kc_grd_region_get_box_count(NULL) == 0U);
+    failed |= check(kc_grd_region_get_box(NULL, 0) == NULL);
+    failed |= check(kc_grd_region_get_separator_count(NULL) == 0U);
+    failed |= check(kc_grd_region_get_separator(NULL, 0) == NULL);
+    failed |= check(kc_grd_region_insert_box(NULL, 0, 1.0f, 1.0f) == NULL);
+    failed |= check(kc_grd_box_get_weight(NULL) == 0.0f);
+    failed |= check(kc_grd_box_set_weight(NULL, 1.0f) == -1);
+    failed |= check(kc_grd_box_get_region(NULL) == NULL);
+    failed |= check(kc_grd_box_get_content(NULL) == NULL);
+    failed |= check(kc_grd_box_subdivide(NULL, KC_GRD_X) == NULL);
+    failed |= check(kc_grd_box_remove(NULL) == -1);
+    failed |= check(kc_grd_separator_get_size(NULL) == 0.0f);
+    failed |= check(kc_grd_separator_set_size(NULL, 1.0f) == -1);
+    failed |= check(kc_grd_separator_get_before(NULL) == NULL);
+    failed |= check(kc_grd_separator_get_after(NULL) == NULL);
+    failed |= check(kc_grd_content_get_box(NULL) == NULL);
+
+    failed |= check(kc_grd_grid_open(&grid, KC_GRD_X) == 0);
+    region = kc_grd_grid_get_region(grid);
+    box = kc_grd_region_get_box(region, 0);
+    content = kc_grd_box_get_content(box);
+    failed |= check(kc_grd_region_set_direction(region, (kc_grd_direction_t)0) == -1);
+    failed |= check(kc_grd_region_get_box(region, 1) == NULL);
+    failed |= check(kc_grd_region_get_separator(region, 0) == NULL);
+    failed |= check(kc_grd_region_insert_box(region, 2, 1.0f, 1.0f) == NULL);
+    failed |= check(kc_grd_box_subdivide(box, (kc_grd_direction_t)0) == NULL);
+    failed |= check(kc_grd_box_get_content(box) == content);
+    failed |= check(kc_grd_box_get_region(box) == NULL);
+
+    kc_grd_grid_close(grid);
+    case_result(failed, "kc_grd_invalid_inputs", "rejects null, out-of-range, and invalid arguments");
+    return failed != 0;
+}
+
+static int run_all(void) {
+    int failed = 0;
+
+    test_case_total = 14;
     test_case_current = 0;
-    run_case(&rc, case_version);
-    run_case(&rc, case_options_default);
-    run_case(&rc, case_options_load_env);
-    run_case(&rc, case_options_free);
-    run_case(&rc, case_box_new);
-    run_case(&rc, case_box_free);
-    run_case(&rc, case_split_set);
-    run_case(&rc, case_split_add);
-    run_case(&rc, case_split_weight);
-    run_case(&rc, case_box_bounds);
-    run_case(&rc, case_box_layout);
-    run_case(&rc, case_split_gap);
-    run_case(&rc, case_gap_hit);
-    run_case(&rc, case_drag_begin);
-    run_case(&rc, case_drag_update);
-    run_case(&rc, case_drag_end);
-    run_case(&rc, case_box_close);
-    run_case(&rc, case_split_at);
-    run_case(&rc, case_stop);
-    run_case(&rc, case_multictx);
-    run_case(&rc, case_split_compute_row);
-    run_case(&rc, case_split_compute_col_gap);
-    run_case(&rc, case_split_compute_errors);
-    run_case(&rc, case_nested_layout);
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
-    return rc;
+    run_case(&failed, case_kc_grd_version);
+    run_case(&failed, case_kc_grd_grid_open);
+    run_case(&failed, case_kc_grd_region_direction);
+    run_case(&failed, case_kc_grd_box_weight);
+    run_case(&failed, case_kc_grd_region_insert_box);
+    run_case(&failed, case_kc_grd_separator_size);
+    run_case(&failed, case_kc_grd_separator_neighbors);
+    run_case(&failed, case_kc_grd_box_subdivide);
+    run_case(&failed, case_kc_grd_content_identity);
+    run_case(&failed, case_kc_grd_box_remove_middle);
+    run_case(&failed, case_kc_grd_box_remove_edges);
+    run_case(&failed, case_kc_grd_box_remove_last_rejected);
+    run_case(&failed, case_kc_grd_nested_tree);
+    run_case(&failed, case_kc_grd_invalid_inputs);
+    printf("%d passed, %d failed\n", test_case_total - failed, failed);
+    return failed != 0;
 }
 
-/**
- * Runs one libgrd public API test case.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return 0 on success, 1 or 2 on failure.
- */
+static int run_individual(case_fn function) {
+    test_case_total = 1;
+    test_case_current = 1;
+    return function();
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) {
-        fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
+        fprintf(stderr, "expected one test selector\n");
         return 2;
     }
-    if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "version") == 0) return case_version();
-    if (strcmp(argv[1], "options-default") == 0) return case_options_default();
-    if (strcmp(argv[1], "options-load-env") == 0) return case_options_load_env();
-    if (strcmp(argv[1], "options-free") == 0) return case_options_free();
-    if (strcmp(argv[1], "box-new") == 0) return case_box_new();
-    if (strcmp(argv[1], "box-free") == 0) return case_box_free();
-    if (strcmp(argv[1], "split-set") == 0) return case_split_set();
-    if (strcmp(argv[1], "split-add") == 0) return case_split_add();
-    if (strcmp(argv[1], "split-weight") == 0) return case_split_weight();
-    if (strcmp(argv[1], "box-bounds") == 0) return case_box_bounds();
-    if (strcmp(argv[1], "box-layout") == 0) return case_box_layout();
-    if (strcmp(argv[1], "split-gap") == 0) return case_split_gap();
-    if (strcmp(argv[1], "gap-hit") == 0) return case_gap_hit();
-    if (strcmp(argv[1], "drag-begin") == 0) return case_drag_begin();
-    if (strcmp(argv[1], "drag-update") == 0) return case_drag_update();
-    if (strcmp(argv[1], "drag-end") == 0) return case_drag_end();
-    if (strcmp(argv[1], "box-close") == 0) return case_box_close();
-    if (strcmp(argv[1], "split-at") == 0) return case_split_at();
-    if (strcmp(argv[1], "stop") == 0) return case_stop();
-    if (strcmp(argv[1], "multictx") == 0) return case_multictx();
-    if (strcmp(argv[1], "split-compute-row") == 0) return case_split_compute_row();
-    if (strcmp(argv[1], "split-compute-col-gap") == 0) return case_split_compute_col_gap();
-    if (strcmp(argv[1], "split-compute-errors") == 0) return case_split_compute_errors();
-    if (strcmp(argv[1], "nested-layout") == 0) return case_nested_layout();
-    fprintf(stderr, "unknown test case: %s\n", argv[1]);
+    if (strcmp(argv[1], "all") == 0) return run_all();
+    if (strcmp(argv[1], "version") == 0) return run_individual(case_kc_grd_version);
+    if (strcmp(argv[1], "grid-open") == 0) return run_individual(case_kc_grd_grid_open);
+    if (strcmp(argv[1], "region-direction") == 0) return run_individual(case_kc_grd_region_direction);
+    if (strcmp(argv[1], "box-weight") == 0) return run_individual(case_kc_grd_box_weight);
+    if (strcmp(argv[1], "region-insert-box") == 0) return run_individual(case_kc_grd_region_insert_box);
+    if (strcmp(argv[1], "separator-size") == 0) return run_individual(case_kc_grd_separator_size);
+    if (strcmp(argv[1], "separator-neighbors") == 0) return run_individual(case_kc_grd_separator_neighbors);
+    if (strcmp(argv[1], "box-subdivide") == 0) return run_individual(case_kc_grd_box_subdivide);
+    if (strcmp(argv[1], "content-identity") == 0) return run_individual(case_kc_grd_content_identity);
+    if (strcmp(argv[1], "box-remove-middle") == 0) return run_individual(case_kc_grd_box_remove_middle);
+    if (strcmp(argv[1], "box-remove-edges") == 0) return run_individual(case_kc_grd_box_remove_edges);
+    if (strcmp(argv[1], "box-remove-last-rejected") == 0) return run_individual(case_kc_grd_box_remove_last_rejected);
+    if (strcmp(argv[1], "nested-tree") == 0) return run_individual(case_kc_grd_nested_tree);
+    if (strcmp(argv[1], "invalid-inputs") == 0) return run_individual(case_kc_grd_invalid_inputs);
+    fprintf(stderr, "unknown test selector: %s\n", argv[1]);
     return 2;
 }

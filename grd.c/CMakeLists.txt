@@ -10,11 +10,6 @@ endif()
 option(GRD_NATIVE "Enable native CPU optimizations" OFF)
 option(GRD_BUILD_TESTS "Build grd tests" OFF)
 
-set(GRD_TEST_EXTERNAL_ARTIFACTS OFF)
-if(GRD_BUILD_TESTS AND GRD_TEST_SHARED_LIBRARY)
-    set(GRD_TEST_EXTERNAL_ARTIFACTS ON)
-endif()
-
 if(NOT MSVC)
     add_compile_options(-O3 -Wall -Wextra -Werror -fno-finite-math-only)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -29,7 +24,7 @@ else()
 endif()
 
 set(GRD_SOURCES src/libgrd.c)
-set(GRD_HEADERS src/grd.h)
+set(GRD_HEADERS src/libgrd.h)
 
 set_source_files_properties(src/libgrd.c PROPERTIES
     COMPILE_DEFINITIONS KC_GRD_BUILD_VERSION=${GRD_BUILD_VERSION}
@@ -45,11 +40,11 @@ if(EMSCRIPTEN)
     target_link_options(grd_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_grd_options_default,_kc_grd_options_load_env,_kc_grd_options_free,_kc_grd_stop,_kc_grd_version,_kc_grd_box_new,_kc_grd_box_free,_kc_grd_split_set,_kc_grd_split_add,_kc_grd_split_weight,_kc_grd_box_bounds,_kc_grd_box_layout,_kc_grd_split_gap,_kc_grd_gap_hit,_kc_grd_drag_begin,_kc_grd_drag_update,_kc_grd_drag_end,_kc_grd_box_close,_kc_grd_split_at
+        -sEXPORTED_FUNCTIONS=_kc_grd_version,_kc_grd_grid_open,_kc_grd_grid_close,_kc_grd_grid_get_region,_kc_grd_region_get_direction,_kc_grd_region_set_direction,_kc_grd_region_get_box_count,_kc_grd_region_get_box,_kc_grd_region_get_separator_count,_kc_grd_region_get_separator,_kc_grd_region_insert_box,_kc_grd_box_get_weight,_kc_grd_box_set_weight,_kc_grd_box_get_region,_kc_grd_box_get_content,_kc_grd_box_subdivide,_kc_grd_box_remove,_kc_grd_separator_get_size,_kc_grd_separator_set_size,_kc_grd_separator_get_before,_kc_grd_separator_get_after,_kc_grd_content_get_box
     )
 endif()
 
-if(NOT GRD_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN)
     add_library(grd_shared SHARED ${GRD_SOURCES})
     set_target_properties(grd_shared PROPERTIES OUTPUT_NAME grd PREFIX "lib")
     target_include_directories(grd_shared PRIVATE src)
@@ -58,18 +53,9 @@ if(NOT GRD_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     set_target_properties(grd_static PROPERTIES OUTPUT_NAME grd PREFIX "lib")
     target_include_directories(grd_static PRIVATE src)
 
-    add_executable(grd_exe src/grd.c ${GRD_SOURCES})
-    set_target_properties(grd_exe PROPERTIES OUTPUT_NAME grd)
-    target_include_directories(grd_exe PRIVATE src)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
+    if(UNIX)
         target_link_libraries(grd_shared m)
         target_link_libraries(grd_static m)
-        target_link_libraries(grd_exe m)
-    elseif(ANDROID)
-        target_link_libraries(grd_shared m)
-        target_link_libraries(grd_static m)
-        target_link_libraries(grd_exe m)
     endif()
 endif()
 
@@ -102,7 +88,7 @@ if(GRD_BUILD_TESTS)
         target_include_directories(grd_contract_test PRIVATE src)
         target_link_libraries(grd_contract_test PRIVATE ${GRD_TEST_SHARED_TARGET})
 
-        if(UNIX AND NOT ANDROID AND NOT APPLE)
+        if(UNIX)
             target_link_libraries(grd_contract_test PRIVATE m)
         endif()
 
