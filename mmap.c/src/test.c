@@ -295,7 +295,6 @@ static int test_cli_run_input(char *const argv[], const char *input,
 #endif
 #endif
 
-
 /**
  * Creates a unique temporary file path.
  * @param out Destination buffer.
