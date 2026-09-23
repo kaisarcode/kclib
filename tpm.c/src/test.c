@@ -146,13 +146,13 @@ static int case_kc_tpm_open(void) {
     kc_tpm_close(explicit_tpm);
 
     options.ngram_size = 0;
-    tpm = (kc_tpm_t *)1;
+    tpm = (kc_tpm_t *)(uintptr_t)1;
     fail += expect_int("open rejects n below range", KC_TPM_ERROR,
         kc_tpm_open(&tpm, "abc", &options));
     fail += expect_true("invalid option clears output", tpm == NULL);
 
     options.ngram_size = 9;
-    tpm = (kc_tpm_t *)1;
+    tpm = (kc_tpm_t *)(uintptr_t)1;
     fail += expect_int("open rejects n above range", KC_TPM_ERROR,
         kc_tpm_open(&tpm, "abc", &options));
     fail += expect_true("invalid high option clears output", tpm == NULL);
@@ -183,7 +183,7 @@ static int case_kc_tpm_open(void) {
     fail += expect_true("allocate overflow text", large_text != NULL);
     if (large_text != NULL) {
         options.ngram_size = 1;
-        tpm = (kc_tpm_t *)1;
+        tpm = (kc_tpm_t *)(uintptr_t)1;
         fail += expect_int("open reports raw gram overflow", KC_TPM_ERROR,
             kc_tpm_open(&tpm, large_text, &options));
         fail += expect_true("overflow open returns no profile", tpm == NULL);
