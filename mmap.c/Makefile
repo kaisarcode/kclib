@@ -490,11 +490,11 @@ test:
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wasm --target mmap_contract_test || exit 1; \
 		if [ -n "$(EMSDK_NODE)" ]; then node="$(EMSDK_NODE)"; else node="$(WASM_NODE)"; fi; \
-		if ! command -v "$node" >/dev/null 2>&1; then \
+		if ! command -v "$$node" >/dev/null 2>&1; then \
 			echo "Missing Emscripten test runtime: $node" >&2; \
 			exit 1; \
 		fi; \
-		"$node" $(BUILD_DIR)/test-wasm/mmap_contract_test.js all; \
+		"$$node" $(BUILD_DIR)/test-wasm/mmap_contract_test.js all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
