@@ -28,7 +28,11 @@
 #include <stdarg.h>
 #include <stdatomic.h>
 
-#ifndef _WIN32
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <pthread.h>
 #endif
 
@@ -84,8 +88,12 @@ struct kc_wch {
 
 #ifdef _WIN32
     HANDLE thread;
-#else
+#elif !defined(__EMSCRIPTEN__)
     pthread_t thread;
+#endif
+
+#ifdef __EMSCRIPTEN__
+    struct kc_wch *wasm_next;
 #endif
 
 #ifdef __linux__
@@ -223,6 +231,10 @@ static int dequeue(struct kc_wch *w, kc_wch_event_t *ev) {
  * @return 1 on success, 0 on failure.
  */
 static int try_backend(struct kc_wch *w) {
+#ifdef __EMSCRIPTEN__
+    w->backend = 4;
+    return 1;
+#endif
 #ifdef __linux__
     int ifd = inotify_init();
     if (ifd < 0) return 0;
@@ -709,6 +721,136 @@ static void fill_windows(struct kc_wch *w, int tmo) {
 }
 #endif
 
+#ifdef __EMSCRIPTEN__
+
+static kc_wch_t *kc_wch_wasm_watchers = NULL;
+static int kc_wch_wasm_hooks_installed = 0;
+
+/**
+ * Installs filesystem tracking callbacks for the Emscripten virtual filesystem.
+ * @return None.
+ */
+EM_JS(void, kc_wch_wasm_install_hooks, (), {
+    if (Module.__kc_wch_hooks_installed) return;
+    Module.__kc_wch_hooks_installed = true;
+
+    function emit(type, path) {
+        if (!path) return;
+        setTimeout(function() {
+            var n = lengthBytesUTF8(path) + 1;
+            var p = _malloc(n);
+            stringToUTF8(path, p, n);
+            _kc_wch_wasm_event(type, p);
+            _free(p);
+        }, 0);
+    }
+
+    FS.trackingDelegate['onMakeDirectory'] = function(path) {
+        emit(0, path);
+    };
+    FS.trackingDelegate['onMakeSymlink'] = function(oldpath, newpath) {
+        emit(0, newpath);
+    };
+    FS.trackingDelegate['onWriteToFile'] = function(path) {
+        emit(1, path);
+    };
+    FS.trackingDelegate['willDeletePath'] = function(path) {
+        emit(2, path);
+    };
+    FS.trackingDelegate['onMovePath'] = function(oldpath, newpath) {
+        emit(2, oldpath);
+        emit(0, newpath);
+    };
+});
+
+/**
+ * Checks whether one VFS path belongs to a watcher.
+ * @param w Watcher instance.
+ * @param path Changed VFS path.
+ * @return 1 when the event belongs to the watcher, otherwise 0.
+ */
+static int kc_wch_wasm_matches(const kc_wch_t *w, const char *path) {
+    size_t root_len;
+
+    if (w == NULL || path == NULL) return 0;
+
+    if (w->has_filter) {
+        return filter_ok((kc_wch_t *)w, path);
+    }
+
+    if (strcmp(w->root, path) == 0) return 1;
+
+    root_len = strlen(w->root);
+    if (root_len == 0U || strncmp(path, w->root, root_len) != 0) return 0;
+    if (path[root_len] != '/') return 0;
+
+    if (w->recursive) return 1;
+
+    return strchr(path + root_len + 1U, '/') == NULL;
+}
+
+/**
+ * Receives one virtual-filesystem mutation from the JavaScript runtime.
+ * @param type Normalized event type.
+ * @param path Changed VFS path.
+ * @return None.
+ */
+EMSCRIPTEN_KEEPALIVE
+void kc_wch_wasm_event(int type, const char *path) {
+    kc_wch_t *w = kc_wch_wasm_watchers;
+
+    while (w != NULL) {
+        kc_wch_t *next = w->wasm_next;
+
+        if (!atomic_load(&w->stop) &&
+                w->handler != NULL &&
+                kc_wch_wasm_matches(w, path)) {
+            kc_wch_event_t event;
+
+            event.type = type;
+            event.path = path;
+            w->handler(&event, w->userdata);
+        }
+
+        w = next;
+    }
+}
+
+/**
+ * Adds one watcher to the virtual-filesystem dispatch list.
+ * @param w Watcher instance.
+ * @return None.
+ */
+static void kc_wch_wasm_add(kc_wch_t *w) {
+    if (!kc_wch_wasm_hooks_installed) {
+        kc_wch_wasm_install_hooks();
+        kc_wch_wasm_hooks_installed = 1;
+    }
+
+    w->wasm_next = kc_wch_wasm_watchers;
+    kc_wch_wasm_watchers = w;
+}
+
+/**
+ * Removes one watcher from the virtual-filesystem dispatch list.
+ * @param w Watcher instance.
+ * @return None.
+ */
+static void kc_wch_wasm_remove(kc_wch_t *w) {
+    kc_wch_t **cursor = &kc_wch_wasm_watchers;
+
+    while (*cursor != NULL) {
+        if (*cursor == w) {
+            *cursor = w->wasm_next;
+            w->wasm_next = NULL;
+            return;
+        }
+        cursor = &(*cursor)->wasm_next;
+    }
+}
+
+#endif
+
 /**
  * Waits internally for one normalized event.
  * @param w Watcher instance.
@@ -788,6 +930,7 @@ static void kc_wch_release(kc_wch_t *w) {
     free(w);
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Runs the asynchronous watcher loop.
  * @param arg Watcher instance.
@@ -826,6 +969,8 @@ static void *kc_wch_worker(void *arg) {
     return NULL;
 #endif
 }
+
+#endif
 
 /**
  * Opens one watcher instance.
@@ -977,7 +1122,9 @@ int kc_wch_on(kc_wch_t *w, kc_wch_handler_t handler, void *userdata) {
 
     w->handler = handler;
     w->userdata = userdata;
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    kc_wch_wasm_add(w);
+#elif defined(_WIN32)
     w->thread = CreateThread(NULL, 0, kc_wch_worker, w, 0, NULL);
     if (w->thread == NULL) {
         w->handler = NULL;
@@ -1010,7 +1157,11 @@ void kc_wch_close(kc_wch_t *w) {
         return;
     }
 
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    kc_wch_wasm_remove(w);
+    kc_wch_release(w);
+    return;
+#elif defined(_WIN32)
     if (GetCurrentThreadId() == GetThreadId(w->thread)) {
         w->self_close = 1;
         return;
