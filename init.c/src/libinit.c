@@ -13,6 +13,7 @@
 
 #include "libinit.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -51,10 +52,12 @@ typedef enum {
     KC_INIT_BACKEND_SYSV
 } kc_init_backend_t;
 
-struct kc_init_options {
-    char *dir;
-    char *backend;
-};
+typedef void (*kc_init_list_cb_internal_internal)(
+    const char *key,
+    const char *user,
+    const char *cmd,
+    void *userdata
+);
 
 struct kc_init {
     char error[256];
@@ -113,89 +116,9 @@ static kc_init_backend_t kc_init_backend_from_string(const char *name) {
     if (strcmp(name, "runit") == 0) return KC_INIT_BACKEND_RUNIT;
     if (strcmp(name, "openrc") == 0) return KC_INIT_BACKEND_OPENRC;
     if (strcmp(name, "sysv") == 0) return KC_INIT_BACKEND_SYSV;
-    if (strcmp(name, "none") == 0) return KC_INIT_BACKEND_NONE;
     return KC_INIT_BACKEND_NONE;
 }
 #endif
-
-/**
- * Create default init options.
- * @return Caller-owned default options, or NULL on allocation failure.
- */
-kc_init_options_t *kc_init_options_default(void) {
-    kc_init_options_t *opts;
-
-    opts = (kc_init_options_t *)malloc(sizeof(*opts));
-    if (!opts) {
-        return NULL;
-    }
-
-    opts->dir = kc_init_strdup(KC_INIT_SYS_DIR);
-    opts->backend = NULL;
-    if (!opts->dir) {
-        free(opts);
-        return NULL;
-    }
-    return opts;
-}
-
-/**
- * Set one init option.
- * @param opts Options to update.
- * @param key Option key.
- * @param value Option value, or NULL to reset it.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
- */
-int kc_init_options_set(
-    kc_init_options_t *opts,
-    const char *key,
-    const char *value
-) {
-    char *copy;
-
-    if (!opts || !key) {
-        return KC_INIT_ERROR;
-    }
-
-    if (strcmp(key, "dir") == 0) {
-        copy = kc_init_strdup(value ? value : KC_INIT_SYS_DIR);
-        if (!copy) {
-            return KC_INIT_ERROR;
-        }
-        free(opts->dir);
-        opts->dir = copy;
-        return KC_INIT_OK;
-    }
-
-    if (strcmp(key, "backend") == 0) {
-        copy = NULL;
-        if (value) {
-            copy = kc_init_strdup(value);
-            if (!copy) {
-                return KC_INIT_ERROR;
-            }
-        }
-        free(opts->backend);
-        opts->backend = copy;
-        return KC_INIT_OK;
-    }
-
-    return KC_INIT_ERROR;
-}
-
-/**
- * Free init options.
- * @param opts Options to free, or NULL.
- * @return None.
- */
-void kc_init_options_free(kc_init_options_t *opts) {
-    if (!opts) {
-        return;
-    }
-    free(opts->dir);
-    free(opts->backend);
-    free(opts);
-}
 
 /**
  * Checks if the current process has administrative/root privileges.
@@ -764,7 +687,7 @@ found:
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_ls_row_sysv(
-    const char *dir, const char *key, kc_init_list_cb cb, void *userdata
+    const char *dir, const char *key, kc_init_list_cb_internal cb, void *userdata
 ) {
     char meta[KC_INIT_PATH];
     char umeta[KC_INIT_PATH];
@@ -792,7 +715,7 @@ static int kc_init_ls_row_sysv(
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_init_run_list_sysv(const char *dir, kc_init_list_cb cb, void *userdata) {
+static int kc_init_run_list_sysv(const char *dir, kc_init_list_cb_internal cb, void *userdata) {
     DIR *dp;
     struct dirent *de;
 
@@ -830,7 +753,7 @@ static int kc_init_run_list_sysv(const char *dir, kc_init_list_cb cb, void *user
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_run_list_one_sysv(
-    const char *dir, const char *key, kc_init_list_cb cb, void *userdata
+    const char *dir, const char *key, kc_init_list_cb_internal cb, void *userdata
 ) {
     char meta[KC_INIT_PATH];
     struct stat st;
@@ -1344,7 +1267,7 @@ found:
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_ls_row_win32(
-    const char *dir, const char *key, kc_init_list_cb cb, void *userdata
+    const char *dir, const char *key, kc_init_list_cb_internal cb, void *userdata
 ) {
     char meta[KC_INIT_PATH];
     char umeta[KC_INIT_PATH];
@@ -1372,7 +1295,7 @@ static int kc_init_ls_row_win32(
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_init_run_list_win32(const char *dir, kc_init_list_cb cb, void *userdata) {
+static int kc_init_run_list_win32(const char *dir, kc_init_list_cb_internal cb, void *userdata) {
     WIN32_FIND_DATAA fd;
     HANDLE h;
     char pattern[KC_INIT_PATH];
@@ -1417,7 +1340,7 @@ static int kc_init_run_list_win32(const char *dir, kc_init_list_cb cb, void *use
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_run_list_one_win32(
-    const char *dir, const char *key, kc_init_list_cb cb, void *userdata
+    const char *dir, const char *key, kc_init_list_cb_internal cb, void *userdata
 ) {
     char meta[KC_INIT_PATH];
     DWORD attr;
@@ -1531,7 +1454,7 @@ static int kc_init_run_exec(kc_init_t *ctx, const char *key) {
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_init_run_list(kc_init_t *ctx, kc_init_list_cb cb, void *userdata) {
+static int kc_init_run_list(kc_init_t *ctx, kc_init_list_cb_internal cb, void *userdata) {
 #ifdef _WIN32
     return kc_init_run_list_win32(ctx->dir, cb, userdata);
 #else
@@ -1547,7 +1470,7 @@ static int kc_init_run_list(kc_init_t *ctx, kc_init_list_cb cb, void *userdata) 
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_init_run_list_one(kc_init_t *ctx, const char *key, kc_init_list_cb cb, void *userdata) {
+static int kc_init_run_list_one(kc_init_t *ctx, const char *key, kc_init_list_cb_internal cb, void *userdata) {
 #ifdef _WIN32
     return kc_init_run_list_one_win32(ctx->dir, key, cb, userdata);
 #else
@@ -1687,7 +1610,7 @@ int kc_init_exec(kc_init_t *ctx, const char *key) {
  * @param userdata Opaque pointer passed unchanged to cb and not retained.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-int kc_init_list(kc_init_t *ctx, const char *key, kc_init_list_cb cb, void *userdata) {
+int kc_init_list(kc_init_t *ctx, const char *key, kc_init_list_cb_internal cb, void *userdata) {
     if (!ctx) {
         return KC_INIT_ERROR;
     }
