@@ -73,6 +73,13 @@ static int expect_true(const char *name, int condition) {
 }
 
 #ifndef __EMSCRIPTEN__
+/**
+ * Verifies one integer test expectation.
+ * @param name Expectation description.
+ * @param expected Expected integer value.
+ * @param actual Actual integer value.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_int(const char *name, int expected, int actual) {
     if (expected != actual) {
         printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
