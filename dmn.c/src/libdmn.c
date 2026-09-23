@@ -798,9 +798,11 @@ static int kc_dmn_bridge_client(
                 return rc;
             }
 
-            keep = eot_size > 1 && joined_size >= eot_size - 1
-                ? eot_size - 1
-                : joined_size;
+            keep = eot_size > 1
+                ? (joined_size >= eot_size - 1
+                    ? eot_size - 1
+                    : joined_size)
+                : 0;
             flush_size = joined_size - keep;
             if (flush_size > 0 &&
                     kc_dmn_write_all(
