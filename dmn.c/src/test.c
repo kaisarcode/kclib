@@ -41,6 +41,13 @@ static int test_case_current;
 
 typedef int (*case_fn)(void);
 
+/**
+ * Print one top-level test result.
+ * @param fail Failure count.
+ * @param name Canonical case name.
+ * @param detail Case detail.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail) {
     printf("[%d/%d] [%s] %s: %s\n",
         test_case_current,
@@ -50,11 +57,24 @@ static void case_result(int fail, const char *name, const char *detail) {
         detail);
 }
 
+/**
+ * Run one top-level test case.
+ * @param rc Failure accumulator.
+ * @param fn Case function.
+ * @return None.
+ */
 static void run_case(int *rc, case_fn fn) {
     test_case_current++;
     *rc += fn();
 }
 
+/**
+ * Verify one integer result.
+ * @param name Check label.
+ * @param expected Expected value.
+ * @param actual Actual value.
+ * @return Failure count.
+ */
 static int expect_int(const char *name, int expected, int actual) {
     if (expected != actual) {
         printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
@@ -63,6 +83,12 @@ static int expect_int(const char *name, int expected, int actual) {
     return 0;
 }
 
+/**
+ * Verify one condition.
+ * @param name Check label.
+ * @param condition Condition to verify.
+ * @return Failure count.
+ */
 static int expect_true(const char *name, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", name);
@@ -71,6 +97,13 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
+/**
+ * Verify one string result.
+ * @param name Check label.
+ * @param expected Expected string.
+ * @param actual Actual string.
+ * @return Failure count.
+ */
 static int expect_string(
     const char *name,
     const char *expected,
@@ -86,6 +119,10 @@ static int expect_string(
     return 0;
 }
 
+/**
+ * Sleep briefly for daemon readiness.
+ * @return None.
+ */
 static void short_sleep(void) {
 #ifdef _WIN32
     Sleep(250);
@@ -95,6 +132,13 @@ static void short_sleep(void) {
 #endif
 }
 
+/**
+ * Create one isolated runtime directory.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @param name Test-specific directory name.
+ * @return Zero on success, non-zero on failure.
+ */
 static int make_runtime_dir(
     char *out,
     size_t cap,
@@ -147,6 +191,11 @@ static int make_runtime_dir(
     }
 }
 
+/**
+ * Remove one temporary runtime directory.
+ * @param dir Runtime directory path.
+ * @return None.
+ */
 static void remove_runtime_dir(const char *dir) {
 #ifdef _WIN32
     (void)RemoveDirectoryA(dir);
@@ -155,6 +204,10 @@ static void remove_runtime_dir(const char *dir) {
 #endif
 }
 
+/**
+ * Return the platform response test command.
+ * @return Borrowed command string.
+ */
 static const char *response_command(void) {
 #ifdef _WIN32
     return "echo response";
@@ -163,6 +216,13 @@ static const char *response_command(void) {
 #endif
 }
 
+/**
+ * Create one test daemon.
+ * @param name Daemon name.
+ * @param dir Runtime directory.
+ * @param cmd Daemon command.
+ * @return dmn status code.
+ */
 static int create_daemon(
     const char *name,
     const char *dir,
@@ -174,6 +234,13 @@ static int create_daemon(
     return kc_dmn_create(name, &options);
 }
 
+/**
+ * Open one test daemon in a selected runtime directory.
+ * @param out Output daemon handle.
+ * @param name Daemon name.
+ * @param dir Runtime directory.
+ * @return dmn status code.
+ */
 static int open_daemon(
     kc_dmn_t **out,
     const char *name,
@@ -191,6 +258,15 @@ static int open_daemon(
 
 #ifdef _WIN32
 
+/**
+ * Join command arguments for the Windows test server.
+ * @param out Output command buffer.
+ * @param cap Output buffer capacity.
+ * @param argv Argument vector.
+ * @param first First argument index.
+ * @param argc Argument count.
+ * @return None.
+ */
 static void test_join_args(
     char *out,
     size_t cap,
@@ -219,6 +295,12 @@ static void test_join_args(
     }
 }
 
+/**
+ * Run the private Windows named-pipe test server.
+ * @param pipename Named pipe path.
+ * @param cmd Command string.
+ * @return Process status.
+ */
 static int test_serve_win32(
     const char *pipename,
     const char *cmd
@@ -367,6 +449,10 @@ static int test_serve_win32(
 
 #endif
 
+/**
+ * Test kc_dmn_create.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_create(void) {
     char dir[512];
     kc_dmn_options_t options = {0};
@@ -398,6 +484,10 @@ static int case_kc_dmn_create(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_open.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_open(void) {
     kc_dmn_t *daemon = (kc_dmn_t *)(uintptr_t)1;
     int fail = 0;
@@ -424,6 +514,10 @@ static int case_kc_dmn_open(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_list.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_list(void) {
     char dir[512];
     kc_dmn_entry_t *entries = NULL;
@@ -458,6 +552,10 @@ static int case_kc_dmn_list(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_delete.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_delete(void) {
     char dir[512];
     int fail = 0;
@@ -484,6 +582,10 @@ static int case_kc_dmn_delete(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_set_cmd.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_set_cmd(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -515,6 +617,10 @@ static int case_kc_dmn_set_cmd(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_get_cmd.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_get_cmd(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -544,6 +650,10 @@ static int case_kc_dmn_get_cmd(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_set_dir.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_set_dir(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -563,6 +673,10 @@ static int case_kc_dmn_set_dir(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_get_dir.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_get_dir(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -584,6 +698,10 @@ static int case_kc_dmn_get_dir(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_set_eot.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_set_eot(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -621,6 +739,10 @@ static int case_kc_dmn_set_eot(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_get_eot.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_get_eot(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -658,6 +780,13 @@ typedef struct {
     size_t bytes;
 } data_state_t;
 
+/**
+ * Record one data event.
+ * @param data Borrowed data chunk.
+ * @param size Chunk size.
+ * @param userdata Data event state.
+ * @return None.
+ */
 static void on_data(const void *data, size_t size, void *userdata) {
     data_state_t *state = (data_state_t *)userdata;
     if (!state || (!data && size > 0)) return;
@@ -665,6 +794,10 @@ static void on_data(const void *data, size_t size, void *userdata) {
     state->bytes += size;
 }
 
+/**
+ * Test kc_dmn_on.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_on(void) {
     kc_dmn_t *daemon = NULL;
     data_state_t state = {0};
@@ -688,6 +821,10 @@ static int case_kc_dmn_on(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_send_data.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_send_data(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -736,6 +873,10 @@ static int case_kc_dmn_send_data(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_send_signal.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_send_signal(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -759,6 +900,10 @@ static int case_kc_dmn_send_signal(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_stream.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_stream(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -792,6 +937,10 @@ static int case_kc_dmn_stream(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_stream_write.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_stream_write(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -830,6 +979,10 @@ static int case_kc_dmn_stream_write(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_stream_read.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_stream_read(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
@@ -877,12 +1030,20 @@ static int case_kc_dmn_stream_read(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_stream_close.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_stream_close(void) {
     kc_dmn_stream_close(NULL);
     case_result(0, "kc_dmn_stream_close", "accepts NULL");
     return 0;
 }
 
+/**
+ * Test kc_dmn_free.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_free(void) {
     kc_dmn_entry_t *entries = NULL;
     size_t count = 0;
@@ -897,6 +1058,10 @@ static int case_kc_dmn_free(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_close.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_close(void) {
     kc_dmn_t *daemon = NULL;
     int fail = expect_int(
@@ -910,12 +1075,20 @@ static int case_kc_dmn_close(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc_dmn_version.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_version(void) {
     int fail = expect_true("version non-zero", kc_dmn_version() != 0U);
     case_result(fail, "kc_dmn_version", "returns the generated build version");
     return fail != 0;
 }
 
+/**
+ * Test the grouped CLI contract.
+ * @return Zero on success, non-zero on failure.
+ */
 static int case_kc_dmn_cli(void) {
     char command[4096];
     int fail = 0;
@@ -954,6 +1127,10 @@ static int case_kc_dmn_cli(void) {
     return fail != 0;
 }
 
+/**
+ * Run all contract test cases.
+ * @return Failure count.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -985,6 +1162,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Run the contract test executable.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process status.
+ */
 int main(int argc, char **argv) {
 #ifdef _WIN32
     if (argc >= 4 && strcmp(argv[1], "--_serve") == 0) {
