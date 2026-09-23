@@ -35,10 +35,10 @@ char *kc_b64_encode(
 );
 
 /**
- * Base64-decodes a string into malloc'd binary data.
- * @param str Base64 string.
- * @param out_size Receives the decoded size.
- * @return malloc'd data, or NULL on failure.
+ * Base64-decodes a strict RFC 4648 string into malloc'd binary data.
+ * @param str Base64 string with canonical padding.
+ * @param out_size Receives the decoded size and is reset to 0 on failure.
+ * @return malloc'd data, including for empty input, or NULL on failure.
  */
 void *kc_b64_decode(const char *str, size_t *out_size);
 
