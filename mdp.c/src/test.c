@@ -58,6 +58,12 @@ static void run_case(int *rc, case_fn fn) {
     *rc += fn();
 }
 
+/**
+ * Verifies one boolean test expectation.
+ * @param name Expectation description.
+ * @param condition Nonzero when the expectation is satisfied.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_true(const char *name, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", name);
