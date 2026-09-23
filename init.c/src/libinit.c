@@ -813,18 +813,6 @@ static int kc_init_run_list_sysv(const char *dir, kc_init_row_handler_t cb, void
         }
         closedir(dp);
     }
-    if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
-        dp = opendir(KC_INIT_SYS_DIR);
-        if (dp) {
-            while ((de = readdir(dp))) {
-                if (de->d_name[0] == '.') continue;
-                if (kc_init_has_suffix(de->d_name, ".user") ||
-                        kc_init_has_suffix(de->d_name, ".backend")) continue;
-                (void)kc_init_ls_row_sysv(KC_INIT_SYS_DIR, de->d_name, cb, userdata);
-            }
-            closedir(dp);
-        }
-    }
     return 0;
 }
 
@@ -1399,24 +1387,6 @@ static int kc_init_run_list_win32(const char *dir, kc_init_row_handler_t cb, voi
         }
     }
 
-    if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
-        if ((size_t)snprintf(pattern, sizeof(pattern),
-                "%s\\*", KC_INIT_SYS_DIR) < sizeof(pattern)) {
-            h = FindFirstFileA(pattern, &fd);
-            if (h != INVALID_HANDLE_VALUE) {
-                do {
-                    if (fd.cFileName[0] == '.') continue;
-                    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-                        continue;
-                    if (kc_init_has_suffix(fd.cFileName, ".user") ||
-                            kc_init_has_suffix(fd.cFileName, ".backend"))
-                        continue;
-                    (void)kc_init_ls_row_win32(KC_INIT_SYS_DIR, fd.cFileName, cb, userdata);
-                } while (FindNextFileA(h, &fd));
-                FindClose(h);
-            }
-        }
-    }
     return 0;
 }
 
