@@ -44,7 +44,7 @@ if(EMSCRIPTEN)
     target_link_options(min_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_min_open,_kc_min_close,_kc_min_set_mode,_kc_min_mode,_kc_min_exec,_kc_min_free,_kc_min_version
+        -sEXPORTED_FUNCTIONS=_kc_min_minify,_kc_min_free,_kc_min_version
     )
 endif()
 
@@ -113,4 +113,15 @@ if(MIN_BUILD_TESTS)
                 $<TARGET_FILE_DIR:min_contract_test>
         )
     endif()
+endif()
+
+if(MIN_BUILD_TESTS)
+    if(MIN_TEST_CLI)
+        set(MIN_TEST_CLI_TARGET_PATH "${MIN_TEST_CLI}")
+    else()
+        set(MIN_TEST_CLI_TARGET_PATH "")
+    endif()
+    target_compile_definitions(min_contract_test PRIVATE
+        MIN_TEST_CLI="${MIN_TEST_CLI_TARGET_PATH}"
+    )
 endif()
