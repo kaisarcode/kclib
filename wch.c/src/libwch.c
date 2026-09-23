@@ -841,16 +841,30 @@ int kc_wch_open(
 ) {
     struct kc_wch *w;
     int exists = 0;
+    int is_directory = 0;
     int recursive = options != NULL && options->recursive != 0;
 
     if (out == NULL) return KC_WCH_ERROR;
     *out = NULL;
     if (path == NULL || path[0] == '\0') return KC_WCH_ERROR;
 
-#ifndef _WIN32
+#ifdef _WIN32
+    {
+        DWORD attrs = GetFileAttributesA(path);
+
+        if (attrs != INVALID_FILE_ATTRIBUTES) {
+            exists = 1;
+            is_directory = (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        }
+    }
+#else
     {
         struct stat st;
-        exists = stat(path, &st) == 0;
+
+        if (stat(path, &st) == 0) {
+            exists = 1;
+            is_directory = S_ISDIR(st.st_mode);
+        }
     }
 #endif
 
@@ -859,43 +873,69 @@ int kc_wch_open(
     atomic_init(&w->stop, 0);
     atomic_init(&w->ready, 0);
 
-    if (exists) {
+    if (exists && is_directory) {
         w->root = strdup(path);
     } else {
         char parent[PATH_MAX];
         char *slash;
+        const char *name;
 
         snprintf(parent, PATH_MAX, "%s", path);
         slash = strrchr(parent, '/');
-        if (slash != NULL) {
-            size_t fn_len = strlen(slash + 1);
+#ifdef _WIN32
+        {
+            char *backslash = strrchr(parent, '\\');
 
+            if (backslash != NULL && (slash == NULL || backslash > slash)) {
+                slash = backslash;
+            }
+        }
+#endif
+        if (slash != NULL) {
+            char separator = *slash;
+
+            name = slash + 1;
             w->filter_name[0] = '/';
-            if (fn_len >= PATH_MAX - 1) fn_len = PATH_MAX - 2;
-            memcpy(w->filter_name + 1, slash + 1, fn_len);
-            w->filter_name[fn_len + 1] = '\0';
+            snprintf(w->filter_name + 1, PATH_MAX - 1, "%s", name);
             *slash = '\0';
-            if (parent[0] == '\0') snprintf(parent, PATH_MAX, ".");
-#ifndef _WIN32
-            {
-                struct stat st;
-                if (stat(parent, &st) != 0) {
-                    free(w);
-                    return KC_WCH_ERROR;
-                }
+
+            if (parent[0] == '\0') {
+                snprintf(parent, PATH_MAX, "/");
+            }
+#ifdef _WIN32
+            if (strlen(parent) == 2U && parent[1] == ':') {
+                parent[2] = separator;
+                parent[3] = '\0';
             }
 #endif
-            w->has_filter = 1;
         } else {
-            size_t fn_len = strlen(path);
-
             w->filter_name[0] = '/';
-            if (fn_len >= PATH_MAX - 1) fn_len = PATH_MAX - 2;
-            memcpy(w->filter_name + 1, path, fn_len);
-            w->filter_name[fn_len + 1] = '\0';
+            snprintf(w->filter_name + 1, PATH_MAX - 1, "%s", path);
             snprintf(parent, PATH_MAX, ".");
-            w->has_filter = 1;
         }
+
+#ifdef _WIN32
+        {
+            DWORD attrs = GetFileAttributesA(parent);
+
+            if (attrs == INVALID_FILE_ATTRIBUTES ||
+                    (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+                free(w);
+                return KC_WCH_ERROR;
+            }
+        }
+#else
+        {
+            struct stat st;
+
+            if (stat(parent, &st) != 0 || !S_ISDIR(st.st_mode)) {
+                free(w);
+                return KC_WCH_ERROR;
+            }
+        }
+#endif
+
+        w->has_filter = 1;
         w->root = strdup(parent);
     }
 
