@@ -1,6 +1,6 @@
 /**
  * nets.c - Network sender.
- * Summary: Command line interface for sending stdin to TCP or UDP.
+ * Summary: Command line interface for sending stdin to TCP, UDP, or TLS.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -19,12 +19,27 @@
 #include <string.h>
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <io.h>
+#include <windows.h>
 #define KC_NETS_STDIN_FD 0
 #else
+#include <pthread.h>
 #include <unistd.h>
 #define KC_NETS_STDIN_FD STDIN_FILENO
 #endif
+
+typedef struct {
+    int done;
+    int status;
+#ifdef _WIN32
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE condition;
+#else
+    pthread_mutex_t lock;
+    pthread_cond_t condition;
+#endif
+} nets_cli_result_t;
 
 /**
  * Parses a host, host:port, bracketed IPv6, or URL-shaped target.
@@ -37,11 +52,11 @@
  * @return 0 on success, or 1 on failure.
  */
 static int nets_parse_target(
-const char *text,
-char *host,
-size_t host_cap,
-unsigned short *port,
-int *proto
+    const char *text,
+    char *host,
+    size_t host_cap,
+    unsigned short *port,
+    int *proto
 ) {
     const char *authority;
     const char *authority_end;
@@ -98,14 +113,14 @@ int *proto
         }
     } else {
         const char *colon;
-        const char *pcur;
+        const char *cursor;
         int colon_count;
 
         colon = NULL;
         colon_count = 0;
-        for (pcur = authority; pcur < authority_end; pcur++) {
-            if (*pcur == ':') {
-                colon = pcur;
+        for (cursor = authority; cursor < authority_end; cursor++) {
+            if (*cursor == ':') {
+                colon = cursor;
                 colon_count++;
             }
         }
@@ -140,57 +155,165 @@ int *proto
 }
 
 /**
- * Reads all available bytes from a file descriptor into a malloc'd buffer.
- * CLI-only utility for reading stdin.
- * @param fd        Source file descriptor.
- * @param out_data  Output buffer pointer (caller frees with free()).
- * @param out_size  Output size pointer.
+ * Reads all available bytes from a file descriptor.
+ * @param fd Source file descriptor.
+ * @param out_data Receives owned bytes.
+ * @param out_size Receives byte count.
  * @return 0 on success, or 1 on failure.
  */
 static int nets_read_fd(int fd, char **out_data, size_t *out_size) {
-    char *data = NULL;
-    size_t used = 0;
-    size_t cap = 0;
-    char buf[8192];
+    char *data;
+    size_t used;
+    size_t capacity;
+    char buffer[8192];
 #ifdef _WIN32
-    int n;
+    int count;
 #else
-    ssize_t n;
+    ssize_t count;
 #endif
 
     if (out_data) *out_data = NULL;
-    if (out_size) *out_size = 0;
+    if (out_size) *out_size = 0U;
     if (!out_data || !out_size) return 1;
+
+    data = NULL;
+    used = 0U;
+    capacity = 0U;
 
     for (;;) {
 #ifdef _WIN32
-        n = _read(fd, buf, (unsigned)sizeof(buf));
+        count = _read(fd, buffer, (unsigned)sizeof(buffer));
 #else
-        n = read(fd, buf, sizeof(buf));
+        count = read(fd, buffer, sizeof(buffer));
 #endif
-        if (n < 0) { free(data); return 1; }
-        if (n == 0) break;
-        if (used + (size_t)n > cap) {
-            size_t next = cap ? cap * 2 : 8192;
-            char *tmp;
-            while (next < used + (size_t)n) next *= 2;
-            tmp = (char *)realloc(data, next);
-            if (!tmp) { free(data); return 1; }
-            data = tmp;
-            cap = next;
+        if (count < 0) {
+            free(data);
+            return 1;
         }
-        memcpy(data + used, buf, (size_t)n);
-        used += (size_t)n;
+        if (count == 0) break;
+        if (used + (size_t)count > capacity) {
+            size_t next_capacity;
+            char *next;
+
+            next_capacity = capacity ? capacity * 2U : 8192U;
+            while (next_capacity < used + (size_t)count) next_capacity *= 2U;
+            next = (char *)realloc(data, next_capacity);
+            if (!next) {
+                free(data);
+                return 1;
+            }
+            data = next;
+            capacity = next_capacity;
+        }
+        memcpy(data + used, buffer, (size_t)count);
+        used += (size_t)count;
     }
 
     if (!data) {
-        data = (char *)malloc(1);
+        data = (char *)malloc(1U);
         if (!data) return 1;
     }
     data[used] = '\0';
     *out_data = data;
     *out_size = used;
     return 0;
+}
+
+/**
+ * Initialize callback completion state.
+ * @param result Completion state.
+ * @return 0 on success, 1 on failure.
+ */
+static int nets_result_init(nets_cli_result_t *result) {
+    memset(result, 0, sizeof(*result));
+#ifdef _WIN32
+    InitializeCriticalSection(&result->lock);
+    InitializeConditionVariable(&result->condition);
+    return 0;
+#else
+    if (pthread_mutex_init(&result->lock, NULL) != 0) return 1;
+    if (pthread_cond_init(&result->condition, NULL) != 0) {
+        pthread_mutex_destroy(&result->lock);
+        return 1;
+    }
+    return 0;
+#endif
+}
+
+/**
+ * Destroy callback completion state.
+ * @param result Completion state.
+ * @return None.
+ */
+static void nets_result_destroy(nets_cli_result_t *result) {
+#ifdef _WIN32
+    DeleteCriticalSection(&result->lock);
+#else
+    pthread_cond_destroy(&result->condition);
+    pthread_mutex_destroy(&result->lock);
+#endif
+}
+
+/**
+ * Receive one terminal transfer result.
+ * @param status Transfer status.
+ * @param data Borrowed response bytes.
+ * @param size Response size.
+ * @param userdata Completion state.
+ * @return None.
+ */
+static void nets_result_handler(
+    int status,
+    const void *data,
+    size_t size,
+    void *userdata
+) {
+    nets_cli_result_t *result;
+
+    result = (nets_cli_result_t *)userdata;
+    if (status == KC_NETS_OK && data != NULL && size > 0U) {
+        fwrite(data, 1, size, stdout);
+    }
+
+#ifdef _WIN32
+    EnterCriticalSection(&result->lock);
+    result->status = status;
+    result->done = 1;
+    WakeConditionVariable(&result->condition);
+    LeaveCriticalSection(&result->lock);
+#else
+    pthread_mutex_lock(&result->lock);
+    result->status = status;
+    result->done = 1;
+    pthread_cond_signal(&result->condition);
+    pthread_mutex_unlock(&result->lock);
+#endif
+}
+
+/**
+ * Wait for transfer completion.
+ * @param result Completion state.
+ * @return Terminal transfer status.
+ */
+static int nets_result_wait(nets_cli_result_t *result) {
+    int status;
+
+#ifdef _WIN32
+    EnterCriticalSection(&result->lock);
+    while (!result->done) {
+        SleepConditionVariableCS(&result->condition, &result->lock, INFINITE);
+    }
+    status = result->status;
+    LeaveCriticalSection(&result->lock);
+#else
+    pthread_mutex_lock(&result->lock);
+    while (!result->done) {
+        pthread_cond_wait(&result->condition, &result->lock);
+    }
+    status = result->status;
+    pthread_mutex_unlock(&result->lock);
+#endif
+    return status;
 }
 
 /**
@@ -227,18 +350,25 @@ static void kc_nets_cli_version(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    char *input = NULL;
-    size_t input_size = 0;
+    char *input;
+    size_t input_size;
     char host[512];
-    unsigned short port = 80;
-    int proto = KC_NETS_TCP;
-    const char *proto_flag = "tcp";
-    const char *target = NULL;
-    kc_nets_t *ctx = NULL;
-    void *resp = NULL;
-    size_t resp_size = 0;
+    unsigned short port;
+    int protocol;
+    const char *protocol_flag;
+    const char *target;
+    kc_nets_t *transfer;
+    nets_cli_result_t result;
     int rc;
     int i;
+
+    input = NULL;
+    input_size = 0U;
+    port = 80;
+    protocol = KC_NETS_TCP;
+    protocol_flag = "tcp";
+    target = NULL;
+    transfer = NULL;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -249,11 +379,11 @@ int main(int argc, char **argv) {
             kc_nets_cli_version();
             return 0;
         } else if (strcmp(argv[i], "--tcp") == 0) {
-            proto_flag = "tcp";
+            protocol_flag = "tcp";
         } else if (strcmp(argv[i], "--udp") == 0) {
-            proto_flag = "udp";
+            protocol_flag = "udp";
         } else if (strcmp(argv[i], "--tls") == 0) {
-            proto_flag = "tls";
+            protocol_flag = "tls";
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "nets: unknown option '%s'\n", argv[i]);
             return 1;
@@ -281,43 +411,60 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (strcmp(proto_flag, "tls") == 0) {
+    if (strcmp(protocol_flag, "tls") == 0) {
         if (!kc_nets_tls_available()) {
             fprintf(stderr, "nets: TLS not available (compiled without OpenSSL)\n");
             free(input);
             return 1;
         }
-        proto = KC_NETS_TLS;
-    } else if (strcmp(proto_flag, "udp") == 0) {
-        proto = KC_NETS_UDP;
+        protocol = KC_NETS_TLS;
+    } else if (strcmp(protocol_flag, "udp") == 0) {
+        protocol = KC_NETS_UDP;
     }
 
-    if (nets_parse_target(target, host, sizeof(host), &port, &proto) != 0) {
+    if (nets_parse_target(target, host, sizeof(host), &port, &protocol) != 0) {
         fprintf(stderr, "nets: invalid target\n");
         free(input);
         return 1;
     }
 
-    if (kc_nets_open(&ctx) != KC_NETS_OK) {
+    if (protocol == KC_NETS_TLS && !kc_nets_tls_available()) {
+        fprintf(stderr, "nets: TLS not available (compiled without OpenSSL)\n");
+        free(input);
+        return 1;
+    }
+
+    if (nets_result_init(&result) != 0) {
         fprintf(stderr, "nets: out of memory\n");
         free(input);
         return 1;
     }
 
-    rc = kc_nets_send(ctx, host, port, proto, input, input_size, &resp, &resp_size);
+    rc = kc_nets_send(
+        &transfer,
+        host,
+        port,
+        protocol,
+        input,
+        input_size,
+        nets_result_handler,
+        &result
+    );
+    free(input);
+
     if (rc != KC_NETS_OK) {
         fprintf(stderr, "nets: %s\n", kc_nets_strerror(rc));
-        kc_nets_free(resp);
-        free(input);
-        kc_nets_close(ctx);
+        nets_result_destroy(&result);
         return 1;
     }
 
-    if (resp != NULL && resp_size > 0) {
-        fwrite(resp, 1, resp_size, stdout);
+    rc = nets_result_wait(&result);
+    kc_nets_close(transfer);
+    nets_result_destroy(&result);
+
+    if (rc != KC_NETS_OK) {
+        fprintf(stderr, "nets: %s\n", kc_nets_strerror(rc));
+        return 1;
     }
-    kc_nets_free(resp);
-    free(input);
-    kc_nets_close(ctx);
     return 0;
 }
