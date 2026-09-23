@@ -68,7 +68,7 @@ int main(void) {
      * Call kc_nets_stop(transfer) when graceful interruption is required.
      */
 
-    kc_nets_close(transfer);
+    /* Close from the terminal callback, or stop explicitly when needed. */
     return 0;
 }
 ```
