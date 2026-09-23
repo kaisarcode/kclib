@@ -892,7 +892,9 @@ int kc_wch_open(
         }
 #endif
         if (slash != NULL) {
+#ifdef _WIN32
             char separator = *slash;
+#endif
 
             name = slash + 1;
             w->filter_name[0] = '/';
