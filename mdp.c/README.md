@@ -118,7 +118,7 @@ allocation/processing failure.
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests
