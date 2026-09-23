@@ -19,7 +19,6 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdarg.h>
 
 #ifndef KC_DMN_BUILD_VERSION
 #define KC_DMN_BUILD_VERSION 0
@@ -68,23 +67,21 @@ struct kc_dmn {
     size_t eot_size;
     kc_dmn_handler_t data_handler;
     void *data_userdata;
-    char error[256];
 };
 
-/**
- * Sets an error message on the context.
- * @param ctx Context pointer.
- * @param fmt Printf-style format string.
- * @param ... Format arguments.
- * @return None.
- */
-static void kc_dmn_set_error(kc_dmn_t *ctx, const char *fmt, ...) {
-    va_list ap;
-    if (!ctx || !fmt) return;
-    va_start(ap, fmt);
-    vsnprintf(ctx->error, sizeof(ctx->error), fmt, ap);
-    va_end(ap);
-    ctx->error[sizeof(ctx->error) - 1] = '\0';
+static size_t kc_dmn_find_bytes(
+    const unsigned char *data,
+    size_t data_size,
+    const unsigned char *needle,
+    size_t needle_size
+) {
+    size_t i;
+    if (!data || !needle || needle_size == 0 || data_size < needle_size)
+        return (size_t)-1;
+    for (i = 0; i + needle_size <= data_size; i++) {
+        if (memcmp(data + i, needle, needle_size) == 0) return i;
+    }
+    return (size_t)-1;
 }
 
 #ifndef _WIN32
@@ -661,21 +658,6 @@ static int kc_dmn_backend_alive(const kc_dmn_backend_t *backend) {
  * @param backend Resident backend state.
  * @return 0 on success, 1 on failure.
  */
-static size_t kc_dmn_find_bytes(
-    const unsigned char *data,
-    size_t data_size,
-    const unsigned char *needle,
-    size_t needle_size
-) {
-    size_t i;
-    if (!data || !needle || needle_size == 0 || data_size < needle_size)
-        return (size_t)-1;
-    for (i = 0; i + needle_size <= data_size; i++) {
-        if (memcmp(data + i, needle, needle_size) == 0) return i;
-    }
-    return (size_t)-1;
-}
-
 static int kc_dmn_bridge_client(
     int cli,
     kc_dmn_backend_t *backend,
