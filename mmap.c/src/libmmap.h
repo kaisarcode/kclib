@@ -1,6 +1,6 @@
 /**
- * mmap.h - Readonly memory mapping.
- * Summary: Public API for the mmap library.
+ * mmap.h - Persistent binary value.
+ * Summary: Public API for one file-backed mmap value.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -19,39 +19,78 @@ extern "C" {
 
 typedef struct kc_mmap kc_mmap_t;
 
-#define KC_MMAP_OK      0
-#define KC_MMAP_ERROR  -1
+#define KC_MMAP_OK         0
+#define KC_MMAP_NOT_FOUND  1
+#define KC_MMAP_ERROR     -1
 
 /**
- * Initialize a new mmap context and map a file.
- * @param out Output pointer for the new context.
- * @param path File path.
+ * Opens one file-backed value.
+ *
+ * A missing file is not an error: the instance opens with no current value.
+ *
+ * @param out Output pointer for the new instance.
+ * @param path Backing file path copied by the instance.
  * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
  */
 int kc_mmap_open(kc_mmap_t **out, const char *path);
 
 /**
- * Get pointer to mapped data.
- * @param map Map context pointer.
- * @return Context-owned, borrowed read-only data; do not free or write through
- *         this pointer. It is valid only while this exact context remains open
- *         and becomes invalid immediately after kc_mmap_close(). A successfully
- *         opened empty file returns NULL. kc_mmap_size() is authoritative; this
- *         function does not copy data.
+ * Reads the current in-memory value.
+ *
+ * The returned pointer is borrowed from the instance and remains valid until
+ * kc_mmap_set(), kc_mmap_del(), or kc_mmap_close().
+ *
+ * @param map Instance pointer.
+ * @param out_data Receives the borrowed value pointer on KC_MMAP_OK.
+ * @param out_size Receives the value size on KC_MMAP_OK.
+ * @return KC_MMAP_OK when a value exists, KC_MMAP_NOT_FOUND when the backing
+ *         file did not exist and no value has been set, or KC_MMAP_ERROR when
+ *         the instance is invalid.
  */
-const void *kc_mmap_data(const kc_mmap_t *map);
+int kc_mmap_get(
+    const kc_mmap_t *map,
+    const void **out_data,
+    size_t *out_size
+);
 
 /**
- * Get mapped data size.
- * @param map Map context pointer.
- * @return Byte length of the borrowed mapping.
+ * Replaces the current in-memory value without writing the backing file.
+ *
+ * NULL data with size zero is accepted and represents an empty value.
+ *
+ * @param map Instance pointer.
+ * @param data Borrowed input bytes, or NULL when size is zero.
+ * @param size Input byte length.
+ * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
  */
-size_t kc_mmap_size(const kc_mmap_t *map);
+int kc_mmap_set(kc_mmap_t *map, const void *data, size_t size);
 
 /**
- * Release a mmap context.
- * @param map Map context pointer; NULL is safe.
- * @return None. This call invalidates map and all borrowed data pointers.
+ * Persists the current value to the backing file.
+ *
+ * An empty value creates or truncates the file to zero bytes. Saving an
+ * untouched missing value is an error because there is no current value.
+ *
+ * @param map Instance pointer.
+ * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
+ */
+int kc_mmap_save(kc_mmap_t *map);
+
+/**
+ * Deletes the backing file and invalidates the instance.
+ *
+ * Deleting an already missing backing file still succeeds for a valid
+ * instance. After this call, get/set/save/del return KC_MMAP_ERROR.
+ *
+ * @param map Instance pointer.
+ * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
+ */
+int kc_mmap_del(kc_mmap_t *map);
+
+/**
+ * Releases an instance. NULL is safe.
+ * @param map Instance pointer.
+ * @return None.
  */
 void kc_mmap_close(kc_mmap_t *map);
 
