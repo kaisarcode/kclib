@@ -88,7 +88,6 @@ static int expect_string(const char *name, const char *expected, const char *act
     return 0;
 }
 
-#ifndef __EMSCRIPTEN__
 /**
  * Verifies one integer test expectation.
  * @param name Expectation description.
@@ -104,6 +103,7 @@ static int expect_int(const char *name, int expected, int actual) {
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 /**
  * Appends one argument to the Windows CLI command line.
