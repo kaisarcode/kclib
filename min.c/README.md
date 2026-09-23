@@ -11,25 +11,31 @@
 Minify CSS:
 
 ```bash
-echo 'body { color: red; }' | ./bin/x86_64/linux/min css
+echo 'body { color: red; }' | ./bin/x86_64/linux/min --css
 ```
 
 Minify JavaScript:
 
 ```bash
-echo 'const x = 1; // comment' | ./bin/x86_64/linux/min js
+echo 'const x = 1; // comment' | ./bin/x86_64/linux/min --js
 ```
 
 Minify HTML:
 
 ```bash
-echo '<div>  hello  </div>' | ./bin/x86_64/linux/min html
+echo '<div>  hello  </div>' | ./bin/x86_64/linux/min --html
 ```
 
 Minify generic text:
 
 ```bash
-echo '  hello   world  ' | ./bin/x86_64/linux/min txt
+echo '  hello   world  ' | ./bin/x86_64/linux/min --txt
+```
+
+Pass a value directly instead of stdin:
+
+```bash
+./bin/x86_64/linux/min -txt "Hello                      World  !"
 ```
 
 ---
@@ -38,12 +44,15 @@ echo '  hello   world  ' | ./bin/x86_64/linux/min txt
 
 | Parameter | Description |
 | :--- | :--- |
-| `css` | Minify CSS input |
-| `js` | Minify JavaScript input |
-| `html` | Minify HTML input |
-| `txt` | Minify generic text input |
+| `-css`, `--css` | Minify CSS input |
+| `-js`, `--js` | Minify JavaScript input |
+| `-html`, `--html` | Minify HTML input |
+| `-txt`, `--txt` | Minify generic text input |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
+
+When a value argument is omitted, the CLI reads the source from stdin. When a
+value is present after the mode flag, that value is minified directly.
 
 ---
 
