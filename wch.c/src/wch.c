@@ -827,13 +827,13 @@ int main(int argc, char **argv) {
 
     if (argc == 3 &&
             (strcmp(argv[2], "-l") == 0 ||
-             strcmp(argv[2], "--list") == 0)) {
+            strcmp(argv[2], "--list") == 0)) {
         return kc_wch_list_one(dir, argv[1]);
     }
 
     if (argc == 3 &&
             (strcmp(argv[2], "-d") == 0 ||
-             strcmp(argv[2], "--delete") == 0)) {
+            strcmp(argv[2], "--delete") == 0)) {
         return kc_wch_delete(dir, argv[1]);
     }
 
@@ -849,7 +849,7 @@ int main(int argc, char **argv) {
         i = 2;
         if (i < argc &&
                 (strcmp(argv[i], "-r") == 0 ||
-                 strcmp(argv[i], "--recursive") == 0)) {
+                strcmp(argv[i], "--recursive") == 0)) {
             recursive = 1;
             i++;
         }
