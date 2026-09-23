@@ -86,30 +86,57 @@ HTML, such as `2 < 3` or `<3`, stays escaped.
 
 ## Public API
 
+The reusable API models one parsed Markdown document. Frontmatter is split from
+the body once when the document is opened, then the same instance exposes its
+body, metadata, and cached HTML representation.
+
 ```c
 #include "libmdp.h"
 
-char *html = kc_mdp_html("# Hello");
+kc_mdp_t *mark = NULL;
 
-if (html != NULL) {
-    /* Use html. */
-    kc_mdp_free(html);
+if (kc_mdp_open(&mark, source) == KC_MDP_OK) {
+    const char *body = kc_mdp_body(mark);
+    const char *meta = kc_mdp_meta(mark);
+    const char *html = kc_mdp_html(mark);
+
+    /* Use body, meta, and html while mark is alive. */
+
+    kc_mdp_close(mark);
 }
 ```
 
-The public API is stateless:
+The public lifecycle is:
 
-- `kc_mdp_html()` renders the Markdown body as an HTML fragment.
-- `kc_mdp_body()` returns the body after recognized frontmatter.
-- `kc_mdp_meta()` returns recognized raw frontmatter content.
-- `kc_mdp_free()` releases any successful returned allocation and accepts `NULL`.
+- `kc_mdp_open()` creates one persistent document and performs the frontmatter/body split once.
+- `kc_mdp_body()` returns the stored body view without reparsing.
+- `kc_mdp_meta()` returns the stored raw frontmatter view without reparsing.
+- `kc_mdp_html()` renders the stored body on first use and caches the HTML for later calls.
+- `kc_mdp_close()` releases the document, including cached HTML.
 - `kc_mdp_version()` returns the generated build version.
 
-All processing functions accept one null-terminated document. On success they
-return an owned NUL-terminated string, including an allocated empty string for
-an empty result. The caller must release successful results with
-`kc_mdp_free()`, never raw `free()`. A `NULL` return means invalid input or
-allocation/processing failure.
+The input string is borrowed only for the duration of `kc_mdp_open()`.
+Successful open owns its split body and metadata independently of the original
+input buffer.
+
+Pointers returned by `kc_mdp_body()`, `kc_mdp_meta()`, and
+`kc_mdp_html()` belong to the document. Callers must not free them. They
+remain valid until `kc_mdp_close()`. Empty body, metadata, or HTML results are
+represented by valid empty strings.
+
+A natural scripting binding can expose the same capability as:
+
+```js
+const mark = mdp(markdown);
+
+mark.html();
+mark.body();
+mark.meta();
+```
+
+The binding only adapts the native handle mechanically; it does not need to
+reconstruct document parsing or lifecycle semantics.
+
 
 ---
 
@@ -152,9 +179,9 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/mdp.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the stateless public API: `kc_mdp_html`, `kc_mdp_body`, `kc_mdp_meta`, `kc_mdp_free`, and `kc_mdp_version`. It contains the reusable library capability, not the `mdp` CLI: `src/mdp.c` is not compiled into the module.
+- The module exports the persistent document API: `kc_mdp_open`, `kc_mdp_html`, `kc_mdp_body`, `kc_mdp_meta`, `kc_mdp_close`, and `kc_mdp_version`. It contains the reusable library capability, not the `mdp` CLI: `src/mdp.c` is not compiled into the module.
 
-`make test wasm` compiles the reusable public-contract cases in `src/test.c` with Emscripten and runs them under Node.js. Native and Wine test runs additionally execute one grouped `kc_mdp_cli` case against the shipped CLI. It requires `bin/wasm32/wasm/mdp.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles the six reusable public-contract cases in `src/test.c` with Emscripten and runs them under Node.js. Native and Wine test runs additionally execute one grouped `kc_mdp_cli` case against the shipped CLI. It requires `bin/wasm32/wasm/mdp.wasm` and reports how to build it when it is absent.
 
 `wasm32/wasm` is included in `make all`.
 
