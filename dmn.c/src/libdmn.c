@@ -661,41 +661,178 @@ static int kc_dmn_backend_alive(const kc_dmn_backend_t *backend) {
  * @param backend Resident backend state.
  * @return 0 on success, 1 on failure.
  */
-static int kc_dmn_bridge_client(int cli, kc_dmn_backend_t *backend) {
+static size_t kc_dmn_find_bytes(
+    const unsigned char *data,
+    size_t data_size,
+    const unsigned char *needle,
+    size_t needle_size
+) {
+    size_t i;
+    if (!data || !needle || needle_size == 0 || data_size < needle_size)
+        return (size_t)-1;
+    for (i = 0; i + needle_size <= data_size; i++) {
+        if (memcmp(data + i, needle, needle_size) == 0) return i;
+    }
+    return (size_t)-1;
+}
+
+static int kc_dmn_bridge_client(
+    int cli,
+    kc_dmn_backend_t *backend,
+    const unsigned char *eot,
+    size_t eot_size
+) {
     int cli_open = 1;
+    unsigned char *in_tail = NULL;
+    size_t in_tail_size = 0;
+    unsigned char *out_tail = NULL;
+    size_t out_tail_size = 0;
+
+    if (!eot || eot_size == 0) return 1;
+    if (eot_size > 1) {
+        in_tail = (unsigned char *)malloc(eot_size - 1);
+        out_tail = (unsigned char *)malloc(eot_size - 1);
+        if (!in_tail || !out_tail) {
+            free(in_tail);
+            free(out_tail);
+            return 1;
+        }
+    }
+
     while (1) {
         fd_set fds;
         int max_fd = cli > backend->out_fd ? cli : backend->out_fd;
         int ready;
-        char buf[KC_DMN_BUF];
+        unsigned char buf[KC_DMN_BUF];
 
         FD_ZERO(&fds);
         if (cli_open) FD_SET(cli, &fds);
         FD_SET(backend->out_fd, &fds);
         ready = select(max_fd + 1, &fds, NULL, NULL, NULL);
-        if (ready < 0) return 1;
+        if (ready < 0) {
+            free(in_tail);
+            free(out_tail);
+            return 1;
+        }
+
         if (cli_open && FD_ISSET(cli, &fds)) {
             ssize_t n = read(cli, buf, sizeof(buf));
-            if (n < 0) return 1;
+            if (n < 0) {
+                free(in_tail);
+                free(out_tail);
+                return 1;
+            }
             if (n == 0) {
                 cli_open = 0;
                 close(backend->in_fd);
                 backend->in_fd = -1;
-            } else if (kc_dmn_write_all(backend->in_fd, buf, (size_t)n) != 0) {
-                return 1;
-            } else if (memchr(buf, 4, (size_t)n) != NULL) {
-                cli_open = 0;
+            } else {
+                unsigned char *joined;
+                size_t joined_size = in_tail_size + (size_t)n;
+                size_t keep;
+
+                if (kc_dmn_write_all(
+                        backend->in_fd,
+                        (const char *)buf,
+                        (size_t)n
+                    ) != 0) {
+                    free(in_tail);
+                    free(out_tail);
+                    return 1;
+                }
+
+                joined = (unsigned char *)malloc(joined_size);
+                if (!joined) {
+                    free(in_tail);
+                    free(out_tail);
+                    return 1;
+                }
+                if (in_tail_size > 0)
+                    memcpy(joined, in_tail, in_tail_size);
+                memcpy(joined + in_tail_size, buf, (size_t)n);
+
+                if (kc_dmn_find_bytes(
+                        joined,
+                        joined_size,
+                        eot,
+                        eot_size
+                    ) != (size_t)-1) {
+                    cli_open = 0;
+                }
+
+                keep = eot_size > 1 && joined_size >= eot_size - 1
+                    ? eot_size - 1
+                    : joined_size;
+                if (keep > 0)
+                    memcpy(in_tail, joined + joined_size - keep, keep);
+                in_tail_size = keep;
+                free(joined);
             }
         }
+
         if (FD_ISSET(backend->out_fd, &fds)) {
             ssize_t n = read(backend->out_fd, buf, sizeof(buf));
-            if (n <= 0) return 1;
-            for (ssize_t i = 0; i < n; i++) {
-                if (buf[i] == 4) {
-                    return kc_dmn_write_all(cli, buf, (size_t)i + 1);
-                }
+            unsigned char *joined;
+            size_t joined_size;
+            size_t marker;
+            size_t keep;
+            size_t flush_size;
+
+            if (n <= 0) {
+                if (out_tail_size > 0)
+                    (void)kc_dmn_write_all(
+                        cli,
+                        (const char *)out_tail,
+                        out_tail_size
+                    );
+                free(in_tail);
+                free(out_tail);
+                return 1;
             }
-            if (kc_dmn_write_all(cli, buf, (size_t)n) != 0) return 1;
+
+            joined_size = out_tail_size + (size_t)n;
+            joined = (unsigned char *)malloc(joined_size);
+            if (!joined) {
+                free(in_tail);
+                free(out_tail);
+                return 1;
+            }
+            if (out_tail_size > 0)
+                memcpy(joined, out_tail, out_tail_size);
+            memcpy(joined + out_tail_size, buf, (size_t)n);
+
+            marker = kc_dmn_find_bytes(joined, joined_size, eot, eot_size);
+            if (marker != (size_t)-1) {
+                int rc = kc_dmn_write_all(
+                    cli,
+                    (const char *)joined,
+                    marker + eot_size
+                );
+                free(joined);
+                free(in_tail);
+                free(out_tail);
+                return rc;
+            }
+
+            keep = eot_size > 1 && joined_size >= eot_size - 1
+                ? eot_size - 1
+                : joined_size;
+            flush_size = joined_size - keep;
+            if (flush_size > 0 &&
+                    kc_dmn_write_all(
+                        cli,
+                        (const char *)joined,
+                        flush_size
+                    ) != 0) {
+                free(joined);
+                free(in_tail);
+                free(out_tail);
+                return 1;
+            }
+            if (keep > 0)
+                memcpy(out_tail, joined + flush_size, keep);
+            out_tail_size = keep;
+            free(joined);
         }
     }
 }
@@ -708,8 +845,14 @@ static int kc_dmn_bridge_client(int cli, kc_dmn_backend_t *backend) {
  * @param cmd Shell command string.
  * @return Does not return normally.
  */
-static void kc_dmn_serve_loop(int fd, const char *dir,
-    const char *key, const char *cmd) {
+static void kc_dmn_serve_loop(
+    int fd,
+    const char *dir,
+    const char *key,
+    const char *cmd,
+    const unsigned char *eot,
+    size_t eot_size
+) {
     kc_dmn_backend_t backend;
 
     signal(SIGCHLD, SIG_IGN);
@@ -724,7 +867,7 @@ static void kc_dmn_serve_loop(int fd, const char *dir,
     while (1) {
         int cli = accept(fd, NULL, NULL);
         if (cli < 0) continue;
-        (void)kc_dmn_bridge_client(cli, &backend);
+        (void)kc_dmn_bridge_client(cli, &backend, eot, eot_size);
         close(cli);
         if (backend.in_fd < 0 || !kc_dmn_backend_alive(&backend)) {
             kc_dmn_backend_stop(&backend);
@@ -750,7 +893,11 @@ static void kc_dmn_serve_loop(int fd, const char *dir,
  * @return 0 on success, 1 on failure.
  */
 static int kc_dmn_update_posix(
-    const char *dir, const char *key, const char *cmd
+    const char *dir,
+    const char *key,
+    const char *cmd,
+    const unsigned char *eot,
+    size_t eot_size
 ) {
     char sock[KC_DMN_PATH];
     char pidpath[KC_DMN_PATH];
@@ -782,7 +929,7 @@ static int kc_dmn_update_posix(
         if (write(ready[1], "1", 1) != 1) {}
         close(ready[1]);
         kc_dmn_detach_stdio();
-        kc_dmn_serve_loop(fd, dir, key, cmd);
+        kc_dmn_serve_loop(fd, dir, key, cmd, eot, eot_size);
         _exit(0);
     }
     close(ready[1]);
@@ -853,7 +1000,11 @@ static int kc_dmn_update_win32(
  * @return 0 on success, 1 on failure.
  */
 static int kc_dmn_run_update(
-    const char *dir, const char *key, const char *cmd
+    const char *dir,
+    const char *key,
+    const char *cmd,
+    const unsigned char *eot,
+    size_t eot_size
 ) {
     char pidpath[KC_DMN_PATH];
     long pid;
@@ -891,9 +1042,11 @@ static int kc_dmn_run_update(
         }
     }
 #ifdef _WIN32
+    (void)eot;
+    (void)eot_size;
     return kc_dmn_update_win32(dir, key, cmd);
 #else
-    return kc_dmn_update_posix(dir, key, cmd);
+    return kc_dmn_update_posix(dir, key, cmd, eot, eot_size);
 #endif
 }
 
