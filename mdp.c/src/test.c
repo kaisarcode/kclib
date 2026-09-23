@@ -47,6 +47,12 @@ static void case_result(int fail, const char *name, const char *description) {
 
 typedef int (*case_fn)(void);
 
+/**
+ * Executes one test case and accumulates its result.
+ * @param rc Aggregate failed-case count.
+ * @param fn Test-case function to execute.
+ * @return None.
+ */
 static void run_case(int *rc, case_fn fn) {
     test_case_current++;
     *rc += fn();
