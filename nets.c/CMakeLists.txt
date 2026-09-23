@@ -10,6 +10,7 @@ endif()
 
 option(NETS_NATIVE "Enable native hardware optimizations" OFF)
 option(NETS_BUILD_TESTS "Build nets tests" OFF)
+set(NETS_TEST_CLI "" CACHE STRING "Path to the nets CLI used by contract tests")
 
 set(NETS_TEST_EXTERNAL_ARTIFACTS OFF)
 if(NETS_BUILD_TESTS AND NETS_TEST_SHARED_LIBRARY)
@@ -118,6 +119,12 @@ if(NETS_BUILD_TESTS)
     add_executable(nets_contract_test src/test.c)
     target_include_directories(nets_contract_test PRIVATE src)
     target_link_libraries(nets_contract_test PRIVATE ${NETS_TEST_SHARED_TARGET})
+
+    if(NETS_TEST_CLI)
+        target_compile_definitions(nets_contract_test PRIVATE NETS_TEST_CLI="${NETS_TEST_CLI}")
+    elseif(TARGET nets)
+        target_compile_definitions(nets_contract_test PRIVATE NETS_TEST_CLI="$<TARGET_FILE:nets>")
+    endif()
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(nets_contract_test PRIVATE pthread m)
