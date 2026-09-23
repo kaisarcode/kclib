@@ -440,7 +440,7 @@ test:
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -q '^MIN_TEST_CLI:' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
@@ -448,6 +448,7 @@ test:
 				-DMIN_BUILD_TESTS=ON \
 				-DMIN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmin.dll \
 				-DMIN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmin.dll.a \
+				-DMIN_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/min.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -486,11 +487,12 @@ test:
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -q '^MIN_TEST_CLI:' $(BUILD_DIR)/test/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DMIN_BUILD_TESTS=ON \
 				-DMIN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DMIN_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/min$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
