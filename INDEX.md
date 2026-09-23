@@ -60,7 +60,7 @@ index is the summary, not the contract.
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
 | [`flow`](https://github.com/kaisarcode/kclib/flow.c) | Runs branched command and child flows; branches remain independent and do not merge. | Branching or parallel execution paths. |
-| [`libr`](https://github.com/kaisarcode/kclib/libr.c) | Provides the reference blueprint for new libraries and CLIs in the collection. | Only when creating a new primitive in the collection; not distributed. |
+| [`demo`](https://github.com/kaisarcode/kclib/demo.c) | Provides the reference blueprint for new libraries and CLIs in the collection. | Only when creating a new primitive in the collection; not distributed. |
 
 ## Utilities
 
