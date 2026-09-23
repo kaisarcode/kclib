@@ -349,6 +349,11 @@ static int result_wait(test_result_t *result) {
     return status;
 }
 
+/**
+ * Run one local TCP or UDP test server.
+ * @param userdata Test server state.
+ * @return Platform thread return value.
+ */
 #ifdef _WIN32
 static DWORD WINAPI server_main(void *userdata)
 #else
