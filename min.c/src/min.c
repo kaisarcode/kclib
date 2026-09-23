@@ -91,30 +91,6 @@ static int kc_min_read_all(int fd, char **out) {
 }
 
 /**
- * Convert a CLI mode name to a public minifier.
- * @param name Mode name.
- * @return Public minifier function, or NULL for invalid input.
- */
-static char *(*kc_min_parse_mode(const char *name))(const char *) {
-    if (!name) {
-        return NULL;
-    }
-    if (strcmp(name, "css") == 0) {
-        return kc_min_css;
-    }
-    if (strcmp(name, "js") == 0) {
-        return kc_min_js;
-    }
-    if (strcmp(name, "html") == 0) {
-        return kc_min_html;
-    }
-    if (strcmp(name, "txt") == 0) {
-        return kc_min_txt;
-    }
-    return NULL;
-}
-
-/**
  * Print command usage information.
  * @param name Program executable name.
  * @return None.
@@ -148,10 +124,10 @@ static void kc_print_version(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    const char *mode_name = NULL;
+    char *(*operation)(const char *) = NULL;
+    const char *value = NULL;
     char *input = NULL;
     char *output = NULL;
-    char *(*operation)(const char *);
     int i;
 
     for (i = 1; i < argc; i++) {
@@ -159,53 +135,82 @@ int main(int argc, char **argv) {
             kc_print_help(argv[0]);
             return 0;
         }
+
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             kc_print_version();
             return 0;
         }
-        if (argv[i][0] == '-') {
+
+        if (strcmp(argv[i], "-css") == 0 || strcmp(argv[i], "--css") == 0) {
+            if (operation) {
+                fprintf(stderr, "min: multiple modes are not allowed\n");
+                return 1;
+            }
+            operation = kc_min_css;
+        } else if (strcmp(argv[i], "-js") == 0 || strcmp(argv[i], "--js") == 0) {
+            if (operation) {
+                fprintf(stderr, "min: multiple modes are not allowed\n");
+                return 1;
+            }
+            operation = kc_min_js;
+        } else if (strcmp(argv[i], "-html") == 0 || strcmp(argv[i], "--html") == 0) {
+            if (operation) {
+                fprintf(stderr, "min: multiple modes are not allowed\n");
+                return 1;
+            }
+            operation = kc_min_html;
+        } else if (strcmp(argv[i], "-txt") == 0 || strcmp(argv[i], "--txt") == 0) {
+            if (operation) {
+                fprintf(stderr, "min: multiple modes are not allowed\n");
+                return 1;
+            }
+            operation = kc_min_txt;
+        } else if (argv[i][0] == '-') {
             fprintf(stderr, "min: unknown option '%s'\n", argv[i]);
             return 1;
-        }
-        if (!mode_name) {
-            mode_name = argv[i];
+        } else if (!value) {
+            value = argv[i];
         } else {
             fprintf(stderr, "min: unexpected argument '%s'\n", argv[i]);
             return 1;
         }
     }
 
-    if (!mode_name) {
+    if (!operation) {
         fprintf(stderr, "min: mode is required\n");
         return 1;
     }
 
-    operation = kc_min_parse_mode(mode_name);
-    if (!operation) {
-        fprintf(stderr, "min: invalid mode '%s'\n", mode_name);
-        return 1;
-    }
-
-    if (kc_min_read_all(KC_MIN_STDIN_FD, &input) != 0) {
-        fprintf(stderr, "min: failed to read input\n");
-        return 1;
+    if (value) {
+        input = (char *)value;
+    } else {
+        if (kc_min_read_all(KC_MIN_STDIN_FD, &input) != 0) {
+            fprintf(stderr, "min: failed to read input\n");
+            return 1;
+        }
     }
 
     if (!input || input[0] == '\0') {
-        free(input);
+        if (!value) {
+            free(input);
+        }
         return 0;
     }
 
     output = operation(input);
     if (!output) {
         fprintf(stderr, "min: execution failed\n");
-        free(input);
+        if (!value) {
+            free(input);
+        }
         return 1;
     }
 
     fputs(output, stdout);
 
     kc_min_free(output);
-    free(input);
+    if (!value) {
+        free(input);
+    }
     return 0;
 }
