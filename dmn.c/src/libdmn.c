@@ -1135,21 +1135,6 @@ static int kc_dmn_exists(const char *dir, const char *key) {
 }
 
 /**
- * Lists one registered daemon or reports that it is missing.
- * @param dir Runtime directory.
- * @param key Daemon key name.
- * @param cb Callback, or NULL.
- * @param userdata Opaque pointer.
- * @return 0 on success, 1 on formatting failure.
- */
-static int kc_dmn_run_list_one(const char *dir, const char *key, kc_dmn_row_handler_t cb, void *userdata) {
-    if (!kc_dmn_exists(dir, key)) {
-        return 0;
-    }
-    return kc_dmn_ls_row(dir, key, cb, userdata);
-}
-
-/**
  * Lists all registered daemon keys in the runtime directory.
  * @param dir Runtime directory.
  * @param cb Callback, or NULL.
