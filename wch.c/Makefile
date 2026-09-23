@@ -416,7 +416,7 @@ define wasm_target
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DKC_WCH_BUILD_VERSION=$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
+	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DKC_WCH_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
 	@cp $(BUILD_DIR)/wasm32-wasm/out/wch.js $(BIN_DIR)/wasm32/wasm/wch.js
 	@cp $(BUILD_DIR)/wasm32-wasm/out/wch.wasm $(BIN_DIR)/wasm32/wasm/wch.wasm
 	@echo "OK wasm32/wasm"
