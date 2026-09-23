@@ -23,8 +23,12 @@ watcher.on(event => {
 watcher.close();
 ```
 
-Native backends are inotify on Linux, kqueue on macOS/BSD, and
-`ReadDirectoryChangesW` on Windows.
+Native backends are selected automatically for the current platform.
+
+In browser builds, `libwch` watches the virtual filesystem available to the
+application. It does not watch or gain direct access to the user's local disk.
+Files and directories created or modified inside that virtual filesystem can be
+observed through the same `open / on / close` API used on native platforms.
 
 ---
 
