@@ -212,7 +212,7 @@ static int kc_dmn_cli_relay(kc_dmn_t *daemon) {
     const unsigned char *eot;
     size_t eot_size = 0;
     int stdin_open = 1;
-    int rc;
+    int rc = KC_DMN_OK;
 
     eot = (const unsigned char *)kc_dmn_get_eot(daemon, &eot_size);
     rc = kc_dmn_stream(daemon, &stream);
