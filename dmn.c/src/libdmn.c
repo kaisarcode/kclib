@@ -185,6 +185,176 @@ static int kc_dmn_ensure_dir(const char *path) {
 #endif
 }
 
+static int kc_dmn_name_valid(const char *name) {
+    const unsigned char *p;
+    if (!name || !name[0]) return 0;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return 0;
+    for (p = (const unsigned char *)name; *p; p++) {
+        if ((*p >= 'a' && *p <= 'z') ||
+                (*p >= 'A' && *p <= 'Z') ||
+                (*p >= '0' && *p <= '9') ||
+                *p == '.' || *p == '_' || *p == '-') continue;
+        return 0;
+    }
+    return 1;
+}
+
+static int kc_dmn_cmd_valid(const char *cmd) {
+    size_t n;
+    if (!cmd || !cmd[0]) return 0;
+    n = strlen(cmd);
+    if (n >= KC_DMN_BUF) return 0;
+    return strchr(cmd, '\n') == NULL && strchr(cmd, '\r') == NULL;
+}
+
+static int kc_dmn_resolve_dir(const char *dir, char *out, size_t cap) {
+    if (dir && dir[0]) {
+        return (size_t)snprintf(out, cap, "%s", dir) < cap ? 0 : 1;
+    }
+    return kc_dmn_runtime_dir(out, cap);
+}
+
+static int kc_dmn_meta_path(
+    const char *dir,
+    const char *name,
+    const char *suffix,
+    char *out,
+    size_t cap
+) {
+#ifdef _WIN32
+    return (size_t)snprintf(out, cap, "%s\\%s%s", dir, name, suffix) < cap ? 0 : 1;
+#else
+    return (size_t)snprintf(out, cap, "%s/%s%s", dir, name, suffix) < cap ? 0 : 1;
+#endif
+}
+
+static int kc_dmn_write_bytes(const char *path, const void *data, size_t size) {
+    FILE *file;
+    if (!path || (!data && size > 0)) return 1;
+    file = fopen(path, "wb");
+    if (!file) return 1;
+    if (size > 0 && fwrite(data, 1, size, file) != size) {
+        fclose(file);
+        return 1;
+    }
+    return fclose(file) == 0 ? 0 : 1;
+}
+
+static int kc_dmn_read_bytes(
+    const char *path,
+    unsigned char **out,
+    size_t *out_size
+) {
+    FILE *file;
+    long end;
+    unsigned char *data;
+
+    if (!out || !out_size) return 1;
+    *out = NULL;
+    *out_size = 0;
+
+    file = fopen(path, "rb");
+    if (!file) return 1;
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return 1;
+    }
+    end = ftell(file);
+    if (end < 0 || fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return 1;
+    }
+    if (end == 0) {
+        fclose(file);
+        return 0;
+    }
+    data = (unsigned char *)malloc((size_t)end);
+    if (!data) {
+        fclose(file);
+        return 1;
+    }
+    if (fread(data, 1, (size_t)end, file) != (size_t)end) {
+        free(data);
+        fclose(file);
+        return 1;
+    }
+    fclose(file);
+    *out = data;
+    *out_size = (size_t)end;
+    return 0;
+}
+
+static int kc_dmn_write_config(
+    const char *dir,
+    const char *name,
+    const char *cmd,
+    const void *eot,
+    size_t eot_size
+) {
+    char path[KC_DMN_PATH];
+    if (kc_dmn_ensure_dir(dir) != 0) return 1;
+    if (kc_dmn_meta_path(dir, name, ".cmd", path, sizeof(path)) != 0 ||
+            kc_dmn_write_bytes(path, cmd, strlen(cmd)) != 0)
+        return 1;
+    if (kc_dmn_meta_path(dir, name, ".eot", path, sizeof(path)) != 0 ||
+            kc_dmn_write_bytes(path, eot, eot_size) != 0)
+        return 1;
+    return 0;
+}
+
+static void kc_dmn_remove_config(const char *dir, const char *name) {
+    char path[KC_DMN_PATH];
+    if (kc_dmn_meta_path(dir, name, ".cmd", path, sizeof(path)) == 0)
+        (void)remove(path);
+    if (kc_dmn_meta_path(dir, name, ".eot", path, sizeof(path)) == 0)
+        (void)remove(path);
+}
+
+static int kc_dmn_load_config(kc_dmn_t *dmn) {
+    char path[KC_DMN_PATH];
+    unsigned char *raw = NULL;
+    size_t raw_size = 0;
+    char *cmd = NULL;
+    static const unsigned char default_eot = 4;
+
+    if (!dmn) return 1;
+
+    free(dmn->cmd);
+    dmn->cmd = NULL;
+    free(dmn->eot);
+    dmn->eot = NULL;
+    dmn->eot_size = 0;
+
+    if (kc_dmn_meta_path(dmn->dir, dmn->name, ".cmd", path, sizeof(path)) == 0 &&
+            kc_dmn_read_bytes(path, &raw, &raw_size) == 0 && raw_size > 0) {
+        cmd = (char *)malloc(raw_size + 1);
+        if (!cmd) {
+            free(raw);
+            return 1;
+        }
+        memcpy(cmd, raw, raw_size);
+        cmd[raw_size] = '\0';
+        free(raw);
+        raw = NULL;
+        dmn->cmd = cmd;
+    }
+
+    if (kc_dmn_meta_path(dmn->dir, dmn->name, ".eot", path, sizeof(path)) == 0 &&
+            kc_dmn_read_bytes(path, &raw, &raw_size) == 0 && raw_size > 0) {
+        dmn->eot = raw;
+        dmn->eot_size = raw_size;
+        return 0;
+    }
+    free(raw);
+
+    dmn->eot = (unsigned char *)malloc(1);
+    if (!dmn->eot) return 1;
+    dmn->eot[0] = default_eot;
+    dmn->eot_size = 1;
+    return 0;
+}
+
+
 /**
  * Composes the socket or pipe path for a key.
  * On Windows, returns the Named Pipe path ignoring dir.
