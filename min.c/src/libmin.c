@@ -64,7 +64,8 @@ static void kc_min_trim_space(char *out, size_t *n) {
 /**
  * Ensures that empty minification output is represented by an owned string.
  * @param out Output buffer pointer.
- * @return KC_MIN_INTERNAL_OK on success, or KC_MIN_INTERNAL_ERROR on allocation failure.
+ * @return KC_MIN_INTERNAL_OK on success, or KC_MIN_INTERNAL_ERROR on
+ * allocation failure.
  */
 static int kc_min_finish(char **out) {
     if (*out) {
