@@ -55,33 +55,22 @@ echo '<div>  hello  </div>' | ./bin/x86_64/linux/min html
 ```c
 #include "libmin.h"
 
-kc_min_t *ctx = NULL;
-char *output = NULL;
+char *output = kc_min_minify(KC_MIN_MODE_CSS, "body { color: red; }");
 
-if (kc_min_open(&ctx) == KC_MIN_OK) {
-    kc_min_set_mode(ctx, KC_MIN_MODE_CSS);
-
-    if (kc_min_exec(ctx, "body { color: red; }", &output) == KC_MIN_OK) {
-        /* use output */
-        kc_min_free(output);
-    }
-
-    kc_min_close(ctx);
+if (output) {
+    /* use output */
+    kc_min_free(output);
 }
 ```
 
----
+The reusable API is stateless. `kc_min_minify()` accepts one of
+`KC_MIN_MODE_CSS`, `KC_MIN_MODE_JS`, or `KC_MIN_MODE_HTML` plus a borrowed
+null-terminated input string. On success it returns an owned, null-terminated
+string, including an allocated empty string for empty input. It returns `NULL`
+for a null input, an invalid mode, or an allocation failure.
 
-## Lifecycle
-
-- `kc_min_open()` - allocates a new context in `KC_MIN_MODE_CSS`; the caller owns it after success.
-- `kc_min_set_mode()` - optionally selects CSS, JavaScript, or HTML minification for a context.
-- `kc_min_mode()` - converts a CLI mode name to an API mode constant.
-- `kc_min_exec()` - minifies a null-terminated input string and returns an owned, NUL-terminated output string.
-- `kc_min_free()` - releases output strings returned by `kc_min_exec()`.
-- `kc_min_close()` - releases the context.
-
-The lifecycle is: open a context, optionally select its mode, execute, free the returned output, then close the context.
+`kc_min_free()` releases memory returned by the library and accepts `NULL`.
+There is no public context or lifecycle state.
 
 ---
 
@@ -124,9 +113,9 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/min.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_min_*` API with its existing signatures, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `min` CLI: `src/min.c` is not compiled into the module.
+- The module exports `kc_min_minify`, `kc_min_free`, and `kc_min_version`. It contains the reusable stateless library capability, not the `min` CLI: `src/min.c` is not compiled into the module.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the same public-contract tests under Node.js. It requires `bin/wasm32/wasm/min.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles `src/test.c` with Emscripten and runs the reusable public-API contract tests under Node.js. Native and Wine tests additionally run one grouped `kc_min_cli` case; host process-spawning code is excluded from the WASM build. It requires `bin/wasm32/wasm/min.wasm` and reports how to build it when it is absent.
 
 `wasm32/wasm` is included in `make all`.
 
