@@ -745,6 +745,9 @@ EM_JS(void, kc_wch_wasm_install_hooks, (), {
         }, 0);
     }
 
+    FS.trackingDelegate['onOpenFile'] = function(path) {
+        emit(3, path);
+    };
     FS.trackingDelegate['onMakeDirectory'] = function(path) {
         emit(0, path);
     };
@@ -752,7 +755,7 @@ EM_JS(void, kc_wch_wasm_install_hooks, (), {
         emit(0, newpath);
     };
     FS.trackingDelegate['onWriteToFile'] = function(path) {
-        emit(1, path);
+        emit(4, path);
     };
     FS.trackingDelegate['willDeletePath'] = function(path) {
         emit(2, path);
@@ -806,14 +809,74 @@ void kc_wch_wasm_event(int type, const char *path) {
                 w->handler != NULL &&
                 kc_wch_wasm_matches(w, path)) {
             kc_wch_event_t event;
+            int known = path_find(w, path) >= 0;
+            int emit = 1;
 
-            event.type = type;
-            event.path = path;
-            w->handler(&event, w->userdata);
+            if (type == 3) {
+                if (known) {
+                    emit = 0;
+                } else {
+                    event.type = KC_WCH_ADD;
+                    (void)path_add(w, path);
+                }
+            } else if (type == 4) {
+                event.type = known ? KC_WCH_UPD : KC_WCH_ADD;
+                if (!known) (void)path_add(w, path);
+            } else {
+                event.type = type;
+                if (type == KC_WCH_ADD) {
+                    (void)path_add(w, path);
+                } else if (type == KC_WCH_DEL) {
+                    path_remove(w, path);
+                }
+            }
+
+            if (emit) {
+                event.path = path;
+                w->handler(&event, w->userdata);
+            }
         }
 
         w = next;
     }
+}
+
+/**
+ * Records existing paths below one virtual-filesystem directory.
+ * @param w Watcher instance.
+ * @param dir Directory to scan.
+ * @return None.
+ */
+static void kc_wch_wasm_scan(kc_wch_t *w, const char *dir) {
+    DIR *directory = opendir(dir);
+    struct dirent *entry;
+
+    if (directory == NULL) return;
+
+    while ((entry = readdir(directory)) != NULL) {
+        char path[PATH_MAX];
+        struct stat st;
+
+        if (strcmp(entry->d_name, ".") == 0 ||
+                strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        if ((size_t)snprintf(
+                path, sizeof(path), "%s/%s", dir, entry->d_name)
+                >= sizeof(path)) {
+            continue;
+        }
+
+        if (stat(path, &st) != 0) continue;
+        (void)path_add(w, path);
+
+        if (w->recursive && S_ISDIR(st.st_mode)) {
+            kc_wch_wasm_scan(w, path);
+        }
+    }
+
+    closedir(directory);
 }
 
 /**
@@ -1101,6 +1164,11 @@ int kc_wch_open(
 #ifdef __linux__
     if (w->backend == 1) {
         scan_watch_dir(w, w->root);
+    }
+#endif
+#ifdef __EMSCRIPTEN__
+    if (w->backend == 4 && !w->has_filter) {
+        kc_wch_wasm_scan(w, w->root);
     }
 #endif
 
