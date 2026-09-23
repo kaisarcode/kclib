@@ -78,6 +78,7 @@ struct kc_wch {
     kc_wch_handler_t handler;
     void *userdata;
     atomic_int stop;
+    atomic_int ready;
     int thread_started;
     int self_close;
 
@@ -799,6 +800,9 @@ static void *kc_wch_worker(void *arg) {
 #endif
     kc_wch_t *w = (kc_wch_t *)arg;
 
+    while (!atomic_load(&w->ready)) {
+    }
+
     while (!atomic_load(&w->stop)) {
         kc_wch_event_t ev;
         int rc = kc_wch_wait(w, &ev, 100);
@@ -853,6 +857,7 @@ int kc_wch_open(
     w = calloc(1, sizeof(*w));
     if (w == NULL) return KC_WCH_ERROR;
     atomic_init(&w->stop, 0);
+    atomic_init(&w->ready, 0);
 
     if (exists) {
         w->root = strdup(path);
@@ -945,6 +950,7 @@ int kc_wch_on(kc_wch_t *w, kc_wch_handler_t handler, void *userdata) {
     }
 #endif
     w->thread_started = 1;
+    atomic_store(&w->ready, 1);
     return KC_WCH_OK;
 }
 
