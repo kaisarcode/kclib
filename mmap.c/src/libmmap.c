@@ -238,6 +238,12 @@ static int kc_mmap_load(kc_mmap_t *map) {
     return KC_MMAP_OK;
 }
 
+/**
+ * Opens one file-backed value instance.
+ * @param out Output pointer for the new instance.
+ * @param path Backing file path.
+ * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
+ */
 int kc_mmap_open(kc_mmap_t **out, const char *path) {
     kc_mmap_t *map;
 
@@ -273,6 +279,13 @@ int kc_mmap_open(kc_mmap_t **out, const char *path) {
     return KC_MMAP_OK;
 }
 
+/**
+ * Reads the current logical value.
+ * @param map Instance pointer.
+ * @param out_data Output borrowed data pointer.
+ * @param out_size Output byte count.
+ * @return KC_MMAP_OK, KC_MMAP_NOT_FOUND, or KC_MMAP_ERROR.
+ */
 int kc_mmap_get(
     const kc_mmap_t *map,
     const void **out_data,
@@ -298,6 +311,13 @@ int kc_mmap_get(
     return KC_MMAP_OK;
 }
 
+/**
+ * Replaces the current in-memory value.
+ * @param map Instance pointer.
+ * @param data Input bytes, or NULL for null when size is zero.
+ * @param size Input byte count.
+ * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
+ */
 int kc_mmap_set(kc_mmap_t *map, const void *data, size_t size) {
     void *copy = NULL;
 
@@ -321,6 +341,11 @@ int kc_mmap_set(kc_mmap_t *map, const void *data, size_t size) {
     return KC_MMAP_OK;
 }
 
+/**
+ * Persists the current value.
+ * @param map Instance pointer.
+ * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
+ */
 int kc_mmap_save(kc_mmap_t *map) {
     FILE *file;
 
@@ -359,6 +384,11 @@ int kc_mmap_save(kc_mmap_t *map) {
     return KC_MMAP_OK;
 }
 
+/**
+ * Deletes the backing file and invalidates the instance.
+ * @param map Instance pointer.
+ * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
+ */
 int kc_mmap_del(kc_mmap_t *map) {
     if (map == NULL || !map->valid) {
         return KC_MMAP_ERROR;
@@ -371,6 +401,11 @@ int kc_mmap_del(kc_mmap_t *map) {
     return kc_mmap_save(map);
 }
 
+/**
+ * Releases one instance.
+ * @param map Instance pointer; NULL is safe.
+ * @return None.
+ */
 void kc_mmap_close(kc_mmap_t *map) {
     if (map == NULL) {
         return;
@@ -381,6 +416,10 @@ void kc_mmap_close(kc_mmap_t *map) {
     free(map);
 }
 
+/**
+ * Returns the generated build version.
+ * @return Unix timestamp for the current build.
+ */
 uint64_t kc_mmap_version(void) {
     return (uint64_t)KC_MMAP_BUILD_VERSION;
 }
