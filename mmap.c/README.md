@@ -17,8 +17,8 @@ mm.save();
 mm.set(null);
 mm.save();             // deletes the file and invalidates mm
 
-// shorthand:
-mm.del();
+// equivalent shorthand on a valid instance:
+// mm.del();
 ```
 
 After `del()`, any operation other than final cleanup is an error. Reopening the
