@@ -107,81 +107,89 @@ static char *repeat_byte(char byte, size_t count) {
  */
 static int case_kc_tpm_open(void) {
     const char *name = "kc_tpm_open";
-    const char *detail = "validates and allocates an unbuilt context";
+    const char *detail = "creates ready profiles with defaults and options";
     kc_tpm_t *tpm = NULL;
+    kc_tpm_t *default_tpm = NULL;
+    kc_tpm_t *explicit_tpm = NULL;
+    kc_tpm_options_t options;
+    char *large_text = NULL;
     double score = -1.0;
+    double default_score = -1.0;
+    double explicit_score = -1.0;
     int fail = 0;
 
     fail += expect_int("open rejects NULL out", KC_TPM_ERROR,
-        kc_tpm_open(NULL));
-    fail += expect_int("open creates context", KC_TPM_OK,
-        kc_tpm_open(&tpm));
-    fail += expect_true("open sets output", tpm != NULL);
+        kc_tpm_open(NULL, "abc", NULL));
+    fail += expect_int("open rejects NULL map", KC_TPM_ERROR,
+        kc_tpm_open(&tpm, NULL, NULL));
+    fail += expect_true("failed open clears output", tpm == NULL);
+
+    fail += expect_int("open uses default ngram size", KC_TPM_OK,
+        kc_tpm_open(&default_tpm, "hello world hello world", NULL));
+    fail += expect_true("default open returns profile", default_tpm != NULL);
+
+    options.ngram_size = 3;
+    fail += expect_int("open accepts explicit default", KC_TPM_OK,
+        kc_tpm_open(&explicit_tpm, "hello world hello world", &options));
+    fail += expect_true("explicit open returns profile", explicit_tpm != NULL);
+
+    if (default_tpm != NULL && explicit_tpm != NULL) {
+        fail += expect_int("default profile scores immediately", KC_TPM_OK,
+            kc_tpm_score(default_tpm, "hello world", &default_score));
+        fail += expect_int("explicit profile scores immediately", KC_TPM_OK,
+            kc_tpm_score(explicit_tpm, "hello world", &explicit_score));
+        fail += expect_true("default equals explicit n=3",
+            default_score == explicit_score);
+    }
+
+    kc_tpm_close(default_tpm);
+    kc_tpm_close(explicit_tpm);
+
+    options.ngram_size = 0;
+    tpm = (kc_tpm_t *)1;
+    fail += expect_int("open rejects n below range", KC_TPM_ERROR,
+        kc_tpm_open(&tpm, "abc", &options));
+    fail += expect_true("invalid option clears output", tpm == NULL);
+
+    options.ngram_size = 9;
+    tpm = (kc_tpm_t *)1;
+    fail += expect_int("open rejects n above range", KC_TPM_ERROR,
+        kc_tpm_open(&tpm, "abc", &options));
+    fail += expect_true("invalid high option clears output", tpm == NULL);
+
+    options.ngram_size = 1;
+    fail += expect_int("open accepts n=1", KC_TPM_OK,
+        kc_tpm_open(&tpm, "abc abc", &options));
+    kc_tpm_close(tpm);
+
+    options.ngram_size = 8;
+    tpm = NULL;
+    fail += expect_int("open accepts n=8", KC_TPM_OK,
+        kc_tpm_open(&tpm, "abcdefgh abcdefgh", &options));
+    kc_tpm_close(tpm);
+
+    options.ngram_size = 2;
+    tpm = NULL;
+    fail += expect_int("open accepts empty profile", KC_TPM_OK,
+        kc_tpm_open(&tpm, "", &options));
     if (tpm != NULL) {
-        fail += expect_int("new context is unbuilt", KC_TPM_ERROR,
+        fail += expect_int("empty profile scores successfully", KC_TPM_OK,
             kc_tpm_score(tpm, "abc", &score));
-        kc_tpm_close(tpm);
+        fail += expect_true("empty profile scores zero", score == 0.0);
     }
-
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_tpm_build.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpm_build(void) {
-    const char *name = "kc_tpm_build";
-    const char *detail = "builds, rebuilds, and invalidates failed profiles";
-    kc_tpm_t *tpm = NULL;
-    char *large_text = NULL;
-    double score = -1.0;
-    int fail = 0;
-
-    fail += expect_int("build rejects NULL ctx", KC_TPM_ERROR,
-        kc_tpm_build(NULL, "abc", 2));
-    fail += expect_int("open context for build", KC_TPM_OK,
-        kc_tpm_open(&tpm));
-    if (tpm == NULL) {
-        case_result(1, name, detail);
-        return 1;
-    }
-
-    fail += expect_int("build rejects NULL text", KC_TPM_ERROR,
-        kc_tpm_build(tpm, NULL, 2));
-    fail += expect_int("build rejects n below range", KC_TPM_ERROR,
-        kc_tpm_build(tpm, "abc", 0));
-    fail += expect_int("build rejects n above range", KC_TPM_ERROR,
-        kc_tpm_build(tpm, "abc", 9));
-    fail += expect_int("build accepts n=1", KC_TPM_OK,
-        kc_tpm_build(tpm, "abc abc", 1));
-    fail += expect_int("build accepts n=8", KC_TPM_OK,
-        kc_tpm_build(tpm, "abcdefgh abcdefgh", 8));
-    fail += expect_int("build accepts empty profile", KC_TPM_OK,
-        kc_tpm_build(tpm, "", 2));
-    fail += expect_int("empty built profile scores successfully", KC_TPM_OK,
-        kc_tpm_score(tpm, "abc", &score));
-    fail += expect_true("empty built profile scores zero", score == 0.0);
-
-    fail += expect_int("build initial profile for rebuild", KC_TPM_OK,
-        kc_tpm_build(tpm, "hello world hello world", 3));
-    fail += expect_int("successful rebuild replaces profile", KC_TPM_OK,
-        kc_tpm_build(tpm, "zzzz yyyy xxxx", 3));
-    fail += expect_int("rebuilt profile is usable", KC_TPM_OK,
-        kc_tpm_score(tpm, "zzzz yyyy", &score));
+    kc_tpm_close(tpm);
 
     large_text = repeat_byte('a', 16385);
     fail += expect_true("allocate overflow text", large_text != NULL);
     if (large_text != NULL) {
-        fail += expect_int("build reports raw gram overflow", KC_TPM_ERROR,
-            kc_tpm_build(tpm, large_text, 1));
-        fail += expect_int("failed rebuild leaves context unbuilt", KC_TPM_ERROR,
-            kc_tpm_score(tpm, "aaaa", &score));
+        options.ngram_size = 1;
+        tpm = (kc_tpm_t *)1;
+        fail += expect_int("open reports raw gram overflow", KC_TPM_ERROR,
+            kc_tpm_open(&tpm, large_text, &options));
+        fail += expect_true("overflow open returns no profile", tpm == NULL);
     }
 
     free(large_text);
-    kc_tpm_close(tpm);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -192,36 +200,34 @@ static int case_kc_tpm_build(void) {
  */
 static int case_kc_tpm_score(void) {
     const char *name = "kc_tpm_score";
-    const char *detail = "returns explicit status and bounded similarity";
+    const char *detail = "reuses one profile for bounded similarity scoring";
     kc_tpm_t *tpm = NULL;
+    kc_tpm_t *normalized_tpm = NULL;
+    kc_tpm_options_t options = { .ngram_size = 3 };
     char *large_text = NULL;
     double matching_score = -1.0;
     double mismatching_score = -1.0;
     double normalized_score = -1.0;
     double plain_score = -1.0;
-    double first_profile_score = -1.0;
-    double second_profile_score = -1.0;
+    double repeated_score = -1.0;
     double score = -1.0;
     int fail = 0;
 
     fail += expect_int("score rejects NULL ctx", KC_TPM_ERROR,
         kc_tpm_score(NULL, "abc", &score));
-    fail += expect_int("open context for score", KC_TPM_OK,
-        kc_tpm_open(&tpm));
+
+    fail += expect_int("open scoring profile", KC_TPM_OK,
+        kc_tpm_open(&tpm, "hello world hello world english text", &options));
     if (tpm == NULL) {
         case_result(1, name, detail);
         return 1;
     }
 
-    fail += expect_int("score before build fails", KC_TPM_ERROR,
-        kc_tpm_score(tpm, "abc", &score));
     fail += expect_int("score rejects NULL input", KC_TPM_ERROR,
         kc_tpm_score(tpm, NULL, &score));
     fail += expect_int("score rejects NULL output", KC_TPM_ERROR,
         kc_tpm_score(tpm, "abc", NULL));
 
-    fail += expect_int("build scoring profile", KC_TPM_OK,
-        kc_tpm_build(tpm, "hello world hello world english text", 3));
     fail += expect_int("matching score succeeds", KC_TPM_OK,
         kc_tpm_score(tpm, "hello world english text", &matching_score));
     fail += expect_int("mismatching score succeeds", KC_TPM_OK,
@@ -233,40 +239,41 @@ static int case_kc_tpm_score(void) {
     fail += expect_true("score ranks matching text higher",
         matching_score > mismatching_score);
 
-    fail += expect_int("build normalization profile", KC_TPM_OK,
-        kc_tpm_build(tpm, "  Hello\tWORLD\nhello   world  ", 3));
-    fail += expect_int("normalized score succeeds", KC_TPM_OK,
-        kc_tpm_score(tpm, "hello world", &normalized_score));
-    fail += expect_int("plain score succeeds", KC_TPM_OK,
-        kc_tpm_score(tpm, "HELLO\tWORLD", &plain_score));
-    fail += expect_true("score normalizes case and whitespace",
-        plain_score == normalized_score);
+    fail += expect_int("repeated score succeeds", KC_TPM_OK,
+        kc_tpm_score(tpm, "hello world english text", &repeated_score));
+    fail += expect_true("profile is reusable",
+        repeated_score == matching_score);
 
     fail += expect_int("empty input succeeds", KC_TPM_OK,
         kc_tpm_score(tpm, "", &score));
     fail += expect_true("empty input scores zero", score == 0.0);
 
-    fail += expect_int("build first rebuild profile", KC_TPM_OK,
-        kc_tpm_build(tpm, "alpha alpha alpha beta", 3));
-    fail += expect_int("score first rebuild profile", KC_TPM_OK,
-        kc_tpm_score(tpm, "alpha alpha", &first_profile_score));
-    fail += expect_int("build second rebuild profile", KC_TPM_OK,
-        kc_tpm_build(tpm, "zzzz zzzz yyyy", 3));
-    fail += expect_int("score second rebuild profile", KC_TPM_OK,
-        kc_tpm_score(tpm, "alpha alpha", &second_profile_score));
-    fail += expect_true("rebuild replaces active profile",
-        first_profile_score > second_profile_score);
+    fail += expect_int("open normalization profile", KC_TPM_OK,
+        kc_tpm_open(&normalized_tpm,
+            "  Hello\tWORLD\nhello   world  ", &options));
+    if (normalized_tpm != NULL) {
+        fail += expect_int("normalized score succeeds", KC_TPM_OK,
+            kc_tpm_score(normalized_tpm, "hello world", &normalized_score));
+        fail += expect_int("plain score succeeds", KC_TPM_OK,
+            kc_tpm_score(normalized_tpm, "HELLO\tWORLD", &plain_score));
+        fail += expect_true("score normalizes case and whitespace",
+            plain_score == normalized_score);
+    }
 
-    fail += expect_int("build n=1 overflow profile", KC_TPM_OK,
-        kc_tpm_build(tpm, "aaaa", 1));
+    options.ngram_size = 1;
+    kc_tpm_close(tpm);
+    tpm = NULL;
+    fail += expect_int("open n=1 overflow profile", KC_TPM_OK,
+        kc_tpm_open(&tpm, "aaaa", &options));
     large_text = repeat_byte('a', 16385);
     fail += expect_true("allocate score overflow text", large_text != NULL);
-    if (large_text != NULL) {
+    if (tpm != NULL && large_text != NULL) {
         fail += expect_int("score reports raw gram overflow", KC_TPM_ERROR,
             kc_tpm_score(tpm, large_text, &score));
     }
 
     free(large_text);
+    kc_tpm_close(normalized_tpm);
     kc_tpm_close(tpm);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -283,8 +290,8 @@ static int case_kc_tpm_close(void) {
     int fail = 0;
 
     kc_tpm_close(NULL);
-    fail += expect_int("open context for close", KC_TPM_OK,
-        kc_tpm_open(&tpm));
+    fail += expect_int("open profile for close", KC_TPM_OK,
+        kc_tpm_open(&tpm, "abc", NULL));
     kc_tpm_close(tpm);
 
     case_result(fail, name, detail);
@@ -760,8 +767,8 @@ static int case_kc_tpm_cli(void) {
         fail += expect_int("CLI empty map exits 1", 1,
             test_cli_run_input(empty_map, "hello", 5, out, sizeof(out), err,
                 sizeof(err), &status) ? 1 : status);
-        fail += expect_true("CLI empty map build diagnostic",
-            strstr(err, "build failed") != NULL);
+        fail += expect_true("CLI empty map profile diagnostic",
+            strstr(err, "profile creation failed") != NULL);
 
         fail += expect_int("CLI empty stdin exits 0", 0,
             test_cli_run_input(normal, NULL, 0, out, sizeof(out), err,
@@ -807,15 +814,14 @@ static int case_all(void) {
     int rc = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 5;
+    test_case_total = 4;
 #else
     int cli_enabled = KC_TPM_TEST_CLI[0] != '\0';
-    test_case_total = cli_enabled ? 6 : 5;
+    test_case_total = cli_enabled ? 5 : 4;
 #endif
 
     test_case_current = 0;
     run_case(&rc, case_kc_tpm_open);
-    run_case(&rc, case_kc_tpm_build);
     run_case(&rc, case_kc_tpm_score);
     run_case(&rc, case_kc_tpm_close);
     run_case(&rc, case_kc_tpm_version);
@@ -841,7 +847,6 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_tpm_open") == 0) return case_kc_tpm_open();
-    if (strcmp(argv[1], "kc_tpm_build") == 0) return case_kc_tpm_build();
     if (strcmp(argv[1], "kc_tpm_score") == 0) return case_kc_tpm_score();
     if (strcmp(argv[1], "kc_tpm_close") == 0) return case_kc_tpm_close();
     if (strcmp(argv[1], "kc_tpm_version") == 0) return case_kc_tpm_version();
