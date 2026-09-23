@@ -490,9 +490,15 @@ static int case_kc_mmap_save(void) {
 
     fail += expect_int("open missing path", KC_MMAP_OK,
         kc_mmap_open(&map, path));
-    fail += expect_int("save missing untouched value", KC_MMAP_ERROR,
+    fail += expect_int("save initial null", KC_MMAP_OK,
         kc_mmap_save(map));
+    fail += expect_int("initial null save invalidates instance", KC_MMAP_ERROR,
+        kc_mmap_set(map, "AB", 2U));
+    kc_mmap_close(map);
+    map = NULL;
 
+    fail += expect_int("reopen missing path", KC_MMAP_OK,
+        kc_mmap_open(&map, path));
     fail += expect_int("set AB", KC_MMAP_OK,
         kc_mmap_set(map, "AB", 2U));
     fail += expect_int("save AB", KC_MMAP_OK, kc_mmap_save(map));
