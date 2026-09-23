@@ -290,42 +290,35 @@ static int test_cli_run_input(char *const argv[], const char *input,
 #endif
 
 /**
- * Tests the public build-version query.
- * @return 0 when the case passes, 1 otherwise.
- */
-static int case_kc_min_version(void) {
-    int fail = expect_true("version returns non-zero", kc_min_version() != 0U);
-    case_result(fail, "kc_min_version", "returns a nonzero generated build version");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests invalid stateless minification inputs.
- * @return 0 when the case passes, 1 otherwise.
- */
-static int case_kc_min_minify_invalid(void) {
-    int fail = 0;
-    fail += expect_true("NULL input returns NULL", kc_min_minify(KC_MIN_MODE_CSS, NULL) == NULL);
-    fail += expect_true("invalid mode returns NULL", kc_min_minify(0, "x") == NULL);
-    fail += expect_true("unknown mode returns NULL", kc_min_minify(42, "x") == NULL);
-    case_result(fail, "kc_min_minify_invalid", "rejects null input and invalid modes");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests CSS minification.
  * @return 0 when the case passes, 1 otherwise.
  */
-static int case_kc_min_minify_css(void) {
+static int case_kc_min_css(void) {
     char *out;
     int fail = 0;
-    out = kc_min_minify(KC_MIN_MODE_CSS, "/* hi */ body{}");
-    fail += expect_string("CSS comments removed", "body{}", out); kc_min_free(out);
-    out = kc_min_minify(KC_MIN_MODE_CSS, "a { margin: 0px 0% 0pt; }");
-    fail += expect_string("CSS zero units removed", "a{margin:0 0 0}", out); kc_min_free(out);
-    out = kc_min_minify(KC_MIN_MODE_CSS, "a { width: calc(100% - 10px); }");
-    fail += expect_string("CSS calc spacing preserved", "a{width:calc(100% - 10px)}", out); kc_min_free(out);
-    case_result(fail, "kc_min_minify_css", "preserves the conservative CSS scanner contract");
+
+    fail += expect_true("css NULL returns NULL", kc_min_css(NULL) == NULL);
+
+    out = kc_min_css("");
+    fail += expect_true("css empty returns allocation", out != NULL);
+    if (out) fail += expect_string("css empty returns empty string", "", out);
+    kc_min_free(out);
+
+    out = kc_min_css("/* hi */ body{}");
+    fail += expect_string("CSS comments removed", "body{}", out);
+    kc_min_free(out);
+
+    out = kc_min_css("a { margin: 0px 0% 0pt; }");
+    fail += expect_string("CSS zero units removed", "a{margin:0 0 0}", out);
+    kc_min_free(out);
+
+    out = kc_min_css("a { width: calc(100% - 10px); }");
+    fail += expect_string("CSS calc spacing preserved",
+        "a{width:calc(100% - 10px)}", out);
+    kc_min_free(out);
+
+    case_result(fail, "kc_min_css",
+        "minifies CSS with the conservative scanner contract");
     return fail == 0 ? 0 : 1;
 }
 
@@ -333,18 +326,35 @@ static int case_kc_min_minify_css(void) {
  * Tests JavaScript minification.
  * @return 0 when the case passes, 1 otherwise.
  */
-static int case_kc_min_minify_js(void) {
+static int case_kc_min_js(void) {
     char *out;
     int fail = 0;
-    out = kc_min_minify(KC_MIN_MODE_JS, "const x = 1; // comment");
-    fail += expect_string("JS comment removed", "const x = 1;", out); kc_min_free(out);
-    out = kc_min_minify(KC_MIN_MODE_JS, "const t = `a  b`;");
-    fail += expect_string("JS template preserved", "const t = `a  b`;", out); kc_min_free(out);
-    out = kc_min_minify(KC_MIN_MODE_JS, "var re = /a[bc]d/g;");
-    fail += expect_string("JS regex preserved", "var re = /a[bc]d/g;", out); kc_min_free(out);
-    out = kc_min_minify(KC_MIN_MODE_JS, "var d = a / b;");
-    fail += expect_string("JS division preserved", "var d = a / b;", out); kc_min_free(out);
-    case_result(fail, "kc_min_minify_js", "preserves templates, regex literals, and division");
+
+    fail += expect_true("js NULL returns NULL", kc_min_js(NULL) == NULL);
+
+    out = kc_min_js("");
+    fail += expect_true("js empty returns allocation", out != NULL);
+    if (out) fail += expect_string("js empty returns empty string", "", out);
+    kc_min_free(out);
+
+    out = kc_min_js("const x = 1; // comment");
+    fail += expect_string("JS comment removed", "const x = 1;", out);
+    kc_min_free(out);
+
+    out = kc_min_js("const t = `a  b`;");
+    fail += expect_string("JS template preserved", "const t = `a  b`;", out);
+    kc_min_free(out);
+
+    out = kc_min_js("var re = /a[bc]d/g;");
+    fail += expect_string("JS regex preserved", "var re = /a[bc]d/g;", out);
+    kc_min_free(out);
+
+    out = kc_min_js("var d = a / b;");
+    fail += expect_string("JS division preserved", "var d = a / b;", out);
+    kc_min_free(out);
+
+    case_result(fail, "kc_min_js",
+        "minifies JavaScript while preserving templates, regex, and division");
     return fail == 0 ? 0 : 1;
 }
 
@@ -352,30 +362,62 @@ static int case_kc_min_minify_js(void) {
  * Tests HTML minification.
  * @return 0 when the case passes, 1 otherwise.
  */
-static int case_kc_min_minify_html(void) {
+static int case_kc_min_html(void) {
     char *out;
     int fail = 0;
-    out = kc_min_minify(KC_MIN_MODE_HTML, "<!-- c --><p>hi</p>");
-    fail += expect_string("HTML comment removed", "<p>hi</p>", out); kc_min_free(out);
-    out = kc_min_minify(KC_MIN_MODE_HTML, "<pre>  a  </pre>");
-    fail += expect_string("HTML pre preserved", "<pre>  a  </pre>", out); kc_min_free(out);
-    out = kc_min_minify(KC_MIN_MODE_HTML, "<textarea>  x  </textarea>");
-    fail += expect_string("HTML textarea preserved", "<textarea>  x  </textarea>", out); kc_min_free(out);
-    case_result(fail, "kc_min_minify_html", "preserves comments and verbatim-region behavior");
+
+    fail += expect_true("html NULL returns NULL", kc_min_html(NULL) == NULL);
+
+    out = kc_min_html("");
+    fail += expect_true("html empty returns allocation", out != NULL);
+    if (out) fail += expect_string("html empty returns empty string", "", out);
+    kc_min_free(out);
+
+    out = kc_min_html("<!-- c --><p>hi</p>");
+    fail += expect_string("HTML comment removed", "<p>hi</p>", out);
+    kc_min_free(out);
+
+    out = kc_min_html("<pre>  a  </pre>");
+    fail += expect_string("HTML pre preserved", "<pre>  a  </pre>", out);
+    kc_min_free(out);
+
+    out = kc_min_html("<textarea>  x  </textarea>");
+    fail += expect_string("HTML textarea preserved",
+        "<textarea>  x  </textarea>", out);
+    kc_min_free(out);
+
+    case_result(fail, "kc_min_html",
+        "minifies HTML while preserving verbatim regions");
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests owned empty output.
+ * Tests generic text minification.
  * @return 0 when the case passes, 1 otherwise.
  */
-static int case_kc_min_minify_empty(void) {
-    char *out = kc_min_minify(KC_MIN_MODE_CSS, "");
+static int case_kc_min_text(void) {
+    char *out;
     int fail = 0;
-    fail += expect_true("empty returns allocation", out != NULL);
-    if (out) fail += expect_string("empty returns empty string", "", out);
+
+    fail += expect_true("text NULL returns NULL", kc_min_text(NULL) == NULL);
+
+    out = kc_min_text("");
+    fail += expect_true("text empty returns allocation", out != NULL);
+    if (out) fail += expect_string("text empty returns empty string", "", out);
     kc_min_free(out);
-    case_result(fail, "kc_min_minify_empty", "returns an owned empty string");
+
+    out = kc_min_text("  hello   world\n\nfoo\tbar  ");
+    fail += expect_string("text collapses whitespace",
+        "hello world foo bar", out);
+    kc_min_free(out);
+
+    out = kc_min_text("a  <!-- x -->  b");
+    fail += expect_string("text does not interpret syntax",
+        "a <!-- x --> b", out);
+    kc_min_free(out);
+
+    case_result(fail, "kc_min_text",
+        "collapses generic whitespace without interpreting syntax");
     return fail == 0 ? 0 : 1;
 }
 
@@ -384,11 +426,26 @@ static int case_kc_min_minify_empty(void) {
  * @return 0 when the case passes, 1 otherwise.
  */
 static int case_kc_min_free(void) {
-    char *out = kc_min_minify(KC_MIN_MODE_CSS, "body { color: red; }");
-    int fail = expect_true("minify returns allocation", out != NULL);
+    char *out = kc_min_css("body { color: red; }");
+    int fail = expect_true("minifier returns allocation", out != NULL);
+
     kc_min_free(out);
     kc_min_free(NULL);
-    case_result(fail, "kc_min_free", "releases owned output and accepts NULL");
+
+    case_result(fail, "kc_min_free",
+        "releases owned output and accepts NULL");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests the public build-version query.
+ * @return 0 when the case passes, 1 otherwise.
+ */
+static int case_kc_min_version(void) {
+    int fail = expect_true("version returns non-zero", kc_min_version() != 0U);
+
+    case_result(fail, "kc_min_version",
+        "returns a nonzero generated build version");
     return fail == 0 ? 0 : 1;
 }
 
@@ -431,6 +488,13 @@ static int case_kc_min_cli(void) {
         fail += expect_int("CLI html exits 0", 0,
             test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
         fail += expect_string("CLI html output", "<p>hi</p>", out);
+    }
+    {
+        char *args[] = { (char *)MIN_TEST_CLI, "text", NULL };
+        const char *input = "  hello   world\nfoo\tbar  ";
+        fail += expect_int("CLI text exits 0", 0,
+            test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_string("CLI text output", "hello world foo bar", out);
     }
     {
         char *args[] = { (char *)MIN_TEST_CLI, "css", NULL };
@@ -485,22 +549,21 @@ static int case_kc_min_cli(void) {
 static int case_all(void) {
     int rc = 0;
 #ifdef __EMSCRIPTEN__
-    test_case_total = 7;
+    test_case_total = 6;
 #else
     int cli_enabled = MIN_TEST_CLI[0] != '\0';
 #ifdef _WIN32
     cli_enabled = 1;
 #endif
-    test_case_total = cli_enabled ? 8 : 7;
+    test_case_total = cli_enabled ? 7 : 6;
 #endif
     test_case_current = 0;
-    run_case(&rc, case_kc_min_version);
-    run_case(&rc, case_kc_min_minify_invalid);
-    run_case(&rc, case_kc_min_minify_css);
-    run_case(&rc, case_kc_min_minify_js);
-    run_case(&rc, case_kc_min_minify_html);
-    run_case(&rc, case_kc_min_minify_empty);
+    run_case(&rc, case_kc_min_css);
+    run_case(&rc, case_kc_min_js);
+    run_case(&rc, case_kc_min_html);
+    run_case(&rc, case_kc_min_text);
     run_case(&rc, case_kc_min_free);
+    run_case(&rc, case_kc_min_version);
 #ifndef __EMSCRIPTEN__
     if (cli_enabled) run_case(&rc, case_kc_min_cli);
 #endif
@@ -520,13 +583,12 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_min_version") == 0) return case_kc_min_version();
-    if (strcmp(argv[1], "kc_min_minify_invalid") == 0) return case_kc_min_minify_invalid();
-    if (strcmp(argv[1], "kc_min_minify_css") == 0) return case_kc_min_minify_css();
-    if (strcmp(argv[1], "kc_min_minify_js") == 0) return case_kc_min_minify_js();
-    if (strcmp(argv[1], "kc_min_minify_html") == 0) return case_kc_min_minify_html();
-    if (strcmp(argv[1], "kc_min_minify_empty") == 0) return case_kc_min_minify_empty();
+    if (strcmp(argv[1], "kc_min_css") == 0) return case_kc_min_css();
+    if (strcmp(argv[1], "kc_min_js") == 0) return case_kc_min_js();
+    if (strcmp(argv[1], "kc_min_html") == 0) return case_kc_min_html();
+    if (strcmp(argv[1], "kc_min_text") == 0) return case_kc_min_text();
     if (strcmp(argv[1], "kc_min_free") == 0) return case_kc_min_free();
+    if (strcmp(argv[1], "kc_min_version") == 0) return case_kc_min_version();
 #ifndef __EMSCRIPTEN__
     if (strcmp(argv[1], "kc_min_cli") == 0) return case_kc_min_cli();
 #endif
