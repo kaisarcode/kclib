@@ -3,12 +3,17 @@ project(init C)
 
 set(CMAKE_C_STANDARD 11)
 
+if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "init supports Linux and Windows only")
+endif()
+
 if(NOT DEFINED INIT_BUILD_VERSION)
     set(INIT_BUILD_VERSION 0)
 endif()
 
 option(INIT_NATIVE "Enable native hardware optimizations" OFF)
 option(INIT_BUILD_TESTS "Build init tests" OFF)
+set(INIT_TEST_CLI "" CACHE STRING "Path to the init CLI used by contract tests")
 
 set(INIT_TEST_EXTERNAL_ARTIFACTS OFF)
 if(INIT_BUILD_TESTS AND INIT_TEST_SHARED_LIBRARY)
@@ -82,6 +87,12 @@ if(INIT_BUILD_TESTS)
     add_executable(init_contract_test src/test.c)
     target_include_directories(init_contract_test PRIVATE src)
     target_link_libraries(init_contract_test PRIVATE ${INIT_TEST_SHARED_TARGET})
+
+    if(INIT_TEST_CLI)
+        target_compile_definitions(init_contract_test PRIVATE INIT_TEST_CLI="${INIT_TEST_CLI}")
+    elseif(TARGET init)
+        target_compile_definitions(init_contract_test PRIVATE INIT_TEST_CLI="$<TARGET_FILE:init>")
+    endif()
 
     if(WIN32)
         target_link_libraries(init_contract_test PRIVATE advapi32)
