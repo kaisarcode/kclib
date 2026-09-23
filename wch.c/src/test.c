@@ -149,9 +149,10 @@ static void remove_test_dir(const char *path) {
 static void record_event(const kc_wch_event_t *event, void *userdata) {
     event_state_t *state = (event_state_t *)userdata;
 
+    if (atomic_load(&state->count) != 0) return;
     state->type = event->type;
     snprintf(state->path, sizeof(state->path), "%s", event->path);
-    atomic_fetch_add(&state->count, 1);
+    atomic_store(&state->count, 1);
 }
 
 /**
