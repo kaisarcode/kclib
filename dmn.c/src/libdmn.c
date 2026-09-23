@@ -69,6 +69,14 @@ struct kc_dmn {
     void *data_userdata;
 };
 
+/**
+ * Find one byte sequence inside another.
+ * @param data Source bytes.
+ * @param data_size Source byte count.
+ * @param needle Sequence to locate.
+ * @param needle_size Sequence byte count.
+ * @return Byte offset, or the maximum size value when absent.
+ */
 static size_t kc_dmn_find_bytes(
     const unsigned char *data,
     size_t data_size,
@@ -182,6 +190,11 @@ static int kc_dmn_ensure_dir(const char *path) {
 #endif
 }
 
+/**
+ * Validate one daemon name.
+ * @param name Daemon name.
+ * @return Non-zero when valid.
+ */
 static int kc_dmn_name_valid(const char *name) {
     const unsigned char *p;
     if (!name || !name[0]) return 0;
@@ -196,6 +209,11 @@ static int kc_dmn_name_valid(const char *name) {
     return 1;
 }
 
+/**
+ * Validate one daemon command.
+ * @param cmd Command string.
+ * @return Non-zero when valid.
+ */
 static int kc_dmn_cmd_valid(const char *cmd) {
     size_t n;
     if (!cmd || !cmd[0]) return 0;
@@ -204,6 +222,13 @@ static int kc_dmn_cmd_valid(const char *cmd) {
     return strchr(cmd, '\n') == NULL && strchr(cmd, '\r') == NULL;
 }
 
+/**
+ * Resolve a configured or default runtime directory.
+ * @param dir Configured directory, or NULL.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @return Zero on success, non-zero on failure.
+ */
 static int kc_dmn_resolve_dir(const char *dir, char *out, size_t cap) {
     if (dir && dir[0]) {
         return (size_t)snprintf(out, cap, "%s", dir) < cap ? 0 : 1;
@@ -211,6 +236,15 @@ static int kc_dmn_resolve_dir(const char *dir, char *out, size_t cap) {
     return kc_dmn_runtime_dir(out, cap);
 }
 
+/**
+ * Compose one daemon metadata path.
+ * @param dir Runtime directory.
+ * @param name Daemon name.
+ * @param suffix Metadata suffix.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @return Zero on success, non-zero on failure.
+ */
 static int kc_dmn_meta_path(
     const char *dir,
     const char *name,
@@ -225,6 +259,13 @@ static int kc_dmn_meta_path(
 #endif
 }
 
+/**
+ * Write one binary metadata file.
+ * @param path Destination path.
+ * @param data Source bytes.
+ * @param size Source byte count.
+ * @return Zero on success, non-zero on failure.
+ */
 static int kc_dmn_write_bytes(const char *path, const void *data, size_t size) {
     FILE *file;
     if (!path || (!data && size > 0)) return 1;
@@ -237,6 +278,13 @@ static int kc_dmn_write_bytes(const char *path, const void *data, size_t size) {
     return fclose(file) == 0 ? 0 : 1;
 }
 
+/**
+ * Read one binary metadata file.
+ * @param path Source path.
+ * @param out Output byte buffer.
+ * @param out_size Output byte count.
+ * @return Zero on success, non-zero on failure.
+ */
 static int kc_dmn_read_bytes(
     const char *path,
     unsigned char **out,
@@ -281,6 +329,15 @@ static int kc_dmn_read_bytes(
     return 0;
 }
 
+/**
+ * Persist daemon command and EOT metadata.
+ * @param dir Runtime directory.
+ * @param name Daemon name.
+ * @param cmd Daemon command.
+ * @param eot EOT bytes.
+ * @param eot_size EOT byte count.
+ * @return Zero on success, non-zero on failure.
+ */
 static int kc_dmn_write_config(
     const char *dir,
     const char *name,
@@ -299,6 +356,12 @@ static int kc_dmn_write_config(
     return 0;
 }
 
+/**
+ * Remove daemon configuration metadata.
+ * @param dir Runtime directory.
+ * @param name Daemon name.
+ * @return None.
+ */
 static void kc_dmn_remove_config(const char *dir, const char *name) {
     char path[KC_DMN_PATH];
     if (kc_dmn_meta_path(dir, name, ".cmd", path, sizeof(path)) == 0)
@@ -307,6 +370,11 @@ static void kc_dmn_remove_config(const char *dir, const char *name) {
         (void)remove(path);
 }
 
+/**
+ * Load daemon configuration into a handle.
+ * @param dmn Daemon handle.
+ * @return Zero on success, non-zero on failure.
+ */
 static int kc_dmn_load_config(kc_dmn_t *dmn) {
     char path[KC_DMN_PATH];
     unsigned char *raw = NULL;
@@ -350,7 +418,6 @@ static int kc_dmn_load_config(kc_dmn_t *dmn) {
     dmn->eot_size = 1;
     return 0;
 }
-
 
 /**
  * Composes the socket or pipe path for a key.
@@ -410,6 +477,14 @@ static int kc_dmn_pid_path(
  * @return 0 on success, 1 on overflow.
  */
 #ifndef _WIN32
+/**
+ * Compose one backend process identifier path.
+ * @param dir Runtime directory.
+ * @param key Daemon name.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @return Zero on success, non-zero on failure.
+ */
 static int kc_dmn_backend_pid_path(
     const char *dir, const char *key, char *out, size_t cap
 ) {
@@ -1243,6 +1318,11 @@ typedef struct {
     int failed;
 } kc_dmn_collect_t;
 
+/**
+ * Duplicate one string.
+ * @param text Source string.
+ * @return Owned copy, or NULL on failure.
+ */
 static char *kc_dmn_strdup(const char *text) {
     size_t n;
     char *copy;
@@ -1254,6 +1334,11 @@ static char *kc_dmn_strdup(const char *text) {
     return copy;
 }
 
+/**
+ * Release temporary list collection state.
+ * @param collect Collection state.
+ * @return None.
+ */
 static void kc_dmn_collect_clear(kc_dmn_collect_t *collect) {
     size_t i;
     if (!collect) return;
@@ -1266,6 +1351,13 @@ static void kc_dmn_collect_clear(kc_dmn_collect_t *collect) {
     memset(collect, 0, sizeof(*collect));
 }
 
+/**
+ * Collect one daemon list row.
+ * @param name Daemon name.
+ * @param endpoint Daemon endpoint.
+ * @param userdata Collection state.
+ * @return None.
+ */
 static void kc_dmn_collect_row(
     const char *name,
     const char *endpoint,
@@ -1311,6 +1403,13 @@ static void kc_dmn_collect_row(
     collect->count++;
 }
 
+/**
+ * Materialize collected daemon entries.
+ * @param collect Collection state.
+ * @param out_entries Output entry array.
+ * @param out_count Output entry count.
+ * @return dmn status code.
+ */
 static int kc_dmn_collect_finish(
     kc_dmn_collect_t *collect,
     kc_dmn_entry_t **out_entries,
@@ -1351,6 +1450,15 @@ static int kc_dmn_collect_finish(
     return KC_DMN_OK;
 }
 
+/**
+ * Append bytes to one growing response buffer.
+ * @param data Owned response buffer.
+ * @param size Current response size.
+ * @param capacity Current buffer capacity.
+ * @param chunk Bytes to append.
+ * @param chunk_size Byte count to append.
+ * @return Zero on success, non-zero on failure.
+ */
 static int kc_dmn_append(
     unsigned char **data,
     size_t *size,
@@ -1385,6 +1493,12 @@ static int kc_dmn_append(
     return 0;
 }
 
+/**
+ * Create or replace a named daemon.
+ * @param name Daemon name.
+ * @param options Creation options.
+ * @return dmn status code.
+ */
 int kc_dmn_create(
     const char *name,
     const kc_dmn_options_t *options
@@ -1425,6 +1539,12 @@ int kc_dmn_create(
     return KC_DMN_OK;
 }
 
+/**
+ * Open a local handle bound to one daemon name.
+ * @param out Output daemon handle.
+ * @param name Daemon name.
+ * @return dmn status code.
+ */
 int kc_dmn_open(
     kc_dmn_t **out,
     const char *name
@@ -1453,6 +1573,13 @@ int kc_dmn_open(
     return KC_DMN_OK;
 }
 
+/**
+ * List daemons in one runtime directory.
+ * @param dir Runtime directory, or NULL.
+ * @param out_entries Output entry array.
+ * @param out_count Output entry count.
+ * @return dmn status code.
+ */
 int kc_dmn_list(
     const char *dir,
     kc_dmn_entry_t **out_entries,
@@ -1480,6 +1607,12 @@ int kc_dmn_list(
     return rc;
 }
 
+/**
+ * Delete one named daemon.
+ * @param name Daemon name.
+ * @param dir Runtime directory, or NULL.
+ * @return dmn status code.
+ */
 int kc_dmn_delete(
     const char *name,
     const char *dir
@@ -1495,6 +1628,12 @@ int kc_dmn_delete(
     return KC_DMN_OK;
 }
 
+/**
+ * Replace the command of an opened daemon.
+ * @param dmn Daemon handle.
+ * @param cmd Daemon command.
+ * @return dmn status code.
+ */
 int kc_dmn_set_cmd(
     kc_dmn_t *dmn,
     const char *cmd
@@ -1531,12 +1670,23 @@ int kc_dmn_set_cmd(
     return KC_DMN_OK;
 }
 
+/**
+ * Return the configured daemon command.
+ * @param dmn Daemon handle.
+ * @return Borrowed command string, or NULL.
+ */
 const char *kc_dmn_get_cmd(
     const kc_dmn_t *dmn
 ) {
     return dmn ? dmn->cmd : NULL;
 }
 
+/**
+ * Change the runtime directory targeted by a handle.
+ * @param dmn Daemon handle.
+ * @param dir Runtime directory, or NULL.
+ * @return dmn status code.
+ */
 int kc_dmn_set_dir(
     kc_dmn_t *dmn,
     const char *dir
@@ -1557,12 +1707,24 @@ int kc_dmn_set_dir(
     return KC_DMN_OK;
 }
 
+/**
+ * Return the runtime directory targeted by a handle.
+ * @param dmn Daemon handle.
+ * @return Borrowed directory string, or NULL.
+ */
 const char *kc_dmn_get_dir(
     const kc_dmn_t *dmn
 ) {
     return dmn ? dmn->dir : NULL;
 }
 
+/**
+ * Replace the daemon EOT marker.
+ * @param dmn Daemon handle.
+ * @param eot EOT bytes, or NULL.
+ * @param eot_size EOT byte count.
+ * @return dmn status code.
+ */
 int kc_dmn_set_eot(
     kc_dmn_t *dmn,
     const void *eot,
@@ -1617,6 +1779,12 @@ int kc_dmn_set_eot(
     return KC_DMN_OK;
 }
 
+/**
+ * Return the configured daemon EOT marker.
+ * @param dmn Daemon handle.
+ * @param out_size Optional EOT byte count output.
+ * @return Borrowed EOT bytes, or NULL.
+ */
 const void *kc_dmn_get_eot(
     const kc_dmn_t *dmn,
     size_t *out_size
@@ -1625,6 +1793,14 @@ const void *kc_dmn_get_eot(
     return dmn ? dmn->eot : NULL;
 }
 
+/**
+ * Register or clear one daemon event handler.
+ * @param dmn Daemon handle.
+ * @param event Event name.
+ * @param handler Event handler, or NULL.
+ * @param userdata Opaque handler data.
+ * @return dmn status code.
+ */
 int kc_dmn_on(
     kc_dmn_t *dmn,
     const char *event,
@@ -1638,6 +1814,12 @@ int kc_dmn_on(
     return KC_DMN_OK;
 }
 
+/**
+ * Open one raw daemon byte stream.
+ * @param dmn Daemon handle.
+ * @param out Output stream handle.
+ * @return dmn status code.
+ */
 int kc_dmn_stream(
     kc_dmn_t *dmn,
     kc_dmn_stream_t **out
@@ -1684,6 +1866,13 @@ int kc_dmn_stream(
     return KC_DMN_OK;
 }
 
+/**
+ * Write bytes to one raw daemon stream.
+ * @param stream Stream handle.
+ * @param data Source bytes.
+ * @param size Source byte count.
+ * @return dmn status code.
+ */
 int kc_dmn_stream_write(
     kc_dmn_stream_t *stream,
     const void *data,
@@ -1721,6 +1910,14 @@ int kc_dmn_stream_write(
     return KC_DMN_OK;
 }
 
+/**
+ * Read bytes from one raw daemon stream.
+ * @param stream Stream handle.
+ * @param data Output buffer.
+ * @param capacity Output buffer capacity.
+ * @param out_size Output byte count.
+ * @return dmn status code.
+ */
 int kc_dmn_stream_read(
     kc_dmn_stream_t *stream,
     void *data,
@@ -1766,6 +1963,11 @@ int kc_dmn_stream_read(
     return KC_DMN_OK;
 }
 
+/**
+ * Close and release one raw daemon stream.
+ * @param stream Stream handle, or NULL.
+ * @return None.
+ */
 void kc_dmn_stream_close(
     kc_dmn_stream_t *stream
 ) {
@@ -1779,6 +1981,15 @@ void kc_dmn_stream_close(
     free(stream);
 }
 
+/**
+ * Perform one complete daemon data exchange.
+ * @param dmn Daemon handle.
+ * @param data Request bytes.
+ * @param data_size Request byte count.
+ * @param out_data Output response allocation.
+ * @param out_size Output response byte count.
+ * @return dmn status code.
+ */
 int kc_dmn_send_data(
     kc_dmn_t *dmn,
     const void *data,
@@ -1942,6 +2153,12 @@ int kc_dmn_send_data(
     return KC_DMN_OK;
 }
 
+/**
+ * Send one platform signal to an opened daemon.
+ * @param dmn Daemon handle.
+ * @param signal Signal value.
+ * @return dmn status code.
+ */
 int kc_dmn_send_signal(
     kc_dmn_t *dmn,
     int signal
@@ -1956,10 +2173,20 @@ int kc_dmn_send_signal(
     ) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
 }
 
+/**
+ * Release memory returned by dmn.
+ * @param ptr Owned allocation, or NULL.
+ * @return None.
+ */
 void kc_dmn_free(void *ptr) {
     free(ptr);
 }
 
+/**
+ * Close and release one local daemon handle.
+ * @param dmn Daemon handle, or NULL.
+ * @return None.
+ */
 void kc_dmn_close(kc_dmn_t *dmn) {
     if (!dmn) return;
     free(dmn->cmd);
