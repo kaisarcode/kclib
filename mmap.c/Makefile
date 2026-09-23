@@ -428,6 +428,7 @@ test:
 				-DMMAP_BUILD_VERSION=$(BUILD_VERSION) \
 				-DMMAP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmmap.dll \
 				-DMMAP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmmap.dll.a \
+				-DMMAP_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/mmap.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -448,6 +449,7 @@ test:
 				-DMMAP_BUILD_TESTS=ON \
 				-DMMAP_BUILD_VERSION=$(BUILD_VERSION) \
 				-DMMAP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DMMAP_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/mmap$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
