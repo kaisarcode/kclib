@@ -58,22 +58,6 @@ static size_t kc_init_join_args(
 }
 
 /**
- * List callback that prints one registration entry.
- * @param key Registration key name.
- * @param user User name.
- * @param cmd Command string.
- * @param userdata Unused.
- * @return None.
- */
-static void kc_init_print_entry(const char *key, const char *user, const char *cmd, void *userdata) {
-    (void)userdata;
-    if (user && user[0])
-        printf("%s\t[%s]\t%s\n", key, user, cmd);
-    else
-        printf("%s\n", key);
-}
-
-/**
  * Prints command usage to standard output.
  * @return None.
  */
@@ -146,8 +130,15 @@ static void kc_init_elevate(int argc, char **argv) {
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_cli_list(const kc_init_options_t *opts, const char *name) {
-    kc_init_t *ctx = NULL;
+    kc_init_t *ctx;
+    kc_init_entry_t *entries;
+    size_t count;
+    size_t i;
     int rc;
+
+    ctx = NULL;
+    entries = NULL;
+    count = 0U;
 
     rc = kc_init_open(&ctx, opts);
     if (rc != KC_INIT_OK) {
@@ -155,7 +146,7 @@ static int kc_init_cli_list(const kc_init_options_t *opts, const char *name) {
         return 1;
     }
 
-    rc = kc_init_list(ctx, name, kc_init_print_entry, NULL);
+    rc = kc_init_list(ctx, name, &entries, &count);
     if (rc != KC_INIT_OK) {
         const char *err = kc_init_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
@@ -163,6 +154,20 @@ static int kc_init_cli_list(const kc_init_options_t *opts, const char *name) {
         return 1;
     }
 
+    for (i = 0; i < count; i++) {
+        if (entries[i].user && entries[i].user[0]) {
+            printf(
+                "%s\t[%s]\t%s\n",
+                entries[i].key,
+                entries[i].user,
+                entries[i].cmd
+            );
+        } else {
+            printf("%s\n", entries[i].key);
+        }
+    }
+
+    kc_init_free(entries);
     kc_init_close(ctx);
     return 0;
 }
