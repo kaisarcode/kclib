@@ -20,11 +20,11 @@
 #define MDP_OK     0
 #define MDP_ERROR -1
 
-typedef enum {
-    MDP_MODE_HTML = 1,
-    MDP_MODE_BODY = 2,
-    MDP_MODE_META = 3
-} mdp_mode_t;
+struct kc_mdp {
+    char *body;
+    char *meta;
+    char *html;
+};
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -984,39 +984,62 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
 }
 
 /**
- * Process one document using a private output mode.
+ * Create a reusable Markdown document.
+ * Frontmatter is split from the body once during this call.
+ * @param out Pointer to receive the document.
  * @param input Null-terminated Markdown input.
- * @param mode Processing mode.
- * @return Owned NUL-terminated output buffer, or NULL on failure.
+ * @return KC_MDP_OK on success, KC_MDP_ERROR on failure.
  */
-static char *kc_mdp_process(const char *input, mdp_mode_t mode) {
+int kc_mdp_open(kc_mdp_t **out, const char *input) {
+    kc_mdp_t *mdp;
     char *meta = NULL;
     char *body = NULL;
-    mdp_buf_t buf;
-    int rc = MDP_OK;
+
+    if (!out) {
+        return KC_MDP_ERROR;
+    }
+    *out = NULL;
 
     if (!input) {
+        return KC_MDP_ERROR;
+    }
+
+    if (kc_mdp_split(input, &meta, &body) != MDP_OK) {
+        return KC_MDP_ERROR;
+    }
+
+    mdp = (kc_mdp_t *)calloc(1, sizeof(kc_mdp_t));
+    if (!mdp) {
+        free(meta);
+        free(body);
+        return KC_MDP_ERROR;
+    }
+
+    mdp->meta = meta;
+    mdp->body = body;
+    *out = mdp;
+    return KC_MDP_OK;
+}
+
+/**
+ * Render and cache the document body as an HTML fragment.
+ * @param mdp Document returned by kc_mdp_open().
+ * @return Cached NUL-terminated HTML fragment, or NULL on failure.
+ */
+const char *kc_mdp_html(kc_mdp_t *mdp) {
+    mdp_buf_t buf;
+
+    if (!mdp) {
         return NULL;
+    }
+
+    if (mdp->html) {
+        return mdp->html;
     }
 
     memset(&buf, 0, sizeof(buf));
 
-    if (kc_mdp_split(input, &meta, &body) != MDP_OK) {
-        return NULL;
-    }
-
-    if (mode == MDP_MODE_META) {
-        mdp_buf_puts(&buf, meta);
-    } else if (mode == MDP_MODE_BODY) {
-        mdp_buf_puts(&buf, body);
-    } else {
-        rc = kc_mdp_render(&buf, body);
-    }
-
-    free(meta);
-    free(body);
-
-    if (rc != MDP_OK || buf.oom) {
+    if (kc_mdp_render(&buf, mdp->body) != MDP_OK || buf.oom) {
         free(buf.data);
         return NULL;
     }
@@ -1029,43 +1052,42 @@ static char *kc_mdp_process(const char *input, mdp_mode_t mode) {
         buf.data[0] = '\0';
     }
 
-    return (char *)buf.data;
-}
-
-/**
- * Render the Markdown body as an HTML fragment.
- * @param input Null-terminated Markdown input.
- * @return Owned NUL-terminated HTML buffer, or NULL on failure.
- */
-char *kc_mdp_html(const char *input) {
-    return kc_mdp_process(input, MDP_MODE_HTML);
+    mdp->html = (char *)buf.data;
+    return mdp->html;
 }
 
 /**
  * Return the document body after recognized frontmatter.
- * @param input Null-terminated Markdown input.
- * @return Owned NUL-terminated body buffer, or NULL on failure.
+ * @param mdp Document returned by kc_mdp_open().
+ * @return NUL-terminated body text, or NULL for an invalid document.
  */
-char *kc_mdp_body(const char *input) {
-    return kc_mdp_process(input, MDP_MODE_BODY);
+const char *kc_mdp_body(const kc_mdp_t *mdp) {
+    return mdp ? mdp->body : NULL;
 }
 
 /**
  * Return recognized raw frontmatter content.
- * @param input Null-terminated Markdown input.
- * @return Owned NUL-terminated metadata buffer, or NULL on failure.
+ * @param mdp Document returned by kc_mdp_open().
+ * @return NUL-terminated metadata text, or NULL for an invalid document.
  */
-char *kc_mdp_meta(const char *input) {
-    return kc_mdp_process(input, MDP_MODE_META);
+const char *kc_mdp_meta(const kc_mdp_t *mdp) {
+    return mdp ? mdp->meta : NULL;
 }
 
 /**
- * Releases an mdp allocation. The pointer may be NULL.
- * @param ptr Allocation to release.
+ * Release a Markdown document. The pointer may be NULL.
+ * @param mdp Document returned by kc_mdp_open(), or NULL.
  * @return None.
  */
-void kc_mdp_free(void *ptr) {
-    free(ptr);
+void kc_mdp_close(kc_mdp_t *mdp) {
+    if (!mdp) {
+        return;
+    }
+
+    free(mdp->html);
+    free(mdp->body);
+    free(mdp->meta);
+    free(mdp);
 }
 
 #ifndef KC_MDP_BUILD_VERSION
