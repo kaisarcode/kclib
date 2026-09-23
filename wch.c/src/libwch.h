@@ -1,6 +1,6 @@
 /**
- * wch.h - File and directory change notification
- * Summary: Portable file watcher emitting add, upd, and del events.
+ * wch.h - File and directory change notification.
+ * Summary: Portable asynchronous file watcher emitting add, upd, and del events.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -21,51 +21,60 @@ typedef struct kc_wch kc_wch_t;
 #define KC_WCH_OK      0
 #define KC_WCH_ERROR  -1
 
-#define KC_WCH_EVENT    1
-#define KC_WCH_TIMEOUT  0
-
 #define KC_WCH_ADD     0
 #define KC_WCH_UPD     1
 #define KC_WCH_DEL     2
+
+typedef struct {
+    int recursive;
+} kc_wch_options_t;
 
 typedef struct {
     int type;
     const char *path;
 } kc_wch_event_t;
 
+typedef void (*kc_wch_handler_t)(
+    const kc_wch_event_t *event,
+    void *userdata
+);
+
 /**
- * Open a file watcher on the given path.
- * @param out Output pointer for watcher context.
+ * Opens one watcher instance.
+ * @param out Output pointer for the new watcher.
  * @param path File or directory to watch.
- * @param recursive Non-zero to watch directories recursively.
+ * @param options Optional watcher options; NULL uses defaults.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
-int kc_wch_open(kc_wch_t **out, const char *path, int recursive);
+int kc_wch_open(
+    kc_wch_t **out,
+    const char *path,
+    const kc_wch_options_t *options
+);
 
 /**
- * Poll for the next file change event.
- * @param w Watcher context.
- * @param ev Caller-owned event output. Its path is context-owned, must not be
- * freed or modified, is valid only after KC_WCH_EVENT, and remains valid until
- * another event from the same watcher or kc_wch_close(). It may be overwritten
- * by a later event and is NULL on timeout or when reset before waiting.
- * @param timeout_ms Negative waits indefinitely, zero does not wait, and a
- * positive value waits up to that many milliseconds.
- * @return KC_WCH_EVENT on event, KC_WCH_TIMEOUT on timeout, or KC_WCH_ERROR
- * on error.
+ * Registers the event handler and starts asynchronous observation.
+ * @param w Watcher instance.
+ * @param handler Event handler invoked from the watcher worker thread.
+ * @param userdata Opaque caller value passed to the handler.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
-int kc_wch_poll(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms);
+int kc_wch_on(
+    kc_wch_t *w,
+    kc_wch_handler_t handler,
+    void *userdata
+);
 
 /**
- * Close a file watcher and release all resources. NULL safe.
- * @param w Watcher context (NULL safe).
+ * Closes one watcher and releases its resources. NULL safe.
+ * @param w Watcher instance.
  * @return None.
  */
 void kc_wch_close(kc_wch_t *w);
 
 /**
- * Retrieves the library build version as a Unix timestamp.
- * @return Build version timestamp.
+ * Returns the generated build version.
+ * @return Unix timestamp for the current build.
  */
 uint64_t kc_wch_version(void);
 
