@@ -1206,6 +1206,8 @@ static int kc_dmn_run_list(const char *dir, kc_dmn_row_handler_t cb, void *userd
         if (de->d_name[0] == '.') continue;
         if (n > 4 && strcmp(de->d_name + n - 4, ".pid") == 0) continue;
         if (n > 5 && strcmp(de->d_name + n - 5, ".bpid") == 0) continue;
+        if (n > 4 && strcmp(de->d_name + n - 4, ".cmd") == 0) continue;
+        if (n > 4 && strcmp(de->d_name + n - 4, ".eot") == 0) continue;
         if (kc_dmn_ls_row(dir, de->d_name, cb, userdata) != 0) {
             closedir(dp);
             return 1;
