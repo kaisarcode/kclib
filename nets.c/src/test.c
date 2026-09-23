@@ -1,6 +1,6 @@
 /**
  * test.c - libnets public API contract tests.
- * Summary: Tests each exported nets function through one CTest case.
+ * Summary: Tests the asynchronous transfer API and grouped CLI contract.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -19,6 +19,7 @@
 #include <string.h>
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <io.h>
 #include <process.h>
 #include <winsock2.h>
@@ -28,16 +29,17 @@
 #include <errno.h>
 #include <pthread.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
 
 #define TEST_HOST "127.0.0.1"
 
-#ifndef _WIN32
-static const unsigned char test_response[] = {'n', 'e', 't', 's', 0, 'o', 'k'};
+#ifndef NETS_TEST_CLI
+#define NETS_TEST_CLI ""
 #endif
+
+static const unsigned char test_response[] = {'n', 'e', 't', 's', 0, 'o', 'k'};
 
 #ifdef _WIN32
 typedef SOCKET test_socket_t;
@@ -46,20 +48,38 @@ typedef HANDLE test_thread_t;
 #else
 typedef int test_socket_t;
 typedef pthread_t test_thread_t;
-#define TEST_BAD_SOCKET -1
+#define TEST_BAD_SOCKET (-1)
 #endif
 
 typedef struct {
     unsigned short port;
-    int proto;
+    int protocol;
+    int hold_open;
     char received[8192];
     size_t received_size;
     int result;
     test_thread_t thread;
 } test_server_t;
 
+typedef struct {
+    int done;
+    int status;
+    unsigned char data[128];
+    size_t size;
+#ifdef _WIN32
+    CRITICAL_SECTION lock;
+    CONDITION_VARIABLE condition;
+#else
+    pthread_mutex_t lock;
+    pthread_cond_t condition;
+#endif
+} test_result_t;
+
+static int test_case_total;
+static int test_case_current;
+
 /**
- * Returns a process-specific base port.
+ * Return a process-specific base port.
  * @return Port base.
  */
 static unsigned short port_base(void) {
@@ -71,31 +91,30 @@ static unsigned short port_base(void) {
 }
 
 /**
- * Sleeps for a bounded number of milliseconds.
- * @param ms Milliseconds to sleep.
+ * Sleep for a bounded number of milliseconds.
+ * @param ms Milliseconds.
  * @return None.
  */
 static void sleep_ms(unsigned int ms) {
 #ifdef _WIN32
     Sleep(ms);
 #else
-    struct timespec ts;
+    struct timespec value;
 
-    ts.tv_sec = (time_t)(ms / 1000U);
-    ts.tv_nsec = (long)(ms % 1000U) * 1000000L;
-    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {
+    value.tv_sec = (time_t)(ms / 1000U);
+    value.tv_nsec = (long)(ms % 1000U) * 1000000L;
+    while (nanosleep(&value, &value) != 0 && errno == EINTR) {
     }
 #endif
 }
 
 /**
- * Initializes process socket state for test-owned sockets.
+ * Initialize test socket support.
  * @return 0 on success, 1 on failure.
  */
 static int socket_start(void) {
 #ifdef _WIN32
     WSADATA data;
-
     return WSAStartup(MAKEWORD(2, 2), &data) == 0 ? 0 : 1;
 #else
     signal(SIGPIPE, SIG_IGN);
@@ -104,128 +123,123 @@ static int socket_start(void) {
 }
 
 /**
- * Stops process socket state for test-owned sockets.
- * @return 0 on success.
+ * Release test socket support.
+ * @return None.
  */
-static int socket_stop(void) {
+static void socket_stop(void) {
 #ifdef _WIN32
     WSACleanup();
 #endif
-    return 0;
 }
 
 /**
- * Closes one socket.
- * @param fd Socket descriptor.
- * @return 0 on success.
+ * Close a test socket.
+ * @param socket Socket.
+ * @return None.
  */
-static int socket_close(test_socket_t fd) {
+static void socket_close(test_socket_t socket) {
 #ifdef _WIN32
-    return closesocket(fd) == 0 ? 0 : 1;
+    closesocket(socket);
 #else
-    return close(fd) == 0 ? 0 : 1;
+    close(socket);
 #endif
 }
 
 /**
- * Sets a receive timeout on one socket.
- * @param fd Socket descriptor.
- * @param ms Timeout in milliseconds.
+ * Enable address reuse.
+ * @param socket Socket.
  * @return None.
  */
-static void socket_timeout(test_socket_t fd, unsigned int ms) {
-#ifdef _WIN32
-    DWORD tv;
+static void socket_reuse(test_socket_t socket) {
+    int enabled;
 
-    tv = (DWORD)ms;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
-#else
-    struct timeval tv;
-
-    tv.tv_sec = (time_t)(ms / 1000U);
-    tv.tv_usec = (suseconds_t)(ms % 1000U) * 1000;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
-#endif
+    enabled = 1;
+    setsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_REUSEADDR,
+        (const char *)&enabled,
+        sizeof(enabled)
+    );
 }
 
 /**
- * Enables local socket reuse.
- * @param fd Socket descriptor.
- * @return None.
- */
-static void socket_reuse(test_socket_t fd) {
-    int one;
-
-    one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof(one));
-}
-
-/**
- * Verifies one integer result.
- * @param name Check description.
+ * Verify one integer result.
+ * @param label Check label.
  * @param expected Expected value.
  * @param actual Actual value.
- * @return 0 on success, 1 on failure.
+ * @return Failure count.
  */
-static int expect_int(const char *name, int expected, int actual) {
+static int expect_int(const char *label, int expected, int actual) {
     if (expected != actual) {
-        printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
+        printf("[FAIL] %s: expected %d, got %d\n", label, expected, actual);
         return 1;
     }
     return 0;
 }
 
 /**
- * Verifies one boolean condition.
- * @param name Check description.
- * @param condition Non-zero when the check passed.
- * @return 0 on success, 1 on failure.
+ * Verify one condition.
+ * @param label Check label.
+ * @param condition Condition.
+ * @return Failure count.
  */
-static int expect_true(const char *name, int condition) {
+static int expect_true(const char *label, int condition) {
     if (!condition) {
-        printf("[FAIL] %s\n", name);
+        printf("[FAIL] %s\n", label);
         return 1;
     }
     return 0;
 }
 
 /**
- * Verifies one string result.
- * @param name Check description.
+ * Verify one string.
+ * @param label Check label.
  * @param expected Expected string.
  * @param actual Actual string.
- * @return 0 on success, 1 on failure.
+ * @return Failure count.
  */
-static int expect_string(const char *name, const char *expected, const char *actual) {
+static int expect_string(
+    const char *label,
+    const char *expected,
+    const char *actual
+) {
     if (actual == NULL || strcmp(expected, actual) != 0) {
-        printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
-            actual != NULL ? actual : "NULL");
+        printf(
+            "[FAIL] %s: expected '%s', got '%s'\n",
+            label,
+            expected,
+            actual != NULL ? actual : "NULL"
+        );
         return 1;
     }
     return 0;
 }
 
-static int test_case_total = 0;
-static int test_case_current = 0;
-
 /**
- * Prints a test case result line.
- * @param fail Non-zero when the case failed.
- * @param name Test case name.
- * @param detail Test behavior detail.
+ * Print one top-level test result.
+ * @param fail Failure count.
+ * @param name Canonical case name.
+ * @param detail Case detail.
  * @return None.
  */
 static void case_result(int fail, const char *name, const char *detail) {
-    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        fail ? "FAIL" : "PASS", name, detail);
+    printf(
+        "[%d/%d] [%s] %s: %s\n",
+        test_case_current,
+        test_case_total,
+        fail ? "FAIL" : "PASS",
+        name,
+        detail
+    );
 }
 
 typedef int (*case_fn)(void);
 
 /**
- * Runs one test case with counter tracking.
- * @param rc Destination accumulator.
- * @param fn Test case function.
+ * Run one top-level case.
+ * @param rc Failure accumulator.
+ * @param fn Case function.
  * @return None.
  */
 static void run_case(int *rc, case_fn fn) {
@@ -233,94 +247,200 @@ static void run_case(int *rc, case_fn fn) {
     *rc += fn();
 }
 
+/**
+ * Initialize one callback result.
+ * @param result Result state.
+ * @return 0 on success, 1 on failure.
+ */
+static int result_init(test_result_t *result) {
+    memset(result, 0, sizeof(*result));
 #ifdef _WIN32
-/**
- * Runs one TCP or UDP receiver thread.
- * @param arg Server state pointer.
- * @return Thread return value.
- */
-static DWORD WINAPI server_main(void *arg)
+    InitializeCriticalSection(&result->lock);
+    InitializeConditionVariable(&result->condition);
+    return 0;
 #else
+    if (pthread_mutex_init(&result->lock, NULL) != 0) return 1;
+    if (pthread_cond_init(&result->condition, NULL) != 0) {
+        pthread_mutex_destroy(&result->lock);
+        return 1;
+    }
+    return 0;
+#endif
+}
+
 /**
- * Runs one TCP or UDP receiver thread.
- * @param arg Server state pointer.
- * @return Thread return value.
+ * Destroy one callback result.
+ * @param result Result state.
+ * @return None.
  */
-static void *server_main(void *arg)
+static void result_destroy(test_result_t *result) {
+#ifdef _WIN32
+    DeleteCriticalSection(&result->lock);
+#else
+    pthread_cond_destroy(&result->condition);
+    pthread_mutex_destroy(&result->lock);
+#endif
+}
+
+/**
+ * Store one terminal callback result.
+ * @param status Status.
+ * @param data Borrowed bytes.
+ * @param size Byte count.
+ * @param userdata Result state.
+ * @return None.
+ */
+static void result_handler(
+    int status,
+    const void *data,
+    size_t size,
+    void *userdata
+) {
+    test_result_t *result;
+    size_t copy_size;
+
+    result = (test_result_t *)userdata;
+    copy_size = size < sizeof(result->data) ? size : sizeof(result->data);
+
+#ifdef _WIN32
+    EnterCriticalSection(&result->lock);
+#else
+    pthread_mutex_lock(&result->lock);
+#endif
+    result->status = status;
+    result->size = size;
+    if (data != NULL && copy_size > 0U) {
+        memcpy(result->data, data, copy_size);
+    }
+    result->done = 1;
+#ifdef _WIN32
+    WakeConditionVariable(&result->condition);
+    LeaveCriticalSection(&result->lock);
+#else
+    pthread_cond_signal(&result->condition);
+    pthread_mutex_unlock(&result->lock);
+#endif
+}
+
+/**
+ * Wait for one terminal callback.
+ * @param result Result state.
+ * @return Status.
+ */
+static int result_wait(test_result_t *result) {
+    int status;
+
+#ifdef _WIN32
+    EnterCriticalSection(&result->lock);
+    while (!result->done) {
+        SleepConditionVariableCS(&result->condition, &result->lock, INFINITE);
+    }
+    status = result->status;
+    LeaveCriticalSection(&result->lock);
+#else
+    pthread_mutex_lock(&result->lock);
+    while (!result->done) {
+        pthread_cond_wait(&result->condition, &result->lock);
+    }
+    status = result->status;
+    pthread_mutex_unlock(&result->lock);
+#endif
+    return status;
+}
+
+#ifdef _WIN32
+static DWORD WINAPI server_main(void *userdata)
+#else
+static void *server_main(void *userdata)
 #endif
 {
     test_server_t *server;
-    test_socket_t fd;
-    struct sockaddr_in addr;
-    int n;
+    test_socket_t listener;
+    struct sockaddr_in address;
+    int count;
 
-    server = (test_server_t *)arg;
-    fd = socket(AF_INET, server->proto == KC_NETS_UDP ? SOCK_DGRAM : SOCK_STREAM, 0);
-    if (fd == TEST_BAD_SOCKET) {
+    server = (test_server_t *)userdata;
+    listener = socket(
+        AF_INET,
+        server->protocol == KC_NETS_UDP ? SOCK_DGRAM : SOCK_STREAM,
+        0
+    );
+    if (listener == TEST_BAD_SOCKET) {
         server->result = 1;
-#ifdef _WIN32
-        return 0;
-#else
-        return NULL;
-#endif
+        goto done;
     }
-    socket_reuse(fd);
-    socket_timeout(fd, 5000U);
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(server->port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        socket_close(fd);
+
+    socket_reuse(listener);
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(server->port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    if (bind(
+            listener,
+            (const struct sockaddr *)&address,
+            sizeof(address)
+        ) != 0) {
+        socket_close(listener);
         server->result = 1;
-#ifdef _WIN32
-        return 0;
-#else
-        return NULL;
-#endif
+        goto done;
     }
-    if (server->proto == KC_NETS_TCP) {
+
+    if (server->protocol == KC_NETS_UDP) {
+        count = (int)recv(
+            listener,
+            server->received,
+            (int)sizeof(server->received),
+            0
+        );
+        if (count > 0) server->received_size = (size_t)count;
+        server->result = count > 0 ? 0 : 1;
+        socket_close(listener);
+        goto done;
+    }
+
+    if (listen(listener, 1) != 0) {
+        socket_close(listener);
+        server->result = 1;
+        goto done;
+    }
+
+    {
         test_socket_t client;
 
-        if (listen(fd, 1) != 0) {
-            socket_close(fd);
-            server->result = 1;
-#ifdef _WIN32
-            return 0;
-#else
-            return NULL;
-#endif
-        }
-        client = accept(fd, NULL, NULL);
+        client = accept(listener, NULL, NULL);
         if (client == TEST_BAD_SOCKET) {
-            socket_close(fd);
+            socket_close(listener);
             server->result = 1;
-#ifdef _WIN32
-            return 0;
-#else
-            return NULL;
-#endif
+            goto done;
         }
-        socket_timeout(client, 5000U);
-        n = (int)recv(client, server->received, (int)sizeof(server->received), 0);
-        if (n > 0) server->received_size = (size_t)n;
-        if (server->received_size > 0) {
-#ifdef _WIN32
-            server->result = 0;
-#else
-            n = (int)send(client, (const char *)test_response,
-                (int)sizeof(test_response), 0);
-            server->result = n == (int)sizeof(test_response) ? 0 : 1;
-#endif
+
+        count = (int)recv(
+            client,
+            server->received,
+            (int)sizeof(server->received),
+            0
+        );
+        if (count > 0) server->received_size = (size_t)count;
+
+        if (server->hold_open) {
+            sleep_ms(3000U);
+        } else if (count > 0) {
+            count = (int)send(
+                client,
+                (const char *)test_response,
+                (int)sizeof(test_response),
+                0
+            );
         }
+
+        server->result = server->received_size > 0U ? 0 : 1;
         socket_close(client);
-    } else {
-        n = (int)recv(fd, server->received, (int)sizeof(server->received), 0);
-        if (n > 0) server->received_size = (size_t)n;
     }
-    socket_close(fd);
-    if (server->received_size == 0) server->result = 1;
-    else if (server->proto == KC_NETS_UDP) server->result = 0;
+
+    socket_close(listener);
+
+done:
 #ifdef _WIN32
     return 0;
 #else
@@ -329,29 +449,37 @@ static void *server_main(void *arg)
 }
 
 /**
- * Starts one test server thread.
+ * Start one local test server.
  * @param server Server state.
- * @param proto Protocol.
- * @param port Listen port.
+ * @param protocol Protocol.
+ * @param port Port.
+ * @param hold_open Whether to hold TCP open.
  * @return 0 on success, 1 on failure.
  */
-static int server_start(test_server_t *server, int proto, unsigned short port) {
+static int server_start(
+    test_server_t *server,
+    int protocol,
+    unsigned short port,
+    int hold_open
+) {
     memset(server, 0, sizeof(*server));
-    server->proto = proto;
+    server->protocol = protocol;
     server->port = port;
+    server->hold_open = hold_open;
     server->result = 1;
+
 #ifdef _WIN32
     server->thread = CreateThread(NULL, 0, server_main, server, 0, NULL);
     if (server->thread == NULL) return 1;
 #else
     if (pthread_create(&server->thread, NULL, server_main, server) != 0) return 1;
 #endif
-    sleep_ms(200U);
+    sleep_ms(150U);
     return 0;
 }
 
 /**
- * Joins one test server thread.
+ * Join one local server.
  * @param server Server state.
  * @return 0 on success, 1 on failure.
  */
@@ -362,320 +490,372 @@ static int server_join(test_server_t *server) {
 #else
     if (pthread_join(server->thread, NULL) != 0) return 1;
 #endif
-    return server->result == 0 ? 0 : 1;
+    return server->result;
 }
 
 /**
- * Tests kc_nets_open.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_open(void) {
-    const char *name = "kc_nets_open";
-    const char *detail = "validates and allocates context";
-    kc_nets_t *ctx;
-    int fail;
-
-    ctx = NULL;
-    fail = 0;
-    fail += expect_int("open NULL out", KC_NETS_EINVAL, kc_nets_open(NULL));
-    fail += expect_int("open valid context", KC_NETS_OK, kc_nets_open(&ctx));
-    fail += expect_true("open sets context", ctx != NULL);
-    kc_nets_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_close.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_close(void) {
-    const char *name = "kc_nets_close";
-    const char *detail = "releases a context";
-    kc_nets_t *ctx;
-    int fail;
-
-    ctx = NULL;
-    fail = 0;
-    fail += expect_int("open before close", KC_NETS_OK, kc_nets_open(&ctx));
-    kc_nets_close(NULL);
-    kc_nets_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_stop(void) {
-    const char *name = "kc_nets_stop";
-    const char *detail = "is idempotent on a context";
-    kc_nets_t *ctx;
-    int fail;
-
-    ctx = NULL;
-    fail = 0;
-    fail += expect_int("stop NULL", KC_NETS_EINVAL, kc_nets_stop(NULL));
-    fail += expect_int("open before stop", KC_NETS_OK, kc_nets_open(&ctx));
-    fail += expect_int("stop context", KC_NETS_OK, kc_nets_stop(ctx));
-    fail += expect_int("stop context repeated", KC_NETS_OK, kc_nets_stop(ctx));
-    kc_nets_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_stop_requested.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_stop_requested(void) {
-    const char *name = "kc_nets_stop_requested";
-    const char *detail = "tracks stop state on a context";
-    kc_nets_t *ctx;
-    int fail;
-
-    ctx = NULL;
-    fail = 0;
-    fail += expect_int("stop_requested NULL is 0", 0, kc_nets_stop_requested(NULL));
-    fail += expect_int("open before stop", KC_NETS_OK, kc_nets_open(&ctx));
-    fail += expect_int("fresh context not stopped", 0, kc_nets_stop_requested(ctx));
-    fail += expect_int("stop context", KC_NETS_OK, kc_nets_stop(ctx));
-    fail += expect_int("stopped context reported", 1, kc_nets_stop_requested(ctx));
-    kc_nets_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_send.
+ * Test kc_nets_send.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_nets_send(void) {
     const char *name = "kc_nets_send";
-    const char *detail = "delivers tcp and udp payloads";
-    kc_nets_t *ctx;
-    kc_nets_t *stopped;
+    const char *detail = "launches async TCP and UDP transfers with terminal callbacks";
+    kc_nets_t *transfer;
+    test_result_t result;
     test_server_t server;
     unsigned short tcp_port;
     unsigned short udp_port;
-    void *resp = NULL;
-    size_t resp_size = 0;
     int fail;
 
-    ctx = NULL;
-    stopped = NULL;
+    transfer = NULL;
     tcp_port = (unsigned short)(port_base() + 1U);
-    udp_port = (unsigned short)(port_base() + 20U);
+    udp_port = (unsigned short)(port_base() + 2U);
     fail = 0;
 
-    if (socket_start() != 0) {
+    fail += expect_int(
+        "send NULL out",
+        KC_NETS_EINVAL,
+        kc_nets_send(NULL, TEST_HOST, 9, KC_NETS_TCP, "x", 1, result_handler, NULL)
+    );
+    fail += expect_int(
+        "send NULL host",
+        KC_NETS_EINVAL,
+        kc_nets_send(&transfer, NULL, 9, KC_NETS_TCP, "x", 1, result_handler, NULL)
+    );
+    fail += expect_int(
+        "send NULL data",
+        KC_NETS_EINVAL,
+        kc_nets_send(&transfer, TEST_HOST, 9, KC_NETS_TCP, NULL, 1, result_handler, NULL)
+    );
+    fail += expect_int(
+        "send NULL handler",
+        KC_NETS_EINVAL,
+        kc_nets_send(&transfer, TEST_HOST, 9, KC_NETS_TCP, "x", 1, NULL, NULL)
+    );
+    fail += expect_int(
+        "send invalid protocol",
+        KC_NETS_EINVAL,
+        kc_nets_send(&transfer, TEST_HOST, 9, 999, "x", 1, result_handler, NULL)
+    );
+
+    if (socket_start() != 0 || result_init(&result) != 0) {
         case_result(1, name, detail);
         return 1;
     }
 
-    fail += expect_int("send NULL ctx", KC_NETS_EINVAL,
-        kc_nets_send(NULL, TEST_HOST, 9, KC_NETS_TCP, "x", 1, NULL, NULL));
-    fail += expect_int("open for send", KC_NETS_OK, kc_nets_open(&ctx));
-    fail += expect_int("send NULL host", KC_NETS_EINVAL,
-        kc_nets_send(ctx, NULL, 9, KC_NETS_TCP, "x", 1, NULL, NULL));
-    fail += expect_int("send empty host", KC_NETS_EINVAL,
-        kc_nets_send(ctx, "", 9, KC_NETS_TCP, "x", 1, NULL, NULL));
-    fail += expect_int("send NULL data", KC_NETS_EINVAL,
-        kc_nets_send(ctx, TEST_HOST, 9, KC_NETS_TCP, NULL, 1, NULL, NULL));
-    fail += expect_int("send invalid proto", KC_NETS_EINVAL,
-        kc_nets_send(ctx, TEST_HOST, 9, 999, "x", 1, NULL, NULL));
-    fail += expect_int("send unresolvable host", KC_NETS_ENET,
-        kc_nets_send(ctx, "invalid.invalid", 9, KC_NETS_TCP, "x", 1, NULL, NULL));
-    fail += expect_int("open stopped context", KC_NETS_OK,
-        kc_nets_open(&stopped));
-    fail += expect_int("stop context", KC_NETS_OK, kc_nets_stop(stopped));
-    fail += expect_int("send stopped context", KC_NETS_ESTOP,
-        kc_nets_send(stopped, TEST_HOST, 9, KC_NETS_TCP, "x", 1, NULL, NULL));
-    kc_nets_close(stopped);
-
-    if (server_start(&server, KC_NETS_TCP, tcp_port) != 0) {
-        fail += 1;
+    if (server_start(&server, KC_NETS_TCP, tcp_port, 0) != 0) {
+        fail++;
     } else {
-        resp = NULL;
-        resp_size = 0;
-        fail += expect_int("tcp send", KC_NETS_OK,
-            kc_nets_send(ctx, TEST_HOST, tcp_port, KC_NETS_TCP, "hello tcp", 9, &resp, &resp_size));
-        fail += expect_int("tcp server join", 0, server_join(&server));
-        fail += expect_true("tcp payload size", server.received_size == 9U);
-        fail += expect_true("tcp payload bytes",
-            memcmp(server.received, "hello tcp", 9) == 0);
-#ifdef _WIN32
-        fail += expect_true("tcp response empty", resp == NULL && resp_size == 0U);
-#else
-        fail += expect_true("tcp response allocated", resp != NULL);
-        fail += expect_true("tcp response size", resp_size == sizeof(test_response));
-        if (resp != NULL && resp_size == sizeof(test_response)) {
-            fail += expect_true("tcp response bytes",
-                memcmp(resp, test_response, sizeof(test_response)) == 0);
+        transfer = NULL;
+        fail += expect_int(
+            "launch TCP",
+            KC_NETS_OK,
+            kc_nets_send(
+                &transfer,
+                TEST_HOST,
+                tcp_port,
+                KC_NETS_TCP,
+                "hello tcp",
+                9,
+                result_handler,
+                &result
+            )
+        );
+        if (transfer != NULL) {
+            fail += expect_int("TCP callback status", KC_NETS_OK, result_wait(&result));
+            fail += expect_true("TCP response size", result.size == sizeof(test_response));
+            if (result.size == sizeof(test_response)) {
+                fail += expect_true(
+                    "TCP response bytes",
+                    memcmp(result.data, test_response, sizeof(test_response)) == 0
+                );
+            }
+            kc_nets_close(transfer);
         }
-#endif
-        kc_nets_free(resp);
+        fail += expect_int("TCP server", 0, server_join(&server));
+        fail += expect_true("TCP payload", server.received_size == 9U);
     }
 
-    if (server_start(&server, KC_NETS_UDP, udp_port) != 0) {
-        fail += 1;
+    result_destroy(&result);
+    if (result_init(&result) != 0) fail++;
+    if (server_start(&server, KC_NETS_UDP, udp_port, 0) != 0) {
+        fail++;
     } else {
-        resp = NULL;
-        resp_size = 0;
-        fail += expect_int("udp send", KC_NETS_OK,
-            kc_nets_send(ctx, TEST_HOST, udp_port, KC_NETS_UDP, "hello udp", 9, &resp, &resp_size));
-        fail += expect_int("udp server join", 0, server_join(&server));
-        fail += expect_true("udp payload size", server.received_size == 9U);
-        fail += expect_true("udp payload bytes",
-            memcmp(server.received, "hello udp", 9) == 0);
-        fail += expect_true("udp response empty", resp == NULL && resp_size == 0U);
-        kc_nets_free(resp);
+        transfer = NULL;
+        fail += expect_int(
+            "launch UDP",
+            KC_NETS_OK,
+            kc_nets_send(
+                &transfer,
+                TEST_HOST,
+                udp_port,
+                KC_NETS_UDP,
+                "hello udp",
+                9,
+                result_handler,
+                &result
+            )
+        );
+        if (transfer != NULL) {
+            fail += expect_int("UDP callback status", KC_NETS_OK, result_wait(&result));
+            fail += expect_true("UDP response empty", result.size == 0U);
+            kc_nets_close(transfer);
+        }
+        fail += expect_int("UDP server", 0, server_join(&server));
+        fail += expect_true("UDP payload", server.received_size == 9U);
     }
 
-    kc_nets_close(ctx);
+    result_destroy(&result);
     socket_stop();
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_nets_free.
+ * Test kc_nets_stop.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_nets_free(void) {
-    const char *name = "kc_nets_free";
-    const char *detail = "releases returned response and accepts NULL";
-    kc_nets_t *ctx;
+static int case_kc_nets_stop(void) {
+    const char *name = "kc_nets_stop";
+    const char *detail = "interrupts an active transfer and reports KC_NETS_ESTOP";
+    kc_nets_t *transfer;
+    test_result_t result;
     test_server_t server;
     unsigned short port;
-    void *response;
-    size_t response_size;
     int fail;
 
-    ctx = NULL;
-    port = (unsigned short)(port_base() + 2U);
-    response = NULL;
-    response_size = 0;
+    transfer = NULL;
+    port = (unsigned short)(port_base() + 3U);
     fail = 0;
 
-    if (socket_start() != 0) {
+    fail += expect_int("stop NULL", KC_NETS_EINVAL, kc_nets_stop(NULL));
+    if (socket_start() != 0 || result_init(&result) != 0) {
         case_result(1, name, detail);
         return 1;
     }
 
-    fail += expect_int("open for free", KC_NETS_OK, kc_nets_open(&ctx));
-    if (server_start(&server, KC_NETS_TCP, port) != 0) {
-        fail += 1;
+    if (server_start(&server, KC_NETS_TCP, port, 1) != 0) {
+        fail++;
     } else {
-        fail += expect_int("send for free", KC_NETS_OK,
-            kc_nets_send(ctx, TEST_HOST, port, KC_NETS_TCP, "free", 4,
-                &response, &response_size));
-        fail += expect_int("free server join", 0, server_join(&server));
-#ifdef _WIN32
-        fail += expect_true("free response empty",
-            response == NULL && response_size == 0U);
-#else
-        fail += expect_true("free response allocated", response != NULL);
-        fail += expect_true("free response size",
-            response_size == sizeof(test_response));
-        if (response != NULL && response_size == sizeof(test_response)) {
-            fail += expect_true("free response bytes",
-                memcmp(response, test_response, sizeof(test_response)) == 0);
+        fail += expect_int(
+            "launch stoppable transfer",
+            KC_NETS_OK,
+            kc_nets_send(
+                &transfer,
+                TEST_HOST,
+                port,
+                KC_NETS_TCP,
+                "stop",
+                4,
+                result_handler,
+                &result
+            )
+        );
+        sleep_ms(250U);
+        if (transfer != NULL) {
+            fail += expect_int("stop transfer", KC_NETS_OK, kc_nets_stop(transfer));
+            fail += expect_int("stop repeated", KC_NETS_OK, kc_nets_stop(transfer));
+            fail += expect_int(
+                "stopped callback status",
+                KC_NETS_ESTOP,
+                result_wait(&result)
+            );
+            kc_nets_close(transfer);
         }
-#endif
+        fail += expect_int("stop server", 0, server_join(&server));
     }
-    kc_nets_free(response);
-    kc_nets_free(NULL);
-    kc_nets_close(ctx);
+
+    result_destroy(&result);
     socket_stop();
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_nets_strerror.
+ * Test kc_nets_close.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_close(void) {
+    const char *name = "kc_nets_close";
+    const char *detail = "accepts NULL and releases a completed transfer";
+    kc_nets_t *transfer;
+    test_result_t result;
+    test_server_t server;
+    unsigned short port;
+    int fail;
+
+    transfer = NULL;
+    port = (unsigned short)(port_base() + 4U);
+    fail = 0;
+    kc_nets_close(NULL);
+
+    if (socket_start() != 0 || result_init(&result) != 0) {
+        case_result(1, name, detail);
+        return 1;
+    }
+
+    if (server_start(&server, KC_NETS_UDP, port, 0) != 0) {
+        fail++;
+    } else {
+        fail += expect_int(
+            "launch before close",
+            KC_NETS_OK,
+            kc_nets_send(
+                &transfer,
+                TEST_HOST,
+                port,
+                KC_NETS_UDP,
+                "close",
+                5,
+                result_handler,
+                &result
+            )
+        );
+        if (transfer != NULL) {
+            fail += expect_int("complete before close", KC_NETS_OK, result_wait(&result));
+            kc_nets_close(transfer);
+        }
+        fail += expect_int("close server", 0, server_join(&server));
+    }
+
+    result_destroy(&result);
+    socket_stop();
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Test kc_nets_strerror.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_nets_strerror(void) {
     const char *name = "kc_nets_strerror";
-    const char *detail = "maps codes to messages";
+    const char *detail = "maps public status codes to static messages";
     int fail;
 
     fail = 0;
-    fail += expect_string("strerror OK", "ok", kc_nets_strerror(KC_NETS_OK));
-    fail += expect_string("strerror EINVAL", "invalid argument",
-        kc_nets_strerror(KC_NETS_EINVAL));
-    fail += expect_string("strerror ENET", "network error",
-        kc_nets_strerror(KC_NETS_ENET));
-    fail += expect_string("strerror ESTOP", "operation stopped",
-        kc_nets_strerror(KC_NETS_ESTOP));
-    fail += expect_string("strerror unknown", "unknown error",
-        kc_nets_strerror(999));
+    fail += expect_string("OK", "ok", kc_nets_strerror(KC_NETS_OK));
+    fail += expect_string("EINVAL", "invalid argument", kc_nets_strerror(KC_NETS_EINVAL));
+    fail += expect_string("ENET", "network error", kc_nets_strerror(KC_NETS_ENET));
+    fail += expect_string("ESTOP", "operation stopped", kc_nets_strerror(KC_NETS_ESTOP));
+    fail += expect_string("unknown", "unknown error", kc_nets_strerror(999));
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_nets_version.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_version(void) {
-    const char *name = "kc_nets_version";
-    const char *detail = "returns a non-zero build timestamp";
-    int fail;
-
-    fail = expect_true(name, kc_nets_version() != 0U);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_tls_available.
+ * Test kc_nets_tls_available.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_nets_tls_available(void) {
     const char *name = "kc_nets_tls_available";
-    const char *detail = "reports a stable availability flag";
-    int a;
-    int b;
+    const char *detail = "reports a stable boolean TLS capability";
+    int first;
+    int second;
     int fail;
 
-    a = kc_nets_tls_available();
-    b = kc_nets_tls_available();
+    first = kc_nets_tls_available();
+    second = kc_nets_tls_available();
     fail = 0;
-    fail += expect_true("tls availability is boolean", a == 0 || a == 1);
-    fail += expect_int("tls availability is stable", a, b);
+    fail += expect_true("TLS availability boolean", first == 0 || first == 1);
+    fail += expect_int("TLS availability stable", first, second);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Runs all test cases in a single process.
- * @return 0 on success, nonzero on failure.
+ * Test kc_nets_version.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_version(void) {
+    const char *name = "kc_nets_version";
+    const char *detail = "returns a non-zero generated build version";
+    int fail;
+
+    fail = expect_true("version non-zero", kc_nets_version() != 0U);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Test the grouped CLI contract.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_cli(void) {
+    const char *name = "kc_nets_cli";
+    const char *detail = "covers help, version, missing target, and invalid option";
+    char command[2048];
+    int fail;
+    int rc;
+
+    fail = 0;
+    if (NETS_TEST_CLI[0] == '\0') {
+        case_result(1, name, detail);
+        return 1;
+    }
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"%s\" --help > NUL 2>&1", NETS_TEST_CLI);
+#else
+    snprintf(command, sizeof(command), "\"%s\" --help > /dev/null 2>&1", NETS_TEST_CLI);
+#endif
+    rc = system(command);
+    fail += expect_true("CLI help succeeds", rc == 0);
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"%s\" --version > NUL 2>&1", NETS_TEST_CLI);
+#else
+    snprintf(command, sizeof(command), "\"%s\" --version > /dev/null 2>&1", NETS_TEST_CLI);
+#endif
+    rc = system(command);
+    fail += expect_true("CLI version succeeds", rc == 0);
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"%s\" --bad > NUL 2>&1", NETS_TEST_CLI);
+#else
+    snprintf(command, sizeof(command), "\"%s\" --bad > /dev/null 2>&1", NETS_TEST_CLI);
+#endif
+    rc = system(command);
+    fail += expect_true("CLI invalid option fails", rc != 0);
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"%s\" > NUL 2>&1", NETS_TEST_CLI);
+#else
+    snprintf(command, sizeof(command), "\"%s\" > /dev/null 2>&1", NETS_TEST_CLI);
+#endif
+    rc = system(command);
+    fail += expect_true("CLI missing target fails", rc != 0);
+
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Run all test cases.
+ * @return Failure count.
  */
 static int case_all(void) {
-    int rc = 0;
-    test_case_total = 9;
+    int rc;
+
+    rc = 0;
+    test_case_total = 7;
     test_case_current = 0;
-    run_case(&rc, case_kc_nets_open);
-    run_case(&rc, case_kc_nets_close);
-    run_case(&rc, case_kc_nets_stop);
-    run_case(&rc, case_kc_nets_stop_requested);
     run_case(&rc, case_kc_nets_send);
-    run_case(&rc, case_kc_nets_free);
+    run_case(&rc, case_kc_nets_stop);
+    run_case(&rc, case_kc_nets_close);
     run_case(&rc, case_kc_nets_strerror);
-    run_case(&rc, case_kc_nets_version);
     run_case(&rc, case_kc_nets_tls_available);
+    run_case(&rc, case_kc_nets_version);
+    run_case(&rc, case_kc_nets_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
 /**
- * Runs one named test case.
+ * Test executable entry point.
  * @param argc Argument count.
  * @param argv Argument vector.
- * @return 0 on success, 1 or 2 on failure.
+ * @return Process status.
  */
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -683,15 +863,13 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_nets_open") == 0) return case_kc_nets_open();
-    if (strcmp(argv[1], "kc_nets_close") == 0) return case_kc_nets_close();
-    if (strcmp(argv[1], "kc_nets_stop") == 0) return case_kc_nets_stop();
-    if (strcmp(argv[1], "kc_nets_stop_requested") == 0) return case_kc_nets_stop_requested();
     if (strcmp(argv[1], "kc_nets_send") == 0) return case_kc_nets_send();
-    if (strcmp(argv[1], "kc_nets_free") == 0) return case_kc_nets_free();
+    if (strcmp(argv[1], "kc_nets_stop") == 0) return case_kc_nets_stop();
+    if (strcmp(argv[1], "kc_nets_close") == 0) return case_kc_nets_close();
     if (strcmp(argv[1], "kc_nets_strerror") == 0) return case_kc_nets_strerror();
-    if (strcmp(argv[1], "kc_nets_version") == 0) return case_kc_nets_version();
     if (strcmp(argv[1], "kc_nets_tls_available") == 0) return case_kc_nets_tls_available();
+    if (strcmp(argv[1], "kc_nets_version") == 0) return case_kc_nets_version();
+    if (strcmp(argv[1], "kc_nets_cli") == 0) return case_kc_nets_cli();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
