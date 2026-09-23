@@ -29,6 +29,7 @@ typedef struct {
 
 typedef struct {
     const char *name;
+    const char *endpoint;
 } kc_dmn_entry_t;
 
 typedef void (*kc_dmn_handler_t)(
