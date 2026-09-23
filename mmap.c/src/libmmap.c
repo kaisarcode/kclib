@@ -328,16 +328,16 @@ int kc_mmap_save(kc_mmap_t *map) {
         return KC_MMAP_ERROR;
     }
 
-    if (!map->dirty) {
-        return KC_MMAP_OK;
-    }
-
     if (!map->has_value) {
         if (remove(map->path) != 0 && errno != ENOENT) {
             return KC_MMAP_ERROR;
         }
         map->dirty = 0;
         map->valid = 0;
+        return KC_MMAP_OK;
+    }
+
+    if (!map->dirty) {
         return KC_MMAP_OK;
     }
 
