@@ -190,7 +190,7 @@ define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
 	@cache=$(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; \
 	if [ -f "$$cache" ] && ! grep -Eq '^MMAP_BUILD_VERSION:.*=[0-9]+$$' "$$cache"; then \
-		rm -f "$$cache" "${cache%/*}/build.ninja" && rm -rf "${cache%/*}/CMakeFiles"; \
+		rm -f "$$cache" "$${cache%/*}/build.ninja" && rm -rf "$${cache%/*}/CMakeFiles"; \
 	fi
 	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
@@ -251,7 +251,7 @@ define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
 	@cache=$(BUILD_DIR)/$(1)-windows/CMakeCache.txt; \
 	if [ -f "$$cache" ] && ! grep -Eq '^MMAP_BUILD_VERSION:.*=[0-9]+$$' "$$cache"; then \
-		rm -f "$$cache" "${cache%/*}/build.ninja" && rm -rf "${cache%/*}/CMakeFiles"; \
+		rm -f "$$cache" "$${cache%/*}/build.ninja" && rm -rf "$${cache%/*}/CMakeFiles"; \
 	fi
 	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ]; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
@@ -390,7 +390,7 @@ define android_target
 	@mkdir -p $(BIN_DIR)/$(1)/android
 	@cache=$(BUILD_DIR)/$(1)-android/CMakeCache.txt; \
 	if [ -f "$$cache" ] && ! grep -Eq '^MMAP_BUILD_VERSION:.*=[0-9]+$$' "$$cache"; then \
-		rm -f "$$cache" "${cache%/*}/build.ninja" && rm -rf "${cache%/*}/CMakeFiles"; \
+		rm -f "$$cache" "$${cache%/*}/build.ninja" && rm -rf "$${cache%/*}/CMakeFiles"; \
 	fi
 	@cache=$(BUILD_DIR)/$(1)-android/CMakeCache.txt && \
 	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_TOOLCHAIN_FILE:.*=$(NDK_TOOLCHAIN)$$' "$$cache" || ! grep -q '^ANDROID_ABI:.*=$(2)$$' "$$cache"; }; then \
