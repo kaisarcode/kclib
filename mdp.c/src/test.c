@@ -72,7 +72,6 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
-#ifndef __EMSCRIPTEN__
 /**
  * Verifies one integer test expectation.
  * @param name Expectation description.
@@ -87,7 +86,6 @@ static int expect_int(const char *name, int expected, int actual) {
     }
     return 0;
 }
-#endif
 
 /**
  * Verifies one string test expectation.
