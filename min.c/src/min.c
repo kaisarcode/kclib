@@ -108,8 +108,8 @@ static char *(*kc_min_parse_mode(const char *name))(const char *) {
     if (strcmp(name, "html") == 0) {
         return kc_min_html;
     }
-    if (strcmp(name, "text") == 0) {
-        return kc_min_text;
+    if (strcmp(name, "txt") == 0) {
+        return kc_min_txt;
     }
     return NULL;
 }
@@ -126,7 +126,7 @@ static void kc_print_help(const char *name) {
     printf("    css           Minify CSS input\n");
     printf("    js            Minify JavaScript input\n");
     printf("    html          Minify HTML input\n");
-    printf("    text          Minify generic text input\n");
+    printf("    text          Minify generic txt input\n");
     printf("\n");
     printf("Options:\n");
     printf("    -h, --help    Show this help\n");
