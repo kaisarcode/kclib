@@ -507,11 +507,11 @@ char *kc_min_html(const char *input) {
 }
 
 /**
- * Minify generic text by collapsing whitespace runs and trimming edges.
+ * Minify generic txt by collapsing whitespace runs and trimming edges.
  * @param input Borrowed null-terminated text source.
  * @return Owned minified string, or NULL on failure.
  */
-char *kc_min_text(const char *input) {
+char *kc_min_txt(const char *input) {
     char *output = NULL;
     size_t n = 0;
     size_t cap = 0;
