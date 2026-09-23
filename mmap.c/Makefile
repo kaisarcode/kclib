@@ -190,7 +190,7 @@ define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
 	@cache=$(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; \
 	if [ -f "$$cache" ] && ! grep -Eq '^MMAP_BUILD_VERSION:.*=[0-9]+$$' "$$cache"; then \
-		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DMMAP_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null; \
+		rm -f "$$cache" "$(dirname "$$cache")/build.ninja" && rm -rf "$(dirname "$$cache")/CMakeFiles"; \
 	fi
 	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
@@ -251,7 +251,7 @@ define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
 	@cache=$(BUILD_DIR)/$(1)-windows/CMakeCache.txt; \
 	if [ -f "$$cache" ] && ! grep -Eq '^MMAP_BUILD_VERSION:.*=[0-9]+$$' "$$cache"; then \
-		cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DMMAP_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null; \
+		rm -f "$$cache" "$(dirname "$$cache")/build.ninja" && rm -rf "$(dirname "$$cache")/CMakeFiles"; \
 	fi
 	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ]; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
@@ -390,7 +390,7 @@ define android_target
 	@mkdir -p $(BIN_DIR)/$(1)/android
 	@cache=$(BUILD_DIR)/$(1)-android/CMakeCache.txt; \
 	if [ -f "$$cache" ] && ! grep -Eq '^MMAP_BUILD_VERSION:.*=[0-9]+$$' "$$cache"; then \
-		cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DMMAP_BUILD_VERSION=$(BUILD_VERSION) -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null; \
+		rm -f "$$cache" "$(dirname "$$cache")/build.ninja" && rm -rf "$(dirname "$$cache")/CMakeFiles"; \
 	fi
 	@cache=$(BUILD_DIR)/$(1)-android/CMakeCache.txt && \
 	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_TOOLCHAIN_FILE:.*=$(NDK_TOOLCHAIN)$$' "$$cache" || ! grep -q '^ANDROID_ABI:.*=$(2)$$' "$$cache"; }; then \
@@ -444,7 +444,7 @@ define wasm_target
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DMMAP_BUILD_VERSION=$$$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
+	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DMMAP_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
 	@cp $(BUILD_DIR)/wasm32-wasm/out/mmap.wasm $(BIN_DIR)/wasm32/wasm/mmap.wasm
 	@echo "OK wasm32/wasm"
 endef
