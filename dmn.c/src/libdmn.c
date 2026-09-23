@@ -742,9 +742,11 @@ static int kc_dmn_bridge_client(
                     cli_open = 0;
                 }
 
-                keep = eot_size > 1 && joined_size >= eot_size - 1
-                    ? eot_size - 1
-                    : joined_size;
+                keep = eot_size > 1
+                    ? (joined_size >= eot_size - 1
+                        ? eot_size - 1
+                        : joined_size)
+                    : 0;
                 if (keep > 0)
                     memcpy(in_tail, joined + joined_size - keep, keep);
                 in_tail_size = keep;
@@ -1909,10 +1911,11 @@ int kc_dmn_send_data(
             break;
         }
 
-        keep = dmn->eot_size > 1 &&
-            joined_size >= dmn->eot_size - 1
-            ? dmn->eot_size - 1
-            : joined_size;
+        keep = dmn->eot_size > 1
+            ? (joined_size >= dmn->eot_size - 1
+                ? dmn->eot_size - 1
+                : joined_size)
+            : 0;
         emit_size = joined_size - keep;
         if (emit_size > 0) {
             if (dmn->data_handler)
