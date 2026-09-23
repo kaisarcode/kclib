@@ -26,6 +26,11 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdatomic.h>
+
+#ifndef _WIN32
+#include <pthread.h>
+#endif
 
 #ifndef _WIN32
 #include <sys/stat.h>
@@ -69,6 +74,18 @@ struct kc_wch {
     int q_type[KC_WCH_QUEUE_SIZE];
     char q_path[KC_WCH_QUEUE_SIZE][PATH_MAX];
     int q_used;
+
+    kc_wch_handler_t handler;
+    void *userdata;
+    atomic_int stop;
+    int thread_started;
+    int self_close;
+
+#ifdef _WIN32
+    HANDLE thread;
+#else
+    pthread_t thread;
+#endif
 
 #ifdef __linux__
     int ifd;
@@ -692,125 +709,68 @@ static void fill_windows(struct kc_wch *w, int tmo) {
 #endif
 
 /**
- * Open a file watcher on the given path.
- * @param out Output pointer for watcher context.
- * @param path File or directory to watch.
- * @param recursive Non-zero to watch directories recursively.
- * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ * Waits internally for one normalized event.
+ * @param w Watcher instance.
+ * @param ev Event output.
+ * @param timeout_ms Maximum wait in milliseconds.
+ * @return 1 on event, 0 on timeout, or -1 on error.
  */
-int kc_wch_open(kc_wch_t **out, const char *path, int recursive) {
-    if (out == NULL) return KC_WCH_ERROR;
-    *out = NULL;
-    if (path == NULL || path[0] == '\0') return KC_WCH_ERROR;
-    int exists = 0;
-#ifndef _WIN32
-    struct stat st;
-    exists = (stat(path, &st) == 0);
-#endif
-    struct kc_wch *w = calloc(1, sizeof(*w));
-    if (!w) return KC_WCH_ERROR;
-    if (exists) {
-        w->root = strdup(path);
-    } else {
-        char parent[PATH_MAX];
-        snprintf(parent, PATH_MAX, "%s", path);
-        char *slash = strrchr(parent, '/');
-        if (slash) {
-            w->filter_name[0] = '/';
-            size_t fn_off = 1;
-            size_t fn_len = strlen(slash + 1);
-            if (fn_len >= PATH_MAX - 1) fn_len = PATH_MAX - 2;
-            memcpy(w->filter_name + fn_off, slash + 1, fn_len);
-            w->filter_name[fn_off + fn_len] = '\0';
-            *slash = '\0';
-            if (!parent[0]) snprintf(parent, PATH_MAX, ".");
-#ifndef _WIN32
-            if (stat(parent, &st) != 0) { free(w); return KC_WCH_ERROR; }
-#endif
-            w->has_filter = 1;
-        } else {
-            w->filter_name[0] = '/';
-            size_t fn_len = strlen(path);
-            if (fn_len >= PATH_MAX - 1) fn_len = PATH_MAX - 2;
-            memcpy(w->filter_name + 1, path, fn_len);
-            w->filter_name[fn_len + 1] = '\0';
-            snprintf(parent, PATH_MAX, ".");
-            w->has_filter = 1;
-        }
-        w->root = strdup(parent);
-    }
-    if (!w->root) { free(w); return KC_WCH_ERROR; }
-    w->recursive = recursive ? 1 : 0;
-    if (!try_backend(w)) { free(w->root); free(w); return KC_WCH_ERROR; }
-    if (w->backend == 1) {
-#ifdef __linux__
-        scan_watch_dir(w, w->root);
-#endif
-    }
-    *out = w;
-    return KC_WCH_OK;
-}
-
-/**
- * Poll for the next file change event.
- * @param w Watcher context.
- * @param ev Output event structure.
- * @param timeout_ms Max wait in milliseconds (-1 = infinite, 0 = no wait).
- * @return KC_WCH_EVENT on event, KC_WCH_TIMEOUT on timeout, or KC_WCH_ERROR
- * on error.
- */
-int kc_wch_poll(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms) {
-    if (w == NULL || ev == NULL) return KC_WCH_ERROR;
-    if (dequeue(w, ev)) return KC_WCH_EVENT;
+static int kc_wch_wait(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms) {
+    if (w == NULL || ev == NULL) return -1;
+    if (dequeue(w, ev)) return 1;
     ev->type = -1;
     ev->path = NULL;
 #ifdef __linux__
     if (w->backend == 1) {
         int rc = read_inotify(w, timeout_ms);
-        if (rc < 0) return KC_WCH_ERROR;
-        if (rc > 0) return KC_WCH_TIMEOUT;
+        if (rc < 0) return -1;
+        if (rc > 0) return 0;
         fill_inotify(w);
-        return dequeue(w, ev) ? KC_WCH_EVENT : KC_WCH_TIMEOUT;
+        return dequeue(w, ev) ? 1 : 0;
     }
 #endif
 #ifdef __APPLE__
     if (w->backend == 2) {
-        return fill_kqueue(w, timeout_ms);
+        int rc = fill_kqueue(w, timeout_ms);
+        if (rc < 0) return -1;
+        return dequeue(w, ev) ? 1 : 0;
     }
 #endif
 #ifdef _WIN32
     if (w->backend == 3) {
         fill_windows(w, timeout_ms);
-        return dequeue(w, ev) ? KC_WCH_EVENT : KC_WCH_TIMEOUT;
+        return dequeue(w, ev) ? 1 : 0;
     }
 #endif
-    return KC_WCH_ERROR;
+    return -1;
 }
 
 /**
- * Close a file watcher and release all resources.
- * @param w Watcher context (NULL safe).
+ * Releases all watcher resources.
+ * @param w Watcher instance.
  * @return None.
  */
-void kc_wch_close(kc_wch_t *w) {
+static void kc_wch_release(kc_wch_t *w) {
     int i;
-    if (!w) return;
+
     for (i = 0; i < w->path_count; i++) free(w->paths[i]);
     free(w->paths);
 #ifdef __linux__
     if (w->backend == 1) {
-        for (int i = 0; i < w->wd_count; i++) free(w->wd_paths[i]);
-        free(w->wds); free(w->wd_paths);
+        for (i = 0; i < w->wd_count; i++) free(w->wd_paths[i]);
+        free(w->wds);
+        free(w->wd_paths);
         close(w->ifd);
     }
 #endif
 #ifdef __APPLE__
     if (w->backend == 2) {
-        for (int i = 0; i < w->dir_count; i++) {
+        for (i = 0; i < w->dir_count; i++) {
             close(w->dir_fds[i]);
             free(w->dir_paths[i]);
         }
-        free(w->dir_fds); free(w->dir_paths);
+        free(w->dir_fds);
+        free(w->dir_paths);
         close(w->kq);
     }
 #endif
@@ -819,9 +779,204 @@ void kc_wch_close(kc_wch_t *w) {
         CloseHandle(w->ol.hEvent);
         CloseHandle(w->hdir);
     }
+    if (w->thread_started && w->thread != NULL) {
+        CloseHandle(w->thread);
+    }
 #endif
     free(w->root);
     free(w);
+}
+
+/**
+ * Runs the asynchronous watcher loop.
+ * @param arg Watcher instance.
+ * @return Platform thread result.
+ */
+#ifdef _WIN32
+static DWORD WINAPI kc_wch_worker(void *arg) {
+#else
+static void *kc_wch_worker(void *arg) {
+#endif
+    kc_wch_t *w = (kc_wch_t *)arg;
+
+    while (!atomic_load(&w->stop)) {
+        kc_wch_event_t ev;
+        int rc = kc_wch_wait(w, &ev, 100);
+
+        if (rc < 0) break;
+        if (rc > 0 && w->handler != NULL) {
+            w->handler(&ev, w->userdata);
+        }
+    }
+
+    if (w->self_close) {
+#ifndef _WIN32
+        pthread_detach(pthread_self());
+#endif
+        kc_wch_release(w);
+    }
+
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+/**
+ * Opens one watcher instance.
+ * @param out Output pointer for the new watcher.
+ * @param path File or directory to watch.
+ * @param options Optional watcher options.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_open(
+    kc_wch_t **out,
+    const char *path,
+    const kc_wch_options_t *options
+) {
+    struct kc_wch *w;
+    int exists = 0;
+    int recursive = options != NULL && options->recursive != 0;
+
+    if (out == NULL) return KC_WCH_ERROR;
+    *out = NULL;
+    if (path == NULL || path[0] == '\0') return KC_WCH_ERROR;
+
+#ifndef _WIN32
+    {
+        struct stat st;
+        exists = stat(path, &st) == 0;
+    }
+#endif
+
+    w = calloc(1, sizeof(*w));
+    if (w == NULL) return KC_WCH_ERROR;
+    atomic_init(&w->stop, 0);
+
+    if (exists) {
+        w->root = strdup(path);
+    } else {
+        char parent[PATH_MAX];
+        char *slash;
+
+        snprintf(parent, PATH_MAX, "%s", path);
+        slash = strrchr(parent, '/');
+        if (slash != NULL) {
+            size_t fn_len = strlen(slash + 1);
+
+            w->filter_name[0] = '/';
+            if (fn_len >= PATH_MAX - 1) fn_len = PATH_MAX - 2;
+            memcpy(w->filter_name + 1, slash + 1, fn_len);
+            w->filter_name[fn_len + 1] = '\0';
+            *slash = '\0';
+            if (parent[0] == '\0') snprintf(parent, PATH_MAX, ".");
+#ifndef _WIN32
+            {
+                struct stat st;
+                if (stat(parent, &st) != 0) {
+                    free(w);
+                    return KC_WCH_ERROR;
+                }
+            }
+#endif
+            w->has_filter = 1;
+        } else {
+            size_t fn_len = strlen(path);
+
+            w->filter_name[0] = '/';
+            if (fn_len >= PATH_MAX - 1) fn_len = PATH_MAX - 2;
+            memcpy(w->filter_name + 1, path, fn_len);
+            w->filter_name[fn_len + 1] = '\0';
+            snprintf(parent, PATH_MAX, ".");
+            w->has_filter = 1;
+        }
+        w->root = strdup(parent);
+    }
+
+    if (w->root == NULL) {
+        free(w);
+        return KC_WCH_ERROR;
+    }
+
+    w->recursive = recursive;
+    if (!try_backend(w)) {
+        free(w->root);
+        free(w);
+        return KC_WCH_ERROR;
+    }
+
+#ifdef __linux__
+    if (w->backend == 1) {
+        scan_watch_dir(w, w->root);
+    }
+#endif
+
+    *out = w;
+    return KC_WCH_OK;
+}
+
+/**
+ * Registers the event handler and starts asynchronous observation.
+ * @param w Watcher instance.
+ * @param handler Event handler.
+ * @param userdata Opaque caller value.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_on(kc_wch_t *w, kc_wch_handler_t handler, void *userdata) {
+    if (w == NULL || handler == NULL || w->thread_started) {
+        return KC_WCH_ERROR;
+    }
+
+    w->handler = handler;
+    w->userdata = userdata;
+#ifdef _WIN32
+    w->thread = CreateThread(NULL, 0, kc_wch_worker, w, 0, NULL);
+    if (w->thread == NULL) {
+        w->handler = NULL;
+        w->userdata = NULL;
+        return KC_WCH_ERROR;
+    }
+#else
+    if (pthread_create(&w->thread, NULL, kc_wch_worker, w) != 0) {
+        w->handler = NULL;
+        w->userdata = NULL;
+        return KC_WCH_ERROR;
+    }
+#endif
+    w->thread_started = 1;
+    return KC_WCH_OK;
+}
+
+/**
+ * Closes one watcher and releases its resources.
+ * @param w Watcher instance.
+ * @return None.
+ */
+void kc_wch_close(kc_wch_t *w) {
+    if (w == NULL) return;
+
+    atomic_store(&w->stop, 1);
+    if (!w->thread_started) {
+        kc_wch_release(w);
+        return;
+    }
+
+#ifdef _WIN32
+    if (GetCurrentThreadId() == GetThreadId(w->thread)) {
+        w->self_close = 1;
+        return;
+    }
+    WaitForSingleObject(w->thread, INFINITE);
+#else
+    if (pthread_equal(pthread_self(), w->thread)) {
+        w->self_close = 1;
+        return;
+    }
+    pthread_join(w->thread, NULL);
+#endif
+
+    kc_wch_release(w);
 }
 
 /**
