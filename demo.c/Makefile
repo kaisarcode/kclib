@@ -135,12 +135,12 @@ endif
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libdemo.so
-NATIVE_IMPORT_DEMOARY :=
+NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libdemo.dll
-NATIVE_IMPORT_DEMOARY := -DDEMO_TEST_IMPORT_DEMOARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libdemo.dll.a
+NATIVE_IMPORT_LIBRARY := -DDEMO_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libdemo.dll.a
 endif
 
 ifeq ($(NATIVE_PLATFORM),macos)
@@ -189,7 +189,7 @@ define linux_target
 			-DCMAKE_C_COMPILER=$(2) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-			-DCMAKE_DEMOARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,)
@@ -245,7 +245,7 @@ define windows_target
 			-DCMAKE_C_COMPILER=$(2) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-			-DCMAKE_DEMOARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,)
@@ -274,7 +274,7 @@ define macos_target
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
 	fi
 	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
-		LD_DEMOARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_DEMOARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos \
+		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Darwin \
 			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
@@ -282,7 +282,7 @@ define macos_target
 			-DCMAKE_C_COMPILER=$(2) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
-			-DCMAKE_DEMOARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,)
@@ -315,7 +315,7 @@ define ios_target
 		rm -f "$$cache" && rm -rf $(BUILD_DIR)/$(1)-$(2)/CMakeFiles; \
 	fi
 	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ]; then \
-		LD_DEMOARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_DEMOARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
+		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=iOS \
 			-DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) \
@@ -326,7 +326,7 @@ define ios_target
 			-DCMAKE_C_COMPILER=$(3) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
-			-DCMAKE_DEMOARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),)
@@ -367,7 +367,7 @@ define android_target
 			-DANDROID_PLATFORM=android-21 \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
-			-DCMAKE_DEMOARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,)
@@ -428,8 +428,8 @@ test:
 				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
 				-DDEMO_BUILD_TESTS=ON \
 				-DDEMO_BUILD_VERSION=$(BUILD_VERSION) \
-				-DDEMO_TEST_SHARED_DEMOARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdemo.dll \
-				-DDEMO_TEST_IMPORT_DEMOARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdemo.dll.a \
+				-DDEMO_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdemo.dll \
+				-DDEMO_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdemo.dll.a \
 				-DDEMO_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/demo.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
@@ -470,9 +470,9 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DDEMO_BUILD_TESTS=ON \
 				-DDEMO_BUILD_VERSION=$(BUILD_VERSION) \
-				-DDEMO_TEST_SHARED_DEMOARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DDEMO_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
 				-DDEMO_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/demo$(NATIVE_EXE_EXT) \
-				$(NATIVE_IMPORT_DEMOARY) \
+				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target demo_contract_test; \
