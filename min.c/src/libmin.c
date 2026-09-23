@@ -459,7 +459,8 @@ static int kc_min_html(const char *in, char **out) {
  * Minify a null-terminated source string using the requested mode.
  * @param mode One of KC_MIN_MODE_CSS, KC_MIN_MODE_JS, or KC_MIN_MODE_HTML.
  * @param input Borrowed null-terminated input source.
- * @return Owned null-terminated minified string, or NULL on invalid input or allocation failure.
+ * @return Owned null-terminated minified string, or NULL on invalid input or
+ * allocation failure.
  */
 char *kc_min_minify(int mode, const char *input) {
     char *output = NULL;
