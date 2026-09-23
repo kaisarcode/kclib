@@ -33,6 +33,13 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+/**
+ * Prints one canonical test-case result line.
+ * @param fail Nonzero when the case failed.
+ * @param name Canonical test-case name.
+ * @param description Human-readable test-case description.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *description) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, description);
