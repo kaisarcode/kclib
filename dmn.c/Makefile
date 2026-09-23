@@ -415,20 +415,20 @@ test:
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
-			cmake -S . -B $(BUILD_DIR)/test-wine \
-				-DCMAKE_BUILD_TYPE=Release \
-				-DCMAKE_SYSTEM_NAME=Windows \
-				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
-				-DDMN_BUILD_TESTS=ON \
-				-DDMN_BUILD_VERSION=$(BUILD_VERSION) \
-				-DDMN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdmn.dll \
-				-DDMN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdmn.dll.a \
-				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
-				-G Ninja -Wno-dev > /dev/null; \
-		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
+			-DDMN_BUILD_TESTS=ON \
+			-DDMN_BUILD_VERSION=$(BUILD_VERSION) \
+			-DDMN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdmn.dll \
+			-DDMN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdmn.dll.a \
+			-DDMN_TEST_CLI=dmn.exe \
+			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target dmn_contract_test || exit 1; \
-		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/dmn_contract_test.exe all; \
+		cp $(CURDIR)/$(BIN_DIR)/x86_64/windows/dmn.exe $(BUILD_DIR)/test-wine/dmn.exe; \
+		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) dmn_contract_test.exe all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
@@ -438,15 +438,14 @@ test:
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
-			cmake -S . -B $(BUILD_DIR)/test \
-				-DCMAKE_BUILD_TYPE=Release \
-				-DDMN_BUILD_TESTS=ON \
-				-DDMN_BUILD_VERSION=$(BUILD_VERSION) \
-				-DDMN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				$(NATIVE_IMPORT_LIBRARY) \
-				-G Ninja -Wno-dev > /dev/null; \
-		fi; \
+		cmake -S . -B $(BUILD_DIR)/test \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DDMN_BUILD_TESTS=ON \
+			-DDMN_BUILD_VERSION=$(BUILD_VERSION) \
+			-DDMN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+			-DDMN_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/dmn$(NATIVE_EXE_EXT) \
+			$(NATIVE_IMPORT_LIBRARY) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target dmn_contract_test || exit 1; \
 		$(BUILD_DIR)/test/dmn_contract_test all; \
 	fi
