@@ -427,160 +427,132 @@ static int test_cli_run_input(char *const argv[], const char *input,
 #endif
 
 /**
- * Tests encoding empty input.
+ * Tests kc_b64_encode.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_b64_encode_empty(void) {
-    char *encoded = kc_b64_encode("", 0);
+static int case_kc_b64_encode(void) {
+    const unsigned char binary[] = {0, 1, 127, 128, 255};
+    char *encoded;
     int fail = 0;
+
+    fail += expect_true("encode rejects NULL data",
+        kc_b64_encode(NULL, 0) == NULL);
+
+    encoded = kc_b64_encode("", 0);
     fail += expect_true("encode empty returns non-NULL", encoded != NULL);
-    if (encoded) {
+    if (encoded != NULL) {
         fail += expect_str("encode empty returns empty string", "", encoded);
-        kc_b64_free(encoded);
     }
-    case_result(fail, "kc_b64_encode_empty", "encodes empty input");
-    return fail == 0 ? 0 : 1;
-}
+    kc_b64_free(encoded);
 
-/**
- * Tests encoding "hello" string.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_b64_encode_hello(void) {
-    const char *data = "hello";
-    char *encoded = kc_b64_encode(data, strlen(data));
-    int fail = 0;
+    encoded = kc_b64_encode("hello", 5);
     fail += expect_true("encode hello returns non-NULL", encoded != NULL);
-    if (encoded) {
-        fail += expect_str("encode hello matches expected", "aGVsbG8=", encoded);
-        kc_b64_free(encoded);
+    if (encoded != NULL) {
+        fail += expect_str("encode hello matches expected",
+            "aGVsbG8=", encoded);
     }
-    case_result(fail, "kc_b64_encode_hello", "encodes hello to expected base64");
-    return fail == 0 ? 0 : 1;
-}
+    kc_b64_free(encoded);
 
-/**
- * Tests encoding binary data with round-trip.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_b64_encode_binary(void) {
-    const unsigned char data[] = {0, 1, 127, 128, 255};
-    char *encoded = kc_b64_encode(data, sizeof(data));
-    size_t decoded_len = 0;
-    void *decoded;
-    int fail = 0;
+    encoded = kc_b64_encode(binary, sizeof(binary));
     fail += expect_true("encode binary returns non-NULL", encoded != NULL);
-    if (encoded) {
-        decoded = kc_b64_decode(encoded, &decoded_len);
-        fail += expect_true("round-trip decode returns non-NULL", decoded != NULL);
-        if (decoded) {
-            fail += expect_int("round-trip length", (int)sizeof(data), (int)decoded_len);
-            fail += expect_true("round-trip data matches", memcmp(data, decoded, sizeof(data)) == 0);
-            kc_b64_free(decoded);
-        }
-        kc_b64_free(encoded);
+    if (encoded != NULL) {
+        fail += expect_str("encode binary matches expected",
+            "AAF/gP8=", encoded);
     }
-    case_result(fail, "kc_b64_encode_binary", "round-trips binary bytes through encode");
+    kc_b64_free(encoded);
+
+    case_result(fail, "kc_b64_encode",
+        "encodes empty, text, and binary inputs");
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests decoding empty string.
+ * Tests kc_b64_decode.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_b64_decode_empty(void) {
-    size_t out_size = 0;
-    void *decoded = kc_b64_decode("", &out_size);
+static int case_kc_b64_decode(void) {
+    static const unsigned char binary[] = {0, 1, 127, 128, 255};
+    static const char *invalid[] = {
+        "abc",
+        "invalid!",
+        "====",
+        "A===",
+        "AA=A",
+        "AAAA====",
+        "AB==",
+        "AAB="
+    };
+    void *decoded;
+    size_t out_size;
+    size_t i;
     int fail = 0;
+
+    out_size = 123;
+    fail += expect_true("decode rejects NULL string",
+        kc_b64_decode(NULL, &out_size) == NULL);
+    fail += expect_int("NULL string resets size", 0, (int)out_size);
+
+    fail += expect_true("decode rejects NULL size",
+        kc_b64_decode("Zg==", NULL) == NULL);
+
+    out_size = 123;
+    decoded = kc_b64_decode("", &out_size);
     fail += expect_true("decode empty returns non-NULL", decoded != NULL);
     fail += expect_int("decode empty size", 0, (int)out_size);
     kc_b64_free(decoded);
-    case_result(fail, "kc_b64_decode_empty", "decodes empty string");
-    return fail == 0 ? 0 : 1;
-}
 
-/**
- * Tests decoding "aGVsbG8=" to "hello".
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_b64_decode_hello(void) {
-    size_t out_size = 0;
-    void *decoded = kc_b64_decode("aGVsbG8=", &out_size);
-    int fail = 0;
-    fail += expect_true("decode hello returns non-NULL", decoded != NULL);
-    if (decoded) {
-        fail += expect_int("decode hello length", 5, (int)out_size);
-        fail += expect_true("decode hello matches", memcmp(decoded, "hello", 5) == 0);
+    out_size = 0;
+    decoded = kc_b64_decode("Zg==", &out_size);
+    fail += expect_true("decode one byte succeeds", decoded != NULL);
+    fail += expect_int("decode one byte size", 1, (int)out_size);
+    if (decoded != NULL) {
+        fail += expect_true("decode one byte matches",
+            memcmp(decoded, "f", 1) == 0);
+    }
+    kc_b64_free(decoded);
+
+    out_size = 0;
+    decoded = kc_b64_decode("Zm8=", &out_size);
+    fail += expect_true("decode two bytes succeeds", decoded != NULL);
+    fail += expect_int("decode two bytes size", 2, (int)out_size);
+    if (decoded != NULL) {
+        fail += expect_true("decode two bytes matches",
+            memcmp(decoded, "fo", 2) == 0);
+    }
+    kc_b64_free(decoded);
+
+    out_size = 0;
+    decoded = kc_b64_decode("Zm9v", &out_size);
+    fail += expect_true("decode three bytes succeeds", decoded != NULL);
+    fail += expect_int("decode three bytes size", 3, (int)out_size);
+    if (decoded != NULL) {
+        fail += expect_true("decode three bytes matches",
+            memcmp(decoded, "foo", 3) == 0);
+    }
+    kc_b64_free(decoded);
+
+    out_size = 0;
+    decoded = kc_b64_decode("AAF/gP8=", &out_size);
+    fail += expect_true("decode binary succeeds", decoded != NULL);
+    fail += expect_int("decode binary size",
+        (int)sizeof(binary), (int)out_size);
+    if (decoded != NULL) {
+        fail += expect_true("decode binary matches",
+            memcmp(decoded, binary, sizeof(binary)) == 0);
+    }
+    kc_b64_free(decoded);
+
+    for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        out_size = 123;
+        decoded = kc_b64_decode(invalid[i], &out_size);
+        fail += expect_true("decode rejects malformed base64",
+            decoded == NULL);
+        fail += expect_int("malformed decode resets size", 0, (int)out_size);
         kc_b64_free(decoded);
     }
-    case_result(fail, "kc_b64_decode_hello", "decodes the expected hello bytes");
-    return fail == 0 ? 0 : 1;
-}
 
-/**
- * Tests encode/decode round-trip with various byte values.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_b64_roundtrip(void) {
-    const unsigned char data[] = {0, 1, 127, 128, 255, 'A', 'B'};
-    size_t data_len = sizeof(data);
-    char *encoded;
-    size_t decoded_len = 0;
-    void *decoded;
-    int fail = 0;
-
-    encoded = kc_b64_encode(data, data_len);
-    fail += expect_true("roundtrip encode returns non-NULL", encoded != NULL);
-
-    if (encoded != NULL) {
-        decoded = kc_b64_decode(encoded, &decoded_len);
-        fail += expect_true("roundtrip decode returns non-NULL", decoded != NULL);
-        fail += expect_int("roundtrip length", (int)data_len, (int)decoded_len);
-        if (decoded != NULL) {
-            fail += expect_true("roundtrip data matches", memcmp(data, decoded, data_len) == 0);
-        }
-        kc_b64_free(decoded);
-    }
-    kc_b64_free(encoded);
-    case_result(fail, "kc_b64_roundtrip", "round-trips varied bytes through encode/decode");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests decoding invalid base64 string.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_b64_decode_invalid(void) {
-    size_t out_size = 0;
-    void *decoded = kc_b64_decode("invalid!", &out_size);
-    int fail = 0;
-    fail += expect_true("decode invalid returns NULL", decoded == NULL);
-    case_result(fail, "kc_b64_decode_invalid", "rejects invalid base64 characters");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests decoding string with length not divisible by 4.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_b64_decode_bad_length(void) {
-    size_t out_size = 0;
-    void *decoded = kc_b64_decode("abc", &out_size);
-    int fail = 0;
-    fail += expect_true("decode bad length returns NULL", decoded == NULL);
-    case_result(fail, "kc_b64_decode_bad_length", "rejects a length not divisible by four");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests NULL argument handling.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_b64_null_args(void) {
-    int fail = 0;
-    fail += expect_true("encode NULL data returns NULL", kc_b64_encode(NULL, 0) == NULL);
-    fail += expect_true("decode NULL str returns NULL", kc_b64_decode(NULL, &(size_t){0}) == NULL);
-    case_result(fail, "kc_b64_null_args", "rejects NULL arguments");
+    case_result(fail, "kc_b64_decode",
+        "decodes valid RFC 4648 input and rejects malformed padding");
     return fail == 0 ? 0 : 1;
 }
 
@@ -589,19 +561,28 @@ static int case_kc_b64_null_args(void) {
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_b64_free(void) {
+    char *encoded = kc_b64_encode("x", 1);
+    int fail = 0;
+
+    fail += expect_true("allocate value for free", encoded != NULL);
+    kc_b64_free(encoded);
     kc_b64_free(NULL);
-    case_result(0, "kc_b64_free", "releases allocations and accepts NULL");
-    return 0;
+
+    case_result(fail, "kc_b64_free",
+        "releases library allocations and accepts NULL");
+    return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests version function.
+ * Tests kc_b64_version.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_b64_version(void) {
     int fail = 0;
-    fail += expect_true("version returns non-zero", kc_b64_version() != 0);
-    case_result(fail, "kc_b64_version", "returns a nonzero generated build version");
+
+    fail += expect_true("version returns non-zero", kc_b64_version() != 0U);
+    case_result(fail, "kc_b64_version",
+        "returns a nonzero generated build version");
     return fail == 0 ? 0 : 1;
 }
 
@@ -836,19 +817,7 @@ static int case_all(void) {
     int rc = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 11;
-    test_case_current = 0;
-    run_case(&rc, case_kc_b64_encode_empty);
-    run_case(&rc, case_kc_b64_encode_hello);
-    run_case(&rc, case_kc_b64_encode_binary);
-    run_case(&rc, case_kc_b64_decode_empty);
-    run_case(&rc, case_kc_b64_decode_hello);
-    run_case(&rc, case_kc_b64_roundtrip);
-    run_case(&rc, case_kc_b64_decode_invalid);
-    run_case(&rc, case_kc_b64_decode_bad_length);
-    run_case(&rc, case_kc_b64_null_args);
-    run_case(&rc, case_kc_b64_free);
-    run_case(&rc, case_kc_b64_version);
+    test_case_total = 4;
 #else
     int cli_enabled;
 
@@ -856,23 +825,20 @@ static int case_all(void) {
 #ifdef _WIN32
     cli_enabled = 1;
 #endif
-    test_case_total = cli_enabled ? 12 : 11;
+    test_case_total = cli_enabled ? 5 : 4;
+#endif
+
     test_case_current = 0;
-    run_case(&rc, case_kc_b64_encode_empty);
-    run_case(&rc, case_kc_b64_encode_hello);
-    run_case(&rc, case_kc_b64_encode_binary);
-    run_case(&rc, case_kc_b64_decode_empty);
-    run_case(&rc, case_kc_b64_decode_hello);
-    run_case(&rc, case_kc_b64_roundtrip);
-    run_case(&rc, case_kc_b64_decode_invalid);
-    run_case(&rc, case_kc_b64_decode_bad_length);
-    run_case(&rc, case_kc_b64_null_args);
+    run_case(&rc, case_kc_b64_encode);
+    run_case(&rc, case_kc_b64_decode);
     run_case(&rc, case_kc_b64_free);
     run_case(&rc, case_kc_b64_version);
+#ifndef __EMSCRIPTEN__
     if (cli_enabled) {
         run_case(&rc, case_kc_b64_cli);
     }
 #endif
+
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -889,15 +855,8 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_b64_encode_empty") == 0) return case_kc_b64_encode_empty();
-    if (strcmp(argv[1], "kc_b64_encode_hello") == 0) return case_kc_b64_encode_hello();
-    if (strcmp(argv[1], "kc_b64_encode_binary") == 0) return case_kc_b64_encode_binary();
-    if (strcmp(argv[1], "kc_b64_decode_empty") == 0) return case_kc_b64_decode_empty();
-    if (strcmp(argv[1], "kc_b64_decode_hello") == 0) return case_kc_b64_decode_hello();
-    if (strcmp(argv[1], "kc_b64_roundtrip") == 0) return case_kc_b64_roundtrip();
-    if (strcmp(argv[1], "kc_b64_decode_invalid") == 0) return case_kc_b64_decode_invalid();
-    if (strcmp(argv[1], "kc_b64_decode_bad_length") == 0) return case_kc_b64_decode_bad_length();
-    if (strcmp(argv[1], "kc_b64_null_args") == 0) return case_kc_b64_null_args();
+    if (strcmp(argv[1], "kc_b64_encode") == 0) return case_kc_b64_encode();
+    if (strcmp(argv[1], "kc_b64_decode") == 0) return case_kc_b64_decode();
     if (strcmp(argv[1], "kc_b64_free") == 0) return case_kc_b64_free();
     if (strcmp(argv[1], "kc_b64_version") == 0) return case_kc_b64_version();
 #ifndef __EMSCRIPTEN__
