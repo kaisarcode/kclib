@@ -137,7 +137,6 @@ mark.meta();
 The binding only adapts the native handle mechanically; it does not need to
 reconstruct document parsing or lifecycle semantics.
 
-
 ---
 
 ## Build
