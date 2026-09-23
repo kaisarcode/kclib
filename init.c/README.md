@@ -1,236 +1,221 @@
 # init.c - Persistent Startup Registration
 
-`init.c` provides a small C library and CLI for registering named commands as persistent startup entries using only classic OS startup filesystem primitives. Applications can register a command under a name, execute it immediately, list registrations, and remove them.
+`init.c` provides a synchronous C library and CLI for registering named commands with the startup mechanism available on the local machine.
 
-On POSIX, `init.c` writes executable scripts to `/etc/init.d/` and creates `S99` symlinks in `/etc/rc{2,3,4,5}.d/`. On Windows, it creates `.cmd` launchers in the user Startup folder and optionally adds a `HKCU\...\Run` registry entry. Registration metadata is stored under `/etc/kaisarcode/init.c` on Linux and `C:\ProgramData\kaisarcode\init.c` on Windows. The CLI is implemented on top of `libinit`.
-
----
+The library supports Linux and Windows. Linux can autodetect systemd, runit, OpenRC, or SysV, or the caller can explicitly select one of those backends. Windows uses the Startup folder and Run registry integration.
 
 ## CLI
 
-### Examples
-
-Register a startup command:
+Register or replace an entry:
 
 ```bash
 init myapp /usr/local/bin/myapp --daemon
 ```
 
-Execute the registered command immediately:
+Execute a registered command immediately:
 
 ```bash
 init myapp
 ```
 
-List all registrations:
+List registrations:
 
 ```bash
 init --list
-```
-
-List one registration:
-
-```bash
 init myapp --list
-```
-
-```bash
 init --list myapp
 ```
 
-Remove a registration:
+Delete a registration:
 
 ```bash
 init myapp --delete
-```
-
-```bash
 init --delete myapp
 ```
 
----
+The CLI also supports:
 
-### Parameters
+```text
+--dir <path>
+--backend <name>
+-h, --help
+-v, --version
+```
 
-| Command/Flag | Description |
-| :--- | :--- |
-| `<name> <cmd>` | Register or replace a startup entry. |
-| `<name> -d`, `<name> --delete` | Remove a registration if it exists. |
-| `-d <name>`, `--delete <name>` | Remove a registration if it exists. |
-| `<name> -l`, `<name> --list` | List one registration if it exists. |
-| `-l <name>`, `--list <name>` | List one registration if it exists. |
-| `-l`, `--list` | List all registrations as `name<TAB>path`. |
-| `<name>` | Execute the registered command immediately. |
-| `-h`, `--help` | Show help and usage. |
-| `-v`, `--version` | Show version. |
+`KC_INIT_DIR` and `KC_INIT_BACKEND` remain CLI environment overrides.
 
----
+On POSIX, the CLI may re-execute itself through an installed `sudo` command before operations that currently require its elevation policy. Privilege escalation is CLI policy; the reusable library never invokes `sudo`.
 
 ## Public API
+
+A `kc_init_t` represents one configured local startup registry.
 
 ```c
 #include "libinit.h"
 
-void on_entry(
-    const char *key,
-    const char *user,
-    const char *cmd,
-    void *userdata
-) {
-    /* key/user/cmd are borrowed for this callback invocation */
+kc_init_options_t options = {
+    .dir = NULL,
+    .backend = NULL
+};
+
+kc_init_t *startup = NULL;
+
+if (kc_init_open(&startup, &options) != KC_INIT_OK) {
+    return 1;
 }
 
-kc_init_options_t *opts = kc_init_options_default();
+if (kc_init_set(
+        startup,
+        "myapp",
+        "/usr/local/bin/myapp --daemon"
+    ) != KC_INIT_OK) {
+    const char *error = kc_init_error(startup);
+    (void)error;
+}
 
-if (opts != NULL) {
-    kc_init_options_set(opts, "dir", "/custom/path");
-    kc_init_options_set(opts, "backend", "systemd");
+kc_init_entry_t *entries = NULL;
+size_t count = 0;
 
-    kc_init_t *ctx = NULL;
+if (kc_init_list(startup, NULL, &entries, &count) == KC_INIT_OK) {
+    size_t i;
 
-    if (kc_init_open(&ctx, opts) == KC_INIT_OK) {
-        kc_init_update(ctx, "app", "/usr/local/bin/app --daemon");
-        kc_init_list(ctx, "app", on_entry, NULL);
-        kc_init_exec(ctx, "app");
-        kc_init_delete(ctx, "app");
-
-        kc_init_close(ctx);
+    for (i = 0; i < count; i++) {
+        /* entries[i].key, entries[i].user, entries[i].cmd */
     }
-
-    kc_init_options_free(opts);
 }
+
+kc_init_free(entries);
+kc_init_close(startup);
 ```
 
-`kc_init_options_t` is opaque. `kc_init_options_set()` supports exactly the
-`dir` and `backend` keys. Passing `NULL` options to `kc_init_open()` selects the
-defaults. A successfully opened context copies its configuration, so the
-options may be freed immediately after `kc_init_open()` returns.
+## Options
 
----
+`kc_init_options_t` is a plain public structure:
 
-## Lifecycle
+```c
+typedef struct {
+    const char *dir;
+    const char *backend;
+} kc_init_options_t;
+```
 
-- `kc_init_options_default()` - allocates default opaque init options.
-- `kc_init_options_set()` - sets the `dir` or `backend` option.
-- `kc_init_options_free()` - releases option resources.
-- `kc_init_open()` - resolves metadata state into a context owned by the caller; `NULL` options select defaults.
-- `kc_init_update()` - registers or replaces a named startup command.
-- `kc_init_exec()` - executes the registered command immediately.
-- `kc_init_list()` - synchronously lists all registrations or one named registration.
-- `kc_init_delete()` - removes a named registration and its startup artifacts.
-- `kc_init_path()` - returns the resolved metadata directory as context-owned storage borrowed until close.
-- `kc_init_get_error()` - returns context-owned error text borrowed until close; a later operation may replace it.
-- `kc_init_close()` - releases the context.
+`dir == NULL` selects the platform default metadata directory.
 
-The list callback runs synchronously. Its `userdata` pointer is not retained,
-and its `key`, `user`, and `cmd` strings are borrowed only for the duration of
-each callback invocation.
+On Linux, `backend == NULL` autodetects the local startup backend. An explicit backend must be one of:
 
----
+```text
+systemd
+runit
+openrc
+sysv
+```
 
-## Environment
+An unknown explicit backend is an error.
 
-Environment variables are CLI policy, not part of the library API. The CLI
-continues to support:
+The library copies the resolved directory and backend state during `kc_init_open()`. Option strings only need to remain valid for the duration of the call.
 
-| Variable | Description |
-| :--- | :--- |
-| `KC_INIT_DIR` | Metadata directory path. |
-| `KC_INIT_BACKEND` | POSIX backend override: `systemd`, `runit`, `openrc`, or `sysv`. |
+## Registrations
 
----
+Registration keys are names, not paths. Valid keys contain only ASCII letters, digits, dot, underscore, or hyphen. Empty keys, `.`, `..`, path separators, and other characters are rejected.
 
-## Notes
+Commands remain shell commands by design. They must be non-empty, one line, and shorter than the library command buffer limit.
 
-- `kc_init_update` requires write access to `/etc/init.d/` and `/etc/rc*.d/` on Linux, which typically requires root.
-- `kc_init_exec` reads from the user metadata directory and does not require root.
-- No service managers, PID1 replacements, or external dependencies are used.
+`kc_init_set()` registers or replaces an entry.
 
----
+`kc_init_exec()` executes the stored command synchronously. A missing registration returns `KC_INIT_NOT_FOUND`. A non-zero command exit status returns `KC_INIT_ERROR`.
+
+`kc_init_delete()` removes the registration and its startup artifacts. Deleting an entry that does not exist is a successful no-op.
+
+## Listing and ownership
+
+`kc_init_list()` returns a finite synchronous result:
+
+```c
+kc_init_entry_t *entries = NULL;
+size_t count = 0;
+
+kc_init_list(startup, NULL, &entries, &count);
+kc_init_free(entries);
+```
+
+Passing a key lists only that registration. A missing specific key succeeds with an empty result.
+
+The returned entry array and all `key`, `user`, and `cmd` strings share one allocation. Release it once with `kc_init_free()`.
+
+Internal metadata sidecars such as `.user` and `.backend` are never exposed as registrations.
+
+## Errors
+
+Public status codes are:
+
+```text
+KC_INIT_OK          0
+KC_INIT_NOT_FOUND   1
+KC_INIT_ERROR      -1
+```
+
+`kc_init_error()` returns borrowed context-owned error text after an operation reports additional error detail. The pointer remains owned by the context.
+
+## Platform behavior
+
+Linux startup artifacts are backend-native:
+
+- systemd: `/etc/systemd/system/init-<name>.service`
+- runit: `/etc/sv/init-<name>/run` and `/etc/service/init-<name>`
+- OpenRC: `/etc/init.d/init-<name>`
+- SysV: init script plus runlevel links
+
+Windows writes a Startup-folder `.cmd` launcher and attempts the corresponding Run registry value.
+
+Metadata remains plain local files. The library does not provide process supervision, service state, restart orchestration, logging, remote deployment, or a resident daemon.
+
+## WASM
+
+WASM support is not applicable. Browser WASM cannot register startup services or modify the host operating system's startup configuration without changing the capability contract.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+A plain build targets the current supported host:
 
 ```bash
 make
 ```
 
-### Tests
+Supported artifact platforms are Linux and Windows.
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile only the test executable and link dynamically against the generated shared library.
+Multi-architecture builds:
+
+```bash
+make all
+```
+
+## Tests
+
+Build artifacts before running contract tests:
 
 ```bash
 make
 make test
 ```
 
-To run the common `test` target in Windows-through-Wine mode:
+Windows artifacts can be validated through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+The contract suite exercises the reusable API through isolated metadata fixtures and contains one grouped `kc_init_cli` case for the shipped command-line interface.
 
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
+## Dependencies
 
-### Multiarch Builds
+Build tools:
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+- GNU Make
+- CMake 3.14 or newer
+- Ninja
+- a C11 compiler
 
-```bash
-make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
-```
+Windows links against `advapi32`.
 
-**Note:** iOS targets are not available. `init.c` manages system services using `system()` calls, which are explicitly unavailable in the iOS SDK. iOS apps run in a sandboxed environment with no equivalent to systemd or init systems - Apple's launchd is not accessible to third-party apps.
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### System Libraries
-
-Linux:
-- No additional system libraries required.
-
-Windows (MSVC or MinGW):
-- `advapi32`
-
-macOS / iOS:
-- No additional system libraries required.
-
-### Optional Cross-Compilation SDKs
-
-Required only for multiarch builds:
-
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
-- Android NDK (version 27.2.12479018) for Android targets.
+Optional development tools include MinGW for Windows cross-compilation and Wine for Windows test execution.
