@@ -91,24 +91,27 @@ static int kc_min_read_all(int fd, char **out) {
 }
 
 /**
- * Convert a CLI mode name to a public minification mode.
+ * Convert a CLI mode name to a public minifier.
  * @param name Mode name.
- * @return Public mode constant, or 0 for invalid input.
+ * @return Public minifier function, or NULL for invalid input.
  */
-static int kc_min_parse_mode(const char *name) {
+static char *(*kc_min_parse_mode(const char *name))(const char *) {
     if (!name) {
-        return 0;
+        return NULL;
     }
     if (strcmp(name, "css") == 0) {
-        return KC_MIN_MODE_CSS;
+        return kc_min_css;
     }
     if (strcmp(name, "js") == 0) {
-        return KC_MIN_MODE_JS;
+        return kc_min_js;
     }
     if (strcmp(name, "html") == 0) {
-        return KC_MIN_MODE_HTML;
+        return kc_min_html;
     }
-    return 0;
+    if (strcmp(name, "text") == 0) {
+        return kc_min_text;
+    }
+    return NULL;
 }
 
 /**
@@ -117,12 +120,13 @@ static int kc_min_parse_mode(const char *name) {
  * @return None.
  */
 static void kc_print_help(const char *name) {
-    printf("Usage: %s <css|js|html> [options]\n", name);
+    printf("Usage: %s <css|js|html|text> [options]\n", name);
     printf("\n");
     printf("Parameters:\n");
     printf("    css           Minify CSS input\n");
     printf("    js            Minify JavaScript input\n");
     printf("    html          Minify HTML input\n");
+    printf("    text          Minify generic text input\n");
     printf("\n");
     printf("Options:\n");
     printf("    -h, --help    Show this help\n");
@@ -147,7 +151,7 @@ int main(int argc, char **argv) {
     const char *mode_name = NULL;
     char *input = NULL;
     char *output = NULL;
-    int mode;
+    char *(*operation)(const char *);
     int i;
 
     for (i = 1; i < argc; i++) {
@@ -176,8 +180,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    mode = kc_min_parse_mode(mode_name);
-    if (mode == 0) {
+    operation = kc_min_parse_mode(mode_name);
+    if (!operation) {
         fprintf(stderr, "min: invalid mode '%s'\n", mode_name);
         return 1;
     }
@@ -192,7 +196,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    output = kc_min_minify(mode, input);
+    output = operation(input);
     if (!output) {
         fprintf(stderr, "min: execution failed\n");
         free(input);
