@@ -81,9 +81,18 @@ if(MMAP_BUILD_TESTS)
         set(MMAP_TEST_SHARED_TARGET mmap_test_shared)
     endif()
 
+    if(MMAP_TEST_CLI)
+        set(MMAP_TEST_CLI_TARGET_PATH "${MMAP_TEST_CLI}")
+    else()
+        set(MMAP_TEST_CLI_TARGET_PATH "$<TARGET_FILE:mmap>")
+    endif()
+
     add_executable(mmap_contract_test src/test.c)
     target_include_directories(mmap_contract_test PRIVATE src)
     target_link_libraries(mmap_contract_test PRIVATE ${MMAP_TEST_SHARED_TARGET})
+    target_compile_definitions(mmap_contract_test PRIVATE
+        KC_MMAP_TEST_CLI="${MMAP_TEST_CLI_TARGET_PATH}"
+    )
 
     add_custom_command(TARGET mmap_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
