@@ -36,6 +36,8 @@ static int test_case_current;
 
 typedef int (*case_fn)(void);
 
+static void fixture_remove(const char *dir);
+
 /**
  * Print one top-level test result.
  * @param fail Failure count.
@@ -118,7 +120,7 @@ static int fixture_create(char *out, size_t cap) {
         ) >= cap) {
         return 1;
     }
-    (void)RemoveDirectoryA(out);
+    fixture_remove(out);
     if (!CreateDirectoryA(out, NULL)) return 1;
 #define FIXTURE_SEP "\\"
 #else
@@ -130,7 +132,7 @@ static int fixture_create(char *out, size_t cap) {
         ) >= cap) {
         return 1;
     }
-    (void)rmdir(out);
+    fixture_remove(out);
     if (mkdir(out, 0700) != 0) return 1;
 #define FIXTURE_SEP "/"
 #endif
