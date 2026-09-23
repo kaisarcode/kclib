@@ -11,7 +11,7 @@ option(DEMO_NATIVE "Enable native hardware optimizations" OFF)
 option(DEMO_BUILD_TESTS "Build demo tests" OFF)
 
 set(DEMO_TEST_EXTERNAL_ARTIFACTS OFF)
-if(DEMO_BUILD_TESTS AND DEMO_TEST_SHARED_DEMOARY)
+if(DEMO_BUILD_TESTS AND DEMO_TEST_SHARED_LIBRARY)
     set(DEMO_TEST_EXTERNAL_ARTIFACTS ON)
 endif()
 
@@ -103,14 +103,14 @@ if(DEMO_BUILD_TESTS)
         )
         target_include_directories(demo_contract_test PRIVATE src)
     else()
-        if(DEMO_TEST_SHARED_DEMOARY)
+        if(DEMO_TEST_SHARED_LIBRARY)
             add_library(demo_test_shared SHARED IMPORTED)
             set_target_properties(demo_test_shared PROPERTIES
-                IMPORTED_LOCATION "${DEMO_TEST_SHARED_DEMOARY}"
+                IMPORTED_LOCATION "${DEMO_TEST_SHARED_LIBRARY}"
             )
-            if(DEMO_TEST_IMPORT_DEMOARY)
+            if(DEMO_TEST_IMPORT_LIBRARY)
                 set_target_properties(demo_test_shared PROPERTIES
-                    IMPORTED_IMPLIB "${DEMO_TEST_IMPORT_DEMOARY}"
+                    IMPORTED_IMPLIB "${DEMO_TEST_IMPORT_LIBRARY}"
                 )
             endif()
         else()
