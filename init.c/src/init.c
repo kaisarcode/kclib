@@ -157,7 +157,7 @@ static int kc_init_cli_list(const kc_init_options_t *opts, const char *name) {
 
     rc = kc_init_list(ctx, name, kc_init_print_entry, NULL);
     if (rc != KC_INIT_OK) {
-        const char *err = kc_init_get_error(ctx);
+        const char *err = kc_init_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
         kc_init_close(ctx);
         return 1;
@@ -185,7 +185,7 @@ static int kc_init_cli_delete(const kc_init_options_t *opts, const char *name) {
 
     rc = kc_init_delete(ctx, name);
     if (rc != KC_INIT_OK) {
-        const char *err = kc_init_get_error(ctx);
+        const char *err = kc_init_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
         kc_init_close(ctx);
         return 1;
@@ -212,9 +212,9 @@ static int kc_init_cli_update(const kc_init_options_t *opts, const char *name, c
         return 1;
     }
 
-    rc = kc_init_update(ctx, name, cmd);
+    rc = kc_init_set(ctx, name, cmd);
     if (rc != KC_INIT_OK) {
-        const char *err = kc_init_get_error(ctx);
+        const char *err = kc_init_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
         kc_init_close(ctx);
         return 1;
@@ -242,7 +242,7 @@ static int kc_init_cli_exec(const kc_init_options_t *opts, const char *name) {
 
     rc = kc_init_exec(ctx, name);
     if (rc != KC_INIT_OK) {
-        const char *err = kc_init_get_error(ctx);
+        const char *err = kc_init_error(ctx);
         if (err) fprintf(stderr, "init: %s\n", err);
         kc_init_close(ctx);
         return 1;
@@ -259,68 +259,49 @@ static int kc_init_cli_exec(const kc_init_options_t *opts, const char *name) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    kc_init_options_t *opts = NULL;
+    kc_init_options_t options = {0};
     const char *env_value;
-    int i = 1;
-    int status = 1;
+    int i;
+    int status;
 
-    opts = kc_init_options_default();
-    if (!opts) {
-        fprintf(stderr, "init: memory allocation failed\n");
-        return 1;
-    }
+    i = 1;
+    status = 1;
 
     env_value = getenv("KC_INIT_DIR");
-    if (env_value &&
-        kc_init_options_set(opts, "dir", env_value) != KC_INIT_OK) {
-        fprintf(stderr, "init: memory allocation failed\n");
-        goto cleanup_options;
-    }
+    if (env_value) options.dir = env_value;
 
     env_value = getenv("KC_INIT_BACKEND");
-    if (env_value &&
-        kc_init_options_set(opts, "backend", env_value) != KC_INIT_OK) {
-        fprintf(stderr, "init: memory allocation failed\n");
-        goto cleanup_options;
-    }
+    if (env_value) options.backend = env_value;
 
     if (i >= argc) {
         kc_init_help();
-        goto cleanup_options;
+        return status;
     }
 
     while (i < argc && argv[i][0] == '-') {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             kc_init_help();
-            status = 0;
-            goto cleanup_options;
+            return 0;
         }
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             kc_init_cli_version();
-            status = 0;
-            goto cleanup_options;
+            return 0;
         }
         if (strcmp(argv[i], "--dir") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "init: missing value for --dir\n");
-                goto cleanup_options;
+                return 1;
             }
-            if (kc_init_options_set(opts, "dir", argv[i + 1]) != KC_INIT_OK) {
-                fprintf(stderr, "init: memory allocation failed\n");
-                goto cleanup_options;
-            }
+            options.dir = argv[i + 1];
             i += 2;
             continue;
         }
         if (strcmp(argv[i], "--backend") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "init: missing value for --backend\n");
-                goto cleanup_options;
+                return 1;
             }
-            if (kc_init_options_set(opts, "backend", argv[i + 1]) != KC_INIT_OK) {
-                fprintf(stderr, "init: memory allocation failed\n");
-                goto cleanup_options;
-            }
+            options.backend = argv[i + 1];
             i += 2;
             continue;
         }
@@ -329,76 +310,65 @@ int main(int argc, char **argv) {
 
     if (i >= argc) {
         kc_init_help();
-        goto cleanup_options;
+        return status;
     }
 
     if (strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "--list") == 0) {
         if (i + 1 == argc) {
-            status = kc_init_cli_list(opts, NULL);
-        } else if (i + 2 == argc) {
-            status = kc_init_cli_list(opts, argv[i + 1]);
-        } else {
-            fprintf(stderr, "init: --list accepts at most one name\n");
+            return kc_init_cli_list(&options, NULL);
         }
-        goto cleanup_options;
+        if (i + 2 == argc) {
+            return kc_init_cli_list(&options, argv[i + 1]);
+        }
+        fprintf(stderr, "init: --list accepts at most one name\n");
+        return 1;
     }
 
     if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--delete") == 0) {
         if (i + 2 != argc) {
             fprintf(stderr, "init: --delete requires exactly one name\n");
-            goto cleanup_options;
+            return 1;
         }
 #ifndef _WIN32
         kc_init_elevate(argc, argv);
 #endif
-        status = kc_init_cli_delete(opts, argv[i + 1]);
-        goto cleanup_options;
+        return kc_init_cli_delete(&options, argv[i + 1]);
     }
 
     if (argv[i][0] == '-') {
         kc_init_help();
-        goto cleanup_options;
+        return 1;
     }
 
     if (i + 1 < argc) {
         if (strcmp(argv[i + 1], "-d") == 0 ||
             strcmp(argv[i + 1], "--delete") == 0) {
-            if (i + 2 != argc) {
-                goto cleanup_options;
-            }
+            if (i + 2 != argc) return 1;
 #ifndef _WIN32
             kc_init_elevate(argc, argv);
 #endif
-            status = kc_init_cli_delete(opts, argv[i]);
-            goto cleanup_options;
+            return kc_init_cli_delete(&options, argv[i]);
         }
 
         if (strcmp(argv[i + 1], "-l") == 0 ||
             strcmp(argv[i + 1], "--list") == 0) {
-            if (i + 2 != argc) {
-                goto cleanup_options;
-            }
-            status = kc_init_cli_list(opts, argv[i]);
-            goto cleanup_options;
+            if (i + 2 != argc) return 1;
+            return kc_init_cli_list(&options, argv[i]);
         }
 
         {
             char cmd[KC_INIT_BUF];
+
             kc_init_join_args(cmd, sizeof(cmd), argv, i + 1, argc);
 #ifndef _WIN32
             kc_init_elevate(argc, argv);
 #endif
-            status = kc_init_cli_update(opts, argv[i], cmd);
-            goto cleanup_options;
+            return kc_init_cli_update(&options, argv[i], cmd);
         }
     }
 
 #ifndef _WIN32
     kc_init_elevate(argc, argv);
 #endif
-    status = kc_init_cli_exec(opts, argv[i]);
-
-cleanup_options:
-    kc_init_options_free(opts);
-    return status;
+    return kc_init_cli_exec(&options, argv[i]);
 }
