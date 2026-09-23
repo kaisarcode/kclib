@@ -16,36 +16,53 @@
 extern "C" {
 #endif
 
+typedef struct kc_mdp kc_mdp_t;
+
+#define KC_MDP_OK      0
+#define KC_MDP_ERROR  -1
+
 /**
- * Render the Markdown body as an HTML fragment.
+ * Create a reusable Markdown document.
+ * Frontmatter is split from the body once during this call.
+ * @param out Pointer to receive the document.
  * @param input Null-terminated Markdown input.
- * @return Owned NUL-terminated HTML buffer, or NULL on invalid input or
- *     allocation failure. Release it with kc_mdp_free().
+ * @return KC_MDP_OK on success, KC_MDP_ERROR on failure.
  */
-char *kc_mdp_html(const char *input);
+int kc_mdp_open(kc_mdp_t **out, const char *input);
+
+/**
+ * Render and cache the document body as an HTML fragment.
+ * The returned pointer belongs to the document and remains valid until
+ * kc_mdp_close().
+ * @param mdp Document returned by kc_mdp_open().
+ * @return Cached NUL-terminated HTML fragment, or NULL on failure.
+ */
+const char *kc_mdp_html(kc_mdp_t *mdp);
 
 /**
  * Return the document body after recognized frontmatter.
- * @param input Null-terminated Markdown input.
- * @return Owned NUL-terminated body buffer, or NULL on invalid input or
- *     allocation failure. Release it with kc_mdp_free().
+ * The returned pointer belongs to the document and remains valid until
+ * kc_mdp_close().
+ * @param mdp Document returned by kc_mdp_open().
+ * @return NUL-terminated body text, or NULL for an invalid document.
  */
-char *kc_mdp_body(const char *input);
+const char *kc_mdp_body(const kc_mdp_t *mdp);
 
 /**
  * Return recognized raw frontmatter content.
- * @param input Null-terminated Markdown input.
- * @return Owned NUL-terminated metadata buffer, or NULL on invalid input or
- *     allocation failure. Release it with kc_mdp_free().
+ * The returned pointer belongs to the document and remains valid until
+ * kc_mdp_close().
+ * @param mdp Document returned by kc_mdp_open().
+ * @return NUL-terminated metadata text, or NULL for an invalid document.
  */
-char *kc_mdp_meta(const char *input);
+const char *kc_mdp_meta(const kc_mdp_t *mdp);
 
 /**
- * Release an allocation returned by mdp. Accepts NULL.
- * @param ptr Allocation to release, or NULL.
+ * Release a Markdown document. Accepts NULL.
+ * @param mdp Document returned by kc_mdp_open(), or NULL.
  * @return None.
  */
-void kc_mdp_free(void *ptr);
+void kc_mdp_close(kc_mdp_t *mdp);
 
 /**
  * Returns the build version generated at compile time.
