@@ -87,7 +87,7 @@ static int kc_min_finish(char **out) {
  * @param out Receives the allocated minified buffer.
  * @return KC_MIN_INTERNAL_OK on success, or KC_MIN_INTERNAL_ERROR on failure.
  */
-static int kc_min_css(const char *in, char **out) {
+static int kc_min_css_impl(const char *in, char **out) {
     size_t i = 0;
     size_t n = 0;
     size_t cap = 0;
@@ -197,7 +197,7 @@ static int kc_min_css(const char *in, char **out) {
  * @param out Receives the allocated minified buffer.
  * @return KC_MIN_INTERNAL_OK on success, or KC_MIN_INTERNAL_ERROR on failure.
  */
-static int kc_min_js(const char *in, char **out) {
+static int kc_min_js_impl(const char *in, char **out) {
     size_t i = 0;
     size_t n = 0;
     size_t cap = 0;
@@ -361,7 +361,7 @@ static int kc_min_js(const char *in, char **out) {
  * @param out Receives the allocated minified buffer.
  * @return KC_MIN_INTERNAL_OK on success, or KC_MIN_INTERNAL_ERROR on failure.
  */
-static int kc_min_html(const char *in, char **out) {
+static int kc_min_html_impl(const char *in, char **out) {
     size_t i = 0;
     size_t n = 0;
     size_t cap = 0;
@@ -456,31 +456,94 @@ static int kc_min_html(const char *in, char **out) {
 }
 
 /**
- * Minify a null-terminated source string using the requested mode.
- * @param mode One of KC_MIN_MODE_CSS, KC_MIN_MODE_JS, or KC_MIN_MODE_HTML.
- * @param input Borrowed null-terminated input source.
- * @return Owned null-terminated minified string, or NULL on invalid input or
- * allocation failure.
+ * Finish a public minification call.
+ * @param input Borrowed source string.
+ * @param impl Internal minifier implementation.
+ * @return Owned minified string, or NULL on failure.
  */
-char *kc_min_minify(int mode, const char *input) {
+static char *kc_min_run(
+    const char *input,
+    int (*impl)(const char *, char **)
+) {
     char *output = NULL;
-    int status;
 
     if (!input) {
         return NULL;
     }
 
-    if (mode == KC_MIN_MODE_CSS) {
-        status = kc_min_css(input, &output);
-    } else if (mode == KC_MIN_MODE_JS) {
-        status = kc_min_js(input, &output);
-    } else if (mode == KC_MIN_MODE_HTML) {
-        status = kc_min_html(input, &output);
-    } else {
+    if (impl(input, &output) != KC_MIN_INTERNAL_OK) {
+        free(output);
         return NULL;
     }
 
-    if (status != KC_MIN_INTERNAL_OK) {
+    return output;
+}
+
+/**
+ * Minify CSS conservatively.
+ * @param input Borrowed null-terminated CSS source.
+ * @return Owned minified string, or NULL on failure.
+ */
+char *kc_min_css(const char *input) {
+    return kc_min_run(input, kc_min_css_impl);
+}
+
+/**
+ * Minify JavaScript conservatively.
+ * @param input Borrowed null-terminated JavaScript source.
+ * @return Owned minified string, or NULL on failure.
+ */
+char *kc_min_js(const char *input) {
+    return kc_min_run(input, kc_min_js_impl);
+}
+
+/**
+ * Minify HTML conservatively.
+ * @param input Borrowed null-terminated HTML source.
+ * @return Owned minified string, or NULL on failure.
+ */
+char *kc_min_html(const char *input) {
+    return kc_min_run(input, kc_min_html_impl);
+}
+
+/**
+ * Minify generic text by collapsing whitespace runs and trimming edges.
+ * @param input Borrowed null-terminated text source.
+ * @return Owned minified string, or NULL on failure.
+ */
+char *kc_min_text(const char *input) {
+    char *output = NULL;
+    size_t n = 0;
+    size_t cap = 0;
+    size_t i = 0;
+    int pending_space = 0;
+
+    if (!input) {
+        return NULL;
+    }
+
+    while (input[i]) {
+        if (isspace((unsigned char)input[i])) {
+            pending_space = n > 0;
+            i++;
+            continue;
+        }
+
+        if (pending_space) {
+            if (kc_min_push(&output, &n, &cap, ' ') != KC_MIN_INTERNAL_OK) {
+                free(output);
+                return NULL;
+            }
+            pending_space = 0;
+        }
+
+        if (kc_min_push(&output, &n, &cap, input[i++]) != KC_MIN_INTERNAL_OK) {
+            free(output);
+            return NULL;
+        }
+    }
+
+    if (kc_min_finish(&output) != KC_MIN_INTERNAL_OK) {
         free(output);
         return NULL;
     }
