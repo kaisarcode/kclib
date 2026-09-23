@@ -89,6 +89,13 @@ static int expect_int(const char *name, int expected, int actual) {
 }
 #endif
 
+/**
+ * Verifies one string test expectation.
+ * @param name Expectation description.
+ * @param expected Expected string value.
+ * @param actual Actual string value.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_string(const char *name, const char *expected, const char *actual) {
     if (!actual || strcmp(expected, actual) != 0) {
         printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
@@ -100,6 +107,13 @@ static int expect_string(const char *name, const char *expected, const char *act
 
 #ifndef __EMSCRIPTEN__
 #ifdef _WIN32
+/**
+ * Appends one argument to the Windows CLI command line.
+ * @param cmd Command-line buffer.
+ * @param cap Command-line buffer capacity.
+ * @param arg Argument to append.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     size_t n = wcslen(cmd);
     size_t len = wcslen(arg);
@@ -133,10 +147,24 @@ static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     return 0;
 }
 
+/**
+ * Converts one UTF-8 CLI argument to a Windows wide string.
+ * @param in UTF-8 input string.
+ * @param out Destination wide-character buffer.
+ * @param cap Destination capacity in wide characters.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_cli_to_wide(const char *in, wchar_t *out, size_t cap) {
     return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
 }
 
+/**
+ * Reads process output from one Windows pipe.
+ * @param pipe Pipe handle to read.
+ * @param buf Destination byte buffer.
+ * @param size Destination buffer size.
+ * @return 0 on success.
+ */
 static int test_cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
     DWORD count;
     size_t used = 0;
@@ -150,6 +178,18 @@ static int test_cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
     return 0;
 }
 
+/**
+ * Runs the CLI with controlled input and captured output.
+ * @param argv Null-terminated argument vector.
+ * @param input Input bytes for standard input.
+ * @param input_len Input byte count.
+ * @param out Standard-output buffer.
+ * @param out_size Standard-output buffer size.
+ * @param err Standard-error buffer.
+ * @param err_size Standard-error buffer size.
+ * @param out_status Destination process exit status.
+ * @return 0 on successful execution, 1 on harness failure.
+ */
 static int test_cli_run_input(char *const argv[], const char *input,
         size_t input_len, char *out, size_t out_size, char *err,
         size_t err_size, int *out_status) {
@@ -250,6 +290,18 @@ static int test_cli_run_input(char *const argv[], const char *input,
     return 0;
 }
 #else
+/**
+ * Runs the CLI with controlled input and captured output.
+ * @param argv Null-terminated argument vector.
+ * @param input Input bytes for standard input.
+ * @param input_len Input byte count.
+ * @param out Standard-output buffer.
+ * @param out_size Standard-output buffer size.
+ * @param err Standard-error buffer.
+ * @param err_size Standard-error buffer size.
+ * @param out_status Destination process exit status.
+ * @return 0 on successful execution, 1 on harness failure.
+ */
 static int test_cli_run_input(char *const argv[], const char *input,
         size_t input_len, char *out, size_t out_size, char *err,
         size_t err_size, int *out_status) {
@@ -325,6 +377,10 @@ static int test_cli_run_input(char *const argv[], const char *input,
 #endif
 #endif
 
+/**
+ * Tests the public build-version query.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_version(void) {
     int fail = 0;
     fail += expect_true("version returns non-zero", kc_mdp_version() != 0U);
@@ -332,6 +388,10 @@ static int case_kc_mdp_version(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests Markdown-to-HTML rendering through the public API.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_html(void) {
     char *out;
     int fail = 0;
@@ -364,6 +424,10 @@ static int case_kc_mdp_html(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests body extraction through the public API.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_body(void) {
     char *out;
     int fail = 0;
@@ -394,6 +458,10 @@ static int case_kc_mdp_body(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests frontmatter extraction through the public API.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_meta(void) {
     char *out;
     int fail = 0;
@@ -426,6 +494,10 @@ static int case_kc_mdp_meta(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests ownership release through the public API.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_free(void) {
     char *out = kc_mdp_html("# Hello");
     int fail = 0;
@@ -439,6 +511,10 @@ static int case_kc_mdp_free(void) {
 }
 
 #ifndef __EMSCRIPTEN__
+/**
+ * Tests the shipped CLI contract as one grouped case.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_cli(void) {
     int cli_enabled = MDP_TEST_CLI[0] != '\0';
     int fail = 0;
@@ -530,6 +606,10 @@ static int case_kc_mdp_cli(void) {
 }
 #endif
 
+/**
+ * Runs the complete portable mdp test suite.
+ * @return Number of failed test cases.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -558,6 +638,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Dispatches the requested test case.
+ * @param argc Command-line argument count.
+ * @param argv Command-line argument vector.
+ * @return 0 on success, nonzero on failure.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
