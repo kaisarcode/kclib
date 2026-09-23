@@ -1,43 +1,48 @@
 # tpl.c - Template Renderer
 
-`tpl.c` is a simple template renderer with includes, scoped variables, blocks, and basic control directives. It provides `libtpl` for C callers and a `tpl` CLI that reads the template from standard input and writes the rendered output to standard output.
+`tpl.c` is a simple template renderer with includes, scoped variables, blocks, and basic control directives. It provides reusable template instances through `libtpl` and a one-shot `tpl` CLI.
 
 ---
 
 ## CLI
 
+The CLI receives all render configuration in one invocation. The template
+source can be passed directly or read from stdin when omitted.
+
 ### Examples
 
-Render a template with variables:
+Render a direct template value:
+
+```bash
+./bin/x86_64/linux/tpl --var title=Home '<h1>{{ title }}</h1>'
+```
+
+Arguments may appear before or after the source:
+
+```bash
+./bin/x86_64/linux/tpl '<h1>{{ title }}</h1>' -var title=Home
+```
+
+Render from stdin:
 
 ```bash
 echo '<h1>{{ title }}</h1>' | ./bin/x86_64/linux/tpl --var title=Home
 ```
 
-Render with raw (unescaped) output:
-
-```bash
-echo '{{{ body }}}' | ./bin/x86_64/linux/tpl --var body='<b>bold</b>'
-```
-
-Render a file with includes:
+Render with includes:
 
 ```bash
 ./bin/x86_64/linux/tpl --root ./views --var page=Home < views/page.html
 ```
 
----
-
 ### Parameters
 
 | Flag | Description |
 | :--- | :--- |
-| `--root <dir>` | Base directory for `{{@include ...}}` path resolution (default: `.`) |
-| `--var <key=value>` | Inject a template variable (repeatable) |
+| `-root <dir>`, `--root <dir>` | Base directory for include resolution (default: `.`) |
+| `-var <key=value>`, `--var <key=value>` | Render variable; repeatable |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
-
----
 
 ## Template Syntax
 
@@ -61,50 +66,86 @@ Variables are string-based. Lists are passed as CSV or `[a,b,c]`. Truthy values 
 
 ## Public API
 
+A `kc_tpl_t` represents one reusable template source. The source and root are
+fixed when the instance is opened; each render receives an isolated variable
+set.
+
 ```c
 #include "libtpl.h"
 
-kc_tpl_t *ctx = NULL;
-char *output = NULL;
+kc_tpl_t *page = NULL;
+kc_tpl_options_t options = { .root = "./views" };
+kc_tpl_var_t vars[] = {
+    { "title", "Home" },
+    { "user_name", "John" }
+};
+char *html;
 
-if (kc_tpl_open(&ctx) == KC_TPL_OK) {
-    kc_tpl_set_root(ctx, ".");
-    kc_tpl_set_var(ctx, "title", "Home");
+if (kc_tpl_open(
+        &page,
+        "<h1>{{ title }}</h1><p>{{ user_name }}</p>",
+        &options
+    ) == KC_TPL_OK) {
+    html = kc_tpl_render(page, vars, 2U);
 
-    if (kc_tpl_render_string(
-            ctx,
-            "<h1>{{ title }}</h1>",
-            &output
-        ) == KC_TPL_OK) {
-        /* use output */
-        kc_tpl_free(output);
+    if (html != NULL) {
+        /* use html */
+        kc_tpl_free(html);
+    } else {
+        /* inspect kc_tpl_error(page) */
     }
 
-    kc_tpl_close(ctx);
+    kc_tpl_close(page);
 }
 ```
 
----
+The public API is:
 
-## Lifecycle
+- `kc_tpl_open()` creates a reusable template and copies its source.
+- `kc_tpl_render()` renders that stored source with one isolated variable array.
+- `kc_tpl_error()` returns the latest error for the template instance.
+- `kc_tpl_free()` releases rendered output and accepts `NULL`.
+- `kc_tpl_close()` releases the template instance and accepts `NULL`.
+- `kc_tpl_version()` returns the generated build version.
 
-- `kc_tpl_version()` - returns the build version for the library artifact.
-- `kc_tpl_open()` - initializes a new renderer context through its output pointer. Its default include root is `"."`.
-- `kc_tpl_set_root()` - changes the context's include root used to resolve include paths.
-- `kc_tpl_set_var()` - stores string variables in the context scope.
-- `kc_tpl_render_string()` - renders one template into a caller-owned, NUL-terminated output string. Release it with `kc_tpl_free()`.
-- `kc_tpl_free()` - releases a rendered output string.
-- `kc_tpl_get_error()` - returns the latest context error.
-- `kc_tpl_close()` - releases the context and all associated variable storage.
+`kc_tpl_open()` uses `"."` as the include root when options are `NULL`.
+When options are supplied, `root` must be a non-empty string. The source is
+borrowed only for the duration of `kc_tpl_open()`; the instance owns its copy.
 
----
+Variables are borrowed only for the duration of `kc_tpl_render()`. Each render
+creates a fresh root scope, so values from one render do not persist into the
+next. The returned output is caller-owned and must be released with
+`kc_tpl_free()`.
+
+A scripting binding can map objects/tables mechanically into `kc_tpl_var_t`
+entries:
+
+```js
+const page = tpl(source, { root: "./views" });
+
+const html = page.render({
+    title: "Home",
+    user_name: "John"
+});
+```
+
+```lua
+local page = tpl(source, {
+    root = "./views"
+})
+
+local html = page:render({
+    title = "Home",
+    user_name = "John"
+})
+```
 
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 Run the portable native test suite after building the artifacts:
@@ -131,9 +172,9 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/tpl.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_tpl_*` API with its existing signatures, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `tpl` CLI: `src/tpl.c` is not compiled into the module.
+- The module exports `kc_tpl_open`, `kc_tpl_render`, `kc_tpl_error`, `kc_tpl_free`, `kc_tpl_close`, and `kc_tpl_version`. It contains the reusable library capability, not the `tpl` CLI: `src/tpl.c` is not compiled into the module.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the same public-contract tests under Node.js. It requires `bin/wasm32/wasm/tpl.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles the six reusable public-API contract cases in `src/test.c` with Emscripten and runs them under Node.js. Native and Wine tests additionally run one grouped `kc_tpl_cli` case. It requires `bin/wasm32/wasm/tpl.wasm` and reports how to build it when it is absent.
 
 ### Multiarch Builds
 
