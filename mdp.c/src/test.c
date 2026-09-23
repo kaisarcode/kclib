@@ -378,135 +378,231 @@ static int test_cli_run_input(char *const argv[], const char *input,
 #endif
 
 /**
+ * Tests document creation and one-time split ownership.
+ * @return 0 when the case passes, 1 otherwise.
+ */
+static int case_kc_mdp_open(void) {
+    char input[] = "---\ntitle: Home\n---\n# Hello";
+    kc_mdp_t *mdp = NULL;
+    int fail = 0;
+
+    fail += expect_int("open rejects NULL out", KC_MDP_ERROR,
+        kc_mdp_open(NULL, input));
+    fail += expect_int("open rejects NULL input", KC_MDP_ERROR,
+        kc_mdp_open(&mdp, NULL));
+    fail += expect_true("failed open clears output", mdp == NULL);
+
+    fail += expect_int("open accepts document", KC_MDP_OK,
+        kc_mdp_open(&mdp, input));
+    fail += expect_true("open returns document", mdp != NULL);
+
+    if (mdp != NULL) {
+        input[4] = 'X';
+        fail += expect_string("open owns split metadata",
+            "title: Home", kc_mdp_meta(mdp));
+        fail += expect_string("open owns split body",
+            "# Hello", kc_mdp_body(mdp));
+    }
+
+    kc_mdp_close(mdp);
+    case_result(fail, "kc_mdp_open",
+        "creates one persistent document with an owned split");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests cached Markdown-to-HTML rendering.
+ * @return 0 when the case passes, 1 otherwise.
+ */
+static int case_kc_mdp_html(void) {
+    const char *first;
+    const char *second;
+    kc_mdp_t *mdp = NULL;
+    int fail = 0;
+
+    fail += expect_true("html rejects NULL document",
+        kc_mdp_html(NULL) == NULL);
+
+    fail += expect_int("open composite document", KC_MDP_OK,
+        kc_mdp_open(&mdp,
+            "---\ntitle: Home\n---\n# Hello\n\n"
+            "Text **bold** *italic* `code`.\n\n"
+            "- one\n- two\n\n> quote\n\n"
+            "```\n<a>\n```\n\n---\n\n"
+            "<div>\n*raw*\n</div>\n"));
+
+    first = mdp ? kc_mdp_html(mdp) : NULL;
+    fail += expect_true("html composite returns non-NULL", first != NULL);
+    if (first != NULL) {
+        fail += expect_true("html renders heading",
+            strstr(first, "<h1>Hello</h1>\n") != NULL);
+        fail += expect_true("html renders inline markup",
+            strstr(first,
+                "<strong>bold</strong> <em>italic</em> <code>code</code>") != NULL);
+        fail += expect_true("html renders list",
+            strstr(first, "<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n") != NULL);
+        fail += expect_true("html renders blockquote",
+            strstr(first,
+                "<blockquote>\n<p>quote</p>\n</blockquote>\n") != NULL);
+        fail += expect_true("html escapes fenced code",
+            strstr(first, "<pre><code>&lt;a&gt;\n</code></pre>\n") != NULL);
+        fail += expect_true("html renders horizontal rule",
+            strstr(first, "<hr>\n") != NULL);
+        fail += expect_true("html passes raw block",
+            strstr(first, "<div>\n*raw*\n</div>\n") != NULL);
+        fail += expect_true("html excludes frontmatter",
+            strstr(first, "title: Home") == NULL);
+
+        second = kc_mdp_html(mdp);
+        fail += expect_true("html reuses cached result", second == first);
+    }
+
+    kc_mdp_close(mdp);
+
+    mdp = NULL;
+    fail += expect_int("open empty document", KC_MDP_OK,
+        kc_mdp_open(&mdp, ""));
+    first = mdp ? kc_mdp_html(mdp) : NULL;
+    fail += expect_true("html empty returns non-NULL", first != NULL);
+    if (first != NULL) {
+        fail += expect_string("html empty returns empty string", "", first);
+    }
+    kc_mdp_close(mdp);
+
+    case_result(fail, "kc_mdp_html",
+        "renders once and caches the supported Markdown contract");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests body access through the persistent document.
+ * @return 0 when the case passes, 1 otherwise.
+ */
+static int case_kc_mdp_body(void) {
+    kc_mdp_t *mdp = NULL;
+    const char *first;
+    const char *second;
+    int fail = 0;
+
+    fail += expect_true("body rejects NULL document",
+        kc_mdp_body(NULL) == NULL);
+
+    fail += expect_int("open LF frontmatter", KC_MDP_OK,
+        kc_mdp_open(&mdp, "---\ntitle: Home\n---\n# Hello"));
+    first = mdp ? kc_mdp_body(mdp) : NULL;
+    second = mdp ? kc_mdp_body(mdp) : NULL;
+    fail += expect_string("body LF strips frontmatter", "# Hello", first);
+    fail += expect_true("body returns stable view", second == first);
+    kc_mdp_close(mdp);
+
+    mdp = NULL;
+    fail += expect_int("open CRLF frontmatter", KC_MDP_OK,
+        kc_mdp_open(&mdp, "---\r\ntitle: Home\r\n---\r\n# Hello"));
+    fail += expect_string("body CRLF strips frontmatter",
+        "# Hello", mdp ? kc_mdp_body(mdp) : NULL);
+    kc_mdp_close(mdp);
+
+    mdp = NULL;
+    fail += expect_int("open unclosed frontmatter", KC_MDP_OK,
+        kc_mdp_open(&mdp, "---\ntitle: Home\n# Hello"));
+    fail += expect_string("body unclosed frontmatter preserves input",
+        "---\ntitle: Home\n# Hello", mdp ? kc_mdp_body(mdp) : NULL);
+    kc_mdp_close(mdp);
+
+    mdp = NULL;
+    fail += expect_int("open empty body", KC_MDP_OK,
+        kc_mdp_open(&mdp, ""));
+    fail += expect_string("body empty returns empty string",
+        "", mdp ? kc_mdp_body(mdp) : NULL);
+    kc_mdp_close(mdp);
+
+    case_result(fail, "kc_mdp_body",
+        "returns the persistent body view after one split");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests frontmatter access through the persistent document.
+ * @return 0 when the case passes, 1 otherwise.
+ */
+static int case_kc_mdp_meta(void) {
+    kc_mdp_t *mdp = NULL;
+    const char *first;
+    const char *second;
+    int fail = 0;
+
+    fail += expect_true("meta rejects NULL document",
+        kc_mdp_meta(NULL) == NULL);
+
+    fail += expect_int("open LF metadata", KC_MDP_OK,
+        kc_mdp_open(&mdp, "---\ntitle: Home\n---\n# Hello"));
+    first = mdp ? kc_mdp_meta(mdp) : NULL;
+    second = mdp ? kc_mdp_meta(mdp) : NULL;
+    fail += expect_string("meta LF returns raw frontmatter",
+        "title: Home", first);
+    fail += expect_true("meta returns stable view", second == first);
+    kc_mdp_close(mdp);
+
+    mdp = NULL;
+    fail += expect_int("open CRLF metadata", KC_MDP_OK,
+        kc_mdp_open(&mdp, "---\r\ntitle: Home\r\n---\r\n# Hello"));
+    fail += expect_string("meta CRLF returns raw frontmatter",
+        "title: Home", mdp ? kc_mdp_meta(mdp) : NULL);
+    kc_mdp_close(mdp);
+
+    mdp = NULL;
+    fail += expect_int("open document without metadata", KC_MDP_OK,
+        kc_mdp_open(&mdp, "# Hello"));
+    fail += expect_string("meta absent returns empty string",
+        "", mdp ? kc_mdp_meta(mdp) : NULL);
+    kc_mdp_close(mdp);
+
+    mdp = NULL;
+    fail += expect_int("open unclosed metadata", KC_MDP_OK,
+        kc_mdp_open(&mdp, "---\ntitle: Home\n# Hello"));
+    fail += expect_string("meta unclosed returns empty string",
+        "", mdp ? kc_mdp_meta(mdp) : NULL);
+    kc_mdp_close(mdp);
+
+    case_result(fail, "kc_mdp_meta",
+        "returns the persistent recognized frontmatter view");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests document release through the public API.
+ * @return 0 when the case passes, 1 otherwise.
+ */
+static int case_kc_mdp_close(void) {
+    kc_mdp_t *mdp = NULL;
+    int fail = 0;
+
+    fail += expect_int("open document for close", KC_MDP_OK,
+        kc_mdp_open(&mdp, "# Hello"));
+    fail += expect_true("document allocated for close", mdp != NULL);
+    if (mdp != NULL) {
+        fail += expect_true("html can be cached before close",
+            kc_mdp_html(mdp) != NULL);
+    }
+
+    kc_mdp_close(mdp);
+    kc_mdp_close(NULL);
+
+    case_result(fail, "kc_mdp_close",
+        "releases document state and accepts NULL");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Tests the public build-version query.
  * @return 0 when the case passes, 1 otherwise.
  */
 static int case_kc_mdp_version(void) {
     int fail = 0;
+
     fail += expect_true("version returns non-zero", kc_mdp_version() != 0U);
-    case_result(fail, "kc_mdp_version", "returns a nonzero generated build version");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests Markdown-to-HTML rendering through the public API.
- * @return 0 when the case passes, 1 otherwise.
- */
-static int case_kc_mdp_html(void) {
-    char *out;
-    int fail = 0;
-
-    fail += expect_true("html NULL returns NULL", kc_mdp_html(NULL) == NULL);
-
-    out = kc_mdp_html("");
-    fail += expect_true("html empty returns non-NULL", out != NULL);
-    if (out) {
-        fail += expect_string("html empty returns empty string", "", out);
-        kc_mdp_free(out);
-    }
-
-    out = kc_mdp_html("---\ntitle: Home\n---\n# Hello\n\nText **bold** *italic* `code`.\n\n- one\n- two\n\n> quote\n\n```\n<a>\n```\n\n---\n\n<div>\n*raw*\n</div>\n");
-    fail += expect_true("html composite returns non-NULL", out != NULL);
-    if (out) {
-        fail += expect_true("html renders heading", strstr(out, "<h1>Hello</h1>\n") != NULL);
-        fail += expect_true("html renders inline markup",
-            strstr(out, "<strong>bold</strong> <em>italic</em> <code>code</code>") != NULL);
-        fail += expect_true("html renders list", strstr(out, "<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n") != NULL);
-        fail += expect_true("html renders blockquote", strstr(out, "<blockquote>\n<p>quote</p>\n</blockquote>\n") != NULL);
-        fail += expect_true("html escapes fenced code", strstr(out, "<pre><code>&lt;a&gt;\n</code></pre>\n") != NULL);
-        fail += expect_true("html renders horizontal rule", strstr(out, "<hr>\n") != NULL);
-        fail += expect_true("html passes raw block", strstr(out, "<div>\n*raw*\n</div>\n") != NULL);
-        fail += expect_true("html excludes frontmatter", strstr(out, "title: Home") == NULL);
-        kc_mdp_free(out);
-    }
-
-    case_result(fail, "kc_mdp_html", "renders the supported Markdown contract");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests body extraction through the public API.
- * @return 0 when the case passes, 1 otherwise.
- */
-static int case_kc_mdp_body(void) {
-    char *out;
-    int fail = 0;
-
-    fail += expect_true("body NULL returns NULL", kc_mdp_body(NULL) == NULL);
-
-    out = kc_mdp_body("---\ntitle: Home\n---\n# Hello");
-    fail += expect_string("body LF strips frontmatter", "# Hello", out);
-    kc_mdp_free(out);
-
-    out = kc_mdp_body("---\r\ntitle: Home\r\n---\r\n# Hello");
-    fail += expect_string("body CRLF strips frontmatter", "# Hello", out);
-    kc_mdp_free(out);
-
-    out = kc_mdp_body("---\ntitle: Home\n# Hello");
-    fail += expect_string("body unclosed frontmatter preserves input",
-        "---\ntitle: Home\n# Hello", out);
-    kc_mdp_free(out);
-
-    out = kc_mdp_body("");
-    fail += expect_true("body empty returns non-NULL", out != NULL);
-    if (out) {
-        fail += expect_string("body empty returns empty string", "", out);
-        kc_mdp_free(out);
-    }
-
-    case_result(fail, "kc_mdp_body", "returns body text after recognized frontmatter");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests frontmatter extraction through the public API.
- * @return 0 when the case passes, 1 otherwise.
- */
-static int case_kc_mdp_meta(void) {
-    char *out;
-    int fail = 0;
-
-    fail += expect_true("meta NULL returns NULL", kc_mdp_meta(NULL) == NULL);
-
-    out = kc_mdp_meta("---\ntitle: Home\n---\n# Hello");
-    fail += expect_string("meta LF returns raw frontmatter", "title: Home", out);
-    kc_mdp_free(out);
-
-    out = kc_mdp_meta("---\r\ntitle: Home\r\n---\r\n# Hello");
-    fail += expect_string("meta CRLF returns raw frontmatter", "title: Home", out);
-    kc_mdp_free(out);
-
-    out = kc_mdp_meta("# Hello");
-    fail += expect_true("meta absent returns non-NULL", out != NULL);
-    if (out) {
-        fail += expect_string("meta absent returns empty string", "", out);
-        kc_mdp_free(out);
-    }
-
-    out = kc_mdp_meta("---\ntitle: Home\n# Hello");
-    fail += expect_true("meta unclosed returns non-NULL", out != NULL);
-    if (out) {
-        fail += expect_string("meta unclosed returns empty string", "", out);
-        kc_mdp_free(out);
-    }
-
-    case_result(fail, "kc_mdp_meta", "returns recognized raw frontmatter");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests ownership release through the public API.
- * @return 0 when the case passes, 1 otherwise.
- */
-static int case_kc_mdp_free(void) {
-    char *out = kc_mdp_html("# Hello");
-    int fail = 0;
-
-    fail += expect_true("html returns allocation", out != NULL);
-    kc_mdp_free(out);
-    kc_mdp_free(NULL);
-
-    case_result(fail, "kc_mdp_free", "releases owned output and accepts NULL");
+    case_result(fail, "kc_mdp_version",
+        "returns a nonzero generated build version");
     return fail == 0 ? 0 : 1;
 }
 
@@ -614,21 +710,22 @@ static int case_all(void) {
     int rc = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 5;
+    test_case_total = 6;
 #else
     int cli_enabled = MDP_TEST_CLI[0] != '\0';
 #ifdef _WIN32
     cli_enabled = 1;
 #endif
-    test_case_total = cli_enabled ? 6 : 5;
+    test_case_total = cli_enabled ? 7 : 6;
 #endif
 
     test_case_current = 0;
-    run_case(&rc, case_kc_mdp_version);
+    run_case(&rc, case_kc_mdp_open);
     run_case(&rc, case_kc_mdp_html);
     run_case(&rc, case_kc_mdp_body);
     run_case(&rc, case_kc_mdp_meta);
-    run_case(&rc, case_kc_mdp_free);
+    run_case(&rc, case_kc_mdp_close);
+    run_case(&rc, case_kc_mdp_version);
 #ifndef __EMSCRIPTEN__
     if (cli_enabled) {
         run_case(&rc, case_kc_mdp_cli);
@@ -651,11 +748,12 @@ int main(int argc, char **argv) {
     }
 
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_mdp_version") == 0) return case_kc_mdp_version();
+    if (strcmp(argv[1], "kc_mdp_open") == 0) return case_kc_mdp_open();
     if (strcmp(argv[1], "kc_mdp_html") == 0) return case_kc_mdp_html();
     if (strcmp(argv[1], "kc_mdp_body") == 0) return case_kc_mdp_body();
     if (strcmp(argv[1], "kc_mdp_meta") == 0) return case_kc_mdp_meta();
-    if (strcmp(argv[1], "kc_mdp_free") == 0) return case_kc_mdp_free();
+    if (strcmp(argv[1], "kc_mdp_close") == 0) return case_kc_mdp_close();
+    if (strcmp(argv[1], "kc_mdp_version") == 0) return case_kc_mdp_version();
 #ifndef __EMSCRIPTEN__
     if (strcmp(argv[1], "kc_mdp_cli") == 0) return case_kc_mdp_cli();
 #endif
