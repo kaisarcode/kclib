@@ -61,7 +61,7 @@ char *kc_b64_encode(const void *data, size_t data_size) {
 }
 
 /**
- * Base64-decodes a string into malloc'd binary data.
+ * Base64-decodes an RFC 4648 string into malloc'd binary data.
  * @param str Base64 string.
  * @param out_size Receives the decoded size.
  * @return malloc'd data, or NULL on failure.
@@ -74,37 +74,76 @@ void *kc_b64_decode(const char *str, size_t *out_size) {
         ['+']=62,
         ['/']=63
     };
-    size_t len, out_len, i, j;
+    size_t len;
+    size_t out_len;
+    size_t i;
+    size_t j;
+    size_t padding;
     unsigned char *out;
-    unsigned int accum;
-    int bits;
 
-    if (str == NULL || out_size == NULL) return NULL;
+    if (!out_size) return NULL;
+    *out_size = 0;
+    if (!str) return NULL;
+
     len = strlen(str);
     if (len % 4 != 0) return NULL;
 
-    out_len = len / 4 * 3;
-    if (len >= 2 && str[len - 1] == '=') out_len--;
-    if (len >= 4 && str[len - 2] == '=') out_len--;
+    padding = 0;
+    if (len > 0 && str[len - 1] == '=') padding++;
+    if (len > 1 && str[len - 2] == '=') padding++;
+    if (padding > 2) return NULL;
 
-    out = (unsigned char *)malloc(out_len);
-    if (out == NULL) return NULL;
-
-    accum = 0;
-    bits = 0;
-    j = 0;
-    for (i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)str[i];
-        if (c == '=') break;
-        if (tbl[c] == 0 && c != 'A') { free(out); return NULL; }
-        accum = (accum << 6) | tbl[c];
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            out[j++] = (unsigned char)((accum >> bits) & 0xFF);
+    for (i = 0; i < len - padding; i++) {
+        unsigned char ch = (unsigned char)str[i];
+        if (ch == '=' || (tbl[ch] == 0 && ch != 'A')) {
+            return NULL;
         }
     }
-    *out_size = j;
+    for (; i < len; i++) {
+        if (str[i] != '=') {
+            return NULL;
+        }
+    }
+
+    if (len > 0) {
+        unsigned char a = tbl[(unsigned char)str[len - 4]];
+        unsigned char b = tbl[(unsigned char)str[len - 3]];
+        unsigned char cval = 0;
+
+        if (padding == 2) {
+            if ((b & 0x0F) != 0) {
+                return NULL;
+            }
+        } else if (padding == 1) {
+            cval = tbl[(unsigned char)str[len - 2]];
+            if ((cval & 0x03) != 0) {
+                return NULL;
+            }
+        }
+
+        (void)a;
+    }
+
+    out_len = len / 4 * 3 - padding;
+    out = (unsigned char *)malloc(out_len > 0 ? out_len : 1);
+    if (!out) return NULL;
+
+    j = 0;
+    for (i = 0; i < len; i += 4) {
+        unsigned int a = tbl[(unsigned char)str[i]];
+        unsigned int b = tbl[(unsigned char)str[i + 1]];
+        unsigned int cval = str[i + 2] == '=' ? 0U :
+            tbl[(unsigned char)str[i + 2]];
+        unsigned int d = str[i + 3] == '=' ? 0U :
+            tbl[(unsigned char)str[i + 3]];
+        unsigned int triple = (a << 18) | (b << 12) | (cval << 6) | d;
+
+        if (j < out_len) out[j++] = (unsigned char)((triple >> 16) & 0xFF);
+        if (j < out_len) out[j++] = (unsigned char)((triple >> 8) & 0xFF);
+        if (j < out_len) out[j++] = (unsigned char)(triple & 0xFF);
+    }
+
+    *out_size = out_len;
     return out;
 }
 
