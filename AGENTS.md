@@ -36,6 +36,48 @@ same concept -> same convention
 different concept -> capability-specific design
 ```
 
+## Consumer-first public ABI
+
+Design the public ABI for kclibs and their supported consumption paths, not for
+arbitrary C programs or maximal general-purpose C expressiveness.
+
+Before closing a public API, ask:
+
+```text
+If this capability had been designed directly for a JavaScript programmer,
+what would the natural API look like?
+```
+
+Use that JavaScript shape as the primary consumer-design test. Lua should
+normally project the same capability model idiomatically.
+
+Design from that consumer experience inward:
+
+```text
+kclib capability
+    ↓
+natural JavaScript/Lua consumer model
+    ↓
+minimal public C ABI expressing that same model
+    ↓
+public header
+    ↓
+generated cdef / JNI / WASM mechanical bridge
+```
+
+The C ABI remains canonical, but it is the stable native bridge surface for the
+kclib ecosystem. It is not an attempt to design a universal C API for every
+program or embedding scenario.
+
+Bindings must remain mechanical adapters. They may translate calling mechanics,
+ownership, tables or objects into public value structures, and platform
+transport details. They should not need semantic glue to make the API pleasant.
+
+Prefer opaque handles only when persistent identity or state is a real
+capability-level concept. Prefer simple public value structs, explicit arrays,
+plain scalar types, and clear ownership. Avoid public ABI complexity that does
+not serve an actual kclib consumer.
+
 ## Compatibility
 
 Treat the public header and CLI behavior as compatibility contracts.
