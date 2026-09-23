@@ -1,6 +1,6 @@
 # min.c - Asset Minifier
 
-`min.c` provides conservative CSS, JavaScript, and HTML asset minification as a small C library and stdin/stdout CLI. It reduces payload size while preserving valid runtime behavior for common web asset pipelines.
+`min.c` provides conservative CSS, JavaScript, HTML, and generic text minification as a small C library and stdin/stdout CLI. It reduces payload size while preserving valid runtime behavior for common web asset pipelines.
 
 ---
 
@@ -26,6 +26,12 @@ Minify HTML:
 echo '<div>  hello  </div>' | ./bin/x86_64/linux/min html
 ```
 
+Minify generic text:
+
+```bash
+echo '  hello   world  ' | ./bin/x86_64/linux/min txt
+```
+
 ---
 
 ### Parameters
@@ -35,6 +41,7 @@ echo '<div>  hello  </div>' | ./bin/x86_64/linux/min html
 | `css` | Minify CSS input |
 | `js` | Minify JavaScript input |
 | `html` | Minify HTML input |
+| `txt` | Minify generic text input |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
@@ -48,29 +55,52 @@ echo '<div>  hello  </div>' | ./bin/x86_64/linux/min html
 
 **HTML** - removes HTML comments, collapses whitespace between tokens. Preserves content inside `<pre>` and `<textarea>` verbatim. Preserves spaces adjacent to inline elements.
 
+**Text** - collapses whitespace runs to a single space and trims leading and trailing whitespace. It does not interpret comments, markup, quotes, or other syntax.
+
 ---
 
 ## Public API
 
+The reusable API is stateless and exposes each minification capability directly.
+
 ```c
 #include "libmin.h"
 
-char *output = kc_min_minify(KC_MIN_MODE_CSS, "body { color: red; }");
+char *css = kc_min_css("body { color: red; }");
+char *js = kc_min_js("const x = 1; // comment");
+char *html = kc_min_html("<div>  hello  </div>");
+char *txt = kc_min_txt("  hello   world  ");
 
-if (output) {
-    /* use output */
-    kc_min_free(output);
-}
+kc_min_free(css);
+kc_min_free(js);
+kc_min_free(html);
+kc_min_free(txt);
 ```
 
-The reusable API is stateless. `kc_min_minify()` accepts one of
-`KC_MIN_MODE_CSS`, `KC_MIN_MODE_JS`, or `KC_MIN_MODE_HTML` plus a borrowed
-null-terminated input string. On success it returns an owned, null-terminated
-string, including an allocated empty string for empty input. It returns `NULL`
-for a null input, an invalid mode, or an allocation failure.
+The public operations are:
 
-`kc_min_free()` releases memory returned by the library and accepts `NULL`.
-There is no public context or lifecycle state.
+- `kc_min_css()` for CSS.
+- `kc_min_js()` for JavaScript.
+- `kc_min_html()` for HTML.
+- `kc_min_txt()` for generic text whitespace minification.
+- `kc_min_free()` releases any successful returned allocation and accepts `NULL`.
+- `kc_min_version()` returns the generated build version.
+
+Each minifier accepts one borrowed null-terminated source string. On success it
+returns an owned null-terminated string, including an allocated empty string for
+empty input. A `NULL` input or allocation failure returns `NULL`.
+
+A natural scripting binding can expose the same capability directly:
+
+```lua
+local css = min.css(source)
+local js = min.js(source)
+local html = min.html(source)
+local txt = min.txt(source)
+```
+
+There is no public context, mode enum, dispatcher, or lifecycle state.
+
 
 ---
 
@@ -79,7 +109,7 @@ There is no public context or lifecycle state.
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests
@@ -113,9 +143,9 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/min.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports `kc_min_minify`, `kc_min_free`, and `kc_min_version`. It contains the reusable stateless library capability, not the `min` CLI: `src/min.c` is not compiled into the module.
+- The module exports `kc_min_css`, `kc_min_js`, `kc_min_html`, `kc_min_txt`, `kc_min_free`, and `kc_min_version`. It contains the reusable stateless library capability, not the `min` CLI: `src/min.c` is not compiled into the module.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the reusable public-API contract tests under Node.js. Native and Wine tests additionally run one grouped `kc_min_cli` case; host process-spawning code is excluded from the WASM build. It requires `bin/wasm32/wasm/min.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles the six reusable public-API contract cases in `src/test.c` with Emscripten and runs them under Node.js. Native and Wine tests additionally run one grouped `kc_min_cli` case; host process-spawning code is excluded from the WASM build. It requires `bin/wasm32/wasm/min.wasm` and reports how to build it when it is absent.
 
 `wasm32/wasm` is included in `make all`.
 
