@@ -14,7 +14,11 @@ mm.set("A");
 mm.set(mm.get() + "B");
 mm.save();
 
-mm.del();              // deletes the file and invalidates mm
+mm.set(null);
+mm.save();             // deletes the file and invalidates mm
+
+// shorthand:
+mm.del();
 ```
 
 After `del()`, any operation other than final cleanup is an error. Reopening the
@@ -108,11 +112,14 @@ if (kc_mmap_open(&mm, "file.bin") == KC_MMAP_OK) {
   no current value. On `KC_MMAP_OK`, the returned pointer and size are
   transport details for the current binary value.
 - `kc_mmap_set()` replaces the current in-memory value and does not write the
-  file. `NULL` with size zero is accepted as an empty value.
-- `kc_mmap_save()` persists the current value. An empty value creates or
-  truncates the backing file to zero bytes.
-- `kc_mmap_del()` deletes the backing file and invalidates the instance.
-  Subsequent `get/set/save/del` calls fail.
+  file. `NULL` with size zero sets the logical value to null. A non-NULL
+  pointer with size zero is a real zero-byte value such as `""`.
+- `kc_mmap_save()` persists the current value. A zero-byte value creates or
+  truncates the backing file to zero bytes. Saving null deletes the backing
+  file and invalidates the instance.
+- `kc_mmap_del()` is shorthand for setting null and saving it. It therefore
+  deletes the backing file and invalidates the instance. Subsequent
+  `get/set/save/del` calls fail.
 - `kc_mmap_close()` releases the instance and accepts `NULL`.
 - `kc_mmap_version()` returns the generated build version.
 
@@ -121,7 +128,7 @@ the JS/Lua model. A binding can map the result mechanically:
 
 ```text
 KC_MMAP_NOT_FOUND      -> null
-KC_MMAP_OK + 0 bytes   -> empty string / empty byte value
+KC_MMAP_OK + 0 bytes   -> "" / zero-byte value
 KC_MMAP_OK + N bytes   -> string / byte value
 KC_MMAP_ERROR          -> binding error
 ```
