@@ -293,7 +293,10 @@ static int kc_nets_recv_plain(
 #else
         count = recv(socket, buffer, sizeof(buffer), 0);
 #endif
-        if (count == 0) break;
+        if (count == 0) {
+            if (kc_nets_is_stopped(nets)) rc = KC_NETS_ESTOP;
+            break;
+        }
         if (count < 0) {
             rc = kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
             break;
