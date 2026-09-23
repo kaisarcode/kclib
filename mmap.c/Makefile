@@ -417,12 +417,22 @@ define wasm_target
 		echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 		exit 1; \
 	fi
-	@$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DMMAP_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/wasm32-wasm
+	@cache=$(BUILD_DIR)/wasm32-wasm/CMakeCache.txt; \
+	if [ -f "$$cache" ] && ! grep -Eq '^MMAP_BUILD_VERSION:.*=[0-9]+$$' "$$cache"; then \
+		$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DMMAP_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	@if [ ! -f $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt ]; then \
+		$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DMMAP_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DMMAP_BUILD_VERSION=$$$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
 	@cp $(BUILD_DIR)/wasm32-wasm/out/mmap.wasm $(BIN_DIR)/wasm32/wasm/mmap.wasm
 	@echo "OK wasm32/wasm"
 endef
