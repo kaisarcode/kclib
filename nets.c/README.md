@@ -1,195 +1,163 @@
 # nets.c - Network Sender
 
-`nets.c` is a small C library and CLI for sending standard input to one TCP, UDP, or optional TLS target and printing the response to standard output.
-
----
+`nets.c` provides a native asynchronous library and a one-shot CLI for sending raw bytes to one TCP, UDP, or optional TLS destination.
 
 ## CLI
 
-Send bytes from standard input to a network address and print the response to standard output.
-
-### Examples
-
-Send to a TCP endpoint - stdin is sent, then the response is printed to stdout:
+The CLI reads all input from standard input, sends it to one target, and prints stream response bytes to standard output.
 
 ```bash
 echo 'hello' | nets 127.0.0.1:8080
-```
-
-Send to port 80 by default:
-
-```bash
-echo 'hello' | nets 127.0.0.1
-```
-
-Pass a URL-shaped target:
-
-```bash
+echo 'hello' | nets 127.0.0.1:8080 --udp
 nets https://example.com <<< 'payload'
 ```
 
-URL-shaped targets select transport and authority defaults only: `http://` uses TCP port `80`, `https://` uses TLS and port `443`, `tcp://` uses TCP, and `udp://` uses UDP. `nets` remains a raw byte sender; `https://` does not create an HTTP request or add HTTP framing. TLS encryption is available only when TLS support is compiled in. The current TLS path does not verify the server certificate or hostname and must not be treated as authenticated.
+Usage:
 
-Send a UDP datagram:
-
-```bash
-echo 'hello' | nets 127.0.0.1:8080 --udp
+```text
+nets <target> [--tcp|--udp|--tls]
 ```
 
----
+Targets may be a host, `host:port`, bracketed IPv6 address, or a URL-shaped `http://`, `https://`, `tcp://`, or `udp://` target.
 
-### Parameters
+URL-shaped targets select transport and authority defaults only. They do not add HTTP framing, headers, redirects, parsing, or other application-protocol behavior.
 
-| Parameter | Description |
-| :--- | :--- |
-| `<target>` | Host, `host:port`, or `http://`, `https://`, `tcp://`, `udp://` URL-shaped target. |
-| `--tcp` | Use TCP. This is the default. |
-| `--udp` | Use UDP. |
-| `--tls` | Use TLS over TCP. |
-| `-h`, `--help` | Show help and usage. |
-| `-v`, `--version` | Show version. |
+`http://` selects TCP port 80, `https://` selects TLS port 443, and `tcp://` or `udp://` select their corresponding transport with port 80 when no explicit port is present.
 
----
+TLS is available only when the library is compiled with OpenSSL. The TLS transport sets SNI but does not verify the server certificate or hostname, so it must not be treated as authenticated transport.
 
 ## Public API
+
+A `kc_nets_t` represents one active transfer.
 
 ```c
 #include "libnets.h"
 
-const unsigned char msg[] = "hello\n";
-kc_nets_t *ctx = NULL;
-void *response = NULL;
-size_t response_size = 0;
+static void complete(
+    int status,
+    const void *data,
+    size_t size,
+    void *userdata
+) {
+    (void)userdata;
 
-if (kc_nets_open(&ctx) == KC_NETS_OK) {
-    int rc = kc_nets_send(
-        ctx,
-        "127.0.0.1",
-        8080,
-        KC_NETS_TCP,
-        msg,
-        sizeof(msg) - 1,
-        &response,
-        &response_size
-    );
+    if (status == KC_NETS_OK && data != NULL) {
+        /* data[0..size) is the borrowed response */
+    }
+}
 
-    if (rc == KC_NETS_OK) {
-        /* response[0..response_size) is binary data */
+int main(void) {
+    const unsigned char message[] = "hello";
+    kc_nets_t *transfer = NULL;
+
+    if (kc_nets_send(
+            &transfer,
+            "127.0.0.1",
+            8080,
+            KC_NETS_TCP,
+            message,
+            sizeof(message) - 1,
+            complete,
+            NULL
+        ) != KC_NETS_OK) {
+        return 1;
     }
 
-    kc_nets_free(response);
-    kc_nets_close(ctx);
+    /*
+     * The transfer may continue asynchronously.
+     * Call kc_nets_stop(transfer) when graceful interruption is required.
+     */
+
+    kc_nets_close(transfer);
+    return 0;
 }
 ```
 
----
+## Transfer semantics
 
-## Lifecycle
+`kc_nets_send()` starts one asynchronous transfer and returns after the operation has been launched. The library copies the host string and input bytes before returning, so the caller may immediately reuse or release its input storage.
 
-- `kc_nets_open()` allocates a sender context.
-- `kc_nets_send()` borrows the input bytes for the duration of the call and never retains them. It opens a socket, sends the bytes, returns any response through the output parameters, and closes the socket before returning.
-- A returned response is owned binary memory. `response_size` is authoritative, and no NUL terminator is promised.
-- Release response memory with `kc_nets_free()`. Calling `kc_nets_free(NULL)` is valid.
-- TCP sends all bytes over one connection, then reads the response until EOF.
-- UDP sends the provided bytes as one datagram and normally returns no response data.
-- `kc_nets_stop()` requests a cooperative stop for one context. DNS resolution, connection attempts, and some reads may not be interrupted, and TCP or TLS response reads may wait for peer EOF.
-- `kc_nets_strerror()` maps categorical status codes to static messages.
-- TLS is optional and available only when compiled with OpenSSL.
-- `kc_nets_version()` returns the build version.
-- `kc_nets_close()` releases the context.
+A successfully launched transfer invokes its handler exactly once with the terminal result.
 
----
+For TCP and TLS, `KC_NETS_OK` may include response bytes. The callback owns neither the response pointer nor its storage. Response bytes remain valid only for the callback duration.
+
+UDP sends the complete input as one datagram and reports success with no response bytes.
+
+`kc_nets_stop()` is an interruption command. It requests graceful termination of the active transfer and interrupts the active socket where the platform permits it. A stopped transfer completes through the normal terminal callback with `KC_NETS_ESTOP`. DNS resolution may not be immediately interruptible on every platform.
+
+`kc_nets_close()` releases the transfer. If the transfer is still active, close requests stop and waits for the worker to finish. It is also safe to call `kc_nets_close()` from the transfer callback.
+
+`kc_nets_strerror()` returns static descriptions for public status codes.
+
+`kc_nets_tls_available()` reports whether TLS support is compiled into the current build.
+
+`kc_nets_version()` returns the generated build version.
+
+## Protocol behavior
+
+TCP connects to one resolved address, sends all input bytes, closes the write side, and reads response bytes until peer EOF.
+
+UDP sends exactly one datagram and does not wait for a reply.
+
+TLS applies the same stream-oriented send/response model over the optional OpenSSL transport.
+
+The library resolves destinations using the platform resolver and tries resolved addresses in order until one succeeds, the operation is stopped, or all addresses fail.
+
+## WASM
+
+WASM support is not provided for this library. The reusable capability is arbitrary raw TCP, UDP, and TLS networking, which standard browser WASM environments do not expose. Substituting WebSocket, WebTransport, or another browser transport would change the capability contract.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+A plain build targets the current host architecture.
 
 ```bash
-make clean && make
+make
 ```
 
-### Tests
+Multi-architecture artifacts are written under `bin/{arch}/{platform}/`.
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile only test executables, link dynamically against the generated shared library, and run through CTest.
+```bash
+make all
+```
+
+## Tests
+
+Build project artifacts before running the contract suite.
 
 ```bash
 make
 make test
 ```
 
-To run the common `test` target in Windows-through-Wine mode:
+Windows artifacts can be validated through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+The test suite covers the reusable asynchronous API and one grouped `kc_nets_cli` case for the shipped command-line interface.
 
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
+WASM tests are not applicable because the browser runtime cannot represent the raw socket capability without changing its semantics.
 
-### Multiarch Builds
+## Dependencies
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+Build tools:
 
-```bash
-make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make x86_64/iossim
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make aarch64/ios
-make aarch64/iossim
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
-```
+- GNU Make
+- CMake 3.14 or newer
+- Ninja
+- a C11 compiler
 
----
+Platform networking:
 
-## Development Requirements
+- Windows: `ws2_32`
+- POSIX platforms: native socket APIs and threading support
 
-### Build Tools
+Optional:
 
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### System Libraries
-
-Linux:
-- `libpthread`
-- `libm`
-
-Windows (MSVC or MinGW):
-- `ws2_32`
-
-macOS / iOS:
-- No additional system libraries required.
-
-### Optional Dependencies
-
-- `OpenSSL` - required for TLS over TCP (`--tls`, `https://` URLs).
-    If missing, TLS features are unavailable but TCP and UDP work normally.
-
-### Optional Cross-Compilation SDKs
-
-Required only for multiarch builds:
-
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
-- Android NDK (version 27.2.12479018) for Android targets.
+- OpenSSL for TLS
+- MinGW and Wine for Windows cross-compilation and validation
+- osxcross SDKs for macOS and iOS cross-compilation
+- Android NDK for Android cross-compilation
