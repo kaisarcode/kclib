@@ -60,7 +60,23 @@
 
 #define KC_WCH_QUEUE_SIZE 256
 
-struct kc_wch {
+typedef struct kc_wch_native kc_wch_native_t;
+
+typedef struct {
+    int type;
+    const char *path;
+} kc_wch_native_event_t;
+
+typedef void (*kc_wch_native_handler_t)(
+    const kc_wch_native_event_t *event,
+    void *userdata
+);
+
+#define KC_WCH_NATIVE_ADD 0
+#define KC_WCH_NATIVE_UPD 1
+#define KC_WCH_NATIVE_DEL 2
+
+struct kc_wch_native {
     char *root;
     int recursive;
 
@@ -79,7 +95,7 @@ struct kc_wch {
     char q_path[KC_WCH_QUEUE_SIZE][PATH_MAX];
     int q_used;
 
-    kc_wch_handler_t handler;
+    kc_wch_native_handler_t handler;
     void *userdata;
     atomic_int stop;
     atomic_int ready;
@@ -93,7 +109,7 @@ struct kc_wch {
 #endif
 
 #ifdef __EMSCRIPTEN__
-    struct kc_wch *wasm_next;
+    struct kc_wch_native *wasm_next;
 #endif
 
 #ifdef __linux__
@@ -129,7 +145,7 @@ struct kc_wch {
  * @param p Path to find.
  * @return Index or -1 if not found.
  */
-static int path_find(struct kc_wch *w, const char *p) {
+static int path_find(struct kc_wch_native *w, const char *p) {
     for (int i = 0; i < w->path_count; i++) {
         if (strcmp(w->paths[i], p) == 0) return i;
     }
@@ -142,7 +158,7 @@ static int path_find(struct kc_wch *w, const char *p) {
  * @param p Path to add.
  * @return 0 on success, -1 on failure.
  */
-static int path_add(struct kc_wch *w, const char *p) {
+static int path_add(struct kc_wch_native *w, const char *p) {
     if (path_find(w, p) >= 0) return 0;
     if (w->path_count >= w->path_cap) {
         int nc = w->path_cap ? w->path_cap * 2 : 128;
@@ -163,7 +179,7 @@ static int path_add(struct kc_wch *w, const char *p) {
  * @param p Path to remove.
  * @return None.
  */
-static void path_remove(struct kc_wch *w, const char *p) {
+static void path_remove(struct kc_wch_native *w, const char *p) {
     int i = path_find(w, p);
     if (i < 0) return;
     free(w->paths[i]);
@@ -176,7 +192,7 @@ static void path_remove(struct kc_wch *w, const char *p) {
  * @param path Path to check.
  * @return 1 if path should be reported, 0 if filtered.
  */
-static int filter_ok(struct kc_wch *w, const char *path) {
+static int filter_ok(struct kc_wch_native *w, const char *path) {
     if (!w->has_filter) return 1;
     size_t pl = strlen(path);
     size_t fl = strlen(w->filter_name);
@@ -191,7 +207,7 @@ static int filter_ok(struct kc_wch *w, const char *path) {
  * @param path Event path.
  * @return None.
  */
-static void queue_push(struct kc_wch *w, int type, const char *path) {
+static void queue_push(struct kc_wch_native *w, int type, const char *path) {
     if (w->q_used >= KC_WCH_QUEUE_SIZE) return;
     w->q_type[w->q_used] = type;
     snprintf(w->q_path[w->q_used], PATH_MAX, "%s", path);
@@ -204,7 +220,7 @@ static void queue_push(struct kc_wch *w, int type, const char *path) {
  * @param ev Output event struct.
  * @return 1 if event returned, 0 if queue empty.
  */
-static int dequeue(struct kc_wch *w, kc_wch_event_t *ev) {
+static int dequeue(struct kc_wch_native *w, kc_wch_native_event_t *ev) {
     while (w->q_used > 0) {
         char *p = w->q_path[0];
         if (!filter_ok(w, p)) {
@@ -230,7 +246,7 @@ static int dequeue(struct kc_wch *w, kc_wch_event_t *ev) {
  * @param w Watcher context.
  * @return 1 on success, 0 on failure.
  */
-static int try_backend(struct kc_wch *w) {
+static int try_backend(struct kc_wch_native *w) {
 #ifdef __EMSCRIPTEN__
     w->backend = 4;
     return 1;
@@ -300,7 +316,7 @@ static int try_backend(struct kc_wch *w) {
  * @param wd Watch descriptor.
  * @return Index into wd arrays, or -1.
  */
-static int wd_lookup(struct kc_wch *w, int wd) {
+static int wd_lookup(struct kc_wch_native *w, int wd) {
     for (int i = 0; i < w->wd_count; i++)
         if (w->wds[i] == wd) return i;
     return -1;
@@ -312,7 +328,7 @@ static int wd_lookup(struct kc_wch *w, int wd) {
  * @param dir Directory path.
  * @return Watch descriptor, or -1 on failure.
  */
-static int wd_add(struct kc_wch *w, const char *dir) {
+static int wd_add(struct kc_wch_native *w, const char *dir) {
     int wd = inotify_add_watch(w->ifd, dir,
         IN_CREATE | IN_CLOSE_WRITE | IN_DELETE |
         IN_MOVED_TO | IN_MOVED_FROM);
@@ -343,7 +359,7 @@ static int wd_add(struct kc_wch *w, const char *dir) {
  * @param wd Watch descriptor to remove.
  * @return None.
  */
-static void wd_remove(struct kc_wch *w, int wd) {
+static void wd_remove(struct kc_wch_native *w, int wd) {
     int i = wd_lookup(w, wd);
     if (i < 0) return;
     free(w->wd_paths[i]);
@@ -360,7 +376,7 @@ static void wd_remove(struct kc_wch *w, int wd) {
  * @param dir Directory to scan.
  * @return None.
  */
-static void scan_watch_dir(struct kc_wch *w, const char *dir) {
+static void scan_watch_dir(struct kc_wch_native *w, const char *dir) {
     DIR *d = opendir(dir);
     if (!d) return;
     struct dirent *e;
@@ -386,7 +402,7 @@ static void scan_watch_dir(struct kc_wch *w, const char *dir) {
  * @param tmo Timeout in milliseconds (-1 = infinite).
  * @return 0 on data available, 1 on timeout, -1 on error.
  */
-static int read_inotify(struct kc_wch *w, int tmo) {
+static int read_inotify(struct kc_wch_native *w, int tmo) {
     if (w->rbuf_off < w->rbuf_len) return 0;
     struct pollfd pfd = { .fd = w->ifd, .events = POLLIN };
     int pr = poll(&pfd, 1, tmo);
@@ -404,7 +420,7 @@ static int read_inotify(struct kc_wch *w, int tmo) {
  * @param w Watcher context.
  * @return None.
  */
-static void fill_inotify(struct kc_wch *w) {
+static void fill_inotify(struct kc_wch_native *w) {
     while (w->rbuf_off < w->rbuf_len) {
         struct inotify_event *iev =
             (struct inotify_event *)(w->rbuf + w->rbuf_off);
@@ -418,20 +434,20 @@ static void fill_inotify(struct kc_wch *w) {
         else
             snprintf(fp, PATH_MAX, "%s", w->wd_paths[idx]);
         if (iev->mask & (IN_DELETE | IN_MOVED_FROM)) {
-            queue_push(w, KC_WCH_DEL, fp);
+            queue_push(w, KC_WCH_NATIVE_DEL, fp);
             path_remove(w, fp);
         } else if (iev->mask & IN_MOVED_TO) {
             if (iev->mask & IN_ISDIR && w->recursive)
                 scan_watch_dir(w, fp);
-            queue_push(w, KC_WCH_ADD, fp);
+            queue_push(w, KC_WCH_NATIVE_ADD, fp);
             path_add(w, fp);
         } else if (iev->mask & IN_CLOSE_WRITE) {
-            queue_push(w, KC_WCH_UPD, fp);
+            queue_push(w, KC_WCH_NATIVE_UPD, fp);
             path_add(w, fp);
         } else if (iev->mask & IN_CREATE) {
             if (iev->mask & IN_ISDIR && w->recursive)
                 scan_watch_dir(w, fp);
-            queue_push(w, KC_WCH_ADD, fp);
+            queue_push(w, KC_WCH_NATIVE_ADD, fp);
             path_add(w, fp);
         } else if (iev->mask & IN_IGNORED) {
             wd_remove(w, iev->wd);
@@ -447,7 +463,7 @@ static void fill_inotify(struct kc_wch *w) {
  * @param fd Open fd for a watched directory.
  * @return Index into kqueue dir arrays, or -1.
  */
-static int kq_lookup(struct kc_wch *w, int fd) {
+static int kq_lookup(struct kc_wch_native *w, int fd) {
     for (int i = 0; i < w->dir_count; i++)
         if (w->dir_fds[i] == fd) return i;
     return -1;
@@ -459,7 +475,7 @@ static int kq_lookup(struct kc_wch *w, int fd) {
  * @param dir Directory path.
  * @return None.
  */
-static void kq_add_dir(struct kc_wch *w, const char *dir) {
+static void kq_add_dir(struct kc_wch_native *w, const char *dir) {
     int fd = open(dir, O_RDONLY | O_EVTONLY);
     if (fd < 0) return;
     struct kevent ch;
@@ -486,7 +502,7 @@ static void kq_add_dir(struct kc_wch *w, const char *dir) {
  * @param fd Open fd to remove.
  * @return None.
  */
-static void kq_dir_remove(struct kc_wch *w, int fd) {
+static void kq_dir_remove(struct kc_wch_native *w, int fd) {
     int i = kq_lookup(w, fd);
     if (i < 0) return;
     close(w->dir_fds[i]);
@@ -513,7 +529,7 @@ static int scan_entry_cmp(const void *a, const void *b) {
  * @param w Watcher context.
  * @return None.
  */
-static void kq_scan_diff(struct kc_wch *w) {
+static void kq_scan_diff(struct kc_wch_native *w) {
     int stack_cap = 1024, stack_cnt = 0;
     char **stack = malloc(stack_cap * sizeof(char *));
     int ent_cap = 1024, ent_cnt = 0;
@@ -588,14 +604,14 @@ static void kq_scan_diff(struct kc_wch *w) {
         else if (oi >= w->path_count) cmp = -1;
         else cmp = strcmp(ents[ci], old[oi]);
         if (cmp < 0) {
-            queue_push(w, KC_WCH_ADD, ents[ci]);
+            queue_push(w, KC_WCH_NATIVE_ADD, ents[ci]);
             ci++;
         } else if (cmp > 0) {
-            queue_push(w, KC_WCH_DEL, old[oi]);
+            queue_push(w, KC_WCH_NATIVE_DEL, old[oi]);
             oi++;
         } else {
             if (mtimes[ci] != om[oi] || sizes[ci] != oz[oi])
-                queue_push(w, KC_WCH_UPD, ents[ci]);
+                queue_push(w, KC_WCH_NATIVE_UPD, ents[ci]);
             ci++; oi++;
         }
     }
@@ -627,7 +643,7 @@ cleanup:
  * @param tmo Timeout in milliseconds (-1 = infinite).
  * @return 1 if events queued, 0 on timeout, -1 on error.
  */
-static int fill_kqueue(struct kc_wch *w, int tmo) {
+static int fill_kqueue(struct kc_wch_native *w, int tmo) {
     struct timespec ts = { .tv_sec = tmo / 1000,
         .tv_nsec = (tmo % 1000) * 1000000L };
     struct timespec *tsp = (tmo < 0) ? NULL : &ts;
@@ -638,10 +654,10 @@ static int fill_kqueue(struct kc_wch *w, int tmo) {
     int idx = kq_lookup(w, (int)ev.ident);
     if (idx < 0) return 0;
     if (ev.fflags & NOTE_DELETE) {
-        queue_push(w, KC_WCH_DEL, w->dir_paths[idx]);
+        queue_push(w, KC_WCH_NATIVE_DEL, w->dir_paths[idx]);
         kq_dir_remove(w, (int)ev.ident);
     } else if (ev.fflags & NOTE_RENAME) {
-        queue_push(w, KC_WCH_DEL, w->dir_paths[idx]);
+        queue_push(w, KC_WCH_NATIVE_DEL, w->dir_paths[idx]);
         kq_dir_remove(w, (int)ev.ident);
     } else if (ev.fflags & NOTE_WRITE) {
         kq_scan_diff(w);
@@ -658,7 +674,7 @@ static int fill_kqueue(struct kc_wch *w, int tmo) {
  * @param tmo Timeout in milliseconds.
  * @return None.
  */
-static void fill_windows(struct kc_wch *w, int tmo) {
+static void fill_windows(struct kc_wch_native *w, int tmo) {
     if (!w->pending) {
         DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME |
             FILE_NOTIFY_CHANGE_DIR_NAME |
@@ -701,16 +717,16 @@ static void fill_windows(struct kc_wch *w, int tmo) {
             switch (fni->Action) {
             case FILE_ACTION_ADDED:
             case FILE_ACTION_RENAMED_NEW_NAME:
-                queue_push(w, KC_WCH_ADD, fp);
+                queue_push(w, KC_WCH_NATIVE_ADD, fp);
                 path_add(w, fp);
                 break;
             case FILE_ACTION_MODIFIED:
-                queue_push(w, KC_WCH_UPD, fp);
+                queue_push(w, KC_WCH_NATIVE_UPD, fp);
                 path_add(w, fp);
                 break;
             case FILE_ACTION_REMOVED:
             case FILE_ACTION_RENAMED_OLD_NAME:
-                queue_push(w, KC_WCH_DEL, fp);
+                queue_push(w, KC_WCH_NATIVE_DEL, fp);
                 path_remove(w, fp);
                 break;
             }
@@ -723,7 +739,7 @@ static void fill_windows(struct kc_wch *w, int tmo) {
 
 #ifdef __EMSCRIPTEN__
 
-static kc_wch_t *kc_wch_wasm_watchers = NULL;
+static kc_wch_native_t *kc_wch_wasm_watchers = NULL;
 static int kc_wch_wasm_hooks_installed = 0;
 
 /**
@@ -772,13 +788,13 @@ EM_JS(void, kc_wch_wasm_install_hooks, (), {
  * @param path Changed VFS path.
  * @return 1 when the event belongs to the watcher, otherwise 0.
  */
-static int kc_wch_wasm_matches(const kc_wch_t *w, const char *path) {
+static int kc_wch_wasm_matches(const kc_wch_native_t *w, const char *path) {
     size_t root_len;
 
     if (w == NULL || path == NULL) return 0;
 
     if (w->has_filter) {
-        return filter_ok((kc_wch_t *)w, path);
+        return filter_ok((kc_wch_native_t *)w, path);
     }
 
     if (strcmp(w->root, path) == 0) return 1;
@@ -799,15 +815,15 @@ static int kc_wch_wasm_matches(const kc_wch_t *w, const char *path) {
  * @return None.
  */
 void kc_wch_wasm_event(int type, const char *path) {
-    kc_wch_t *w = kc_wch_wasm_watchers;
+    kc_wch_native_t *w = kc_wch_wasm_watchers;
 
     while (w != NULL) {
-        kc_wch_t *next = w->wasm_next;
+        kc_wch_native_t *next = w->wasm_next;
 
         if (!atomic_load(&w->stop) &&
                 w->handler != NULL &&
                 kc_wch_wasm_matches(w, path)) {
-            kc_wch_event_t event;
+            kc_wch_native_event_t event;
             int known = path_find(w, path) >= 0;
             int emit = 1;
 
@@ -815,17 +831,17 @@ void kc_wch_wasm_event(int type, const char *path) {
                 if (known) {
                     emit = 0;
                 } else {
-                    event.type = KC_WCH_ADD;
+                    event.type = KC_WCH_NATIVE_ADD;
                     (void)path_add(w, path);
                 }
             } else if (type == 4) {
-                event.type = known ? KC_WCH_UPD : KC_WCH_ADD;
+                event.type = known ? KC_WCH_NATIVE_UPD : KC_WCH_NATIVE_ADD;
                 if (!known) (void)path_add(w, path);
             } else {
                 event.type = type;
-                if (type == KC_WCH_ADD) {
+                if (type == KC_WCH_NATIVE_ADD) {
                     (void)path_add(w, path);
-                } else if (type == KC_WCH_DEL) {
+                } else if (type == KC_WCH_NATIVE_DEL) {
                     path_remove(w, path);
                 }
             }
@@ -846,7 +862,7 @@ void kc_wch_wasm_event(int type, const char *path) {
  * @param dir Directory to scan.
  * @return None.
  */
-static void kc_wch_wasm_scan(kc_wch_t *w, const char *dir) {
+static void kc_wch_wasm_scan(kc_wch_native_t *w, const char *dir) {
     DIR *directory = opendir(dir);
     struct dirent *entry;
 
@@ -883,7 +899,7 @@ static void kc_wch_wasm_scan(kc_wch_t *w, const char *dir) {
  * @param w Watcher instance.
  * @return None.
  */
-static void kc_wch_wasm_add(kc_wch_t *w) {
+static void kc_wch_wasm_add(kc_wch_native_t *w) {
     if (!kc_wch_wasm_hooks_installed) {
         kc_wch_wasm_install_hooks();
         kc_wch_wasm_hooks_installed = 1;
@@ -898,8 +914,8 @@ static void kc_wch_wasm_add(kc_wch_t *w) {
  * @param w Watcher instance.
  * @return None.
  */
-static void kc_wch_wasm_remove(kc_wch_t *w) {
-    kc_wch_t **cursor = &kc_wch_wasm_watchers;
+static void kc_wch_wasm_remove(kc_wch_native_t *w) {
+    kc_wch_native_t **cursor = &kc_wch_wasm_watchers;
 
     while (*cursor != NULL) {
         if (*cursor == w) {
@@ -920,7 +936,7 @@ static void kc_wch_wasm_remove(kc_wch_t *w) {
  * @param timeout_ms Maximum wait in milliseconds.
  * @return 1 on event, 0 on timeout, or -1 on error.
  */
-static int kc_wch_wait(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms) {
+static int kc_wch_wait(kc_wch_native_t *w, kc_wch_native_event_t *ev, int timeout_ms) {
 #ifdef __EMSCRIPTEN__
     (void)timeout_ms;
 #endif
@@ -958,7 +974,7 @@ static int kc_wch_wait(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms) {
  * @param w Watcher instance.
  * @return None.
  */
-static void kc_wch_release(kc_wch_t *w) {
+static void kc_wch_release(kc_wch_native_t *w) {
     int i;
 
     for (i = 0; i < w->path_count; i++) free(w->paths[i]);
@@ -1011,13 +1027,13 @@ static DWORD WINAPI kc_wch_worker(void *arg) {
  */
 static void *kc_wch_worker(void *arg) {
 #endif
-    kc_wch_t *w = (kc_wch_t *)arg;
+    kc_wch_native_t *w = (kc_wch_native_t *)arg;
 
     while (!atomic_load(&w->ready)) {
     }
 
     while (!atomic_load(&w->stop)) {
-        kc_wch_event_t ev;
+        kc_wch_native_event_t ev;
         int rc = kc_wch_wait(w, &ev, 100);
 
         if (rc < 0) break;
@@ -1049,12 +1065,12 @@ static void *kc_wch_worker(void *arg) {
  * @param options Optional watcher options.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
-int kc_wch_open(
-    kc_wch_t **out,
+static int kc_wch_native_open(
+    kc_wch_native_t **out,
     const char *path,
     const kc_wch_options_t *options
 ) {
-    struct kc_wch *w;
+    struct kc_wch_native *w;
     int exists = 0;
     int is_directory = 0;
     int recursive = options != NULL && options->recursive != 0;
@@ -1190,7 +1206,7 @@ int kc_wch_open(
  * @param userdata Opaque caller value.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
-int kc_wch_on(kc_wch_t *w, kc_wch_handler_t handler, void *userdata) {
+static int kc_wch_native_on(kc_wch_native_t *w, kc_wch_native_handler_t handler, void *userdata) {
     if (w == NULL || handler == NULL || w->thread_started) {
         return KC_WCH_ERROR;
     }
@@ -1223,7 +1239,7 @@ int kc_wch_on(kc_wch_t *w, kc_wch_handler_t handler, void *userdata) {
  * @param w Watcher instance.
  * @return None.
  */
-void kc_wch_close(kc_wch_t *w) {
+static void kc_wch_native_close(kc_wch_native_t *w) {
     if (w == NULL) return;
 
     atomic_store(&w->stop, 1);
