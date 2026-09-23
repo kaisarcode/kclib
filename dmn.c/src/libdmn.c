@@ -54,12 +54,20 @@ uint64_t kc_dmn_version(void) {
 #define KC_DMN_BUF     4096
 #define KC_DMN_PATH    512
 
-struct kc_dmn_options {
-    char *dir;
-};
+typedef void (*kc_dmn_row_handler_t)(
+    const char *name,
+    const char *endpoint,
+    void *userdata
+);
 
 struct kc_dmn {
+    char name[KC_DMN_PATH];
     char dir[KC_DMN_PATH];
+    char *cmd;
+    unsigned char *eot;
+    size_t eot_size;
+    kc_dmn_handler_t data_handler;
+    void *data_userdata;
     char error[256];
 };
 
@@ -88,7 +96,7 @@ typedef struct {
 } kc_dmn_backend_t;
 #endif
 
-struct kc_dmn_conn {
+struct kc_dmn_stream {
 #ifdef _WIN32
     HANDLE handle;
 #else
@@ -778,7 +786,7 @@ static int kc_dmn_run_delete(const char *dir, const char *key) {
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_dmn_ls_row(const char *dir, const char *key, kc_dmn_list_cb cb, void *userdata) {
+static int kc_dmn_ls_row(const char *dir, const char *key, kc_dmn_row_handler_t cb, void *userdata) {
     char sock[KC_DMN_PATH];
 
 #ifdef _WIN32
@@ -825,7 +833,7 @@ static int kc_dmn_exists(const char *dir, const char *key) {
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on formatting failure.
  */
-static int kc_dmn_run_list_one(const char *dir, const char *key, kc_dmn_list_cb cb, void *userdata) {
+static int kc_dmn_run_list_one(const char *dir, const char *key, kc_dmn_row_handler_t cb, void *userdata) {
     if (!kc_dmn_exists(dir, key)) {
         return 0;
     }
@@ -839,7 +847,7 @@ static int kc_dmn_run_list_one(const char *dir, const char *key, kc_dmn_list_cb 
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_dmn_run_list(const char *dir, kc_dmn_list_cb cb, void *userdata) {
+static int kc_dmn_run_list(const char *dir, kc_dmn_row_handler_t cb, void *userdata) {
 #ifdef _WIN32
     WIN32_FIND_DATAA fd;
     HANDLE h;
@@ -1100,7 +1108,7 @@ int kc_dmn_delete(kc_dmn_t *ctx, const char *key) {
  * @param userdata Opaque pointer passed to cb.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_list(kc_dmn_t *ctx, const char *key, kc_dmn_list_cb cb, void *userdata) {
+int kc_dmn_list(kc_dmn_t *ctx, const char *key, kc_dmn_row_handler_t cb, void *userdata) {
     if (!ctx) {
         return KC_DMN_ERROR;
     }
@@ -1127,9 +1135,9 @@ int kc_dmn_list(kc_dmn_t *ctx, const char *key, kc_dmn_list_cb cb, void *userdat
  * @param out Pointer to receive the connection object.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_connect(kc_dmn_t *ctx, const char *key, kc_dmn_conn_t **out) {
+int kc_dmn_connect(kc_dmn_t *ctx, const char *key, kc_dmn_stream_t **out) {
     char sock[KC_DMN_PATH];
-    kc_dmn_conn_t *conn;
+    kc_dmn_stream_t *conn;
 
     if (!out) {
         if (ctx) kc_dmn_set_error(ctx, "invalid connect arguments");
@@ -1145,7 +1153,7 @@ int kc_dmn_connect(kc_dmn_t *ctx, const char *key, kc_dmn_conn_t **out) {
         kc_dmn_set_error(ctx, "socket path failed");
         return KC_DMN_ERROR;
     }
-    conn = (kc_dmn_conn_t *)calloc(1, sizeof(*conn));
+    conn = (kc_dmn_stream_t *)calloc(1, sizeof(*conn));
     if (!conn) {
         kc_dmn_set_error(ctx, "connection allocation failed");
         return KC_DMN_ERROR;
@@ -1177,7 +1185,7 @@ int kc_dmn_connect(kc_dmn_t *ctx, const char *key, kc_dmn_conn_t **out) {
  * @param data_size Data length.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_send(kc_dmn_conn_t *conn, const void *data, size_t data_size) {
+int kc_dmn_send(kc_dmn_stream_t *conn, const void *data, size_t data_size) {
 #ifdef _WIN32
     size_t off = 0;
 #endif
@@ -1209,7 +1217,7 @@ int kc_dmn_send(kc_dmn_conn_t *conn, const void *data, size_t data_size) {
  * @param out_size Pointer to receive the received size.
  * @return KC_DMN_OK, KC_DMN_EOF, or KC_DMN_ERROR.
  */
-int kc_dmn_recv(kc_dmn_conn_t *conn, size_t max_size,
+int kc_dmn_recv(kc_dmn_stream_t *conn, size_t max_size,
     void **out_data, size_t *out_size) {
     void *buffer;
     size_t received;
@@ -1278,7 +1286,7 @@ int kc_dmn_recv(kc_dmn_conn_t *conn, size_t max_size,
  * @param conn Connection object from kc_dmn_connect.
  * @return None.
  */
-void kc_dmn_disconnect(kc_dmn_conn_t *conn) {
+void kc_dmn_disconnect(kc_dmn_stream_t *conn) {
     if (!conn) return;
 #ifdef _WIN32
     if (conn->handle != INVALID_HANDLE_VALUE) CloseHandle(conn->handle);
