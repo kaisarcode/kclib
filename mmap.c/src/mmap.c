@@ -17,11 +17,14 @@
 
 static void print_help(void) {
     printf("Usage:\n");
-    printf("  mmap -set|--set <file> Read stdin, set the value, and save it\n");
-    printf("  mmap -get|--get <file> Read the saved value to stdout\n");
-    printf("  mmap -del|--del <file> Delete the backing file\n");
-    printf("  mmap -h, --help        Show this help\n");
-    printf("  mmap -v, --version     Show version\n");
+    printf("  mmap <path> -get|--get\n");
+    printf("  mmap <path> -set|--set [value]\n");
+    printf("  mmap <path> -del|--del\n");
+    printf("  mmap -h, --help\n");
+    printf("  mmap -v, --version\n");
+    printf("\n");
+    printf("Input:\n");
+    printf("  value  Optional direct value for set; stdin is used when omitted\n");
 }
 
 static void print_version(void) {
@@ -81,26 +84,34 @@ static int read_stdin(void **out_data, size_t *out_size) {
     return 0;
 }
 
-static int command_set(const char *path) {
+static int command_set(const char *path, const char *value) {
     kc_mmap_t *map = NULL;
-    void *data = NULL;
-    size_t size = 0U;
+    void *stdin_data = NULL;
+    const void *data;
+    size_t size;
     int rc;
 
-    if (read_stdin(&data, &size) != 0) {
-        fprintf(stderr, "mmap: read error\n");
-        return 1;
+    if (value != NULL) {
+        data = value;
+        size = strlen(value);
+    } else {
+        if (read_stdin(&stdin_data, &size) != 0) {
+            fprintf(stderr, "mmap: read error\n");
+            return 1;
+        }
+        data = stdin_data;
     }
 
     rc = kc_mmap_open(&map, path);
     if (rc != KC_MMAP_OK) {
-        free(data);
+        free(stdin_data);
         fprintf(stderr, "mmap: failed to open value\n");
         return 1;
     }
 
     rc = kc_mmap_set(map, data, size);
-    free(data);
+    free(stdin_data);
+
     if (rc == KC_MMAP_OK) {
         rc = kc_mmap_save(map);
     }
@@ -169,8 +180,8 @@ static int command_del(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    const char *mode;
     const char *path;
+    const char *mode;
 
     if (argc >= 2) {
         if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
@@ -183,21 +194,31 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (argc != 3) {
+    if (argc < 3 || argc > 4) {
         fprintf(stderr, "mmap: invalid arguments\n");
         return 1;
     }
 
-    mode = argv[1];
-    path = argv[2];
+    path = argv[1];
+    mode = argv[2];
 
-    if (strcmp(mode, "-set") == 0 || strcmp(mode, "--set") == 0) {
-        return command_set(path);
-    }
     if (strcmp(mode, "-get") == 0 || strcmp(mode, "--get") == 0) {
+        if (argc != 3) {
+            fprintf(stderr, "mmap: get does not accept a value\n");
+            return 1;
+        }
         return command_get(path);
     }
+
+    if (strcmp(mode, "-set") == 0 || strcmp(mode, "--set") == 0) {
+        return command_set(path, argc == 4 ? argv[3] : NULL);
+    }
+
     if (strcmp(mode, "-del") == 0 || strcmp(mode, "--del") == 0) {
+        if (argc != 3) {
+            fprintf(stderr, "mmap: del does not accept a value\n");
+            return 1;
+        }
         return command_del(path);
     }
 
