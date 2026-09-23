@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <ctype.h>
 #include <limits.h>
 #include <stddef.h>
 #include <stdarg.h>
@@ -39,6 +40,8 @@
 #ifndef _WIN32
 #include <sys/stat.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/types.h>
 #include <dirent.h>
 #include <fcntl.h>
 #endif
@@ -59,6 +62,24 @@
 #endif
 
 #define KC_WCH_QUEUE_SIZE 256
+
+#define KC_WCH_NAME_MAX 128
+#define KC_WCH_CMD_MAX 4096
+#define KC_WCH_PATH_MAX 4096
+
+typedef struct {
+    char name[KC_WCH_NAME_MAX];
+    char path[KC_WCH_PATH_MAX];
+    char command[KC_WCH_CMD_MAX];
+    int recursive;
+} kc_wch_registration_t;
+
+typedef struct {
+    const char *command;
+    const char *dir;
+    const char *name;
+} kc_wch_dispatch_t;
+
 
 typedef struct kc_wch_native kc_wch_native_t;
 
