@@ -34,7 +34,22 @@ set_source_files_properties(src/libmmap.c PROPERTIES
     COMPILE_DEFINITIONS KC_MMAP_BUILD_VERSION=${MMAP_BUILD_VERSION}
 )
 
-if(NOT MMAP_TEST_EXTERNAL_ARTIFACTS)
+if(EMSCRIPTEN)
+    add_executable(mmap_wasm ${MMAP_SOURCES})
+    target_include_directories(mmap_wasm PRIVATE src)
+    set_target_properties(mmap_wasm PROPERTIES
+        OUTPUT_NAME "mmap"
+        SUFFIX ".wasm"
+    )
+    target_link_options(mmap_wasm PRIVATE
+        --no-entry
+        -sSTANDALONE_WASM=1
+        -sSTACK_SIZE=4194304
+        -sEXPORTED_FUNCTIONS=_kc_mmap_open,_kc_mmap_get,_kc_mmap_set,_kc_mmap_save,_kc_mmap_del,_kc_mmap_close,_kc_mmap_version
+    )
+endif()
+
+if(NOT EMSCRIPTEN AND NOT MMAP_TEST_EXTERNAL_ARTIFACTS)
     add_executable(mmap
         src/mmap.c
         ${MMAP_SOURCES}
@@ -63,7 +78,11 @@ endif()
 if(MMAP_BUILD_TESTS)
     enable_testing()
 
-    if(MMAP_TEST_SHARED_LIBRARY)
+    if(EMSCRIPTEN)
+        add_executable(mmap_contract_test src/test.c ${MMAP_SOURCES})
+        target_include_directories(mmap_contract_test PRIVATE src)
+        target_link_options(mmap_contract_test PRIVATE -sSTACK_SIZE=4194304)
+    elseif(MMAP_TEST_SHARED_LIBRARY)
         add_library(mmap_test_shared SHARED IMPORTED)
         set_target_properties(mmap_test_shared PROPERTIES
             IMPORTED_LOCATION "${MMAP_TEST_SHARED_LIBRARY}"
@@ -77,26 +96,28 @@ if(MMAP_BUILD_TESTS)
         set(MMAP_TEST_SHARED_TARGET mmap_shared)
     endif()
 
-    if(TARGET mmap_test_shared)
+    if(NOT EMSCRIPTEN AND TARGET mmap_test_shared)
         set(MMAP_TEST_SHARED_TARGET mmap_test_shared)
     endif()
 
-    if(MMAP_TEST_CLI)
-        set(MMAP_TEST_CLI_TARGET_PATH "${MMAP_TEST_CLI}")
-    else()
-        set(MMAP_TEST_CLI_TARGET_PATH "$<TARGET_FILE:mmap>")
+    if(NOT EMSCRIPTEN)
+        if(MMAP_TEST_CLI)
+            set(MMAP_TEST_CLI_TARGET_PATH "${MMAP_TEST_CLI}")
+        else()
+            set(MMAP_TEST_CLI_TARGET_PATH "$<TARGET_FILE:mmap>")
+        endif()
+
+        add_executable(mmap_contract_test src/test.c)
+        target_include_directories(mmap_contract_test PRIVATE src)
+        target_link_libraries(mmap_contract_test PRIVATE ${MMAP_TEST_SHARED_TARGET})
+        target_compile_definitions(mmap_contract_test PRIVATE
+            KC_MMAP_TEST_CLI="${MMAP_TEST_CLI_TARGET_PATH}"
+        )
+
+        add_custom_command(TARGET mmap_contract_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:${MMAP_TEST_SHARED_TARGET}>
+                $<TARGET_FILE_DIR:mmap_contract_test>
+        )
     endif()
-
-    add_executable(mmap_contract_test src/test.c)
-    target_include_directories(mmap_contract_test PRIVATE src)
-    target_link_libraries(mmap_contract_test PRIVATE ${MMAP_TEST_SHARED_TARGET})
-    target_compile_definitions(mmap_contract_test PRIVATE
-        KC_MMAP_TEST_CLI="${MMAP_TEST_CLI_TARGET_PATH}"
-    )
-
-    add_custom_command(TARGET mmap_contract_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:${MMAP_TEST_SHARED_TARGET}>
-            $<TARGET_FILE_DIR:mmap_contract_test>
-    )
 endif()
