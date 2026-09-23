@@ -534,6 +534,13 @@ static int case_kc_min_cli(void) {
         fail += expect_string("CLI direct value output", "Hello World !", out);
     }
     {
+        char *args[] = { (char *)MIN_TEST_CLI,
+            "Hello     World", "-txt", NULL };
+        fail += expect_int("CLI value before mode exits 0", 0,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_string("CLI value before mode output", "Hello World", out);
+    }
+    {
         char *args[] = { (char *)MIN_TEST_CLI, "-css",
             "body { color: red; }", NULL };
         fail += expect_int("CLI short css value exits 0", 0,
