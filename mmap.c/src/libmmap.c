@@ -305,7 +305,7 @@ int kc_mmap_set(kc_mmap_t *map, const void *data, size_t size) {
         return KC_MMAP_ERROR;
     }
 
-    if (size > 0U) {
+    if (data != NULL && size > 0U) {
         copy = malloc(size);
         if (copy == NULL) {
             return KC_MMAP_ERROR;
@@ -316,7 +316,7 @@ int kc_mmap_set(kc_mmap_t *map, const void *data, size_t size) {
     kc_mmap_release_data(map);
     map->data = copy;
     map->size = size;
-    map->has_value = 1;
+    map->has_value = data != NULL ? 1 : 0;
     map->dirty = 1;
     return KC_MMAP_OK;
 }
@@ -324,11 +324,20 @@ int kc_mmap_set(kc_mmap_t *map, const void *data, size_t size) {
 int kc_mmap_save(kc_mmap_t *map) {
     FILE *file;
 
-    if (map == NULL || !map->valid || !map->has_value) {
+    if (map == NULL || !map->valid) {
         return KC_MMAP_ERROR;
     }
 
     if (!map->dirty) {
+        return KC_MMAP_OK;
+    }
+
+    if (!map->has_value) {
+        if (remove(map->path) != 0 && errno != ENOENT) {
+            return KC_MMAP_ERROR;
+        }
+        map->dirty = 0;
+        map->valid = 0;
         return KC_MMAP_OK;
     }
 
@@ -351,23 +360,15 @@ int kc_mmap_save(kc_mmap_t *map) {
 }
 
 int kc_mmap_del(kc_mmap_t *map) {
-    int rc;
-
     if (map == NULL || !map->valid) {
         return KC_MMAP_ERROR;
     }
 
-    kc_mmap_release_data(map);
-
-    rc = remove(map->path);
-    if (rc != 0 && errno != ENOENT) {
+    if (kc_mmap_set(map, NULL, 0U) != KC_MMAP_OK) {
         return KC_MMAP_ERROR;
     }
 
-    map->has_value = 0;
-    map->dirty = 0;
-    map->valid = 0;
-    return KC_MMAP_OK;
+    return kc_mmap_save(map);
 }
 
 void kc_mmap_close(kc_mmap_t *map) {
