@@ -1264,391 +1264,735 @@ static int kc_dmn_run_signal(const char *dir, const char *key, int signo) {
 #endif
 }
 
-/**
- * Initialize a new dmn context.
- * @param out Pointer to store the context pointer.
- * @param opts Configuration options.
- * @return KC_DMN_OK on success, KC_DMN_ERROR on failure.
- */
-int kc_dmn_open(kc_dmn_t **out, const kc_dmn_options_t *opts) {
-    kc_dmn_t *ctx;
+typedef struct {
+    char **names;
+    char **endpoints;
+    size_t count;
+    size_t capacity;
+    int failed;
+} kc_dmn_collect_t;
+
+static char *kc_dmn_strdup(const char *text) {
+    size_t n;
+    char *copy;
+    if (!text) return NULL;
+    n = strlen(text) + 1;
+    copy = (char *)malloc(n);
+    if (!copy) return NULL;
+    memcpy(copy, text, n);
+    return copy;
+}
+
+static void kc_dmn_collect_clear(kc_dmn_collect_t *collect) {
+    size_t i;
+    if (!collect) return;
+    for (i = 0; i < collect->count; i++) {
+        free(collect->names[i]);
+        free(collect->endpoints[i]);
+    }
+    free(collect->names);
+    free(collect->endpoints);
+    memset(collect, 0, sizeof(*collect));
+}
+
+static void kc_dmn_collect_row(
+    const char *name,
+    const char *endpoint,
+    void *userdata
+) {
+    kc_dmn_collect_t *collect = (kc_dmn_collect_t *)userdata;
+    char **names;
+    char **endpoints;
+    size_t next;
+
+    if (!collect || collect->failed) return;
+    if (collect->count == collect->capacity) {
+        next = collect->capacity ? collect->capacity * 2 : 8;
+        names = (char **)realloc(collect->names, next * sizeof(*names));
+        if (!names) {
+            collect->failed = 1;
+            return;
+        }
+        collect->names = names;
+        endpoints = (char **)realloc(
+            collect->endpoints,
+            next * sizeof(*endpoints)
+        );
+        if (!endpoints) {
+            collect->failed = 1;
+            return;
+        }
+        collect->endpoints = endpoints;
+        collect->capacity = next;
+    }
+
+    collect->names[collect->count] = kc_dmn_strdup(name);
+    collect->endpoints[collect->count] = kc_dmn_strdup(endpoint);
+    if (!collect->names[collect->count] ||
+            !collect->endpoints[collect->count]) {
+        free(collect->names[collect->count]);
+        free(collect->endpoints[collect->count]);
+        collect->names[collect->count] = NULL;
+        collect->endpoints[collect->count] = NULL;
+        collect->failed = 1;
+        return;
+    }
+    collect->count++;
+}
+
+static int kc_dmn_collect_finish(
+    kc_dmn_collect_t *collect,
+    kc_dmn_entry_t **out_entries,
+    size_t *out_count
+) {
+    kc_dmn_entry_t *entries;
+    char *cursor;
+    size_t bytes;
+    size_t i;
+
+    if (!collect || !out_entries || !out_count) return KC_DMN_ERROR;
+    if (collect->count == 0) return KC_DMN_OK;
+
+    bytes = collect->count * sizeof(*entries);
+    for (i = 0; i < collect->count; i++) {
+        bytes += strlen(collect->names[i]) + 1;
+        bytes += strlen(collect->endpoints[i]) + 1;
+    }
+
+    entries = (kc_dmn_entry_t *)malloc(bytes);
+    if (!entries) return KC_DMN_ERROR;
+    cursor = (char *)(entries + collect->count);
+
+    for (i = 0; i < collect->count; i++) {
+        size_t n = strlen(collect->names[i]) + 1;
+        memcpy(cursor, collect->names[i], n);
+        entries[i].name = cursor;
+        cursor += n;
+
+        n = strlen(collect->endpoints[i]) + 1;
+        memcpy(cursor, collect->endpoints[i], n);
+        entries[i].endpoint = cursor;
+        cursor += n;
+    }
+
+    *out_entries = entries;
+    *out_count = collect->count;
+    return KC_DMN_OK;
+}
+
+static int kc_dmn_append(
+    unsigned char **data,
+    size_t *size,
+    size_t *capacity,
+    const void *chunk,
+    size_t chunk_size
+) {
+    unsigned char *next;
+    size_t needed;
+    size_t cap;
+
+    if (chunk_size == 0) return 0;
+    if (!data || !size || !capacity || !chunk) return 1;
+    if (*size > (size_t)-1 - chunk_size) return 1;
+    needed = *size + chunk_size;
+    if (needed > *capacity) {
+        cap = *capacity ? *capacity : 256;
+        while (cap < needed) {
+            if (cap > (size_t)-1 / 2) {
+                cap = needed;
+                break;
+            }
+            cap *= 2;
+        }
+        next = (unsigned char *)realloc(*data, cap);
+        if (!next) return 1;
+        *data = next;
+        *capacity = cap;
+    }
+    memcpy(*data + *size, chunk, chunk_size);
+    *size = needed;
+    return 0;
+}
+
+int kc_dmn_create(
+    const char *name,
+    const kc_dmn_options_t *options
+) {
+    char dir[KC_DMN_PATH];
+    static const unsigned char default_eot = 4;
+    const unsigned char *eot = &default_eot;
+    size_t eot_size = 1;
+
+    if (!kc_dmn_name_valid(name) || !options ||
+            !kc_dmn_cmd_valid(options->cmd))
+        return KC_DMN_ERROR;
+
+    if (kc_dmn_resolve_dir(options->dir, dir, sizeof(dir)) != 0)
+        return KC_DMN_ERROR;
+
+    if (options->eot || options->eot_size > 0) {
+        if (!options->eot || options->eot_size == 0) return KC_DMN_ERROR;
+        eot = (const unsigned char *)options->eot;
+        eot_size = options->eot_size;
+    }
+
+    if (kc_dmn_run_update(dir, name, options->cmd, eot, eot_size) != 0)
+        return KC_DMN_ERROR;
+
+    if (kc_dmn_write_config(
+            dir,
+            name,
+            options->cmd,
+            eot,
+            eot_size
+        ) != 0) {
+        (void)kc_dmn_run_delete(dir, name);
+        kc_dmn_remove_config(dir, name);
+        return KC_DMN_ERROR;
+    }
+
+    return KC_DMN_OK;
+}
+
+int kc_dmn_open(
+    kc_dmn_t **out,
+    const char *name
+) {
+    kc_dmn_t *dmn;
 
     if (!out) return KC_DMN_ERROR;
     *out = NULL;
+    if (!kc_dmn_name_valid(name)) return KC_DMN_ERROR;
 
-    ctx = (kc_dmn_t *)calloc(1, sizeof(*ctx));
-    if (!ctx) return KC_DMN_ERROR;
-
-    if (opts && opts->dir && opts->dir[0]) {
-        if ((size_t)snprintf(ctx->dir, sizeof(ctx->dir), "%s", opts->dir) >= sizeof(ctx->dir)) {
-            kc_dmn_set_error(ctx, "path too long");
-            free(ctx);
-            return KC_DMN_ERROR;
-        }
-    } else {
-        if (kc_dmn_runtime_dir(ctx->dir, sizeof(ctx->dir)) != 0) {
-            kc_dmn_set_error(ctx, "runtime directory unavailable");
-            free(ctx);
-            return KC_DMN_ERROR;
-        }
+    dmn = (kc_dmn_t *)calloc(1, sizeof(*dmn));
+    if (!dmn) return KC_DMN_ERROR;
+    if ((size_t)snprintf(
+            dmn->name,
+            sizeof(dmn->name),
+            "%s",
+            name
+        ) >= sizeof(dmn->name) ||
+            kc_dmn_runtime_dir(dmn->dir, sizeof(dmn->dir)) != 0 ||
+            kc_dmn_load_config(dmn) != 0) {
+        kc_dmn_close(dmn);
+        return KC_DMN_ERROR;
     }
 
-    *out = ctx;
+    *out = dmn;
     return KC_DMN_OK;
 }
 
-/**
- * Release a dmn context.
- * @param ctx Context pointer.
- * @return None.
- */
-void kc_dmn_close(kc_dmn_t *ctx) {
-    if (!ctx) return;
-    free(ctx);
+int kc_dmn_list(
+    const char *dir,
+    kc_dmn_entry_t **out_entries,
+    size_t *out_count
+) {
+    char resolved[KC_DMN_PATH];
+    kc_dmn_collect_t collect;
+    int rc;
+
+    if (out_entries) *out_entries = NULL;
+    if (out_count) *out_count = 0;
+    if (!out_entries || !out_count) return KC_DMN_ERROR;
+    if (kc_dmn_resolve_dir(dir, resolved, sizeof(resolved)) != 0)
+        return KC_DMN_ERROR;
+
+    memset(&collect, 0, sizeof(collect));
+    rc = kc_dmn_run_list(resolved, kc_dmn_collect_row, &collect);
+    if (rc != 0 || collect.failed) {
+        kc_dmn_collect_clear(&collect);
+        return KC_DMN_ERROR;
+    }
+
+    rc = kc_dmn_collect_finish(&collect, out_entries, out_count);
+    kc_dmn_collect_clear(&collect);
+    return rc;
 }
 
-/**
- * Allocate an options struct initialized with default values.
- * @return Owned options object, or NULL on allocation failure.
- */
-kc_dmn_options_t *kc_dmn_options_default(void) {
-    kc_dmn_options_t *opts = (kc_dmn_options_t *)calloc(1, sizeof(*opts));
-    return opts;
+int kc_dmn_delete(
+    const char *name,
+    const char *dir
+) {
+    char resolved[KC_DMN_PATH];
+
+    if (!kc_dmn_name_valid(name)) return KC_DMN_ERROR;
+    if (kc_dmn_resolve_dir(dir, resolved, sizeof(resolved)) != 0)
+        return KC_DMN_ERROR;
+
+    (void)kc_dmn_run_delete(resolved, name);
+    kc_dmn_remove_config(resolved, name);
+    return KC_DMN_OK;
 }
 
-/**
- * Set an options value.
- * @param opts Options object.
- * @param key Option key.
- * @param value Option value, or NULL to reset it.
- * @return KC_DMN_OK on success, KC_DMN_ERROR on failure.
- */
-int kc_dmn_options_set(
-    kc_dmn_options_t *opts,
-    const char *key,
-    const char *value
+int kc_dmn_set_cmd(
+    kc_dmn_t *dmn,
+    const char *cmd
 ) {
     char *copy;
 
-    if (!opts || !key || strcmp(key, "dir") != 0) return KC_DMN_ERROR;
-    if (!value) {
-        free(opts->dir);
-        opts->dir = NULL;
-        return KC_DMN_OK;
-    }
+    if (!dmn || !kc_dmn_cmd_valid(cmd)) return KC_DMN_ERROR;
+    if (!kc_dmn_exists(dmn->dir, dmn->name)) return KC_DMN_NOT_FOUND;
+    if (!dmn->eot || dmn->eot_size == 0) return KC_DMN_ERROR;
 
-    copy = (char *)malloc(strlen(value) + 1);
+    if (kc_dmn_run_update(
+            dmn->dir,
+            dmn->name,
+            cmd,
+            dmn->eot,
+            dmn->eot_size
+        ) != 0)
+        return KC_DMN_ERROR;
+
+    copy = kc_dmn_strdup(cmd);
     if (!copy) return KC_DMN_ERROR;
-    memcpy(copy, value, strlen(value) + 1);
-    free(opts->dir);
-    opts->dir = copy;
+    free(dmn->cmd);
+    dmn->cmd = copy;
+
+    if (kc_dmn_write_config(
+            dmn->dir,
+            dmn->name,
+            dmn->cmd,
+            dmn->eot,
+            dmn->eot_size
+        ) != 0)
+        return KC_DMN_ERROR;
+
     return KC_DMN_OK;
 }
 
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_dmn_options_free(kc_dmn_options_t *opts) {
-    if (!opts) return;
-    free(opts->dir);
-    free(opts);
+const char *kc_dmn_get_cmd(
+    const kc_dmn_t *dmn
+) {
+    return dmn ? dmn->cmd : NULL;
 }
 
-/**
- * Return the resolved runtime directory for a dmn context.
- * @param ctx Context pointer.
- * @return Runtime directory path, or NULL on invalid input.
- */
-const char *kc_dmn_path(const kc_dmn_t *ctx) {
-    if (!ctx) {
-        return NULL;
-    }
+int kc_dmn_set_dir(
+    kc_dmn_t *dmn,
+    const char *dir
+) {
+    char resolved[KC_DMN_PATH];
 
-    return ctx->dir;
-}
-
-/**
- * Return the last error message for a dmn context.
- * @param ctx Context pointer.
- * @return Borrowed error string, or NULL when no error is available.
- */
-const char *kc_dmn_get_error(const kc_dmn_t *ctx) {
-    if (!ctx || ctx->error[0] == '\0') return NULL;
-    return ctx->error;
-}
-
-/**
- * Register or replace a named daemon command.
- * @param ctx Context pointer.
- * @param key Daemon key name.
- * @param cmd Shell command string for the resident backend.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_update(kc_dmn_t *ctx, const char *key, const char *cmd) {
-    if (!ctx) {
+    if (!dmn) return KC_DMN_ERROR;
+    if (kc_dmn_resolve_dir(dir, resolved, sizeof(resolved)) != 0)
         return KC_DMN_ERROR;
-    }
-    if (!key || !cmd) {
-        kc_dmn_set_error(ctx, "invalid update arguments");
+    if ((size_t)snprintf(
+            dmn->dir,
+            sizeof(dmn->dir),
+            "%s",
+            resolved
+        ) >= sizeof(dmn->dir))
         return KC_DMN_ERROR;
-    }
-
-    if (kc_dmn_run_update(ctx->dir, key, cmd) != 0) {
-        kc_dmn_set_error(ctx, "update failed");
-        return KC_DMN_ERROR;
-    }
+    if (kc_dmn_load_config(dmn) != 0) return KC_DMN_ERROR;
     return KC_DMN_OK;
 }
 
-/**
- * Delete a named daemon.
- * @param ctx Context pointer.
- * @param key Daemon key name.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_delete(kc_dmn_t *ctx, const char *key) {
-    if (!ctx) {
-        return KC_DMN_ERROR;
+const char *kc_dmn_get_dir(
+    const kc_dmn_t *dmn
+) {
+    return dmn ? dmn->dir : NULL;
+}
+
+int kc_dmn_set_eot(
+    kc_dmn_t *dmn,
+    const void *eot,
+    size_t eot_size
+) {
+    static const unsigned char default_eot = 4;
+    const unsigned char *value;
+    size_t value_size;
+    unsigned char *copy;
+
+    if (!dmn) return KC_DMN_ERROR;
+    if (!eot && eot_size == 0) {
+        value = &default_eot;
+        value_size = 1;
+    } else {
+        if (!eot || eot_size == 0) return KC_DMN_ERROR;
+        value = (const unsigned char *)eot;
+        value_size = eot_size;
     }
-    if (!key) {
-        kc_dmn_set_error(ctx, "invalid delete arguments");
+
+    if (!kc_dmn_exists(dmn->dir, dmn->name)) return KC_DMN_NOT_FOUND;
+    if (!dmn->cmd) return KC_DMN_ERROR;
+
+    copy = (unsigned char *)malloc(value_size);
+    if (!copy) return KC_DMN_ERROR;
+    memcpy(copy, value, value_size);
+
+    if (kc_dmn_run_update(
+            dmn->dir,
+            dmn->name,
+            dmn->cmd,
+            copy,
+            value_size
+        ) != 0) {
+        free(copy);
         return KC_DMN_ERROR;
     }
 
-    if (kc_dmn_run_delete(ctx->dir, key) != 0) {
-        kc_dmn_set_error(ctx, "delete failed");
+    free(dmn->eot);
+    dmn->eot = copy;
+    dmn->eot_size = value_size;
+
+    if (kc_dmn_write_config(
+            dmn->dir,
+            dmn->name,
+            dmn->cmd,
+            dmn->eot,
+            dmn->eot_size
+        ) != 0)
         return KC_DMN_ERROR;
-    }
+
     return KC_DMN_OK;
 }
 
-/**
- * List registered daemons.
- * Calls cb(key, sock, userdata) per entry.
- * @param ctx Context pointer.
- * @param key Optional daemon key name, or NULL for all.
- * @param cb Callback invoked per entry, or NULL.
- * @param userdata Opaque pointer passed to cb.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_list(kc_dmn_t *ctx, const char *key, kc_dmn_row_handler_t cb, void *userdata) {
-    if (!ctx) {
-        return KC_DMN_ERROR;
-    }
+const void *kc_dmn_get_eot(
+    const kc_dmn_t *dmn,
+    size_t *out_size
+) {
+    if (out_size) *out_size = dmn ? dmn->eot_size : 0;
+    return dmn ? dmn->eot : NULL;
+}
 
-    if (key) {
-        if (kc_dmn_run_list_one(ctx->dir, key, cb, userdata) != 0) {
-            kc_dmn_set_error(ctx, "list failed");
-            return KC_DMN_ERROR;
-        }
-        return KC_DMN_OK;
-    }
-
-    if (kc_dmn_run_list(ctx->dir, cb, userdata) != 0) {
-        kc_dmn_set_error(ctx, "list failed");
+int kc_dmn_on(
+    kc_dmn_t *dmn,
+    const char *event,
+    kc_dmn_handler_t handler,
+    void *userdata
+) {
+    if (!dmn || !event || strcmp(event, "data") != 0)
         return KC_DMN_ERROR;
-    }
+    dmn->data_handler = handler;
+    dmn->data_userdata = userdata;
     return KC_DMN_OK;
 }
 
-/**
- * Connect to a named daemon for relay.
- * @param ctx Context pointer.
- * @param key Daemon key name.
- * @param out Pointer to receive the connection object.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_connect(kc_dmn_t *ctx, const char *key, kc_dmn_stream_t **out) {
-    char sock[KC_DMN_PATH];
-    kc_dmn_stream_t *conn;
+int kc_dmn_stream(
+    kc_dmn_t *dmn,
+    kc_dmn_stream_t **out
+) {
+    char endpoint[KC_DMN_PATH];
+    kc_dmn_stream_t *stream;
 
-    if (!out) {
-        if (ctx) kc_dmn_set_error(ctx, "invalid connect arguments");
-        return KC_DMN_ERROR;
-    }
+    if (!out) return KC_DMN_ERROR;
     *out = NULL;
-    if (!ctx) return KC_DMN_ERROR;
-    if (!key) {
-        kc_dmn_set_error(ctx, "invalid connect arguments");
+    if (!dmn) return KC_DMN_ERROR;
+    if (!kc_dmn_exists(dmn->dir, dmn->name)) return KC_DMN_NOT_FOUND;
+    if (kc_dmn_sock_path(
+            dmn->dir,
+            dmn->name,
+            endpoint,
+            sizeof(endpoint)
+        ) != 0)
         return KC_DMN_ERROR;
-    }
-    if (kc_dmn_sock_path(ctx->dir, key, sock, sizeof(sock)) != 0) {
-        kc_dmn_set_error(ctx, "socket path failed");
-        return KC_DMN_ERROR;
-    }
-    conn = (kc_dmn_stream_t *)calloc(1, sizeof(*conn));
-    if (!conn) {
-        kc_dmn_set_error(ctx, "connection allocation failed");
-        return KC_DMN_ERROR;
-    }
+
+    stream = (kc_dmn_stream_t *)calloc(1, sizeof(*stream));
+    if (!stream) return KC_DMN_ERROR;
 #ifdef _WIN32
-    conn->handle = CreateFileA(sock, GENERIC_READ | GENERIC_WRITE,
-        0, NULL, OPEN_EXISTING, 0, NULL);
-    if (conn->handle == INVALID_HANDLE_VALUE) {
-        free(conn);
-        kc_dmn_set_error(ctx, "connect failed");
+    stream->handle = CreateFileA(
+        endpoint,
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+        NULL,
+        OPEN_EXISTING,
+        0,
+        NULL
+    );
+    if (stream->handle == INVALID_HANDLE_VALUE) {
+        free(stream);
         return KC_DMN_ERROR;
     }
 #else
-    conn->fd = kc_dmn_connect_posix(sock);
-    if (conn->fd < 0) {
-        free(conn);
-        kc_dmn_set_error(ctx, "connect failed");
+    stream->fd = kc_dmn_connect_posix(endpoint);
+    if (stream->fd < 0) {
+        free(stream);
         return KC_DMN_ERROR;
     }
 #endif
-    *out = conn;
+    *out = stream;
     return KC_DMN_OK;
 }
 
-/**
- * Send data to a connected daemon.
- * @param conn Connection object from kc_dmn_connect.
- * @param data Data to send.
- * @param data_size Data length.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_send(kc_dmn_stream_t *conn, const void *data, size_t data_size) {
+int kc_dmn_stream_write(
+    kc_dmn_stream_t *stream,
+    const void *data,
+    size_t size
+) {
 #ifdef _WIN32
     size_t off = 0;
 #endif
 
-    if (!conn || (!data && data_size > 0)) return KC_DMN_ERROR;
-    if (data_size == 0) return KC_DMN_OK;
+    if (!stream || (!data && size > 0)) return KC_DMN_ERROR;
+    if (size == 0) return KC_DMN_OK;
 #ifdef _WIN32
-    while (off < data_size) {
-        size_t chunk = data_size - off;
+    while (off < size) {
+        size_t chunk = size - off;
         DWORD written;
         if (chunk > (size_t)(DWORD)-1) chunk = (size_t)(DWORD)-1;
-        if (!WriteFile(conn->handle, (const char *)data + off,
-                (DWORD)chunk, &written, NULL) || written == 0)
+        if (!WriteFile(
+                stream->handle,
+                (const unsigned char *)data + off,
+                (DWORD)chunk,
+                &written,
+                NULL
+            ) || written == 0)
             return KC_DMN_ERROR;
         off += (size_t)written;
     }
 #else
-    if (kc_dmn_write_all(conn->fd, (const char *)data, data_size) != 0)
+    if (kc_dmn_write_all(
+            stream->fd,
+            (const char *)data,
+            size
+        ) != 0)
         return KC_DMN_ERROR;
 #endif
     return KC_DMN_OK;
 }
 
-/**
- * Receive data from a connected daemon.
- * @param conn Connection object from kc_dmn_connect.
- * @param max_size Maximum receive size.
- * @param out_data Pointer to receive owned data.
- * @param out_size Pointer to receive the received size.
- * @return KC_DMN_OK, KC_DMN_EOF, or KC_DMN_ERROR.
- */
-int kc_dmn_recv(kc_dmn_stream_t *conn, size_t max_size,
-    void **out_data, size_t *out_size) {
-    void *buffer;
-    size_t received;
-
-    if (out_data) *out_data = NULL;
+int kc_dmn_stream_read(
+    kc_dmn_stream_t *stream,
+    void *data,
+    size_t capacity,
+    size_t *out_size
+) {
     if (out_size) *out_size = 0;
-    if (!conn || !out_data || !out_size || max_size == 0)
+    if (!stream || !data || capacity == 0 || !out_size)
         return KC_DMN_ERROR;
-    buffer = malloc(max_size);
-    if (!buffer) return KC_DMN_ERROR;
 #ifdef _WIN32
     {
-        DWORD br;
-        if (max_size > (size_t)(DWORD)-1) {
-            free(buffer);
-            return KC_DMN_ERROR;
-        }
-        if (!ReadFile(conn->handle, buffer, (DWORD)max_size, &br, NULL)) {
+        DWORD read_size;
+        if (capacity > (size_t)(DWORD)-1) return KC_DMN_ERROR;
+        if (!ReadFile(
+                stream->handle,
+                data,
+                (DWORD)capacity,
+                &read_size,
+                NULL
+            )) {
             DWORD error = GetLastError();
-            free(buffer);
             if (error == ERROR_BROKEN_PIPE ||
                     error == ERROR_PIPE_NOT_CONNECTED ||
-                    error == ERROR_NO_DATA || error == ERROR_HANDLE_EOF)
+                    error == ERROR_NO_DATA ||
+                    error == ERROR_HANDLE_EOF)
                 return KC_DMN_EOF;
             return KC_DMN_ERROR;
         }
-        received = (size_t)br;
+        if (read_size == 0) return KC_DMN_EOF;
+        *out_size = (size_t)read_size;
     }
 #else
     {
         ssize_t n;
         do {
-            n = read(conn->fd, buffer, max_size);
+            n = read(stream->fd, data, capacity);
         } while (n < 0 && errno == EINTR);
-        if (n < 0) {
-            free(buffer);
-            return KC_DMN_ERROR;
-        }
-        if (n == 0) {
-            free(buffer);
-            return KC_DMN_EOF;
-        }
-        received = (size_t)n;
+        if (n < 0) return KC_DMN_ERROR;
+        if (n == 0) return KC_DMN_EOF;
+        *out_size = (size_t)n;
     }
 #endif
-    if (received == 0) {
-        free(buffer);
-        return KC_DMN_EOF;
-    }
-    {
-        void *result = malloc(received);
-        if (!result) {
-            free(buffer);
-            return KC_DMN_ERROR;
-        }
-        memcpy(result, buffer, received);
-        free(buffer);
-        *out_data = result;
-        *out_size = received;
-    }
     return KC_DMN_OK;
 }
 
-/**
- * Disconnect from a daemon.
- * @param conn Connection object from kc_dmn_connect.
- * @return None.
- */
-void kc_dmn_disconnect(kc_dmn_stream_t *conn) {
-    if (!conn) return;
+void kc_dmn_stream_close(
+    kc_dmn_stream_t *stream
+) {
+    if (!stream) return;
 #ifdef _WIN32
-    if (conn->handle != INVALID_HANDLE_VALUE) CloseHandle(conn->handle);
+    if (stream->handle != INVALID_HANDLE_VALUE)
+        CloseHandle(stream->handle);
 #else
-    if (conn->fd >= 0) close(conn->fd);
+    if (stream->fd >= 0) close(stream->fd);
 #endif
-    free(conn);
+    free(stream);
 }
 
-/**
- * Free memory returned by a dmn API.
- * @param ptr API-owned pointer, or NULL.
- * @return None.
- */
+int kc_dmn_send_data(
+    kc_dmn_t *dmn,
+    const void *data,
+    size_t data_size,
+    void **out_data,
+    size_t *out_size
+) {
+    kc_dmn_stream_t *stream = NULL;
+    unsigned char chunk[KC_DMN_BUF];
+    unsigned char *pending = NULL;
+    size_t pending_size = 0;
+    unsigned char *result = NULL;
+    size_t result_size = 0;
+    size_t result_capacity = 0;
+    int rc;
+
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
+    if (!dmn || (!data && data_size > 0) || !out_data || !out_size ||
+            !dmn->eot || dmn->eot_size == 0)
+        return KC_DMN_ERROR;
+
+    rc = kc_dmn_stream(dmn, &stream);
+    if (rc != KC_DMN_OK) return rc;
+
+    if (kc_dmn_stream_write(stream, data, data_size) != KC_DMN_OK ||
+            kc_dmn_stream_write(
+                stream,
+                dmn->eot,
+                dmn->eot_size
+            ) != KC_DMN_OK) {
+        kc_dmn_stream_close(stream);
+        return KC_DMN_ERROR;
+    }
+
+    if (dmn->eot_size > 1) {
+        pending = (unsigned char *)malloc(dmn->eot_size - 1);
+        if (!pending) {
+            kc_dmn_stream_close(stream);
+            return KC_DMN_ERROR;
+        }
+    }
+
+    while (1) {
+        size_t chunk_size = 0;
+        unsigned char *joined;
+        size_t joined_size;
+        size_t marker;
+        size_t keep;
+        size_t emit_size;
+
+        rc = kc_dmn_stream_read(
+            stream,
+            chunk,
+            sizeof(chunk),
+            &chunk_size
+        );
+        if (rc == KC_DMN_EOF) {
+            if (pending_size > 0) {
+                if (dmn->data_handler)
+                    dmn->data_handler(
+                        pending,
+                        pending_size,
+                        dmn->data_userdata
+                    );
+                if (kc_dmn_append(
+                        &result,
+                        &result_size,
+                        &result_capacity,
+                        pending,
+                        pending_size
+                    ) != 0) {
+                    rc = KC_DMN_ERROR;
+                    break;
+                }
+            }
+            rc = KC_DMN_OK;
+            break;
+        }
+        if (rc != KC_DMN_OK) break;
+
+        joined_size = pending_size + chunk_size;
+        joined = (unsigned char *)malloc(joined_size);
+        if (!joined) {
+            rc = KC_DMN_ERROR;
+            break;
+        }
+        if (pending_size > 0)
+            memcpy(joined, pending, pending_size);
+        memcpy(joined + pending_size, chunk, chunk_size);
+
+        marker = kc_dmn_find_bytes(
+            joined,
+            joined_size,
+            dmn->eot,
+            dmn->eot_size
+        );
+        if (marker != (size_t)-1) {
+            if (marker > 0) {
+                if (dmn->data_handler)
+                    dmn->data_handler(
+                        joined,
+                        marker,
+                        dmn->data_userdata
+                    );
+                if (kc_dmn_append(
+                        &result,
+                        &result_size,
+                        &result_capacity,
+                        joined,
+                        marker
+                    ) != 0)
+                    rc = KC_DMN_ERROR;
+            }
+            free(joined);
+            if (rc == KC_DMN_OK) rc = KC_DMN_OK;
+            break;
+        }
+
+        keep = dmn->eot_size > 1 &&
+            joined_size >= dmn->eot_size - 1
+            ? dmn->eot_size - 1
+            : joined_size;
+        emit_size = joined_size - keep;
+        if (emit_size > 0) {
+            if (dmn->data_handler)
+                dmn->data_handler(
+                    joined,
+                    emit_size,
+                    dmn->data_userdata
+                );
+            if (kc_dmn_append(
+                    &result,
+                    &result_size,
+                    &result_capacity,
+                    joined,
+                    emit_size
+                ) != 0) {
+                free(joined);
+                rc = KC_DMN_ERROR;
+                break;
+            }
+        }
+        if (keep > 0)
+            memcpy(pending, joined + emit_size, keep);
+        pending_size = keep;
+        free(joined);
+    }
+
+    free(pending);
+    kc_dmn_stream_close(stream);
+
+    if (rc != KC_DMN_OK) {
+        free(result);
+        return KC_DMN_ERROR;
+    }
+
+    *out_data = result;
+    *out_size = result_size;
+    return KC_DMN_OK;
+}
+
+int kc_dmn_send_signal(
+    kc_dmn_t *dmn,
+    int signal
+) {
+    if (!dmn) return KC_DMN_ERROR;
+    if (!kc_dmn_exists(dmn->dir, dmn->name))
+        return KC_DMN_NOT_FOUND;
+    return kc_dmn_run_signal(
+        dmn->dir,
+        dmn->name,
+        signal
+    ) == 0 ? KC_DMN_OK : KC_DMN_ERROR;
+}
+
 void kc_dmn_free(void *ptr) {
     free(ptr);
 }
 
-/**
- * Send a signal to a managed daemon process.
- * @param ctx Context pointer.
- * @param key Daemon key name.
- * @param signo Signal number (POSIX) or ignored on Windows.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_signal(kc_dmn_t *ctx, const char *key, int signo) {
-    if (!ctx) {
-        return KC_DMN_ERROR;
-    }
-    if (!key) {
-        kc_dmn_set_error(ctx, "invalid signal arguments");
-        return KC_DMN_ERROR;
-    }
-
-    if (kc_dmn_run_signal(ctx->dir, key, signo) != 0) {
-        kc_dmn_set_error(ctx, "signal failed");
-        return KC_DMN_ERROR;
-    }
-    return KC_DMN_OK;
+void kc_dmn_close(kc_dmn_t *dmn) {
+    if (!dmn) return;
+    free(dmn->cmd);
+    free(dmn->eot);
+    free(dmn);
 }
+
+uint64_t kc_dmn_version(void);
