@@ -1,6 +1,6 @@
 # b64.c - Base64 Encode and Decode
 
-`b64.c` is a small C library and CLI for base64 encoding and decoding. It handles RFC 4648 base64 encoding of binary data and decoding of base64 strings.
+`b64.c` is a small C library and CLI for base64 encoding and decoding. It handles RFC 4648 base64 encoding of binary data and strict decoding of canonical base64 strings.
 
 ---
 
@@ -69,7 +69,7 @@ kc_b64_free(decoded);
 ## Lifecycle
 
 - `kc_b64_encode()` returns caller-owned encoded output that must be released with `kc_b64_free()`.
-- `kc_b64_decode()` returns caller-owned decoded output that must be released with `kc_b64_free()`.
+- `kc_b64_decode()` accepts strict RFC 4648 input with canonical padding, returns caller-owned decoded output, and resets `out_size` to `0` on failure when the size pointer is valid. Empty input is valid and returns an owned zero-length result.
 - `kc_b64_free()` releases memory returned by the b64 library.
 
 ## Build
@@ -82,7 +82,7 @@ make
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile the contract-test executable, link it dynamically against the generated shared library, and run it directly, covering the public API and one grouped CLI test case that exercises the shipped CLI contract.
+The portable test entry point is `make test`. Build project artifacts first, then run tests. Reusable contract tests are grouped by public symbol: `kc_b64_encode`, `kc_b64_decode`, `kc_b64_free`, and `kc_b64_version`. Native and Wine runs add one grouped `kc_b64_cli` case.
 
 ```bash
 make
@@ -96,7 +96,7 @@ make x86_64/windows
 make test wine
 ```
 
-To run the reusable library contract tests under Emscripten/Node (native CLI is not executed):
+To run the four reusable library contract tests under Emscripten/Node (native CLI is not compiled or executed):
 
 ```bash
 make wasm32/wasm
