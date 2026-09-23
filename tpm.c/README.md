@@ -105,6 +105,10 @@ A single line with the score formatted to six decimal places:
 
 ```c
 typedef struct kc_tpm kc_tpm_t;
+
+typedef struct {
+    int ngram_size;
+} kc_tpm_options_t;
 ```
 
 ### Status codes
@@ -118,36 +122,39 @@ typedef struct kc_tpm kc_tpm_t;
 
 | Function | Returns | Description |
 | :------- | :------ | :---------- |
-| `kc_tpm_open(out)` | `int` | Allocate a new context into `out`. |
-| `kc_tpm_build(tpm, map_text, ngram_size)` | `int` | Build an n-gram profile from map text. `ngram_size` must be 1–8. |
-| `kc_tpm_score(tpm, input_text, out_score)` | `int` | Score input text against the built profile and write a 0.0–1.0 result to `out_score`. |
-| `kc_tpm_close(tpm)` | `void` | Free the context. |
+| `kc_tpm_open(out, map_text, options)` | `int` | Create a ready-to-score profile. `NULL` options use n-gram size 3. |
+| `kc_tpm_score(tpm, input_text, out_score)` | `int` | Score input text against the profile and write a 0.0-1.0 result to `out_score`. |
+| `kc_tpm_close(tpm)` | `void` | Release the profile. |
 | `kc_tpm_version(void)` | `uint64_t` | Return the build version timestamp. |
 
 ### Lifecycle
 
 ```c
-kc_tpm_t *t = NULL;
+kc_tpm_t *profile = NULL;
 double score;
 
-if (kc_tpm_open(&t) == KC_TPM_OK) {
-    if (kc_tpm_build(t, map_text, 3) == KC_TPM_OK &&
-        kc_tpm_score(t, input_text, &score) == KC_TPM_OK) {
+if (kc_tpm_open(&profile, map_text, NULL) == KC_TPM_OK) {
+    if (kc_tpm_score(profile, input_text, &score) == KC_TPM_OK) {
         /* use score */
     }
-    kc_tpm_close(t);
+    kc_tpm_close(profile);
 }
 ```
 
-A context is unbuilt after `kc_tpm_open()`. A successful
-`kc_tpm_build()` installs one profile; another successful build replaces it.
-A failed build leaves the context unbuilt. Map and input strings are borrowed
-only for the duration of their calls. The context owns its profile storage.
+A successful `kc_tpm_open()` always returns a complete profile that can be
+scored immediately and repeatedly. There is no separate build phase.
 
-`kc_tpm_score()` returns `KC_TPM_ERROR` for invalid arguments, an unbuilt
-context, allocation failure, or input-profile capacity overflow. A valid empty
-input or a successfully built empty profile returns `KC_TPM_OK` with a score
-of `0.0`.
+`map_text` is borrowed only for the duration of `kc_tpm_open()`.
+`input_text` is borrowed only for the duration of `kc_tpm_score()`.
+The profile owns all derived n-gram storage until `kc_tpm_close()`.
+
+Pass `NULL` for `options` to use the default n-gram size of 3. When options
+are supplied, `ngram_size` must be from 1 through 8.
+
+`kc_tpm_score()` returns `KC_TPM_ERROR` for invalid arguments, allocation
+failure, or input-profile capacity overflow. A valid empty input or a
+successfully created empty profile returns `KC_TPM_OK` with a score of
+`0.0`.
 
 ---
 
@@ -190,9 +197,9 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/tpm.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_tpm_*` API with its existing signatures, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `tpm` CLI: `src/tpm.c` is not compiled into the module.
+- The module exports `kc_tpm_open`, `kc_tpm_score`, `kc_tpm_close`, and `kc_tpm_version` with the same ready-profile lifecycle used by native callers. It contains the reusable library capability, not the `tpm` CLI: `src/tpm.c` is not compiled into the module.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the five reusable public-API cases under Node.js. Native/Wine tests additionally run one grouped `kc_tpm_cli` case. CLI process helpers and the CLI case are excluded from the WASM build at compile time. The target requires `bin/wasm32/wasm/tpm.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles `src/test.c` with Emscripten and runs the four reusable public-API cases under Node.js. Native/Wine tests additionally run one grouped `kc_tpm_cli` case. CLI process helpers and the CLI case are excluded from the WASM build at compile time. The target requires `bin/wasm32/wasm/tpm.wasm` and reports how to build it when it is absent.
 
 `wasm32/wasm` is included in `make all`.
 
