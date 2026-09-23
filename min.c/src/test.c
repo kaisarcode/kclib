@@ -392,31 +392,31 @@ static int case_kc_min_html(void) {
 }
 
 /**
- * Tests generic text minification.
+ * Tests generic txt minification.
  * @return 0 when the case passes, 1 otherwise.
  */
-static int case_kc_min_text(void) {
+static int case_kc_min_txt(void) {
     char *out;
     int fail = 0;
 
-    fail += expect_true("text NULL returns NULL", kc_min_text(NULL) == NULL);
+    fail += expect_true("text NULL returns NULL", kc_min_txt(NULL) == NULL);
 
-    out = kc_min_text("");
+    out = kc_min_txt("");
     fail += expect_true("text empty returns allocation", out != NULL);
     if (out) fail += expect_string("text empty returns empty string", "", out);
     kc_min_free(out);
 
-    out = kc_min_text("  hello   world\n\nfoo\tbar  ");
+    out = kc_min_txt("  hello   world\n\nfoo\tbar  ");
     fail += expect_string("text collapses whitespace",
         "hello world foo bar", out);
     kc_min_free(out);
 
-    out = kc_min_text("a  <!-- x -->  b");
+    out = kc_min_txt("a  <!-- x -->  b");
     fail += expect_string("text does not interpret syntax",
         "a <!-- x --> b", out);
     kc_min_free(out);
 
-    case_result(fail, "kc_min_text",
+    case_result(fail, "kc_min_txt",
         "collapses generic whitespace without interpreting syntax");
     return fail == 0 ? 0 : 1;
 }
@@ -490,7 +490,7 @@ static int case_kc_min_cli(void) {
         fail += expect_string("CLI html output", "<p>hi</p>", out);
     }
     {
-        char *args[] = { (char *)MIN_TEST_CLI, "text", NULL };
+        char *args[] = { (char *)MIN_TEST_CLI, "txt", NULL };
         const char *input = "  hello   world\nfoo\tbar  ";
         fail += expect_int("CLI text exits 0", 0,
             test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
@@ -561,7 +561,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_min_css);
     run_case(&rc, case_kc_min_js);
     run_case(&rc, case_kc_min_html);
-    run_case(&rc, case_kc_min_text);
+    run_case(&rc, case_kc_min_txt);
     run_case(&rc, case_kc_min_free);
     run_case(&rc, case_kc_min_version);
 #ifndef __EMSCRIPTEN__
@@ -586,7 +586,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_min_css") == 0) return case_kc_min_css();
     if (strcmp(argv[1], "kc_min_js") == 0) return case_kc_min_js();
     if (strcmp(argv[1], "kc_min_html") == 0) return case_kc_min_html();
-    if (strcmp(argv[1], "kc_min_text") == 0) return case_kc_min_text();
+    if (strcmp(argv[1], "kc_min_txt") == 0) return case_kc_min_txt();
     if (strcmp(argv[1], "kc_min_free") == 0) return case_kc_min_free();
     if (strcmp(argv[1], "kc_min_version") == 0) return case_kc_min_version();
 #ifndef __EMSCRIPTEN__
