@@ -33,7 +33,6 @@ typedef enum {
 #  include <windows.h>
 #endif
 
-
 /**
  * Growable output buffer for rendered results.
  */
