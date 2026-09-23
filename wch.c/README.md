@@ -1,10 +1,13 @@
 # wch.c - File and Directory Change Watcher
 
-`wch.c` exposes one asynchronous watcher for a file or directory. Observation
-runs in a native worker thread and events are delivered through one callback.
-The caller does not poll or block its own execution thread.
+`wch.c` provides an asynchronous file-watching library and a managed command-line
+product built on top of it.
 
-The consumer model is designed to project naturally to JavaScript and Lua:
+The library observes one file or directory and emits normalized `add`, `upd`,
+and `del` events through a callback. Native waiting happens outside the
+caller's execution thread.
+
+The consumer model projects directly to JavaScript and Lua:
 
 ```js
 const watcher = wch(path, {
@@ -20,47 +23,95 @@ watcher.on(event => {
 watcher.close();
 ```
 
-The native backends remain platform-specific: inotify on Linux, kqueue on
-macOS/BSD, and `ReadDirectoryChangesW` on Windows.
+Native backends are inotify on Linux, kqueue on macOS/BSD, and
+`ReadDirectoryChangesW` on Windows.
 
 ---
 
 ## CLI
 
-The CLI is a blocking process adapter over the same asynchronous watcher.
+The `wch` executable manages named resident watchers. A registration associates
+a name with a path, recursive mode, and a command.
 
-Watch the current directory:
-
-```bash
-./bin/x86_64/linux/wch .
-```
-
-Watch recursively:
+Register a watcher:
 
 ```bash
-./bin/x86_64/linux/wch . --recursive
+wch frontend ./src make build
 ```
 
-Watch one file, including a file that does not exist yet:
+Register a recursive watcher:
 
 ```bash
-./bin/x86_64/linux/wch ./file.txt
+wch frontend --recursive ./src make build
 ```
 
-Events are emitted one per line:
+Registering an existing name replaces the previous resident watcher.
+
+Each filesystem event starts the registered command with two arguments appended:
 
 ```text
-add:/tmp/demo/a.txt
-upd:/tmp/demo/a.txt
-del:/tmp/demo/a.txt
+<command...> <event> <path>
 ```
 
-| Flag | Description |
+For example, an update to `./src/app.c` from the registration above dispatches:
+
+```bash
+make build upd ./src/app.c
+```
+
+The resident watcher continues observing while dispatched commands execute.
+
+List all registrations:
+
+```bash
+wch --list
+```
+
+List one registration:
+
+```bash
+wch frontend --list
+wch --list frontend
+```
+
+The list output contains the registration name, runtime status, watch mode,
+path, and command:
+
+```text
+frontend    running    recursive    ./src    make build
+```
+
+Stop and remove a watcher:
+
+```bash
+wch frontend --delete
+wch --delete frontend
+```
+
+Deleting a watcher terminates its resident process and removes its registration
+state.
+
+### CLI forms
+
+| Command | Description |
 | :--- | :--- |
-| `<path>` | File or directory to watch |
-| `-r`, `--recursive` | Watch directories recursively |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
+| `wch <name> <path> <command...>` | Register or replace a watcher |
+| `wch <name> -r <path> <command...>` | Register or replace a recursive watcher |
+| `wch -l`, `wch --list` | List registered watchers |
+| `wch <name> -l`, `wch --list <name>` | List one watcher |
+| `wch <name> -d`, `wch --delete <name>` | Stop and remove one watcher |
+| `wch -h`, `wch --help` | Show help and usage |
+| `wch -v`, `wch --version` | Show version |
+
+Watcher names may contain letters, digits, `-`, `_`, and `.`.
+
+### Runtime state
+
+The CLI stores registration metadata and resident process IDs in a per-user
+runtime directory. Set `KC_WCH_DIR` to override that location.
+
+Runtime state belongs to the CLI product only. It is not part of the
+`libwch` API.
 
 ---
 
@@ -99,7 +150,7 @@ int main(void) {
 ### API semantics
 
 - `kc_wch_open()` creates one watcher associated with a copied path. Passing
-    `NULL` options uses non-recursive defaults.
+    `NULL` options selects non-recursive behavior.
 - Existing directories are watched directly.
 - Existing files and missing file targets are watched through their parent
     directory and filtered by basename. The parent directory must exist.
@@ -108,13 +159,12 @@ int main(void) {
 - The handler receives normalized `KC_WCH_ADD`, `KC_WCH_UPD`, or
     `KC_WCH_DEL` events.
 - The handler runs on the watcher worker thread. `event->path` is borrowed and
-    is valid for the duration of that callback. Copy it if it must outlive the
-    callback.
-- `kc_wch_close()` stops the worker and releases the watcher. It is NULL-safe
-    and may also be called from inside the event handler.
+    valid only for that callback invocation.
+- `kc_wch_close()` stops observation and releases the watcher. It is NULL-safe
+    and may be called from inside the event handler.
 - `kc_wch_version()` returns the generated build version.
 
-The binding maps event types mechanically:
+Event types map mechanically to consumer values:
 
 ```text
 KC_WCH_ADD -> "add"
@@ -122,9 +172,7 @@ KC_WCH_UPD -> "upd"
 KC_WCH_DEL -> "del"
 ```
 
-No polling API is exposed publicly. Native waiting happens in the worker, so a
-JavaScript or Lua consumer can remain event-driven without blocking its main
-execution thread.
+There is no public polling API.
 
 ---
 
@@ -152,8 +200,8 @@ make x86_64/windows
 make test wine
 ```
 
-The reusable contract cases cover `open`, `on`, `close`, and `version`,
-including real asynchronous filesystem notification delivery.
+The reusable library contract cases cover `open`, `on`, `close`, and
+`version`, including asynchronous filesystem notification delivery.
 
 ### Multiarch Builds
 
@@ -202,7 +250,7 @@ make loongarch64/linux
 
 ### Optional Cross-Compilation SDKs
 
-Required only for the corresponding multiarch targets:
+Required only for corresponding multiarch targets:
 
 - MinGW for Windows cross-compilation
 - Wine for Windows contract tests on Linux
