@@ -18,29 +18,30 @@ extern "C" {
 
 typedef struct kc_tpm kc_tpm_t;
 
+typedef struct {
+    int ngram_size;
+} kc_tpm_options_t;
+
 #define KC_TPM_OK      0
 #define KC_TPM_ERROR  -1
 
 /**
- * Allocate and initialize a new tpm context.
- * Prepares one inference context. Must be paired with kc_tpm_close().
- * @param out Pointer to receive the context pointer.
+ * Create a reusable text profile.
+ * A successful call always returns a profile ready for kc_tpm_score().
+ * @param out Pointer to receive the profile.
+ * @param map_text Representative text used to build the profile.
+ * @param options Optional configuration. NULL uses ngram_size = 3.
  * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
  */
-int kc_tpm_open(kc_tpm_t **out);
+int kc_tpm_open(
+    kc_tpm_t **out,
+    const char *map_text,
+    const kc_tpm_options_t *options
+);
 
 /**
- * Build an n-gram profile from map text.
- * @param tpm Context pointer.
- * @param map_text Text to build profile from.
- * @param ngram_size N-gram size (must be >= 1).
- * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
- */
-int kc_tpm_build(kc_tpm_t *tpm, const char *map_text, int ngram_size);
-
-/**
- * Score input text against the built profile.
- * @param tpm Context pointer with a successfully built profile.
+ * Score input text against the profile.
+ * @param tpm Profile pointer returned by kc_tpm_open().
  * @param input_text Text to score.
  * @param out_score Destination for the score in [0.0, 1.0].
  * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
@@ -52,8 +53,8 @@ int kc_tpm_score(
 );
 
 /**
- * Release a tpm context.
- * @param tpm Context pointer.
+ * Release a text profile.
+ * @param tpm Profile pointer, or NULL.
  * @return None.
  */
 void kc_tpm_close(kc_tpm_t *tpm);
