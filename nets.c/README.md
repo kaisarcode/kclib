@@ -68,7 +68,7 @@ int main(void) {
      * Call kc_nets_stop(transfer) when graceful interruption is required.
      */
 
-    /* Close from the terminal callback, or stop explicitly when needed. */
+    /* Close the transfer after the terminal callback has completed. */
     return 0;
 }
 ```
@@ -85,7 +85,7 @@ UDP sends the complete input as one datagram and reports success with no respons
 
 `kc_nets_stop()` is an interruption command. It requests graceful termination of the active transfer and interrupts the active socket where the platform permits it. A stopped transfer completes through the normal terminal callback with `KC_NETS_ESTOP`. DNS resolution may not be immediately interruptible on every platform.
 
-`kc_nets_close()` releases the transfer. If the transfer is still active, close requests stop and waits for the worker to finish. It is also safe to call `kc_nets_close()` from the transfer callback.
+`kc_nets_close()` releases the transfer. If the transfer is still active, close requests stop and waits for the worker to finish. Call it after the terminal callback has returned.
 
 `kc_nets_strerror()` returns static descriptions for public status codes.
 
