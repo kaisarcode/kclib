@@ -459,11 +459,10 @@ static int case_kc_mmap_set(void) {
     fail += expect_true("replacement visible",
         size == 2U && memcmp(data, "AB", 2U) == 0);
 
-    fail += expect_int("set NULL as empty", KC_MMAP_OK,
+    fail += expect_int("set NULL", KC_MMAP_OK,
         kc_mmap_set(map, NULL, 0U));
-    fail += expect_int("get empty after NULL set", KC_MMAP_OK,
+    fail += expect_int("get after NULL set", KC_MMAP_NOT_FOUND,
         kc_mmap_get(map, &data, &size));
-    fail += expect_true("NULL set becomes empty value", size == 0U);
     fail += expect_int("NULL with nonzero size fails", KC_MMAP_ERROR,
         kc_mmap_set(map, NULL, 1U));
 
@@ -508,20 +507,29 @@ static int case_kc_mmap_save(void) {
     kc_mmap_close(verify);
     verify = NULL;
 
-    fail += expect_int("set empty", KC_MMAP_OK,
-        kc_mmap_set(map, NULL, 0U));
-    fail += expect_int("save empty", KC_MMAP_OK, kc_mmap_save(map));
-    fail += expect_int("open empty saved value", KC_MMAP_OK,
+    fail += expect_int("set zero-byte string", KC_MMAP_OK,
+        kc_mmap_set(map, "", 0U));
+    fail += expect_int("save zero-byte string", KC_MMAP_OK, kc_mmap_save(map));
+    fail += expect_int("open zero-byte saved value", KC_MMAP_OK,
         kc_mmap_open(&verify, path));
-    fail += expect_int("get empty saved value", KC_MMAP_OK,
+    fail += expect_int("get zero-byte saved value", KC_MMAP_OK,
         kc_mmap_get(verify, &data, &size));
-    fail += expect_true("saved empty file remains a value", size == 0U);
-
+    fail += expect_true("zero-byte file remains a value", size == 0U);
     kc_mmap_close(verify);
+    verify = NULL;
+
+    fail += expect_int("set null", KC_MMAP_OK,
+        kc_mmap_set(map, NULL, 0U));
+    fail += expect_int("get null before save", KC_MMAP_NOT_FOUND,
+        kc_mmap_get(map, &data, &size));
+    fail += expect_int("save null", KC_MMAP_OK, kc_mmap_save(map));
+    fail += expect_true("saving null removes file", !file_exists(path));
+    fail += expect_int("save invalidated null instance", KC_MMAP_ERROR,
+        kc_mmap_save(map));
+
     kc_mmap_close(map);
-    remove(path);
     case_result(fail, "kc_mmap_save",
-        "persists current values including an empty value");
+        "persists values and turns saved null into deletion");
     return fail == 0 ? 0 : 1;
 }
 
