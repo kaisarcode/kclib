@@ -468,7 +468,7 @@ static int case_kc_min_cli(void) {
     }
 
     {
-        char *args[] = { (char *)MIN_TEST_CLI, "css", NULL };
+        char *args[] = { (char *)MIN_TEST_CLI, "--css", NULL };
         const char *input = "body { color: red; }";
         fail += expect_int("CLI css exits 0", 0,
             test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
@@ -476,28 +476,28 @@ static int case_kc_min_cli(void) {
         fail += expect_string("CLI css stderr", "", err);
     }
     {
-        char *args[] = { (char *)MIN_TEST_CLI, "js", NULL };
+        char *args[] = { (char *)MIN_TEST_CLI, "--js", NULL };
         const char *input = "const x = 1; // comment";
         fail += expect_int("CLI js exits 0", 0,
             test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
         fail += expect_string("CLI js output", "const x = 1;", out);
     }
     {
-        char *args[] = { (char *)MIN_TEST_CLI, "html", NULL };
+        char *args[] = { (char *)MIN_TEST_CLI, "--html", NULL };
         const char *input = "<!-- c --><p>hi</p>";
         fail += expect_int("CLI html exits 0", 0,
             test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
         fail += expect_string("CLI html output", "<p>hi</p>", out);
     }
     {
-        char *args[] = { (char *)MIN_TEST_CLI, "txt", NULL };
+        char *args[] = { (char *)MIN_TEST_CLI, "--txt", NULL };
         const char *input = "  hello   world\nfoo\tbar  ";
         fail += expect_int("CLI text exits 0", 0,
             test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
         fail += expect_string("CLI text output", "hello world foo bar", out);
     }
     {
-        char *args[] = { (char *)MIN_TEST_CLI, "css", NULL };
+        char *args[] = { (char *)MIN_TEST_CLI, "--css", NULL };
         fail += expect_int("CLI empty stdin exits 0", 0,
             test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
         fail += expect_string("CLI empty stdin stdout", "", out);
@@ -522,19 +522,37 @@ static int case_kc_min_cli(void) {
         fail += expect_true("CLI missing mode diagnostic", strstr(err, "min: mode is required") != NULL);
     }
     {
-        char *args[] = { (char *)MIN_TEST_CLI, "bogus", NULL };
-        fail += expect_int("CLI invalid mode exits 1", 1, test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
-        fail += expect_true("CLI invalid mode diagnostic", strstr(err, "min: invalid mode 'bogus'") != NULL);
-    }
-    {
         char *args[] = { (char *)MIN_TEST_CLI, "--nope", NULL };
         fail += expect_int("CLI invalid option exits 1", 1, test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
         fail += expect_true("CLI invalid option diagnostic", strstr(err, "min: unknown option '--nope'") != NULL);
     }
     {
-        char *args[] = { (char *)MIN_TEST_CLI, "css", "extra", NULL };
-        fail += expect_int("CLI extra argument exits 1", 1, test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
-        fail += expect_true("CLI extra argument diagnostic", strstr(err, "min: unexpected argument 'extra'") != NULL);
+        char *args[] = { (char *)MIN_TEST_CLI, "-txt",
+            "Hello                      World  !", NULL };
+        fail += expect_int("CLI direct value exits 0", 0,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_string("CLI direct value output", "Hello World !", out);
+    }
+    {
+        char *args[] = { (char *)MIN_TEST_CLI, "-css",
+            "body { color: red; }", NULL };
+        fail += expect_int("CLI short css value exits 0", 0,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_string("CLI short css value output", "body{color:red}", out);
+    }
+    {
+        char *args[] = { (char *)MIN_TEST_CLI, "--css", "--html", NULL };
+        fail += expect_int("CLI multiple modes exits 1", 1,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI multiple modes diagnostic",
+            strstr(err, "min: multiple modes are not allowed") != NULL);
+    }
+    {
+        char *args[] = { (char *)MIN_TEST_CLI, "--txt", "one", "two", NULL };
+        fail += expect_int("CLI extra value exits 1", 1,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI extra value diagnostic",
+            strstr(err, "min: unexpected argument 'two'") != NULL);
     }
 
     case_result(fail, "kc_min_cli", "preserves modes, stdin/stdout, diagnostics, help, and version");
