@@ -52,7 +52,7 @@ typedef enum {
     KC_INIT_BACKEND_SYSV
 } kc_init_backend_t;
 
-typedef void (*kc_init_list_cb_internal_internal)(
+typedef void (*kc_init_row_handler_t_internal)(
     const char *key,
     const char *user,
     const char *cmd,
@@ -769,7 +769,7 @@ found:
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_ls_row_sysv(
-    const char *dir, const char *key, kc_init_list_cb_internal cb, void *userdata
+    const char *dir, const char *key, kc_init_row_handler_t cb, void *userdata
 ) {
     char meta[KC_INIT_PATH];
     char umeta[KC_INIT_PATH];
@@ -797,7 +797,7 @@ static int kc_init_ls_row_sysv(
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_init_run_list_sysv(const char *dir, kc_init_list_cb_internal cb, void *userdata) {
+static int kc_init_run_list_sysv(const char *dir, kc_init_row_handler_t cb, void *userdata) {
     DIR *dp;
     struct dirent *de;
 
@@ -805,7 +805,8 @@ static int kc_init_run_list_sysv(const char *dir, kc_init_list_cb_internal cb, v
     if (dp) {
         while ((de = readdir(dp))) {
             if (de->d_name[0] == '.') continue;
-            if (strstr(de->d_name, ".user") || strstr(de->d_name, ".backend"))
+            if (kc_init_has_suffix(de->d_name, ".user") ||
+                    kc_init_has_suffix(de->d_name, ".backend"))
                 continue;
 
             (void)kc_init_ls_row_sysv(dir, de->d_name, cb, userdata);
@@ -836,7 +837,7 @@ static int kc_init_run_list_sysv(const char *dir, kc_init_list_cb_internal cb, v
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_run_list_one_sysv(
-    const char *dir, const char *key, kc_init_list_cb_internal cb, void *userdata
+    const char *dir, const char *key, kc_init_row_handler_t cb, void *userdata
 ) {
     char meta[KC_INIT_PATH];
     struct stat st;
@@ -1350,7 +1351,7 @@ found:
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_ls_row_win32(
-    const char *dir, const char *key, kc_init_list_cb_internal cb, void *userdata
+    const char *dir, const char *key, kc_init_row_handler_t cb, void *userdata
 ) {
     char meta[KC_INIT_PATH];
     char umeta[KC_INIT_PATH];
@@ -1378,7 +1379,7 @@ static int kc_init_ls_row_win32(
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_init_run_list_win32(const char *dir, kc_init_list_cb_internal cb, void *userdata) {
+static int kc_init_run_list_win32(const char *dir, kc_init_row_handler_t cb, void *userdata) {
     WIN32_FIND_DATAA fd;
     HANDLE h;
     char pattern[KC_INIT_PATH];
@@ -1428,7 +1429,7 @@ static int kc_init_run_list_win32(const char *dir, kc_init_list_cb_internal cb, 
  * @return 0 on success, 1 on failure.
  */
 static int kc_init_run_list_one_win32(
-    const char *dir, const char *key, kc_init_list_cb_internal cb, void *userdata
+    const char *dir, const char *key, kc_init_row_handler_t cb, void *userdata
 ) {
     char meta[KC_INIT_PATH];
     DWORD attr;
@@ -1542,7 +1543,7 @@ static int kc_init_run_exec(kc_init_t *ctx, const char *key) {
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_init_run_list(kc_init_t *ctx, kc_init_list_cb_internal cb, void *userdata) {
+static int kc_init_run_list(kc_init_t *ctx, kc_init_row_handler_t cb, void *userdata) {
 #ifdef _WIN32
     return kc_init_run_list_win32(ctx->dir, cb, userdata);
 #else
@@ -1558,7 +1559,7 @@ static int kc_init_run_list(kc_init_t *ctx, kc_init_list_cb_internal cb, void *u
  * @param userdata Opaque pointer.
  * @return 0 on success, 1 on failure.
  */
-static int kc_init_run_list_one(kc_init_t *ctx, const char *key, kc_init_list_cb_internal cb, void *userdata) {
+static int kc_init_run_list_one(kc_init_t *ctx, const char *key, kc_init_row_handler_t cb, void *userdata) {
 #ifdef _WIN32
     return kc_init_run_list_one_win32(ctx->dir, key, cb, userdata);
 #else
