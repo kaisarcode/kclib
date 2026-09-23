@@ -566,6 +566,11 @@ static void kc_nets_destroy(kc_nets_t *nets) {
     free(nets);
 }
 
+/**
+ * Run one asynchronous transfer and deliver its terminal callback.
+ * @param userdata Transfer pointer.
+ * @return Platform thread return value.
+ */
 #ifdef _WIN32
 static DWORD WINAPI kc_nets_worker(void *userdata)
 #else
@@ -593,6 +598,15 @@ static void *kc_nets_worker(void *userdata)
 
 /**
  * Start one asynchronous network transfer.
+ * @param out Receives the transfer handle.
+ * @param host Destination host or IP address.
+ * @param port Destination port.
+ * @param protocol Transport selector.
+ * @param data Input bytes copied by the library.
+ * @param data_size Input size in bytes.
+ * @param handler Terminal result callback.
+ * @param userdata Caller data passed to the callback.
+ * @return KC_NETS_OK when launched, or a negative status code.
  */
 int kc_nets_send(
     kc_nets_t **out,
@@ -676,6 +690,8 @@ int kc_nets_send(
 
 /**
  * Request graceful interruption of one transfer.
+ * @param nets Transfer handle.
+ * @return KC_NETS_OK on success, or KC_NETS_EINVAL for NULL.
  */
 int kc_nets_stop(kc_nets_t *nets) {
     kc_nets_socket_t socket;
@@ -692,6 +708,8 @@ int kc_nets_stop(kc_nets_t *nets) {
 
 /**
  * Stop if necessary and release one transfer.
+ * @param nets Transfer handle, or NULL.
+ * @return None.
  */
 void kc_nets_close(kc_nets_t *nets) {
     if (nets == NULL) return;
@@ -708,6 +726,8 @@ void kc_nets_close(kc_nets_t *nets) {
 
 /**
  * Return a static message for a public status code.
+ * @param code Public status code.
+ * @return Static status message.
  */
 const char *kc_nets_strerror(int code) {
     switch (code) {
@@ -721,6 +741,7 @@ const char *kc_nets_strerror(int code) {
 
 /**
  * Check whether TLS support is compiled in.
+ * @return 1 when TLS is available, otherwise 0.
  */
 int kc_nets_tls_available(void) {
 #ifdef KC_NETS_OPENSSL
@@ -736,6 +757,7 @@ int kc_nets_tls_available(void) {
 
 /**
  * Return the build version generated at compile time.
+ * @return Unix timestamp for the current build.
  */
 uint64_t kc_nets_version(void) {
     return (uint64_t)KC_NETS_BUILD_VERSION;
