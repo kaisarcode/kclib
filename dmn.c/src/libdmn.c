@@ -1981,5 +1981,3 @@ void kc_dmn_close(kc_dmn_t *dmn) {
     free(dmn->eot);
     free(dmn);
 }
-
-uint64_t kc_dmn_version(void);
