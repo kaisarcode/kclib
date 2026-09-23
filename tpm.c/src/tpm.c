@@ -251,34 +251,24 @@ int main(int argc, char **argv) {
 
     {
         kc_tpm_t *tpm = NULL;
-        int rc = 1;
-
-        if (kc_tpm_open(&tpm) != KC_TPM_OK) {
-            fprintf(stderr, "tpm: open failed\n");
-            free(map_text);
-            free(stdin_text);
-            return 1;
-        }
-
-        if (kc_tpm_build(tpm, map_text, ngram_size) != KC_TPM_OK) {
-            fprintf(stderr, "tpm: build failed\n");
-            kc_tpm_close(tpm);
-            free(map_text);
-            free(stdin_text);
-            return 1;
-        }
-
+        kc_tpm_options_t options = { .ngram_size = ngram_size };
         double score = 0.0;
+
+        if (kc_tpm_open(&tpm, map_text, &options) != KC_TPM_OK) {
+            fprintf(stderr, "tpm: profile creation failed\n");
+            free(map_text);
+            free(stdin_text);
+            return 1;
+        }
+
         if (kc_tpm_score(tpm, stdin_text, &score) != KC_TPM_OK) {
             score = 0.0;
         }
         kc_tpm_close(tpm);
 
         printf("%.6f\n", score);
-        rc = 0;
-
         free(map_text);
         free(stdin_text);
-        return rc;
+        return 0;
     }
 }
