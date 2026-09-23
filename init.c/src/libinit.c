@@ -105,6 +105,56 @@ static char *kc_init_strdup(const char *text) {
 }
 
 /**
+ * Check whether one registration key is safe for backend paths and names.
+ * @param key Registration key.
+ * @return 1 when valid, otherwise 0.
+ */
+static int kc_init_key_valid(const char *key) {
+    const unsigned char *p;
+
+    if (!key || !key[0]) return 0;
+    if (strcmp(key, ".") == 0 || strcmp(key, "..") == 0) return 0;
+
+    for (p = (const unsigned char *)key; *p; p++) {
+        if (!(isalnum(*p) || *p == '.' || *p == '_' || *p == '-')) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * Check whether one startup command fits the supported one-line contract.
+ * @param cmd Startup command.
+ * @return 1 when valid, otherwise 0.
+ */
+static int kc_init_cmd_valid(const char *cmd) {
+    size_t size;
+
+    if (!cmd || !cmd[0]) return 0;
+    size = strlen(cmd);
+    if (size >= KC_INIT_BUF) return 0;
+    return strchr(cmd, '\n') == NULL && strchr(cmd, '\r') == NULL;
+}
+
+/**
+ * Check whether a string ends with one suffix.
+ * @param text Source string.
+ * @param suffix Suffix string.
+ * @return 1 when text ends with suffix, otherwise 0.
+ */
+static int kc_init_has_suffix(const char *text, const char *suffix) {
+    size_t text_size;
+    size_t suffix_size;
+
+    if (!text || !suffix) return 0;
+    text_size = strlen(text);
+    suffix_size = strlen(suffix);
+    if (suffix_size > text_size) return 0;
+    return strcmp(text + text_size - suffix_size, suffix) == 0;
+}
+
+/**
  * Resolves one backend name into a backend value.
  * @param name Backend name.
  * @return Backend value.
@@ -253,6 +303,38 @@ static int kc_init_meta_path(
         return 1;
     return 0;
 #endif
+}
+
+/**
+ * Check whether registration metadata exists in the configured or fallback
+ * metadata directory.
+ * @param init Startup registry context.
+ * @param key Registration key.
+ * @return 1 when metadata exists, otherwise 0.
+ */
+static int kc_init_entry_exists(const kc_init_t *init, const char *key) {
+    char path[KC_INIT_PATH];
+
+    if (!init || !key) return 0;
+    if (kc_init_meta_path(init->dir, key, path, sizeof(path)) == 0) {
+#ifdef _WIN32
+        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 1;
+#else
+        struct stat st;
+        if (stat(path, &st) == 0) return 1;
+#endif
+    }
+
+    if (strcmp(init->dir, KC_INIT_SYS_DIR) != 0 &&
+            kc_init_meta_path(KC_INIT_SYS_DIR, key, path, sizeof(path)) == 0) {
+#ifdef _WIN32
+        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 1;
+#else
+        struct stat st;
+        if (stat(path, &st) == 0) return 1;
+#endif
+    }
+    return 0;
 }
 
 /**
@@ -735,7 +817,8 @@ static int kc_init_run_list_sysv(const char *dir, kc_init_list_cb_internal cb, v
         if (dp) {
             while ((de = readdir(dp))) {
                 if (de->d_name[0] == '.') continue;
-                if (strstr(de->d_name, ".backend")) continue;
+                if (kc_init_has_suffix(de->d_name, ".user") ||
+                        kc_init_has_suffix(de->d_name, ".backend")) continue;
                 (void)kc_init_ls_row_sysv(KC_INIT_SYS_DIR, de->d_name, cb, userdata);
             }
             closedir(dp);
@@ -1307,6 +1390,8 @@ static int kc_init_run_list_win32(const char *dir, kc_init_list_cb_internal cb, 
             do {
                 if (fd.cFileName[0] == '.') continue;
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                if (kc_init_has_suffix(fd.cFileName, ".user") ||
+                        kc_init_has_suffix(fd.cFileName, ".backend")) continue;
                 (void)kc_init_ls_row_win32(dir, fd.cFileName, cb, userdata);
             } while (FindNextFileA(h, &fd));
             FindClose(h);
@@ -1321,6 +1406,9 @@ static int kc_init_run_list_win32(const char *dir, kc_init_list_cb_internal cb, 
                 do {
                     if (fd.cFileName[0] == '.') continue;
                     if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                        continue;
+                    if (kc_init_has_suffix(fd.cFileName, ".user") ||
+                            kc_init_has_suffix(fd.cFileName, ".backend"))
                         continue;
                     (void)kc_init_ls_row_win32(KC_INIT_SYS_DIR, fd.cFileName, cb, userdata);
                 } while (FindNextFileA(h, &fd));
