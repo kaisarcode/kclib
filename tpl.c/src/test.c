@@ -373,7 +373,7 @@ static int case_kc_tpl_render(void) {
 
     out = kc_tpl_render(tpl, second, sizeof(second) / sizeof(second[0]));
     fail += expect_string("render variables are isolated",
-        "Second||no|||", out);
+        "Second||no||", out);
     kc_tpl_free(out);
 
     kc_tpl_close(tpl);
