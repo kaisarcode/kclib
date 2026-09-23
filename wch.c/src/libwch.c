@@ -922,6 +922,9 @@ static void kc_wch_wasm_remove(kc_wch_t *w) {
  * @return 1 on event, 0 on timeout, or -1 on error.
  */
 static int kc_wch_wait(kc_wch_t *w, kc_wch_event_t *ev, int timeout_ms) {
+#ifdef __EMSCRIPTEN__
+    (void)timeout_ms;
+#endif
     if (w == NULL || ev == NULL) return -1;
     if (dequeue(w, ev)) return 1;
     ev->type = -1;
