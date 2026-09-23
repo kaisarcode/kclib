@@ -78,9 +78,14 @@ static void kc_print_version(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
+    enum {
+        MDP_CLI_HTML = 1,
+        MDP_CLI_BODY = 2,
+        MDP_CLI_META = 3
+    } mode = MDP_CLI_HTML;
     char *src = NULL;
-    char *out = NULL;
-    char *(*operation)(const char *) = kc_mdp_html;
+    kc_mdp_t *mdp = NULL;
+    const char *out;
     int i;
 
     for (i = 1; i < argc; i++) {
@@ -95,11 +100,11 @@ int main(int argc, char **argv) {
         }
 
         if (strcmp(argv[i], "html") == 0 || strcmp(argv[i], "--html") == 0) {
-            operation = kc_mdp_html;
+            mode = MDP_CLI_HTML;
         } else if (strcmp(argv[i], "body") == 0 || strcmp(argv[i], "--body") == 0) {
-            operation = kc_mdp_body;
+            mode = MDP_CLI_BODY;
         } else if (strcmp(argv[i], "meta") == 0 || strcmp(argv[i], "--meta") == 0) {
-            operation = kc_mdp_meta;
+            mode = MDP_CLI_META;
         } else {
             fprintf(stderr, "mdp: unknown option '%s'\n", argv[i]);
             return 1;
@@ -111,16 +116,30 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    out = operation(src);
+    if (kc_mdp_open(&mdp, src) != KC_MDP_OK) {
+        fprintf(stderr, "mdp: execution failed\n");
+        free(src);
+        return 1;
+    }
+
+    if (mode == MDP_CLI_BODY) {
+        out = kc_mdp_body(mdp);
+    } else if (mode == MDP_CLI_META) {
+        out = kc_mdp_meta(mdp);
+    } else {
+        out = kc_mdp_html(mdp);
+    }
+
     if (!out) {
         fprintf(stderr, "mdp: execution failed\n");
+        kc_mdp_close(mdp);
         free(src);
         return 1;
     }
 
     fputs(out, stdout);
 
-    kc_mdp_free(out);
+    kc_mdp_close(mdp);
     free(src);
     return 0;
 }
