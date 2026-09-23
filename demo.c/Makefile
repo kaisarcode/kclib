@@ -182,7 +182,7 @@ all: \
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
 	@cache=$(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; \
-	if [ ! -f "$cache" ] || ! grep -Fq 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=$(CURDIR)/$(BIN_DIR)/$(1)/linux' "$cache"; then \
+	if [ ! -f "$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/linux' "$cache"; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Linux \
@@ -239,7 +239,7 @@ loongarch64/linux:
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
 	@cache=$(BUILD_DIR)/$(1)-windows/CMakeCache.txt; \
-	if [ ! -f "$cache" ] || ! grep -Fq 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=$(CURDIR)/$(BIN_DIR)/$(1)/windows' "$cache"; then \
+	if [ ! -f "$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/windows' "$cache"; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Windows \
@@ -275,7 +275,7 @@ define macos_target
 	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache"; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -Fq 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=$(CURDIR)/$(BIN_DIR)/$(1)/macos' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/macos' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
 		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Darwin \
@@ -316,7 +316,7 @@ define ios_target
 	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_C_COMPILER:.*=$(3)$$' "$$cache" || ! grep -q '^CMAKE_OSX_SYSROOT:.*=$(5)$$' "$$cache"; }; then \
 		rm -f "$$cache" && rm -rf $(BUILD_DIR)/$(1)-$(2)/CMakeFiles; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ] || ! grep -Fq 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=$(CURDIR)/$(BIN_DIR)/$(1)/$(2)' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/$(2)' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
 		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=iOS \
@@ -361,7 +361,7 @@ define android_target
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-android/build.ninja && rm -rf $(BUILD_DIR)/$(1)-android/CMakeFiles; \
 	fi
 	@cache=$(BUILD_DIR)/$(1)-android/CMakeCache.txt; \
-	if [ ! -f "$cache" ] || ! grep -Fq 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:PATH=$(CURDIR)/$(BIN_DIR)/$(1)/android' "$cache"; then \
+	if [ ! -f "$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/android' "$cache"; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-android \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
