@@ -1,37 +1,74 @@
-# mmap.c - Memory map
+# mmap.c - Persistent Binary Value
 
-`mmap.c` is a minimal portable C library and CLI for creating a binary file from stdin and later exposing that file as readonly memory through mmap.
+`mmap.c` exposes one file-backed binary value per instance. Opening a missing
+path is valid and starts with no value. The current value can be replaced in
+memory, persisted explicitly, or deleted together with its backing file.
+
+The public model is designed to project naturally to JavaScript and Lua:
+
+```js
+const mm = mmap(file);
+
+mm.get();              // value, or null when the file did not exist
+mm.set("A");
+mm.set(mm.get() + "B");
+mm.save();
+
+mm.del();              // deletes the file and invalidates mm
+```
+
+After `del()`, any operation other than final cleanup is an error. Reopening the
+same path creates a new valid instance whose `get()` returns `null`.
 
 ---
 
 ## CLI
 
-Command line interface for the mmap tool.
+The CLI is a one-shot adapter over the same file/value operations.
 
 ### Examples
 
-Read standard input and write to file:
+Read a saved value:
 
 ```bash
-echo -n "example input" | ./bin/x86_64/linux/mmap --set file.bin
+./bin/x86_64/linux/mmap file.bin --get
 ```
 
-Map file and print to standard output:
+Set and save a direct value:
 
 ```bash
-./bin/x86_64/linux/mmap --get file.bin
+./bin/x86_64/linux/mmap file.bin --set "value"
 ```
 
----
+Set and save exact bytes from stdin:
+
+```bash
+cat input.bin | ./bin/x86_64/linux/mmap file.bin --set
+```
+
+Delete the backing file:
+
+```bash
+./bin/x86_64/linux/mmap file.bin --del
+```
+
+Short operation flags are also accepted:
+
+```bash
+./bin/x86_64/linux/mmap file.bin -get
+./bin/x86_64/linux/mmap file.bin -set "value"
+./bin/x86_64/linux/mmap file.bin -del
+```
 
 ### Parameters
 
-| Flag | Description |
+| Form | Description |
 | :--- | :--- |
-| `--set`, `-set` | Read stdin, replace file with exact bytes |
-| `--get`, `-get` | Map file, write exact bytes to stdout |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
+| `mmap <path> -get\|--get` | Write the saved value to stdout |
+| `mmap <path> -set\|--set [value]` | Set and save a direct value, or read exact bytes from stdin when value is omitted |
+| `mmap <path> -del\|--del` | Delete the backing file |
+| `mmap -h\|--help` | Show help and usage |
+| `mmap -v\|--version` | Show version |
 
 ---
 
@@ -40,32 +77,57 @@ Map file and print to standard output:
 ```c
 #include "libmmap.h"
 
-kc_mmap_t *map = NULL;
+kc_mmap_t *mm = NULL;
+const void *data = NULL;
+size_t size = 0;
 
-if (kc_mmap_open(&map, "file.bin") == KC_MMAP_OK) {
-    const void *data = kc_mmap_data(map);
-    size_t size = kc_mmap_size(map);
+if (kc_mmap_open(&mm, "file.bin") == KC_MMAP_OK) {
+    int rc = kc_mmap_get(mm, &data, &size);
 
-    /* use data[0..size) only while map remains open */
+    if (rc == KC_MMAP_NOT_FOUND) {
+        /* no current value */
+    }
 
-    kc_mmap_close(map);
+    if (kc_mmap_set(mm, "A", 1U) == KC_MMAP_OK) {
+        kc_mmap_get(mm, &data, &size);
+
+        if (kc_mmap_save(mm) == KC_MMAP_OK) {
+            /* file.bin now contains one byte: A */
+        }
+    }
+
+    kc_mmap_close(mm);
 }
 ```
 
----
+### API semantics
 
-## Lifecycle
+- `kc_mmap_open()` creates one instance associated with a copied file path.
+  Missing files are valid and produce an instance with no value.
+- `kc_mmap_get()` returns `KC_MMAP_NOT_FOUND` only when the valid instance has
+  no current value. On `KC_MMAP_OK`, the returned pointer and size are
+  transport details for the current binary value.
+- `kc_mmap_set()` replaces the current in-memory value and does not write the
+  file. `NULL` with size zero is accepted as an empty value.
+- `kc_mmap_save()` persists the current value. An empty value creates or
+  truncates the backing file to zero bytes.
+- `kc_mmap_del()` deletes the backing file and invalidates the instance.
+  Subsequent `get/set/save/del` calls fail.
+- `kc_mmap_close()` releases the instance and accepts `NULL`.
+- `kc_mmap_version()` returns the generated build version.
 
-- `kc_mmap_open()` allocates a mapping context and maps a file. The caller owns
-    that context and must eventually call `kc_mmap_close()`.
-- `kc_mmap_data()` returns a borrowed, read-only pointer to context-owned mapped
-    bytes. The caller must not free it or write through it; no copy is implied.
-    It remains valid only while that exact context is open, and
-    `kc_mmap_close()` invalidates it.
-- `kc_mmap_size()` returns the mapped byte length.
-- Empty files open successfully with a size of zero and a NULL data pointer.
-- The lifecycle is: open, obtain data and size, consume the borrowed bytes, then
-    close the context.
+The size argument is part of the binary C bridge, not a user-facing property of
+the JS/Lua model. A binding can map the result mechanically:
+
+```text
+KC_MMAP_NOT_FOUND      -> null
+KC_MMAP_OK + 0 bytes   -> empty string / empty byte value
+KC_MMAP_OK + N bytes   -> string / byte value
+KC_MMAP_ERROR          -> binding error
+```
+
+A `get()` pointer is borrowed from the instance. It remains valid until
+`set()`, `del()`, or `close()`.
 
 ---
 
@@ -74,28 +136,31 @@ if (kc_mmap_open(&map, "file.bin") == KC_MMAP_OK) {
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile only test executables, link dynamically against the generated shared library, and run through CTest.
+Build the project artifacts first, then run the native contract suite:
 
 ```bash
 make
 make test
 ```
 
-To run the common `test` target in Windows-through-Wine mode:
+Run the Windows contract suite through Wine after building Windows artifacts:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+The reusable contract cases cover `open`, `get`, `set`, `save`, `del`,
+`close`, and `version`. Native and Wine runs additionally exercise the
+shipped CLI as one grouped contract.
 
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
+There is no WebAssembly target. This library depends on native file-backed
+mapping and filesystem behavior.
 
 ### Multiarch Builds
 
@@ -157,3 +222,19 @@ Required only for multiarch builds:
 - `wine` for running Windows tests on Linux.
 - `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
 - Android NDK (version 27.2.12479018) for Android targets.
+
+---
+
+## Beta Notice
+
+This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support. You are free to test it, use it, and modify it as you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Please note that I do not accept pull requests; the goal is to avoid long-term dependency on platforms like GitHub, and I do not maintain fixed infrastructure to guarantee long-term stability for these projects.
+
+---
+
+## License
+
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
