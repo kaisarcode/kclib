@@ -33,16 +33,35 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+/**
+ * Print one test case result line.
+ * @param fail Non-zero when the case failed.
+ * @param name Canonical test case name.
+ * @param detail Behavior verified by the case.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, detail);
 }
 
+/**
+ * Run one test case with counter tracking.
+ * @param rc Destination accumulator.
+ * @param fn Test case function.
+ * @return None.
+ */
 static void run_case(int *rc, int (*fn)(void)) {
     test_case_current++;
     *rc += fn();
 }
 
+/**
+ * Verify one boolean condition.
+ * @param name Check description.
+ * @param condition Non-zero when the check passed.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_true(const char *name, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", name);
@@ -51,6 +70,10 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
+/**
+ * Test kc_libr_greet and kc_libr_free.
+ * @return 0 on success, 1 on failure.
+ */
 static int case_kc_libr_greet(void) {
     const char *name = "kc_libr_greet";
     const char *detail = "returns an owned greeting for the supplied name";
@@ -80,6 +103,10 @@ static int case_kc_libr_greet(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test kc_libr_version.
+ * @return 0 on success, 1 on failure.
+ */
 static int case_kc_libr_version(void) {
     const char *name = "kc_libr_version";
     const char *detail = "returns a nonzero generated build version";
@@ -92,12 +119,26 @@ static int case_kc_libr_version(void) {
 #ifndef __EMSCRIPTEN__
 
 #ifdef _WIN32
+/**
+ * Convert a UTF-8 string to a wide string.
+ * @param input UTF-8 input string.
+ * @param output Destination wide-string buffer.
+ * @param capacity Destination capacity in wchar_t units.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_to_wide(const char *input, wchar_t *output, size_t capacity) {
     return MultiByteToWideChar(
         CP_UTF8, 0, input, -1, output, (int)capacity
     ) > 0 ? 0 : 1;
 }
 
+/**
+ * Append one quoted argument to a Windows command line.
+ * @param command Destination command line.
+ * @param capacity Destination capacity in wchar_t units.
+ * @param arg Argument to append.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_append_arg(
     wchar_t *command,
     size_t capacity,
@@ -120,6 +161,13 @@ static int test_append_arg(
     return 0;
 }
 
+/**
+ * Read one Windows pipe into a NUL-terminated buffer.
+ * @param pipe Pipe read handle.
+ * @param buffer Destination buffer.
+ * @param size Destination buffer size.
+ * @return None.
+ */
 static void test_read_pipe(HANDLE pipe, char *buffer, size_t size) {
     DWORD count;
     size_t used = 0;
@@ -133,6 +181,16 @@ static void test_read_pipe(HANDLE pipe, char *buffer, size_t size) {
 }
 #endif
 
+/**
+ * Run the libr CLI and capture stdout, stderr, and exit status.
+ * @param argv NULL-terminated argument vector.
+ * @param out Captured stdout buffer.
+ * @param out_size Stdout buffer size.
+ * @param err Captured stderr buffer.
+ * @param err_size Stderr buffer size.
+ * @param out_status Destination for the process exit status.
+ * @return 0 on execution success, 1 on harness failure.
+ */
 static int test_cli_run(
     char *const argv[],
     char *out,
@@ -245,6 +303,10 @@ static int test_cli_run(
 #endif
 }
 
+/**
+ * Test the complete libr CLI contract as one grouped case.
+ * @return 0 on success, 1 on failure.
+ */
 static int case_kc_libr_cli(void) {
     const char *name = "kc_libr_cli";
     const char *detail = "default/name greeting, help, version, and diagnostics";
@@ -321,6 +383,10 @@ static int case_kc_libr_cli(void) {
 }
 #endif
 
+/**
+ * Run all enabled contract test cases.
+ * @return 0 on success, non-zero on failure.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -344,6 +410,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Run one liblibr contract test case.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return 0 on success, 1 or 2 on failure.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
