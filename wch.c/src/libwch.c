@@ -798,7 +798,6 @@ static int kc_wch_wasm_matches(const kc_wch_t *w, const char *path) {
  * @param path Changed VFS path.
  * @return None.
  */
-EMSCRIPTEN_KEEPALIVE
 void kc_wch_wasm_event(int type, const char *path) {
     kc_wch_t *w = kc_wch_wasm_watchers;
 
@@ -1005,6 +1004,11 @@ static void kc_wch_release(kc_wch_t *w) {
 #ifdef _WIN32
 static DWORD WINAPI kc_wch_worker(void *arg) {
 #else
+/**
+ * Runs the asynchronous watcher loop on POSIX platforms.
+ * @param arg Watcher instance.
+ * @return Thread result pointer.
+ */
 static void *kc_wch_worker(void *arg) {
 #endif
     kc_wch_t *w = (kc_wch_t *)arg;
