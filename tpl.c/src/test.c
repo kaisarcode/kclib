@@ -1,6 +1,6 @@
 /**
- * test.c - libtpl public API contract tests.
- * Summary: Validates each exported libtpl function through one dedicated test case.
+ * test.c - liblibtpl public API and CLI tests.
+ * Summary: Contract tests for the stateless min API and shipped CLI.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -13,55 +13,55 @@
 
 #include "libtpl.h"
 
+#ifndef __EMSCRIPTEN__
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef KC_TPL_TEST_CLI
+#define KC_TPL_TEST_CLI ""
+#endif
 
 static int test_case_total = 0;
 static int test_case_current = 0;
 
 /**
- * Prints a test case result line.
- * @param fail Non-zero when the case failed.
- * @param name Test case description.
- * @param detail Behavior detail.
+ * Prints one canonical test-case result line.
+ * @param fail Nonzero when the case failed.
+ * @param name Canonical test-case name.
+ * @param description Human-readable test-case description.
  * @return None.
  */
-static void case_result(int fail, const char *name, const char *detail) {
+static void case_result(int fail, const char *name, const char *description) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        fail ? "FAIL" : "PASS", name, detail);
+        fail ? "FAIL" : "PASS", name, description);
 }
 
+typedef int (*case_fn)(void);
+
 /**
- * Runs one test case with counter tracking.
- * @param rc Destination accumulator.
- * @param fn Test case function.
+ * Executes one test case and accumulates its result.
+ * @param rc Aggregate failed-case count.
+ * @param fn Test-case function to execute.
  * @return None.
  */
-static void run_case(int *rc, int (*fn)(void)) {
+static void run_case(int *rc, case_fn fn) {
     test_case_current++;
     *rc += fn();
 }
 
 /**
- * Verifies an integer result.
- * @param name Check name.
- * @param expected Expected value.
- * @param actual Actual value.
- * @return 0 on success, 1 on failure.
- */
-static int expect_int(const char *name, int expected, int actual) {
-    if (expected != actual) {
-        printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Verifies a true condition.
- * @param name Check name.
- * @param condition Condition expected to be true.
+ * Verifies one boolean test expectation.
+ * @param name Expectation description.
+ * @param condition Nonzero when the expectation is satisfied.
  * @return 0 on success, 1 on failure.
  */
 static int expect_true(const char *name, int condition) {
@@ -73,324 +73,547 @@ static int expect_true(const char *name, int condition) {
 }
 
 /**
- * Verifies a string result.
- * @param name Check name.
- * @param expected Expected string.
- * @param actual Actual string.
+ * Verifies one string test expectation.
+ * @param name Expectation description.
+ * @param expected Expected string value.
+ * @param actual Actual string value.
  * @return 0 on success, 1 on failure.
  */
 static int expect_string(const char *name, const char *expected, const char *actual) {
-    if (actual == NULL || strcmp(expected, actual) != 0) {
+    if (!actual || strcmp(expected, actual) != 0) {
         printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
-            actual != NULL ? actual : "NULL");
+            actual ? actual : "NULL");
         return 1;
     }
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
 /**
- * Renders one template and compares its output.
- * @param name Check description.
- * @param ctx Template context.
- * @param input Template text.
- * @param expected Expected rendered text.
+ * Verifies one integer test expectation.
+ * @param name Expectation description.
+ * @param expected Expected integer value.
+ * @param actual Actual integer value.
  * @return 0 on success, 1 on failure.
  */
-static int render_expect(const char *name, kc_tpl_t *ctx, const char *input, const char *expected);
+static int expect_int(const char *name, int expected, int actual) {
+    if (expected != actual) {
+        printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
+        return 1;
+    }
+    return 0;
+}
+
+#ifdef _WIN32
+/**
+ * Appends one argument to the Windows CLI command line.
+ * @param cmd Command-line buffer.
+ * @param cap Command-line buffer capacity.
+ * @param arg Argument to append.
+ * @return 0 on success, 1 on failure.
+ */
+static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
+    size_t n = wcslen(cmd);
+    size_t len = wcslen(arg);
+    int quote = len == 0 || wcschr(arg, L' ') != NULL || wcschr(arg, L'\t') != NULL ||
+        wcschr(arg, L'"') != NULL;
+    int i;
+
+    if (n > 0) {
+        if (n + 1 >= cap) return 1;
+        cmd[n++] = L' ';
+    }
+    if (quote) {
+        if (n + 1 >= cap) return 1;
+        cmd[n++] = L'"';
+        for (i = 0; i < (int)len; i++) {
+            if (arg[i] == L'"') {
+                if (n + 1 >= cap) return 1;
+                cmd[n++] = L'\\';
+            }
+            if (n + 1 >= cap) return 1;
+            cmd[n++] = arg[i];
+        }
+        if (n + 1 >= cap) return 1;
+        cmd[n++] = L'"';
+    } else {
+        if (n + len >= cap) return 1;
+        memcpy(cmd + n, arg, len * sizeof(wchar_t));
+        n += len;
+    }
+    cmd[n] = L'\0';
+    return 0;
+}
 
 /**
- * Tests kc_tpl_version.
+ * Converts one UTF-8 CLI argument to a Windows wide string.
+ * @param in UTF-8 input string.
+ * @param out Destination wide-character buffer.
+ * @param cap Destination capacity in wide characters.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_tpl_version(void) {
-    const char *name = "kc_tpl_version";
-    const char *detail = "returns build timestamp";
-    int fail = expect_true("version set", kc_tpl_version() != 0U);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+static int test_cli_to_wide(const char *in, wchar_t *out, size_t cap) {
+    return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
 }
+
+/**
+ * Reads process output from one Windows pipe.
+ * @param pipe Pipe handle to read.
+ * @param buf Destination byte buffer.
+ * @param size Destination buffer size.
+ * @return 0 on success.
+ */
+static int test_cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
+    DWORD count;
+    size_t used = 0;
+
+    while (used + 1 < size &&
+            ReadFile(pipe, buf + used, (DWORD)(size - used - 1), &count, NULL) &&
+            count > 0) {
+        used += count;
+    }
+    buf[used] = '\0';
+    return 0;
+}
+
+/**
+ * Runs the CLI with controlled input and captured output.
+ * @param argv Null-terminated argument vector.
+ * @param input Input bytes for standard input.
+ * @param input_len Input byte count.
+ * @param out Standard-output buffer.
+ * @param out_size Standard-output buffer size.
+ * @param err Standard-error buffer.
+ * @param err_size Standard-error buffer size.
+ * @param out_status Destination process exit status.
+ * @return 0 on successful execution, 1 on harness failure.
+ */
+static int test_cli_run_input(char *const argv[], const char *input,
+        size_t input_len, char *out, size_t out_size, char *err,
+        size_t err_size, int *out_status) {
+    wchar_t exe[MAX_PATH];
+    wchar_t cmd[32768];
+    wchar_t wide[4096];
+    HANDLE in_pipe[2], out_pipe[2], err_pipe[2];
+    SECURITY_ATTRIBUTES sa;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    DWORD exit_code, written;
+    int i;
+
+    if (test_cli_to_wide(KC_TPL_TEST_CLI, exe, sizeof(exe) / sizeof(wchar_t))) return 1;
+    sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
+    if (!CreatePipe(&in_pipe[0], &in_pipe[1], &sa, 0)) return 1;
+    if (!CreatePipe(&out_pipe[0], &out_pipe[1], &sa, 0)) return 1;
+    if (!CreatePipe(&err_pipe[0], &err_pipe[1], &sa, 0)) return 1;
+    SetHandleInformation(in_pipe[1], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(out_pipe[0], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(err_pipe[0], HANDLE_FLAG_INHERIT, 0);
+    memset(&si, 0, sizeof(si)); memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si); si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = in_pipe[0]; si.hStdOutput = out_pipe[1]; si.hStdError = err_pipe[1];
+
+    cmd[0] = L'\0';
+    if (test_cli_append_arg(cmd, sizeof(cmd) / sizeof(wchar_t), exe)) return 1;
+    for (i = 1; argv[i]; i++) {
+        if (test_cli_to_wide(argv[i], wide, sizeof(wide) / sizeof(wchar_t)) ||
+                test_cli_append_arg(cmd, sizeof(cmd) / sizeof(wchar_t), wide)) return 1;
+    }
+    if (!CreateProcessW(exe, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) return 1;
+    CloseHandle(in_pipe[0]); CloseHandle(out_pipe[1]); CloseHandle(err_pipe[1]);
+    if (input_len > 0) (void)WriteFile(in_pipe[1], input, (DWORD)input_len, &written, NULL);
+    CloseHandle(in_pipe[1]);
+    test_cli_read_pipe(out_pipe[0], out, out_size);
+    test_cli_read_pipe(err_pipe[0], err, err_size);
+    CloseHandle(out_pipe[0]); CloseHandle(err_pipe[0]);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    *out_status = (int)exit_code;
+    return 0;
+}
+#else
+/**
+ * Runs the CLI with controlled input and captured output.
+ * @param argv Null-terminated argument vector.
+ * @param input Input bytes for standard input.
+ * @param input_len Input byte count.
+ * @param out Standard-output buffer.
+ * @param out_size Standard-output buffer size.
+ * @param err Standard-error buffer.
+ * @param err_size Standard-error buffer size.
+ * @param out_status Destination process exit status.
+ * @return 0 on successful execution, 1 on harness failure.
+ */
+static int test_cli_run_input(char *const argv[], const char *input,
+        size_t input_len, char *out, size_t out_size, char *err,
+        size_t err_size, int *out_status) {
+    int in_pipe[2], out_pipe[2], err_pipe[2];
+    pid_t pid;
+    ssize_t count;
+    size_t written = 0, pos = 0;
+    int status;
+
+    if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0 || pipe(err_pipe) != 0) return 1;
+    pid = fork();
+    if (pid < 0) return 1;
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        dup2(err_pipe[1], STDERR_FILENO);
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
+        close(err_pipe[0]); close(err_pipe[1]);
+        execv(argv[0], argv);
+        _exit(127);
+    }
+    close(in_pipe[0]); close(out_pipe[1]); close(err_pipe[1]);
+    while (written < input_len) {
+        count = write(in_pipe[1], input + written, input_len - written);
+        if (count < 0) break;
+        written += (size_t)count;
+    }
+    close(in_pipe[1]);
+    memset(out, 0, out_size);
+    while (pos + 1 < out_size &&
+            (count = read(out_pipe[0], out + pos, out_size - pos - 1)) > 0) pos += (size_t)count;
+    close(out_pipe[0]);
+    pos = 0; memset(err, 0, err_size);
+    while (pos + 1 < err_size &&
+            (count = read(err_pipe[0], err + pos, err_size - pos - 1)) > 0) pos += (size_t)count;
+    close(err_pipe[0]);
+    if (waitpid(pid, &status, 0) < 0) return 1;
+    *out_status = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    return 0;
+}
+#endif
+#endif
 
 /**
  * Tests kc_tpl_open.
- * @return 0 on success, 1 on failure.
+ * @return 0 on success, 1 otherwise.
  */
 static int case_kc_tpl_open(void) {
-    const char *name = "kc_tpl_open";
-    const char *detail = "validates and allocates context";
-    kc_tpl_t *ctx;
+    kc_tpl_t *tpl = NULL;
+    kc_tpl_options_t options;
+    char source[] = "<h1>{{ title }}</h1>";
+    char *out;
     int fail = 0;
 
-    ctx = NULL;
-    fail += expect_int("open NULL out", KC_TPL_ERROR, kc_tpl_open(NULL));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
-    fail += expect_true("open sets context", ctx != NULL);
-    kc_tpl_close(ctx);
-    case_result(fail, name, detail);
+    fail += expect_int("open NULL out", KC_TPL_ERROR,
+        kc_tpl_open(NULL, source, NULL));
+    fail += expect_int("open NULL source", KC_TPL_ERROR,
+        kc_tpl_open(&tpl, NULL, NULL));
+    fail += expect_true("NULL source clears output", tpl == NULL);
+
+    options.root = NULL;
+    fail += expect_int("open NULL root", KC_TPL_ERROR,
+        kc_tpl_open(&tpl, source, &options));
+    options.root = "";
+    fail += expect_int("open empty root", KC_TPL_ERROR,
+        kc_tpl_open(&tpl, source, &options));
+
+    options.root = ".";
+    fail += expect_int("open valid template", KC_TPL_OK,
+        kc_tpl_open(&tpl, source, &options));
+    fail += expect_true("open returns template", tpl != NULL);
+
+    source[0] = 'X';
+    out = kc_tpl_render(tpl, NULL, 0U);
+    fail += expect_string("open owns source",
+        "<h1></h1>", out);
+    kc_tpl_free(out);
+    kc_tpl_close(tpl);
+
+    case_result(fail, "kc_tpl_open",
+        "validates options and owns the template source");
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_tpl_close.
- * @return 0 on success, 1 on failure.
+ * Tests kc_tpl_render.
+ * @return 0 on success, 1 otherwise.
  */
-static int case_kc_tpl_close(void) {
-    const char *name = "kc_tpl_close";
-    const char *detail = "releases context";
-    kc_tpl_t *ctx;
-
-    ctx = NULL;
-    kc_tpl_close(NULL);
-    if (kc_tpl_open(&ctx) != KC_TPL_OK) {
-        case_result(1, name, detail);
-        return 1;
-    }
-    kc_tpl_close(ctx);
-    case_result(0, name, detail);
-    return 0;
-}
-
-/**
- * Tests kc_tpl_set_root.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_set_root(void) {
-    const char *name = "kc_tpl_set_root";
-    const char *detail = "validates input";
-    kc_tpl_t *ctx;
+static int case_kc_tpl_render(void) {
+    const char *source =
+        "{{ title }}|{{{ raw }}}|"
+        "{{@if show}}yes{{@else}}no{{@endif}}|"
+        "{{@foreach item in items}}[{{ item }}]{{@endforeach}}|"
+        "{{/* hidden */}}";
+    kc_tpl_var_t vars[] = {
+        { "title", "A&B" },
+        { "raw", "<b>x</b>" },
+        { "show", "true" },
+        { "items", "[one,two]" }
+    };
+    kc_tpl_var_t second[] = {
+        { "title", "Second" }
+    };
+    kc_tpl_var_t invalid[] = {
+        { "", "x" }
+    };
+    kc_tpl_t *tpl = NULL;
+    char *out;
     int fail = 0;
 
-    ctx = NULL;
-    fail += expect_int("set root NULL ctx", KC_TPL_ERROR, kc_tpl_set_root(NULL, "."));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
-    fail += expect_int("set root NULL value", KC_TPL_ERROR, kc_tpl_set_root(ctx, NULL));
-    fail += expect_int("set root empty", KC_TPL_ERROR, kc_tpl_set_root(ctx, ""));
-    fail += expect_int("set root valid", KC_TPL_OK, kc_tpl_set_root(ctx, "."));
-    kc_tpl_close(ctx);
-    case_result(fail, name, detail);
+    fail += expect_true("render NULL template",
+        kc_tpl_render(NULL, NULL, 0U) == NULL);
+    fail += expect_int("open template", KC_TPL_OK,
+        kc_tpl_open(&tpl, source, NULL));
+
+    fail += expect_true("render NULL vars with count fails",
+        kc_tpl_render(tpl, NULL, 1U) == NULL);
+    fail += expect_true("render invalid var fails",
+        kc_tpl_render(tpl, invalid, 1U) == NULL);
+
+    out = kc_tpl_render(tpl, vars, sizeof(vars) / sizeof(vars[0]));
+    fail += expect_string("render directives",
+        "A&amp;B|<b>x</b>|yes|[one][two]|", out);
+    kc_tpl_free(out);
+
+    out = kc_tpl_render(tpl, second, sizeof(second) / sizeof(second[0]));
+    fail += expect_string("render variables are isolated",
+        "Second||no|||", out);
+    kc_tpl_free(out);
+
+    kc_tpl_close(tpl);
+
+    fail += expect_int("open empty template", KC_TPL_OK,
+        kc_tpl_open(&tpl, "", NULL));
+    out = kc_tpl_render(tpl, NULL, 0U);
+    fail += expect_true("empty render returns allocation", out != NULL);
+    if (out) fail += expect_string("empty render", "", out);
+    kc_tpl_free(out);
+    kc_tpl_close(tpl);
+
+    case_result(fail, "kc_tpl_render",
+        "renders stored source with isolated per-call variables");
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_tpl_set_var.
- * @return 0 on success, 1 on failure.
+ * Tests kc_tpl_error.
+ * @return 0 on success, 1 otherwise.
  */
-static int case_kc_tpl_set_var(void) {
-    const char *name = "kc_tpl_set_var";
-    const char *detail = "validates and stores";
-    kc_tpl_t *ctx;
+static int case_kc_tpl_error(void) {
+    kc_tpl_t *tpl = NULL;
+    char *out;
     int fail = 0;
 
-    ctx = NULL;
-    fail += expect_int("set var NULL ctx", KC_TPL_ERROR,
-        kc_tpl_set_var(NULL, "k", "v"));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
-    fail += expect_int("set var empty key", KC_TPL_ERROR,
-        kc_tpl_set_var(ctx, "", "v"));
-    fail += expect_int("set var NULL key", KC_TPL_ERROR,
-        kc_tpl_set_var(ctx, NULL, "v"));
-    fail += expect_int("set var NULL value", KC_TPL_ERROR,
-        kc_tpl_set_var(ctx, "k", NULL));
-    fail += expect_int("set title", KC_TPL_OK, kc_tpl_set_var(ctx, "title", "A&B"));
-    kc_tpl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
+    fail += expect_string("NULL template error",
+        "invalid template", kc_tpl_error(NULL));
+    fail += expect_int("open template", KC_TPL_OK,
+        kc_tpl_open(&tpl, "{{@include \"missing.html\"}}", NULL));
+    fail += expect_string("initial error", "ok", kc_tpl_error(tpl));
 
-/**
- * Tests kc_tpl_render_string.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_tpl_render_string(void) {
-    const char *name = "kc_tpl_render_string";
-    const char *detail = "handles all directives";
-    kc_tpl_t *ctx;
-    char *output;
-    int fail = 0;
+    out = kc_tpl_render(tpl, NULL, 0U);
+    fail += expect_true("missing include fails", out == NULL);
+    kc_tpl_free(out);
+    fail += expect_true("error updated",
+        strcmp(kc_tpl_error(tpl), "ok") != 0);
 
-    ctx = NULL;
-    output = NULL;
-    fail += expect_int("render NULL ctx", KC_TPL_ERROR,
-        kc_tpl_render_string(NULL, "x", &output));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
-    fail += expect_int("render NULL input", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, NULL, &output));
-    fail += expect_int("render NULL output", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "x", NULL));
-    fail += expect_int("set title", KC_TPL_OK, kc_tpl_set_var(ctx, "title", "A&B"));
-    fail += expect_int("set raw", KC_TPL_OK, kc_tpl_set_var(ctx, "raw", "<b>x</b>"));
-    fail += expect_int("set items", KC_TPL_OK,
-        kc_tpl_set_var(ctx, "items", "[item_1,item_2]"));
-    fail += expect_int("set item one", KC_TPL_OK,
-        kc_tpl_set_var(ctx, "item_1_title", "One"));
-    fail += expect_int("set item two", KC_TPL_OK,
-        kc_tpl_set_var(ctx, "item_2_title", "Two"));
-    fail += expect_int("set a", KC_TPL_OK, kc_tpl_set_var(ctx, "a", "one"));
-    fail += expect_int("set b", KC_TPL_OK, kc_tpl_set_var(ctx, "b", "one"));
-    fail += expect_int("set c", KC_TPL_OK, kc_tpl_set_var(ctx, "c", "yes"));
-    fail += expect_int("set n", KC_TPL_OK, kc_tpl_set_var(ctx, "n", "0"));
-    fail += render_expect("escaped interpolation", ctx, "<h1>{{ title }}</h1>", "<h1>A&amp;B</h1>");
-    fail += render_expect("raw interpolation", ctx, "{{{ raw }}}", "<b>x</b>");
-    fail += render_expect("if truthy var", ctx, "{{@if title}}yes{{@else}}no{{@endif}}", "yes");
-    fail += render_expect("if missing var", ctx, "{{@if missing}}yes{{@else}}no{{@endif}}", "no");
-    fail += render_expect("if eq true", ctx, "{{@if a == b}}eq{{@else}}neq{{@endif}}", "eq");
-    fail += render_expect("if neq", ctx, "{{@if a != b}}neq{{@else}}eq{{@endif}}", "eq");
-    fail += render_expect("if eq false", ctx, "{{@if a == c}}eq{{@else}}neq{{@endif}}", "neq");
-    fail += render_expect("if and both", ctx, "{{@if a && b}}both{{@else}}one{{@endif}}", "both");
-    fail += render_expect("if and missing", ctx, "{{@if a && missing}}both{{@else}}one{{@endif}}", "one");
-    fail += render_expect("if or match", ctx, "{{@if a || missing}}or{{@else}}none{{@endif}}", "or");
-    fail += render_expect("if or none", ctx, "{{@if missing || other}}or{{@else}}none{{@endif}}", "none");
-    fail += render_expect("if not missing", ctx, "{{@if !missing}}not{{@else}}is{{@endif}}", "not");
-    fail += render_expect("if not truthy", ctx, "{{@if ! a}}neg{{@else}}pos{{@endif}}", "pos");
-    fail += render_expect("if zero falsy", ctx, "{{@if n}}truthy{{@else}}falsy{{@endif}}", "falsy");
-    fail += render_expect("if eq zero", ctx, "{{@if n == \"0\"}}zero{{@else}}nonzero{{@endif}}", "zero");
-    fail += render_expect("if and eq", ctx, "{{@if a == b && c}}pre{{@else}}post{{@endif}}", "pre");
-    fail += render_expect("if or eq false", ctx, "{{@if a == c || b == c}}or{{@else}}none{{@endif}}", "none");
-    fail += render_expect("foreach list", ctx,
-        "{{@foreach item in items}}<b>{{ item.title }}</b>{{@endforeach}}",
-        "<b>One</b><b>Two</b>");
-    fail += render_expect("block with props", ctx,
-        "{{@setblock card}}<i>{{ name }}</i>{{@endsetblock}}{{@block card [ \"name\": \"Ada\" ]}}",
-        "<i>Ada</i>");
-    fail += render_expect("block empty var", ctx,
-        "{{@setblock card}}<i>{{ title }}</i>{{@endsetblock}}{{@block card}}",
-        "<i></i>");
-    fail += render_expect("block with ref prop", ctx,
-        "{{@setblock card}}<i>{{ t }}</i>{{@endsetblock}}{{@block card [ \"t\": title ]}}",
-        "<i>A&amp;B</i>");
-    fail += render_expect("nested blocks", ctx,
-        "{{@setblock ico}}I{{@endsetblock}}{{@setblock nav}}<{{ href }}>{{@block ico}}{{@endsetblock}}{{@block nav [ \"href\": \"#\" ]}}",
-        "<#>I");
-    fail += render_expect("foreach with block", ctx,
-        "{{@foreach item in items}}{{@setblock row}}r={{ v }};i={{ item }}{{@endsetblock}}{{@block row [ \"v\": item ]}}{{@endforeach}}",
-        "r=item_1;i=r=item_2;i=");
-    fail += render_expect("block after var", ctx,
-        "{{@setblock card}}[{{ title }}]{{@endsetblock}}{{ title }}{{@block card}}",
-        "A&amp;B[]");
-    fail += render_expect("var inside block", ctx,
-        "{{@setblock b}}{{@var x \"hello\"}}{{ x }}{{@endsetblock}}{{@var x \"world\"}}[{{@block b}}]{{ x }}",
-        "[hello]world");
-    fail += render_expect("comment stripped", ctx, "A{{/* hidden */}}B", "AB");
-    fail += render_expect("comment in html comment", ctx, "<div><!-- {{@if title}}x{{@endif}} --></div>",
-        "<div><!-- {{@if title}}x{{@endif}} --></div>");
-    kc_tpl_close(ctx);
-    case_result(fail, name, detail);
+    kc_tpl_close(tpl);
+    case_result(fail, "kc_tpl_error",
+        "returns the latest template error");
     return fail == 0 ? 0 : 1;
 }
 
 /**
  * Tests kc_tpl_free.
- * @return 0 on success, 1 on failure.
+ * @return 0 on success, 1 otherwise.
  */
 static int case_kc_tpl_free(void) {
-    const char *name = "kc_tpl_free";
-    const char *detail = "releases render output";
-    kc_tpl_t *ctx;
-    char *output;
+    kc_tpl_t *tpl = NULL;
+    char *out;
     int fail = 0;
 
-    ctx = NULL;
-    output = NULL;
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
-    fail += expect_int("render output", KC_TPL_OK,
-        kc_tpl_render_string(ctx, "output", &output));
-    fail += expect_string("rendered output", "output", output);
-    kc_tpl_free(output);
+    fail += expect_int("open template", KC_TPL_OK,
+        kc_tpl_open(&tpl, "output", NULL));
+    out = kc_tpl_render(tpl, NULL, 0U);
+    fail += expect_string("render output", "output", out);
+    kc_tpl_free(out);
     kc_tpl_free(NULL);
-    kc_tpl_close(ctx);
-    case_result(fail, name, detail);
+    kc_tpl_close(tpl);
+
+    case_result(fail, "kc_tpl_free",
+        "releases render output and accepts NULL");
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_tpl_get_error.
- * @return 0 on success, 1 on failure.
+ * Tests kc_tpl_close.
+ * @return 0 on success, 1 otherwise.
  */
-static int case_kc_tpl_get_error(void) {
-    const char *name = "kc_tpl_get_error";
-    const char *detail = "returns error details";
-    kc_tpl_t *ctx;
-    char *output;
+static int case_kc_tpl_close(void) {
+    kc_tpl_t *tpl = NULL;
     int fail = 0;
 
-    ctx = NULL;
-    output = NULL;
-    fail += expect_string("NULL error", "invalid context", kc_tpl_get_error(NULL));
-    fail += expect_int("open context", KC_TPL_OK, kc_tpl_open(&ctx));
-    fail += expect_string("initial error", "ok", kc_tpl_get_error(ctx));
-    fail += expect_int("missing include", KC_TPL_ERROR,
-        kc_tpl_render_string(ctx, "{{@include \"missing.html\"}}", &output));
-    kc_tpl_free(output);
-    fail += expect_true("error string set", strcmp(kc_tpl_get_error(ctx), "ok") != 0);
-    kc_tpl_close(ctx);
-    case_result(fail, name, detail);
+    kc_tpl_close(NULL);
+    fail += expect_int("open template", KC_TPL_OK,
+        kc_tpl_open(&tpl, "x", NULL));
+    kc_tpl_close(tpl);
+
+    case_result(fail, "kc_tpl_close",
+        "releases template state and accepts NULL");
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Renders one template and compares its output.
- * @param name Check description.
- * @param ctx Template context.
- * @param input Template text.
- * @param expected Expected rendered text.
- * @return 0 on success, 1 on failure.
+ * Tests kc_tpl_version.
+ * @return 0 on success, 1 otherwise.
  */
-static int render_expect(const char *name, kc_tpl_t *ctx, const char *input, const char *expected) {
-    char *output;
-    int rc;
+static int case_kc_tpl_version(void) {
+    int fail = expect_true("version returns non-zero", kc_tpl_version() != 0U);
 
-    output = NULL;
-    rc = kc_tpl_render_string(ctx, input, &output);
-    if (rc != KC_TPL_OK) {
-        printf("[FAIL] %s: expected KC_TPL_OK, got %d: %s\n", name, rc,
-            kc_tpl_get_error(ctx));
-        kc_tpl_free(output);
-        return 1;
-    }
-    rc = expect_string(name, expected, output);
-    kc_tpl_free(output);
-    return rc;
+    case_result(fail, "kc_tpl_version",
+        "returns a nonzero generated build version");
+    return fail == 0 ? 0 : 1;
 }
 
+#ifndef __EMSCRIPTEN__
 /**
- * Runs all test cases in a single process.
- * @return Total failures across all cases.
+ * Tests the shipped CLI contract as one grouped case.
+ * @return 0 on success, 1 otherwise.
+ */
+static int case_kc_tpl_cli(void) {
+    int cli_enabled = KC_TPL_TEST_CLI[0] != '\0';
+    int fail = 0;
+    int status = 0;
+    char out[8192];
+    char err[8192];
+
+#ifdef _WIN32
+    cli_enabled = 1;
+#endif
+
+    if (!cli_enabled) {
+        case_result(0, "kc_tpl_cli",
+            "preserves flags, direct source, stdin, diagnostics, help, and version");
+        return 0;
+    }
+
+    {
+        char var[] = "title=Home";
+        char *args[] = {
+            (char *)KC_TPL_TEST_CLI, "--var", var,
+            "<h1>{{ title }}</h1>", NULL
+        };
+        fail += expect_int("CLI direct source exits 0", 0,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_string("CLI direct source output", "<h1>Home</h1>", out);
+    }
+    {
+        char var[] = "title=Home";
+        char *args[] = {
+            (char *)KC_TPL_TEST_CLI,
+            "<h1>{{ title }}</h1>", "-var", var, NULL
+        };
+        fail += expect_int("CLI source before flags exits 0", 0,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_string("CLI source before flags output", "<h1>Home</h1>", out);
+    }
+    {
+        char var[] = "title=Home";
+        char *args[] = { (char *)KC_TPL_TEST_CLI, "--var", var, NULL };
+        const char *input = "<h1>{{ title }}</h1>";
+        fail += expect_int("CLI stdin exits 0", 0,
+            test_cli_run_input(args, input, strlen(input), out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_string("CLI stdin output", "<h1>Home</h1>", out);
+    }
+    {
+        char *args[] = { (char *)KC_TPL_TEST_CLI, "--var", NULL };
+        fail += expect_int("CLI missing var exits 1", 1,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI missing var diagnostic",
+            strstr(err, "missing value for var") != NULL);
+    }
+    {
+        char a[] = "a=1";
+        char b[] = "b=2";
+        char *args[] = {
+            (char *)KC_TPL_TEST_CLI, "--var", a, "--var", b,
+            "{{ a }}{{ b }}", NULL
+        };
+        fail += expect_int("CLI repeated vars exit 0", 0,
+            test_cli_run_input(args, NULL, 0, out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_string("CLI repeated vars output", "12", out);
+    }
+    {
+        char *short_help[] = { (char *)KC_TPL_TEST_CLI, "-h", NULL };
+        char *long_version[] = { (char *)KC_TPL_TEST_CLI, "--version", NULL };
+        fail += expect_int("CLI help exits 0", 0,
+            test_cli_run_input(short_help, NULL, 0, out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI help usage", strstr(out, "Usage:") != NULL);
+        fail += expect_int("CLI version exits 0", 0,
+            test_cli_run_input(long_version, NULL, 0, out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI version build", strstr(out, "tpl build ") != NULL);
+    }
+
+    case_result(fail, "kc_tpl_cli",
+        "preserves flags, direct source, stdin, diagnostics, help, and version");
+    return fail == 0 ? 0 : 1;
+}
+#endif
+
+/**
+ * Runs the complete portable tpl test suite.
+ * @return Number of failed test cases.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 8;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 6;
+#else
+    int cli_enabled = KC_TPL_TEST_CLI[0] != '\0';
+#ifdef _WIN32
+    cli_enabled = 1;
+#endif
+    test_case_total = cli_enabled ? 7 : 6;
+#endif
     test_case_current = 0;
-    run_case(&rc, case_kc_tpl_version);
+
     run_case(&rc, case_kc_tpl_open);
-    run_case(&rc, case_kc_tpl_close);
-    run_case(&rc, case_kc_tpl_set_root);
-    run_case(&rc, case_kc_tpl_set_var);
-    run_case(&rc, case_kc_tpl_render_string);
+    run_case(&rc, case_kc_tpl_render);
+    run_case(&rc, case_kc_tpl_error);
     run_case(&rc, case_kc_tpl_free);
-    run_case(&rc, case_kc_tpl_get_error);
+    run_case(&rc, case_kc_tpl_close);
+    run_case(&rc, case_kc_tpl_version);
+#ifndef __EMSCRIPTEN__
+    if (cli_enabled) run_case(&rc, case_kc_tpl_cli);
+#endif
+
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
 /**
- * Runs one named test case.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return Process status code.
+ * Dispatches the requested test case.
+ * @param argc Command-line argument count.
+ * @param argv Command-line argument vector.
+ * @return 0 on success, nonzero on failure.
  */
 int main(int argc, char **argv) {
     if (argc != 2) {
-        fprintf(stderr, "usage: %s <case>\n", argv[0]);
+        fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_tpl_version") == 0) return case_kc_tpl_version();
     if (strcmp(argv[1], "kc_tpl_open") == 0) return case_kc_tpl_open();
-    if (strcmp(argv[1], "kc_tpl_close") == 0) return case_kc_tpl_close();
-    if (strcmp(argv[1], "kc_tpl_set_root") == 0) return case_kc_tpl_set_root();
-    if (strcmp(argv[1], "kc_tpl_set_var") == 0) return case_kc_tpl_set_var();
-    if (strcmp(argv[1], "kc_tpl_render_string") == 0) return case_kc_tpl_render_string();
+    if (strcmp(argv[1], "kc_tpl_render") == 0) return case_kc_tpl_render();
+    if (strcmp(argv[1], "kc_tpl_error") == 0) return case_kc_tpl_error();
     if (strcmp(argv[1], "kc_tpl_free") == 0) return case_kc_tpl_free();
-    if (strcmp(argv[1], "kc_tpl_get_error") == 0) return case_kc_tpl_get_error();
-    fprintf(stderr, "unknown case: %s\n", argv[1]);
+    if (strcmp(argv[1], "kc_tpl_close") == 0) return case_kc_tpl_close();
+    if (strcmp(argv[1], "kc_tpl_version") == 0) return case_kc_tpl_version();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "kc_tpl_cli") == 0) return case_kc_tpl_cli();
+#endif
+    fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
