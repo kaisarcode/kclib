@@ -784,12 +784,20 @@ static int case_kc_nets_version(void) {
  */
 static int case_kc_nets_cli(void) {
     const char *name = "kc_nets_cli";
-    const char *detail = "covers help, version, missing target, and invalid option";
+    const char *detail = "covers help, version, errors, TCP, UDP, and URL-shaped targets";
+    test_server_t server;
+    unsigned short tcp_port;
+    unsigned short udp_port;
+    unsigned short url_port;
     char command[2048];
     int fail;
     int rc;
 
     fail = 0;
+    tcp_port = (unsigned short)(port_base() + 10U);
+    udp_port = (unsigned short)(port_base() + 11U);
+    url_port = (unsigned short)(port_base() + 12U);
+
     if (NETS_TEST_CLI[0] == '\0') {
         case_result(1, name, detail);
         return 1;
@@ -827,6 +835,65 @@ static int case_kc_nets_cli(void) {
     rc = system(command);
     fail += expect_true("CLI missing target fails", rc != 0);
 
+    if (socket_start() != 0) {
+        case_result(1, name, detail);
+        return 1;
+    }
+
+    if (server_start(&server, KC_NETS_TCP, tcp_port, 0) != 0) {
+        fail++;
+    } else {
+#ifdef _WIN32
+        snprintf(command, sizeof(command),
+            "echo cli|\"%s\" 127.0.0.1:%u > NUL 2>&1",
+            NETS_TEST_CLI, (unsigned int)tcp_port);
+#else
+        snprintf(command, sizeof(command),
+            "printf cli | \"%s\" 127.0.0.1:%u > /dev/null 2>&1",
+            NETS_TEST_CLI, (unsigned int)tcp_port);
+#endif
+        rc = system(command);
+        fail += expect_true("CLI TCP succeeds", rc == 0);
+        fail += expect_int("CLI TCP server", 0, server_join(&server));
+        fail += expect_true("CLI TCP sends stdin", server.received_size > 0U);
+    }
+
+    if (server_start(&server, KC_NETS_UDP, udp_port, 0) != 0) {
+        fail++;
+    } else {
+#ifdef _WIN32
+        snprintf(command, sizeof(command),
+            "echo cli|\"%s\" 127.0.0.1:%u --udp > NUL 2>&1",
+            NETS_TEST_CLI, (unsigned int)udp_port);
+#else
+        snprintf(command, sizeof(command),
+            "printf cli | \"%s\" 127.0.0.1:%u --udp > /dev/null 2>&1",
+            NETS_TEST_CLI, (unsigned int)udp_port);
+#endif
+        rc = system(command);
+        fail += expect_true("CLI UDP succeeds", rc == 0);
+        fail += expect_int("CLI UDP server", 0, server_join(&server));
+        fail += expect_true("CLI UDP sends stdin", server.received_size > 0U);
+    }
+
+    if (server_start(&server, KC_NETS_TCP, url_port, 0) != 0) {
+        fail++;
+    } else {
+#ifdef _WIN32
+        snprintf(command, sizeof(command),
+            "echo cli|\"%s\" tcp://127.0.0.1:%u > NUL 2>&1",
+            NETS_TEST_CLI, (unsigned int)url_port);
+#else
+        snprintf(command, sizeof(command),
+            "printf cli | \"%s\" tcp://127.0.0.1:%u > /dev/null 2>&1",
+            NETS_TEST_CLI, (unsigned int)url_port);
+#endif
+        rc = system(command);
+        fail += expect_true("CLI URL-shaped TCP succeeds", rc == 0);
+        fail += expect_int("CLI URL-shaped server", 0, server_join(&server));
+    }
+
+    socket_stop();
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
