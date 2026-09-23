@@ -211,7 +211,7 @@ static int case_kc_wch_open(void) {
  */
 static int case_kc_wch_on(void) {
     char directory[512];
-    char event_path[512];
+    char event_path[520];
     kc_wch_t *w = NULL;
     event_state_t state;
     int fail = 0;
