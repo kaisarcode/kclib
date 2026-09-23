@@ -15,6 +15,10 @@
 
 #define KC_MMAP_BUF_SIZE 8192
 
+/**
+ * Prints CLI usage information.
+ * @return None.
+ */
 static void print_help(void) {
     printf("Usage:\n");
     printf("  mmap <path> -get|--get\n");
@@ -27,10 +31,20 @@ static void print_help(void) {
     printf("  value  Optional direct value for set; stdin is used when omitted\n");
 }
 
+/**
+ * Prints the build version.
+ * @return None.
+ */
 static void print_version(void) {
     printf("mmap build %llu\n", (unsigned long long)kc_mmap_version());
 }
 
+/**
+ * Reads all stdin bytes into an owned buffer.
+ * @param out_data Output pointer for allocated bytes.
+ * @param out_size Output byte count.
+ * @return 0 on success, 1 on failure.
+ */
 static int read_stdin(void **out_data, size_t *out_size) {
     unsigned char chunk[KC_MMAP_BUF_SIZE];
     unsigned char *data = NULL;
@@ -84,6 +98,12 @@ static int read_stdin(void **out_data, size_t *out_size) {
     return 0;
 }
 
+/**
+ * Sets and saves one value through the public API.
+ * @param path Backing file path.
+ * @param value Optional direct string value; NULL reads stdin.
+ * @return 0 on success, 1 on failure.
+ */
 static int command_set(const char *path, const char *value) {
     kc_mmap_t *map = NULL;
     void *stdin_data = NULL;
@@ -126,6 +146,11 @@ static int command_set(const char *path, const char *value) {
     return 0;
 }
 
+/**
+ * Writes one saved value to stdout through the public API.
+ * @param path Backing file path.
+ * @return 0 on success, 1 on failure.
+ */
 static int command_get(const char *path) {
     kc_mmap_t *map = NULL;
     const void *data = NULL;
@@ -159,6 +184,11 @@ static int command_get(const char *path) {
     return 0;
 }
 
+/**
+ * Deletes one value through the public API.
+ * @param path Backing file path.
+ * @return 0 on success, 1 on failure.
+ */
 static int command_del(const char *path) {
     kc_mmap_t *map = NULL;
     int rc;
@@ -179,6 +209,12 @@ static int command_del(const char *path) {
     return 0;
 }
 
+/**
+ * Runs the mmap command line interface.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process exit status.
+ */
 int main(int argc, char **argv) {
     const char *path;
     const char *mode;
