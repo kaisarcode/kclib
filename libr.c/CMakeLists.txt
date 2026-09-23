@@ -35,7 +35,7 @@ set_source_files_properties(src/liblibr.c PROPERTIES
     COMPILE_DEFINITIONS KC_LIBR_BUILD_VERSION=${LIBR_BUILD_VERSION}
 )
 
-# Core library sources (no kcrun, no runner)
+# Core library sources
 set(LIBR_CORE_SOURCES
     src/liblibr.c
 )
