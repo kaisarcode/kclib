@@ -1,6 +1,6 @@
 /**
- * nets.h - Network sender.
- * Summary: Public API for sending byte buffers over TCP or UDP.
+ * libnets.h - Asynchronous network transfer.
+ * Summary: Public API for sending byte buffers over TCP, UDP, or optional TLS.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -29,82 +29,79 @@ typedef struct kc_nets kc_nets_t;
 #define KC_NETS_TLS       3
 
 /**
- * Initialize a new nets context.
- * @param out Destination context pointer.
- * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
- */
-int kc_nets_open(kc_nets_t **out);
-
-/**
- * Release a nets context.
- * @param ctx Context pointer.
+ * Receives the terminal result of one network transfer.
+ * Response bytes are borrowed and remain valid only for the callback duration.
+ * @param status   KC_NETS_OK or a negative status code.
+ * @param data     Borrowed response bytes, or NULL when no response is present.
+ * @param size     Response size in bytes.
+ * @param userdata Caller-provided callback data.
  * @return None.
  */
-void kc_nets_close(kc_nets_t *ctx);
-
-/**
- * Request stop for a specific nets context.
- * @param ctx Context handle.
- * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
- */
-int kc_nets_stop(kc_nets_t *ctx);
-
-/**
- * Check whether a stop has been requested on the context.
- * @param ctx Context pointer.
- * @return 1 if stop was requested, 0 otherwise.
- */
-int kc_nets_stop_requested(const kc_nets_t *ctx);
-
-/**
- * Sends bytes to one network address and returns the response.
- * @param ctx      Context handle.
- * @param host     Destination host or IP address.
- * @param port     Destination port.
- * @param proto    KC_NETS_TCP, KC_NETS_UDP, or KC_NETS_TLS.
- * @param data      Borrowed input for the call; caller retains ownership.
- * @param data_size Input buffer size in bytes.
- * @param out_data  Receives owned binary response bytes.
- *                  Release the bytes with kc_nets_free().
- * @param out_size  Receives the authoritative response size in bytes.
- * @return KC_NETS_OK on success, or a negative error code.
- */
-int kc_nets_send(
-kc_nets_t *ctx,
-const char *host,
-unsigned short port,
-int proto,
-const void *data,
-size_t data_size,
-void **out_data,
-size_t *out_size
+typedef void (*kc_nets_handler_t)(
+    int status,
+    const void *data,
+    size_t size,
+    void *userdata
 );
 
 /**
- * Release response memory returned by nets. Accepts NULL.
- * @param ptr Response allocation to release, or NULL.
- * @return None.
+ * Start one asynchronous network transfer.
+ * The library copies host and data before returning. A successful launch causes
+ * exactly one terminal callback.
+ * @param out       Receives the transfer handle.
+ * @param host      Destination host or IP address.
+ * @param port      Destination port.
+ * @param protocol  KC_NETS_TCP, KC_NETS_UDP, or KC_NETS_TLS.
+ * @param data      Input bytes copied by the library.
+ * @param data_size Input size in bytes.
+ * @param handler   Terminal result callback.
+ * @param userdata  Caller data passed unchanged to handler.
+ * @return KC_NETS_OK when launched, or a negative status code.
  */
-void kc_nets_free(void *ptr);
+int kc_nets_send(
+    kc_nets_t **out,
+    const char *host,
+    unsigned short port,
+    int protocol,
+    const void *data,
+    size_t data_size,
+    kc_nets_handler_t handler,
+    void *userdata
+);
 
 /**
- * Returns a static message for a nets status code.
+ * Request graceful interruption of one transfer.
+ * @param nets Transfer handle.
+ * @return KC_NETS_OK on success, KC_NETS_EINVAL for NULL.
+ */
+int kc_nets_stop(kc_nets_t *nets);
+
+/**
+ * Stop if necessary and release one transfer.
+ * Safe to call from the transfer callback.
+ * @param nets Transfer handle, or NULL.
+ * @return None.
+ */
+void kc_nets_close(kc_nets_t *nets);
+
+/**
+ * Return a static message for a public status code.
  * @param code Status code.
  * @return Static message.
  */
 const char *kc_nets_strerror(int code);
 
 /**
- * Returns the build version generated at compile time.
+ * Check whether TLS support is compiled in.
+ * @return 1 when TLS is available, otherwise 0.
+ */
+int kc_nets_tls_available(void);
+
+/**
+ * Return the build version generated at compile time.
  * @return Unix timestamp for the current build.
  */
 uint64_t kc_nets_version(void);
-
-/**
- * Check if TLS support is compiled in.
- * @return 1 if TLS is available, 0 otherwise.
- */
-int kc_nets_tls_available(void);
 
 #ifdef __cplusplus
 }
