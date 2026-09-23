@@ -431,23 +431,23 @@ static int kc_nets_transfer_address(
     unsigned char **out_data,
     size_t *out_size
 ) {
-    kc_nets_socket_t socket;
+    kc_nets_socket_t sock;
     int type;
     int rc;
 
     if (kc_nets_is_stopped(nets)) return KC_NETS_ESTOP;
 
     type = nets->protocol == KC_NETS_UDP ? SOCK_DGRAM : SOCK_STREAM;
-    socket = socket(address->ai_family, type, address->ai_protocol);
-    if (socket == KC_NETS_BAD_SOCKET) return KC_NETS_ENET;
-    kc_nets_set_socket(nets, socket);
+    sock = socket(address->ai_family, type, address->ai_protocol);
+    if (sock == KC_NETS_BAD_SOCKET) return KC_NETS_ENET;
+    kc_nets_set_socket(nets, sock);
 
     if (kc_nets_is_stopped(nets)) {
         rc = KC_NETS_ESTOP;
     } else if (nets->protocol == KC_NETS_UDP) {
 #ifdef _WIN32
         int count = sendto(
-            socket,
+            sock,
             (const char *)nets->data,
             (int)nets->data_size,
             0,
@@ -456,7 +456,7 @@ static int kc_nets_transfer_address(
         );
 #else
         ssize_t count = sendto(
-            socket,
+            sock,
             nets->data,
             nets->data_size,
             0,
@@ -469,29 +469,29 @@ static int kc_nets_transfer_address(
         } else {
             rc = KC_NETS_OK;
         }
-    } else if (connect(socket, address->ai_addr, address->ai_addrlen) != 0) {
+    } else if (connect(sock, address->ai_addr, address->ai_addrlen) != 0) {
         rc = kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
     } else {
 #ifdef KC_NETS_OPENSSL
         if (nets->protocol == KC_NETS_TLS) {
-            rc = kc_nets_tls_transfer(nets, socket, out_data, out_size);
+            rc = kc_nets_tls_transfer(nets, sock, out_data, out_size);
         } else
 #endif
         {
-            rc = kc_nets_send_all(nets, socket);
+            rc = kc_nets_send_all(nets, sock);
             if (rc == KC_NETS_OK) {
 #ifdef _WIN32
-                shutdown(socket, SD_SEND);
+                shutdown(sock, SD_SEND);
 #else
-                shutdown(socket, SHUT_WR);
+                shutdown(sock, SHUT_WR);
 #endif
-                rc = kc_nets_recv_plain(nets, socket, out_data, out_size);
+                rc = kc_nets_recv_plain(nets, sock, out_data, out_size);
             }
         }
     }
 
-    kc_nets_clear_socket(nets, socket);
-    kc_nets_socket_close(socket);
+    kc_nets_clear_socket(nets, sock);
+    kc_nets_socket_close(sock);
     return rc;
 }
 
