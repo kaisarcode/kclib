@@ -22,6 +22,10 @@
 #endif
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <unistd.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,12 +92,11 @@ static int expect_string(const char *name, const char *expected, const char *act
     return 0;
 }
 
-#ifndef __EMSCRIPTEN__
 /**
  * Verifies one integer test expectation.
  * @param name Expectation description.
  * @param expected Expected integer value.
- * @param actual Actual integer value.
+ * @param actual Actual value.
  * @return 0 on success, 1 on failure.
  */
 static int expect_int(const char *name, int expected, int actual) {
@@ -104,6 +107,7 @@ static int expect_int(const char *name, int expected, int actual) {
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 /**
  * Appends one argument to the Windows CLI command line.
