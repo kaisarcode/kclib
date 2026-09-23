@@ -59,6 +59,9 @@ OSXCROSS_IOSSIM_AARCH64_CC := $(OSXCROSS_ROOT)/bin/iossim64-clang
 OSXCROSS_IOSSIM_X86_64_CC := $(OSXCROSS_ROOT)/bin/iossimx64-clang
 WINE ?= wine
 WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
+WASM_EMCMAKE ?= emcmake
+WASM_EMCC    ?= emcc
+WASM_NODE    ?= node
 
 BUILD_DIR := .build
 BIN_DIR   := bin
@@ -153,7 +156,7 @@ endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
-.PHONY: all test wine clean \
+.PHONY: all test wine wasm clean \
 	x86_64/linux x86_64/windows x86_64/macos \
 	x86_64/iossim \
 	i686/linux i686/windows \
@@ -164,7 +167,8 @@ endif
 	powerpc64le/linux \
 	mips/linux mipsel/linux mips64el/linux \
 	s390x/linux \
-	loongarch64/linux
+	loongarch64/linux \
+	wasm32/wasm
 
 all: \
 	x86_64/linux x86_64/windows x86_64/macos \
@@ -177,7 +181,8 @@ all: \
 	powerpc64le/linux \
 	mips/linux mipsel/linux mips64el/linux \
 	s390x/linux \
-	loongarch64/linux
+	loongarch64/linux \
+	wasm32/wasm
 
 ## Linux
 
@@ -396,6 +401,30 @@ aarch64/android:
 armv7/android:
 	$(call android_target,armv7,armeabi-v7a)
 
+## WebAssembly
+
+define wasm_target
+	@mkdir -p $(BIN_DIR)/wasm32/wasm
+	@if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1 || ! command -v $(WASM_EMCC) >/dev/null 2>&1; then \
+		echo "Missing Emscripten SDK toolchain: $(WASM_EMCMAKE)/$(WASM_EMCC)" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -f $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt ]; then \
+		$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DKC_WCH_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DKC_WCH_BUILD_VERSION=$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/wasm32-wasm/out/wch.js $(BIN_DIR)/wasm32/wasm/wch.js
+	@cp $(BUILD_DIR)/wasm32-wasm/out/wch.wasm $(BIN_DIR)/wasm32/wasm/wch.wasm
+	@echo "OK wasm32/wasm"
+endef
+
+wasm32/wasm:
+	$(call wasm_target)
+
 ## Utility
 
 test:
@@ -449,6 +478,13 @@ test:
 wine:
 	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
 		echo "Use 'make test wine' to run tests through Wine." >&2; \
+		exit 1; \
+	fi
+	@:
+
+wasm:
+	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
+		echo "Use 'make test wasm' to run tests through Emscripten and Node.js." >&2; \
 		exit 1; \
 	fi
 	@:
