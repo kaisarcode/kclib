@@ -1,6 +1,6 @@
 /**
- * wch.h - File and directory change notification.
- * Summary: Portable asynchronous file watcher emitting add, upd, and del events.
+ * wch.h - Resident File Watcher
+ * Summary: Public API for named resident filesystem watchers.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -10,6 +10,7 @@
 #ifndef KC_WCH_H
 #define KC_WCH_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -18,63 +19,191 @@ extern "C" {
 
 typedef struct kc_wch kc_wch_t;
 
-#define KC_WCH_OK      0
-#define KC_WCH_ERROR  -1
-
-#define KC_WCH_ADD     0
-#define KC_WCH_UPD     1
-#define KC_WCH_DEL     2
-
 typedef struct {
+    const char *path;
+    const char *cmd;
+    const char *dir;
     int recursive;
 } kc_wch_options_t;
 
 typedef struct {
-    int type;
+    const char *name;
     const char *path;
-} kc_wch_event_t;
+    const char *cmd;
+    int recursive;
+    int running;
+} kc_wch_entry_t;
 
 typedef void (*kc_wch_handler_t)(
-    const kc_wch_event_t *event,
+    const char *path,
     void *userdata
 );
 
+#define KC_WCH_OK          0
+#define KC_WCH_NOT_FOUND   1
+#define KC_WCH_ERROR      -1
+
 /**
- * Opens one watcher instance.
- * @param out Output pointer for the new watcher.
- * @param path File or directory to watch.
- * @param options Optional watcher options; NULL uses defaults.
+ * Create or replace one named resident watcher.
+ * @param name Watcher name.
+ * @param options Creation options.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
-int kc_wch_open(
-    kc_wch_t **out,
-    const char *path,
+int kc_wch_create(
+    const char *name,
     const kc_wch_options_t *options
 );
 
 /**
- * Registers the event handler and starts asynchronous observation.
- * @param w Watcher instance.
- * @param handler Event handler invoked from the watcher worker thread.
- * @param userdata Opaque caller value passed to the handler.
+ * Open one local handle bound to a watcher name.
+ * @param out Output watcher handle.
+ * @param name Watcher name.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_open(
+    kc_wch_t **out,
+    const char *name
+);
+
+/**
+ * List registered watchers.
+ * Returned entries share one allocation released with kc_wch_free().
+ * @param dir Runtime directory, or NULL for the default.
+ * @param out_entries Output entry array.
+ * @param out_count Output entry count.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_list(
+    const char *dir,
+    kc_wch_entry_t **out_entries,
+    size_t *out_count
+);
+
+/**
+ * Delete one named resident watcher.
+ * @param name Watcher name.
+ * @param dir Runtime directory, or NULL for the default.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_delete(
+    const char *name,
+    const char *dir
+);
+
+/**
+ * Replace the watched path.
+ * @param w Watcher handle.
+ * @param path File or directory path.
+ * @return KC_WCH_OK, KC_WCH_NOT_FOUND, or KC_WCH_ERROR.
+ */
+int kc_wch_set_path(
+    kc_wch_t *w,
+    const char *path
+);
+
+/**
+ * Return the configured watched path.
+ * @param w Watcher handle.
+ * @return Borrowed path string, or NULL when unavailable.
+ */
+const char *kc_wch_get_path(
+    const kc_wch_t *w
+);
+
+/**
+ * Replace the persistent event command.
+ * @param w Watcher handle.
+ * @param cmd Event command.
+ * @return KC_WCH_OK, KC_WCH_NOT_FOUND, or KC_WCH_ERROR.
+ */
+int kc_wch_set_cmd(
+    kc_wch_t *w,
+    const char *cmd
+);
+
+/**
+ * Return the configured event command.
+ * @param w Watcher handle.
+ * @return Borrowed command string, or NULL when unavailable.
+ */
+const char *kc_wch_get_cmd(
+    const kc_wch_t *w
+);
+
+/**
+ * Change the runtime directory targeted by a watcher handle.
+ * @param w Watcher handle.
+ * @param dir Runtime directory, or NULL for the default.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_set_dir(
+    kc_wch_t *w,
+    const char *dir
+);
+
+/**
+ * Return the runtime directory targeted by a watcher handle.
+ * @param w Watcher handle.
+ * @return Borrowed runtime directory, or NULL on invalid input.
+ */
+const char *kc_wch_get_dir(
+    const kc_wch_t *w
+);
+
+/**
+ * Replace recursive observation mode.
+ * @param w Watcher handle.
+ * @param recursive Nonzero enables recursive observation.
+ * @return KC_WCH_OK, KC_WCH_NOT_FOUND, or KC_WCH_ERROR.
+ */
+int kc_wch_set_recursive(
+    kc_wch_t *w,
+    int recursive
+);
+
+/**
+ * Return recursive observation mode.
+ * @param w Watcher handle.
+ * @return Nonzero when recursive, otherwise zero.
+ */
+int kc_wch_get_recursive(
+    const kc_wch_t *w
+);
+
+/**
+ * Register or clear one temporary event subscription.
+ * Supported events are add, upd, and del.
+ * @param w Watcher handle.
+ * @param event Event name.
+ * @param handler Event handler, or NULL to clear it.
+ * @param userdata Opaque handler data.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
 int kc_wch_on(
     kc_wch_t *w,
+    const char *event,
     kc_wch_handler_t handler,
     void *userdata
 );
 
 /**
- * Closes one watcher and releases its resources. NULL safe.
- * @param w Watcher instance.
+ * Release memory returned by wch.
+ * @param ptr Owned allocation, or NULL.
+ * @return None.
+ */
+void kc_wch_free(void *ptr);
+
+/**
+ * Close and release one local watcher handle.
+ * This does not delete the resident watcher.
+ * @param w Watcher handle, or NULL.
  * @return None.
  */
 void kc_wch_close(kc_wch_t *w);
 
 /**
- * Returns the generated build version.
- * @return Unix timestamp for the current build.
+ * Return the generated build version.
+ * @return Build version value.
  */
 uint64_t kc_wch_version(void);
 
