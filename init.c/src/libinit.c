@@ -52,7 +52,7 @@ typedef enum {
     KC_INIT_BACKEND_SYSV
 } kc_init_backend_t;
 
-typedef void (*kc_init_row_handler_t_internal)(
+typedef void (*kc_init_row_handler_t)(
     const char *key,
     const char *user,
     const char *cmd,
