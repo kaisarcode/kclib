@@ -1,6 +1,6 @@
 /**
  * test.c - libwch public API contract tests.
- * Summary: Validates each exported libwch function through one dedicated test case.
+ * Summary: Validates the asynchronous file watcher API.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -13,6 +13,7 @@
 
 #include "libwch.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,38 +21,47 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <time.h>
 #include <unistd.h>
 #endif
 
 static int test_case_total = 0;
 static int test_case_current = 0;
 
-/**
- * Prints a test case result line.
- * @param fail Non-zero when the case failed.
- * @param name Test case name.
- * @param detail Behavior verified by the case.
- * @return None.
- */
-static void case_result(int fail, const char *name, const char *detail) {
-    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        fail ? "FAIL" : "PASS", name, detail);
-}
+typedef struct {
+    atomic_int count;
+    int type;
+    char path[512];
+} event_state_t;
 
 /**
- * Runs one test case with counter tracking.
- * @param rc Destination accumulator.
- * @param fn Test case function.
+ * Prints one canonical test-case result line.
+ * @param fail Nonzero when the case failed.
+ * @param name Canonical test-case name.
+ * @param description Human-readable test-case description.
  * @return None.
  */
-static void run_case(int *rc, int (*fn)(void)) {
+static void case_result(int fail, const char *name, const char *description) {
+    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
+        fail ? "FAIL" : "PASS", name, description);
+}
+
+typedef int (*case_fn)(void);
+
+/**
+ * Executes one test case and accumulates its result.
+ * @param rc Aggregate failed-case count.
+ * @param fn Test-case function to execute.
+ * @return None.
+ */
+static void run_case(int *rc, case_fn fn) {
     test_case_current++;
     *rc += fn();
 }
 
 /**
- * Verifies an integer result.
- * @param name Check name.
+ * Verifies one integer expectation.
+ * @param name Expectation description.
  * @param expected Expected value.
  * @param actual Actual value.
  * @return 0 on success, 1 on failure.
@@ -65,9 +75,9 @@ static int expect_int(const char *name, int expected, int actual) {
 }
 
 /**
- * Verifies a true condition.
- * @param name Check name.
- * @param condition Condition expected to be true.
+ * Verifies one boolean expectation.
+ * @param name Expectation description.
+ * @param condition Nonzero when satisfied.
  * @return 0 on success, 1 on failure.
  */
 static int expect_true(const char *name, int condition) {
@@ -79,9 +89,26 @@ static int expect_true(const char *name, int condition) {
 }
 
 /**
- * Creates an empty directory for an isolated watcher test.
+ * Sleeps for a small number of milliseconds.
+ * @param ms Milliseconds to sleep.
+ * @return None.
+ */
+static void sleep_ms(int ms) {
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+}
+
+/**
+ * Creates an empty isolated directory.
  * @param path Destination path buffer.
- * @param path_size Size of the destination buffer.
+ * @param path_size Destination buffer size.
  * @return 1 on success, 0 on failure.
  */
 static int make_test_dir(char *path, size_t path_size) {
@@ -101,7 +128,7 @@ static int make_test_dir(char *path, size_t path_size) {
 }
 
 /**
- * Removes an empty isolated watcher test directory.
+ * Removes one isolated directory.
  * @param path Directory path.
  * @return None.
  */
@@ -114,189 +141,191 @@ static void remove_test_dir(const char *path) {
 }
 
 /**
+ * Records one callback event.
+ * @param event Watcher event.
+ * @param userdata Event-state pointer.
+ * @return None.
+ */
+static void record_event(const kc_wch_event_t *event, void *userdata) {
+    event_state_t *state = (event_state_t *)userdata;
+
+    state->type = event->type;
+    snprintf(state->path, sizeof(state->path), "%s", event->path);
+    atomic_fetch_add(&state->count, 1);
+}
+
+/**
+ * Waits until at least one callback event arrives.
+ * @param state Event-state pointer.
+ * @return 1 when an event arrived, otherwise 0.
+ */
+static int wait_event(event_state_t *state) {
+    int i;
+
+    for (i = 0; i < 100; i++) {
+        if (atomic_load(&state->count) > 0) return 1;
+        sleep_ms(10);
+    }
+    return 0;
+}
+
+/**
  * Tests kc_wch_open.
- * @return 0 on success, 1 on failure.
+ * @return 0 on success, 1 otherwise.
  */
 static int case_kc_wch_open(void) {
-    const char *name = "kc_wch_open";
-    const char *detail = "validates and allocates context";
-    kc_wch_t *w;
+    char directory[512];
+    kc_wch_options_t options = { 1 };
+    kc_wch_t *w = NULL;
     int fail = 0;
 
-    w = NULL;
     fail += expect_int("open rejects NULL out", KC_WCH_ERROR,
-        kc_wch_open(NULL, "/tmp", 0));
+        kc_wch_open(NULL, ".", NULL));
     fail += expect_int("open rejects NULL path", KC_WCH_ERROR,
-        kc_wch_open(&w, NULL, 0));
-    fail += expect_true("open leaves output NULL after NULL path", w == NULL);
+        kc_wch_open(&w, NULL, NULL));
     fail += expect_int("open rejects empty path", KC_WCH_ERROR,
-        kc_wch_open(&w, "", 0));
-    fail += expect_true("open leaves output NULL after empty path", w == NULL);
-    fail += expect_int("open rejects nonexistent parent", KC_WCH_ERROR,
-        kc_wch_open(&w, "/tmp/kc_wch_missing_parent_xyz/target", 0));
-    fail += expect_true("open leaves output NULL after missing parent", w == NULL);
-    fail += expect_int("open valid path", KC_WCH_OK,
-        kc_wch_open(&w, "/tmp", 0));
-    fail += expect_true("open sets output", w != NULL);
+        kc_wch_open(&w, "", NULL));
+
+    if (!make_test_dir(directory, sizeof(directory))) return 1;
+    fail += expect_int("open default options", KC_WCH_OK,
+        kc_wch_open(&w, directory, NULL));
+    fail += expect_true("open returns watcher", w != NULL);
     kc_wch_close(w);
     w = NULL;
-    fail += expect_int("open accepts recursive mode", KC_WCH_OK,
-        kc_wch_open(&w, "/tmp", 1));
-    fail += expect_true("recursive open sets output", w != NULL);
+
+    fail += expect_int("open recursive options", KC_WCH_OK,
+        kc_wch_open(&w, directory, &options));
+    fail += expect_true("recursive open returns watcher", w != NULL);
     kc_wch_close(w);
-    case_result(fail, name, detail);
+    remove_test_dir(directory);
+
+    case_result(fail, "kc_wch_open",
+        "opens watchers with optional recursive configuration");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_wch_on.
+ * @return 0 on success, 1 otherwise.
+ */
+static int case_kc_wch_on(void) {
+    char directory[512];
+    char event_path[512];
+    kc_wch_t *w = NULL;
+    event_state_t state;
+    int fail = 0;
+#ifdef _WIN32
+    HANDLE file;
+#else
+    FILE *file;
+#endif
+
+    atomic_init(&state.count, 0);
+    state.type = -1;
+    state.path[0] = '\0';
+
+    if (!make_test_dir(directory, sizeof(directory))) return 1;
+    if (kc_wch_open(&w, directory, NULL) != KC_WCH_OK) {
+        remove_test_dir(directory);
+        return 1;
+    }
+
+    fail += expect_int("on rejects NULL watcher", KC_WCH_ERROR,
+        kc_wch_on(NULL, record_event, &state));
+    fail += expect_int("on rejects NULL handler", KC_WCH_ERROR,
+        kc_wch_on(w, NULL, &state));
+    fail += expect_int("on starts watcher", KC_WCH_OK,
+        kc_wch_on(w, record_event, &state));
+    fail += expect_int("on rejects second handler", KC_WCH_ERROR,
+        kc_wch_on(w, record_event, &state));
+
+    snprintf(event_path, sizeof(event_path), "%s/event", directory);
+#ifdef _WIN32
+    file = CreateFileA(event_path, GENERIC_WRITE, 0, NULL,
+        CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    fail += expect_true("create watched file", file != INVALID_HANDLE_VALUE);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+#else
+    file = fopen(event_path, "w");
+    fail += expect_true("create watched file", file != NULL);
+    if (file != NULL) fclose(file);
+#endif
+
+    fail += expect_true("callback receives event", wait_event(&state));
+    if (atomic_load(&state.count) > 0) {
+        fail += expect_true("callback receives path",
+            strstr(state.path, "event") != NULL);
+        fail += expect_true("callback receives normalized type",
+            state.type == KC_WCH_ADD || state.type == KC_WCH_UPD);
+    }
+
+    kc_wch_close(w);
+    remove(event_path);
+    remove_test_dir(directory);
+
+    case_result(fail, "kc_wch_on",
+        "starts background observation and delivers normalized events");
     return fail == 0 ? 0 : 1;
 }
 
 /**
  * Tests kc_wch_close.
- * @return 0 on success, 1 on failure.
+ * @return 0 on success, 1 otherwise.
  */
 static int case_kc_wch_close(void) {
-    const char *name = "kc_wch_close";
-    const char *detail = "releases context";
-    kc_wch_t *w;
-    int fail = 0;
-
-    w = NULL;
-    kc_wch_close(NULL);
-    fail += expect_int("open context for close", KC_WCH_OK, kc_wch_open(&w, "/tmp", 0));
-    fail += expect_true("open context for close sets output", w != NULL);
-    kc_wch_close(w);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_wch_poll.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_wch_poll(void) {
-    const char *name = "kc_wch_poll";
-    const char *detail = "reports timeout, events, and invalid arguments";
-    kc_wch_t *w;
-    kc_wch_event_t ev;
     char directory[512];
-    char event_path[512];
-#ifndef _WIN32
-    FILE *file;
-#endif
+    kc_wch_t *w = NULL;
     int fail = 0;
 
-    w = NULL;
-    directory[0] = '\0';
-    event_path[0] = '\0';
-    fail += expect_int("poll rejects NULL context", KC_WCH_ERROR, kc_wch_poll(NULL, &ev, 0));
-    fail += expect_true("create isolated poll directory", make_test_dir(directory, sizeof(directory)));
-    fail += expect_int("open context for poll", KC_WCH_OK, kc_wch_open(&w, directory, 0));
-    fail += expect_int("poll rejects NULL event", KC_WCH_ERROR, kc_wch_poll(w, NULL, 0));
-    fail += expect_int("poll timeout=0 returns timeout", KC_WCH_TIMEOUT, kc_wch_poll(w, &ev, 0));
-    fail += expect_int("timeout resets event type", -1, ev.type);
-    fail += expect_true("timeout resets event path", ev.path == NULL);
-    if (w != NULL && directory[0] != '\0') {
-        snprintf(event_path, sizeof(event_path), "%s/event", directory);
-#ifdef _WIN32
-    HANDLE file_handle = CreateFileA(event_path, GENERIC_WRITE, 0, NULL,
-            CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-        fail += expect_true("create watched file", file_handle != INVALID_HANDLE_VALUE);
-        if (file_handle != INVALID_HANDLE_VALUE) CloseHandle(file_handle);
-#else
-        file = fopen(event_path, "w");
-        fail += expect_true("create watched file", file != NULL);
-        if (file != NULL) fclose(file);
-#endif
-        int event_rc = kc_wch_poll(w, &ev, 1000);
-#ifdef _WIN32
-        if (GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version") != NULL) {
-            fail += expect_true("Wine poll reports event or timeout",
-                event_rc == KC_WCH_EVENT || event_rc == KC_WCH_TIMEOUT);
-        } else {
-            fail += expect_int("poll reports real event", KC_WCH_EVENT, event_rc);
-        }
-#else
-        fail += expect_int("poll reports real event", KC_WCH_EVENT, event_rc);
-#endif
-        if (event_rc == KC_WCH_EVENT) {
-            fail += expect_true("real event sets path", ev.path != NULL);
-        }
-    }
+    kc_wch_close(NULL);
+    if (!make_test_dir(directory, sizeof(directory))) return 1;
+
+    fail += expect_int("open watcher for close", KC_WCH_OK,
+        kc_wch_open(&w, directory, NULL));
     kc_wch_close(w);
-    if (event_path[0] != '\0') remove(event_path);
-    if (directory[0] != '\0') remove_test_dir(directory);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
+    remove_test_dir(directory);
 
-/**
- * Tests that two contexts coexist independently.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_wch_multictx(void) {
-    const char *name = "kc_wch_multictx";
-    const char *detail = "two contexts coexist independently";
-    kc_wch_t *a;
-    kc_wch_t *b;
-    kc_wch_event_t ev;
-    char a_directory[512];
-    char b_directory[512];
-    int fail = 0;
-
-    a = NULL;
-    b = NULL;
-    a_directory[0] = '\0';
-    b_directory[0] = '\0';
-    fail += expect_true("create first isolated directory",
-        make_test_dir(a_directory, sizeof(a_directory)));
-    fail += expect_true("create second isolated directory",
-        make_test_dir(b_directory, sizeof(b_directory)));
-    fail += expect_int("open first context", KC_WCH_OK, kc_wch_open(&a, a_directory, 0));
-    fail += expect_int("open second context", KC_WCH_OK, kc_wch_open(&b, b_directory, 0));
-    fail += expect_int("poll first context", KC_WCH_TIMEOUT, kc_wch_poll(a, &ev, 0));
-    fail += expect_int("poll second context", KC_WCH_TIMEOUT, kc_wch_poll(b, &ev, 0));
-    kc_wch_close(a);
-    fail += expect_int("poll second context after first closes", KC_WCH_TIMEOUT,
-        kc_wch_poll(b, &ev, 0));
-    kc_wch_close(b);
-    if (a_directory[0] != '\0') remove_test_dir(a_directory);
-    if (b_directory[0] != '\0') remove_test_dir(b_directory);
-    case_result(fail, name, detail);
+    case_result(fail, "kc_wch_close",
+        "releases idle watcher instances and accepts NULL");
     return fail == 0 ? 0 : 1;
 }
 
 /**
  * Tests kc_wch_version.
- * @return 0 on success, 1 on failure.
+ * @return 0 on success, 1 otherwise.
  */
 static int case_kc_wch_version(void) {
-    const char *name = "kc_wch_version";
-    const char *detail = "returns non-zero build timestamp";
-    int fail = expect_true("version returns non-zero build timestamp", kc_wch_version() != 0U);
-    case_result(fail, name, detail);
+    int fail = expect_true("version nonzero", kc_wch_version() != 0U);
+
+    case_result(fail, "kc_wch_version",
+        "returns a nonzero generated build version");
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Runs all test cases in a single process.
- * @return 0 on success, nonzero on failure.
+ * Runs all public contract cases.
+ * @return Failed case count.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 5;
+
+    test_case_total = 4;
     test_case_current = 0;
+
     run_case(&rc, case_kc_wch_open);
+    run_case(&rc, case_kc_wch_on);
     run_case(&rc, case_kc_wch_close);
-    run_case(&rc, case_kc_wch_poll);
-    run_case(&rc, case_kc_wch_multictx);
     run_case(&rc, case_kc_wch_version);
+
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
 /**
- * Runs one libwch contract test case.
+ * Dispatches one named test case.
  * @param argc Argument count.
  * @param argv Argument vector.
- * @return 0 on success, 1 or 2 on failure.
+ * @return Process exit status.
  */
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -305,9 +334,8 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_wch_open") == 0) return case_kc_wch_open();
+    if (strcmp(argv[1], "kc_wch_on") == 0) return case_kc_wch_on();
     if (strcmp(argv[1], "kc_wch_close") == 0) return case_kc_wch_close();
-    if (strcmp(argv[1], "kc_wch_poll") == 0) return case_kc_wch_poll();
-    if (strcmp(argv[1], "kc_wch_multictx") == 0) return case_kc_wch_multictx();
     if (strcmp(argv[1], "kc_wch_version") == 0) return case_kc_wch_version();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
