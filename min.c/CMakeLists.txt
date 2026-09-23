@@ -44,7 +44,7 @@ if(EMSCRIPTEN)
     target_link_options(min_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_min_minify,_kc_min_free,_kc_min_version
+        -sEXPORTED_FUNCTIONS=_kc_min_css,_kc_min_js,_kc_min_html,_kc_min_text,_kc_min_free,_kc_min_version
     )
 endif()
 
