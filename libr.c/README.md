@@ -1,66 +1,44 @@
-# libr.c - Small C Library and CLI Example
+# libr.c - Minimal C Library Example
 
-`libr.c` is an example/template project showing a small C library and CLI structure. The CLI reads requests from stdin and can stay resident, processing multiple requests framed by the EOT delimiter byte (value 4).
+`libr.c` is a minimal example library showing the standard kclib structure with
+one small reusable capability, a CLI consumer, portable tests, and a WebAssembly
+build.
 
 ---
 
 ## CLI
 
-The `libr` CLI accepts an optional verb, optional positional input, and options. Results are framed on stdout with the EOT delimiter byte (value 4).
-
-### Examples
-
-Execute the default operation with a verb:
+Run without arguments to greet the default name:
 
 ```bash
-./bin/x86_64/linux/libr set "example input"
-./bin/x86_64/linux/libr get "example input"
+./bin/x86_64/linux/libr
+Hello World!
 ```
 
-Provide a parameter flag:
+Provide a name:
 
 ```bash
-./bin/x86_64/linux/libr set "example input" -p "value"
+./bin/x86_64/linux/libr -n John
+Hello John!
 ```
 
-Pipe one request through standard input:
+The long form is also available:
 
 ```bash
-echo "example input" | ./bin/x86_64/linux/libr set
-```
-
-Process multiple requests in one resident run using EOT (byte 4):
-
-```bash
-printf 'first\004second\004' | ./bin/x86_64/linux/libr set
+./bin/x86_64/linux/libr --name Jane
+Hello Jane!
 ```
 
 ### Parameters
 
-| Command/Flag | Description |
+| Flag | Description |
 | :--- | :--- |
-| `set` | Example verb for setting data |
-| `get` | Example verb for getting data |
-| `-p`, `--param <val>` | Set parameter value |
+| `-n`, `--name <name>` | Name to greet (default: `World`) |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
-### Operating Modes
-
-When positional input is provided, the CLI writes one EOT delimiter byte to stdout and exits.
-
-When no positional input is provided, the CLI reads requests from standard input:
-
-- reads bytes until the EOT delimiter (byte 4) or EOF;
-- writes the EOT delimiter byte to stdout after each response;
-- flushes stdout after each response;
-- ignores empty framed requests;
-- processes a final non-empty request that ends at EOF;
-- exits when stdin reaches EOF.
-
-When stdout is a terminal, a newline is appended after the EOT delimiter for operator readability. Redirected and piped stdout remains byte-exact.
-
-Unknown or malformed options fail directly with a diagnostic on stderr and exit status 1.
+The CLI is a thin consumer of the reusable public API. It does not implement
+separate greeting logic.
 
 ---
 
@@ -68,21 +46,38 @@ Unknown or malformed options fail directly with a diagnostic on stderr and exit 
 
 ```c
 #include "liblibr.h"
+
+char *greeting = kc_libr_greet("John");
+
+if (greeting != NULL) {
+    /* "Hello John!" */
+    kc_libr_free(greeting);
+}
 ```
 
-The library exposes one function:
+The public API contains three functions:
 
 ```c
+char *kc_libr_greet(const char *name);
+void kc_libr_free(void *ptr);
 uint64_t kc_libr_version(void);
 ```
 
-`kc_libr_version()` returns the build version generated at compile time (a Unix timestamp).
+`kc_libr_greet()` returns an owned NUL-terminated string containing
+`Hello <name>!`. A `NULL` name is invalid and returns `NULL`. Successful
+results must be released with `kc_libr_free()`.
+
+`kc_libr_free()` accepts `NULL`.
+
+`kc_libr_version()` returns the build version generated at compile time as a
+Unix timestamp.
 
 ---
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
@@ -90,44 +85,42 @@ make
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile the test executable, link dynamically against the generated shared library, and run directly.
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
 make
 make test
 ```
 
-To run the common `test` target in Windows-through-Wine mode:
+Native and Wine runs validate two reusable public-API cases plus one grouped CLI
+case. WebAssembly validates only the two reusable cases; native process helpers
+and the CLI case are excluded from the WASM test build at compile time.
+
+To run through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
-
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test`, `make test wine`, or `make test wasm`.
-
 ### WebAssembly (Emscripten)
-
-The `wasm32/wasm` target builds the reusable library as a WebAssembly module using the Emscripten CMake toolchain:
 
 ```bash
 make wasm32/wasm
+make test wasm
 ```
 
 - Artifact: `bin/wasm32/wasm/libr.wasm`
-- Test: `make test wasm`
-- Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (e.g. `source emsdk_env.sh`).
-- The module exports the single public entry point `kc_libr_version`. It represents the reusable library, not the `libr` CLI: `src/libr.c` is not compiled into the module.
-
-`make test wasm` validates the reusable library contract under Emscripten/Node.js. The WASM module does not contain the CLI, so CLI tests are not executed in the WASM test run. It requires `bin/wasm32/wasm/libr.wasm` and fails with instructions if it is missing.
+- Exports: `kc_libr_greet`, `kc_libr_free`, `kc_libr_version`
+- The module contains the reusable library only; the CLI is not compiled into it.
 
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
 
 ```bash
 make all
@@ -165,35 +158,29 @@ make loongarch64/linux
 - `ninja`
 - `gcc` or `clang` (C11 compatible)
 
-### System Libraries
-
-Linux:
-- `libpthread`
-- `libm`
-
-Windows (MSVC or MinGW):
-- No additional system libraries required.
-
-macOS / iOS:
-- No additional system libraries required.
-
 ### Optional Cross-Compilation SDKs
 
-Required only for multiarch builds:
+Required only for the corresponding targets:
 
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
-- Android NDK (version 27.2.12479018) for Android targets.
-- Emscripten SDK for `wasm32/wasm` builds and `make test wasm`.
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- `osxcross` with Apple SDKs for macOS and iOS.
+- Android NDK for Android targets.
+- Emscripten SDK and Node.js for WebAssembly builds and tests.
 
 ---
 
 ## Beta Notice
 
-This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support. You are free to test it, use it, and modify it as you please.
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
 
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Please note that I do not accept pull requests; the goal is to avoid long-term dependency on platforms like GitHub, and I do not maintain fixed infrastructure to guarantee long-term stability for these projects.
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
 
 ---
 
