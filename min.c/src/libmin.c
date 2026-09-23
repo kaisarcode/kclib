@@ -25,7 +25,8 @@
  * @param n Pointer to the current used length.
  * @param cap Pointer to the current buffer capacity.
  * @param c Character to append.
- * @return KC_MIN_INTERNAL_OK on success, or KC_MIN_INTERNAL_ERROR on\n * allocation failure.
+ * @return KC_MIN_INTERNAL_OK on success, or KC_MIN_INTERNAL_ERROR on
+ * allocation failure.
  */
 static int kc_min_push(char **out, size_t *n, size_t *cap, char c) {
     char *grown;
