@@ -14,22 +14,6 @@
 #include "libmmap.h"
 
 #ifndef __EMSCRIPTEN__
-/**
- * Verifies one string test expectation.
- * @param name Expectation description.
- * @param expected Expected string value.
- * @param actual Actual string value.
- * @return 0 on success, 1 on failure.
- */
-static int expect_string(const char *name, const char *expected, const char *actual) {
-    if (!actual || strcmp(expected, actual) != 0) {
-        printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
-            actual ? actual : "NULL");
-        return 1;
-    }
-    return 0;
-}
-
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -45,6 +29,24 @@ static int expect_string(const char *name, const char *expected, const char *act
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef __EMSCRIPTEN__
+/**
+ * Verifies one string test expectation.
+ * @param name Expectation description.
+ * @param expected Expected string value.
+ * @param actual Actual string value.
+ * @return 0 on success, 1 on failure.
+ */
+static int expect_string(const char *name, const char *expected, const char *actual) {
+    if (!actual || strcmp(expected, actual) != 0) {
+        printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
+            actual ? actual : "NULL");
+        return 1;
+    }
+    return 0;
+}
+#endif
 
 #ifndef KC_MMAP_TEST_CLI
 #define KC_MMAP_TEST_CLI ""
