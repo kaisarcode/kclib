@@ -38,7 +38,6 @@ struct kc_tpm {
     int profile_size;
     long total;
     int ngram_size;
-    int built;
 };
 
 /**
@@ -201,43 +200,40 @@ static int kc_tpm_grams(
 }
 
 /**
- * Allocate and initialize a new tpm context.
- * Prepares one inference context.
- * @param out Pointer to receive the context pointer.
+ * Create a reusable text profile.
+ * A successful call always returns a profile ready for kc_tpm_score().
+ * @param out Pointer to receive the profile.
+ * @param map_text Representative text used to build the profile.
+ * @param options Optional configuration. NULL uses ngram_size = 3.
  * @return KC_TPM_OK on success, or KC_TPM_ERROR on failure.
  */
-int kc_tpm_open(kc_tpm_t **out) {
+int kc_tpm_open(
+    kc_tpm_t **out,
+    const char *map_text,
+    const kc_tpm_options_t *options
+) {
     kc_tpm_t *tpm;
-    if (!out) return KC_TPM_ERROR;
-    tpm = (kc_tpm_t *)calloc(1, sizeof(kc_tpm_t));
-    if (!tpm) return KC_TPM_ERROR;
-    *out = tpm;
-    return KC_TPM_OK;
-}
-
-/**
- * Build an n-gram profile from map text.
- * @param tpm Context pointer.
- * @param map_text Text to build profile from.
- * @param ngram_size N-gram size.
- * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
- */
-int kc_tpm_build(kc_tpm_t *tpm, const char *map_text, int ngram_size) {
     char *norm;
     size_t len;
+    int ngram_size;
     int rc;
 
-    if (!tpm || !map_text || ngram_size < 1 || ngram_size > KC_TPM_NG_MAX) {
+    if (!out) return KC_TPM_ERROR;
+    *out = NULL;
+    if (!map_text) return KC_TPM_ERROR;
+
+    ngram_size = options ? options->ngram_size : 3;
+    if (ngram_size < 1 || ngram_size > KC_TPM_NG_MAX) {
         return KC_TPM_ERROR;
     }
 
-    tpm->built = 0;
-    tpm->profile_size = 0;
-    tpm->total = 0;
+    tpm = (kc_tpm_t *)calloc(1, sizeof(kc_tpm_t));
+    if (!tpm) return KC_TPM_ERROR;
     tpm->ngram_size = ngram_size;
 
     norm = kc_tpm_norm(map_text, &len);
     if (!norm) {
+        free(tpm);
         return KC_TPM_ERROR;
     }
 
@@ -245,17 +241,20 @@ int kc_tpm_build(kc_tpm_t *tpm, const char *map_text, int ngram_size) {
         norm, len, ngram_size,
         tpm->profile, &tpm->profile_size, &tpm->total
     );
-
     free(norm);
-    if (rc == KC_TPM_OK) {
-        tpm->built = 1;
+
+    if (rc != KC_TPM_OK) {
+        free(tpm);
+        return KC_TPM_ERROR;
     }
-    return rc;
+
+    *out = tpm;
+    return KC_TPM_OK;
 }
 
 /**
- * Score input text against the built profile.
- * @param tpm Context pointer with a successfully built profile.
+ * Score input text against the profile.
+ * @param tpm Profile pointer returned by kc_tpm_open().
  * @param input_text Text to score.
  * @param out_score Destination for the score in [0.0, 1.0].
  * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
@@ -269,7 +268,7 @@ int kc_tpm_score(const kc_tpm_t *tpm, const char *input_text, double *out_score)
     int i;
     double log_sum;
 
-    if (!tpm || !input_text || !out_score || !tpm->built) {
+    if (!tpm || !input_text || !out_score) {
         return KC_TPM_ERROR;
     }
 
@@ -332,8 +331,8 @@ int kc_tpm_score(const kc_tpm_t *tpm, const char *input_text, double *out_score)
 }
 
 /**
- * Release a tpm context.
- * @param tpm Context pointer.
+ * Release a text profile.
+ * @param tpm Profile pointer, or NULL.
  * @return None.
  */
 void kc_tpm_close(kc_tpm_t *tpm) {
