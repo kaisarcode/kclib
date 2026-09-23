@@ -78,7 +78,7 @@ int kc_nets_stop(kc_nets_t *nets);
 
 /**
  * Stop if necessary and release one transfer.
- * Safe to call from the transfer callback.
+ * Call after the terminal callback has returned.
  * @param nets Transfer handle, or NULL.
  * @return None.
  */
