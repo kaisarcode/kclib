@@ -38,7 +38,7 @@ typedef ssize_t kc_min_ssize_t;
  * Reads all available input from a descriptor into an owned buffer.
  * @param fd Source descriptor.
  * @param out Receives the allocated buffer pointer (owned by caller).
- * @return KC_MIN_OK on success, or KC_MIN_ERROR on failure.
+ * @return 0 on success, or -1 on failure.
  */
 static int kc_min_read_all(int fd, char **out) {
     char *buf = NULL;
@@ -48,7 +48,7 @@ static int kc_min_read_all(int fd, char **out) {
     kc_min_ssize_t n;
 
     if (!out) {
-        return KC_MIN_ERROR;
+        return -1;
     }
 
     *out = NULL;
@@ -58,7 +58,7 @@ static int kc_min_read_all(int fd, char **out) {
 
         if (n < 0) {
             free(buf);
-            return KC_MIN_ERROR;
+            return -1;
         }
 
         if (n == 0) {
@@ -70,7 +70,7 @@ static int kc_min_read_all(int fd, char **out) {
             char *p = (char *)realloc(buf, cap);
             if (!p) {
                 free(buf);
-                return KC_MIN_ERROR;
+                return -1;
             }
             buf = p;
         }
@@ -81,13 +81,34 @@ static int kc_min_read_all(int fd, char **out) {
     if (!buf) {
         buf = (char *)malloc(1);
         if (!buf) {
-            return KC_MIN_ERROR;
+            return -1;
         }
     }
 
     buf[used] = '\0';
     *out = buf;
-    return KC_MIN_OK;
+    return 0;
+}
+
+/**
+ * Convert a CLI mode name to a public minification mode.
+ * @param name Mode name.
+ * @return Public mode constant, or 0 for invalid input.
+ */
+static int kc_min_parse_mode(const char *name) {
+    if (!name) {
+        return 0;
+    }
+    if (strcmp(name, "css") == 0) {
+        return KC_MIN_MODE_CSS;
+    }
+    if (strcmp(name, "js") == 0) {
+        return KC_MIN_MODE_JS;
+    }
+    if (strcmp(name, "html") == 0) {
+        return KC_MIN_MODE_HTML;
+    }
+    return 0;
 }
 
 /**
@@ -126,7 +147,6 @@ int main(int argc, char **argv) {
     const char *mode_name = NULL;
     char *input = NULL;
     char *output = NULL;
-    kc_min_t *ctx = NULL;
     int mode;
     int i;
 
@@ -156,13 +176,13 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    mode = kc_min_mode(mode_name);
-    if (mode == KC_MIN_MODE_NONE) {
+    mode = kc_min_parse_mode(mode_name);
+    if (mode == 0) {
         fprintf(stderr, "min: invalid mode '%s'\n", mode_name);
         return 1;
     }
 
-    if (kc_min_read_all(KC_MIN_STDIN_FD, &input) != KC_MIN_OK) {
+    if (kc_min_read_all(KC_MIN_STDIN_FD, &input) != 0) {
         fprintf(stderr, "min: failed to read input\n");
         return 1;
     }
@@ -172,25 +192,15 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    if (kc_min_open(&ctx) != KC_MIN_OK) {
-        fprintf(stderr, "min: out of memory\n");
-        free(input);
-        return 1;
-    }
-    kc_min_set_mode(ctx, mode);
-
-    if (kc_min_exec(ctx, input, &output) != KC_MIN_OK) {
+    output = kc_min_minify(mode, input);
+    if (!output) {
         fprintf(stderr, "min: execution failed\n");
-        kc_min_close(ctx);
         free(input);
         return 1;
     }
 
-    if (output != NULL) {
-        fputs(output, stdout);
-    }
+    fputs(output, stdout);
 
-    kc_min_close(ctx);
     kc_min_free(output);
     free(input);
     return 0;
