@@ -57,7 +57,7 @@ if(EMSCRIPTEN)
     target_link_options(libr_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_libr_version
+        -sEXPORTED_FUNCTIONS=_kc_libr_greet,_kc_libr_free,_kc_libr_version
     )
 endif()
 
@@ -96,12 +96,7 @@ endif()
 if(LIBR_BUILD_TESTS)
     enable_testing()
 
-    # kcrun for native test runner (referenced by path like llm.c does)
-    set(KCRUN_SOURCE_DIR "${CMAKE_SOURCE_DIR}/../kcrun.c")
-
     if(EMSCRIPTEN)
-        # WebAssembly contract test: compile the public-contract tests against
-        # the reusable library sources for the Emscripten toolchain.
         add_executable(libr_contract_test
             src/test.c
             ${LIBR_CORE_SOURCES}
@@ -132,22 +127,8 @@ if(LIBR_BUILD_TESTS)
             set(LIBR_TEST_CLI_TARGET_PATH "$<TARGET_FILE:libr>")
         endif()
 
-        set(TEST_SOURCES
-            src/test.c
-        )
-        if(EXISTS "${KCRUN_SOURCE_DIR}/src/libkcrun.c")
-            list(APPEND TEST_SOURCES
-                ${KCRUN_SOURCE_DIR}/src/libkcrun.c
-                ${KCRUN_SOURCE_DIR}/lib/parson/parson.c
-            )
-            set_source_files_properties(${KCRUN_SOURCE_DIR}/lib/parson/parson.c PROPERTIES COMPILE_OPTIONS "-w")
-        endif()
-
-        add_executable(libr_contract_test ${TEST_SOURCES})
+        add_executable(libr_contract_test src/test.c)
         target_include_directories(libr_contract_test PRIVATE src)
-        if(EXISTS "${KCRUN_SOURCE_DIR}/src/libkcrun.c")
-            target_include_directories(libr_contract_test PRIVATE ${KCRUN_SOURCE_DIR}/src ${KCRUN_SOURCE_DIR}/lib/parson)
-        endif()
         target_link_libraries(libr_contract_test PRIVATE ${LIBR_TEST_SHARED_TARGET})
 
         if(UNIX AND NOT ANDROID AND NOT APPLE)
