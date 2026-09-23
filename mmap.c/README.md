@@ -166,8 +166,20 @@ The reusable contract cases cover `open`, `get`, `set`, `save`, `del`,
 `close`, and `version`. Native and Wine runs additionally exercise the
 shipped CLI as one grouped contract.
 
-There is no WebAssembly target. This library depends on native file-backed
-mapping and filesystem behavior.
+Build the WebAssembly artifact with:
+
+```bash
+make wasm32/wasm
+```
+
+Run the reusable API contract through Emscripten and Node.js with:
+
+```bash
+make test wasm
+```
+
+The WebAssembly build uses Emscripten filesystem semantics. The CLI is not part
+of the WebAssembly contract.
 
 ### Multiarch Builds
 
