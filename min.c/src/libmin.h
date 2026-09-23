@@ -41,13 +41,13 @@ char *kc_min_js(const char *input);
 char *kc_min_html(const char *input);
 
 /**
- * Minify generic text by collapsing whitespace runs to one space and trimming
+ * Minify generic txt by collapsing whitespace runs to one space and trimming
  * leading and trailing whitespace.
  * @param input Borrowed null-terminated text source.
  * @return Owned null-terminated minified string, or NULL on invalid input or
  * allocation failure.
  */
-char *kc_min_text(const char *input);
+char *kc_min_txt(const char *input);
 
 /**
  * Release memory allocated by the min library.
