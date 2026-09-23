@@ -96,13 +96,16 @@ static int kc_tpl_read_all(int fd, char **out) {
  * @return None.
  */
 static void kc_print_help(const char *name) {
-    printf("Usage: %s [options]\n", name);
+    printf("Usage: %s [options] [source]\n", name);
     printf("\n");
     printf("Options:\n");
-    printf("    --root <dir>        Base directory for includes (default: cwd)\n");
-    printf("    --var <key=value>   Inject a template variable (repeatable)\n");
-    printf("    -h, --help          Show this help\n");
-    printf("    -v, --version       Show version\n");
+    printf("    -root, --root <dir>      Base directory for includes (default: .)\n");
+    printf("    -var, --var <key=value>  Inject a template variable (repeatable)\n");
+    printf("    -h, --help               Show this help\n");
+    printf("    -v, --version            Show version\n");
+    printf("\n");
+    printf("Input:\n");
+    printf("    source                    Optional template source; stdin is used when omitted\n");
 }
 
 /**
@@ -120,98 +123,133 @@ static void kc_print_version(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    char *input = NULL;
-    char *root = NULL;
-    kc_tpl_t *ctx = NULL;
+    kc_tpl_options_t options;
+    kc_tpl_var_t *vars = NULL;
+    size_t var_count = 0U;
+    const char *source_arg = NULL;
+    char *stdin_source = NULL;
+    const char *source;
+    kc_tpl_t *tpl = NULL;
     char *output = NULL;
+    const char *root = ".";
     int i;
-    int rc = 0;
+
+    if (argc > 1) {
+        vars = (kc_tpl_var_t *)calloc((size_t)argc, sizeof(kc_tpl_var_t));
+        if (vars == NULL) {
+            fprintf(stderr, "tpl: out of memory\n");
+            return 1;
+        }
+    }
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            free(vars);
             kc_print_help(argv[0]);
             return 0;
-        } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+        }
+
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            free(vars);
             kc_print_version();
             return 0;
-        } else if (strcmp(argv[i], "--root") == 0) {
+        }
+
+        if (strcmp(argv[i], "-root") == 0 || strcmp(argv[i], "--root") == 0) {
             i++;
             if (i >= argc) {
-                fprintf(stderr, "tpl: missing value for --root\n");
+                fprintf(stderr, "tpl: missing value for root\n");
+                free(vars);
                 return 1;
             }
             root = argv[i];
-        } else if (strcmp(argv[i], "--var") == 0) {
+            continue;
+        }
+
+        if (strcmp(argv[i], "-var") == 0 || strcmp(argv[i], "--var") == 0) {
+            char *eq;
+
             i++;
             if (i >= argc) {
-                fprintf(stderr, "tpl: missing value for --var\n");
+                fprintf(stderr, "tpl: missing value for var\n");
+                free(vars);
                 return 1;
             }
-        } else {
+
+            eq = strchr(argv[i], '=');
+            if (eq == NULL || eq == argv[i]) {
+                fprintf(stderr, "tpl: invalid variable '%s'\n", argv[i]);
+                free(vars);
+                return 1;
+            }
+
+            *eq = '\0';
+            vars[var_count].key = argv[i];
+            vars[var_count].value = eq + 1;
+            var_count++;
+            continue;
+        }
+
+        if (argv[i][0] == '-') {
             fprintf(stderr, "tpl: unknown option '%s'\n", argv[i]);
+            free(vars);
             return 1;
         }
+
+        if (source_arg != NULL) {
+            fprintf(stderr, "tpl: unexpected argument '%s'\n", argv[i]);
+            free(vars);
+            return 1;
+        }
+
+        source_arg = argv[i];
     }
 
-    if (kc_tpl_read_all(KC_TPL_STDIN_FD, &input) != KC_TPL_OK) {
-        fprintf(stderr, "tpl: failed to read input\n");
-        free(input);
-        return 1;
+    if (source_arg != NULL) {
+        source = source_arg;
+    } else {
+        if (kc_tpl_read_all(KC_TPL_STDIN_FD, &stdin_source) != KC_TPL_OK) {
+            fprintf(stderr, "tpl: failed to read input\n");
+            free(vars);
+            return 1;
+        }
+        source = stdin_source;
     }
 
-    if (!input || input[0] == '\0') {
-        free(input);
+    if (source == NULL || source[0] == '\0') {
+        free(stdin_source);
+        free(vars);
         return 0;
     }
 
-    rc = kc_tpl_open(&ctx);
-    if (rc != KC_TPL_OK) {
-        fprintf(stderr, "tpl: failed to open context\n");
-        free(input);
+    options.root = root;
+    if (kc_tpl_open(&tpl, source, &options) != KC_TPL_OK) {
+        fprintf(stderr, "tpl: failed to open template\n");
+        free(stdin_source);
+        free(vars);
         return 1;
     }
 
-    if (root) {
-        rc = kc_tpl_set_root(ctx, root);
-        if (rc != KC_TPL_OK) {
-            fprintf(stderr, "tpl: failed to open context\n");
-            free(input);
-            kc_tpl_close(ctx);
-            return 1;
-        }
-    }
-
-    for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--var") == 0) {
-            i++;
-            if (i < argc) {
-                char *pair = argv[i];
-                char *eq = strchr(pair, '=');
-                if (eq) {
-                    *eq = '\0';
-                    kc_tpl_set_var(ctx, pair, eq + 1);
-                    *eq = '=';
-                }
-            }
-        }
-    }
-
-    rc = kc_tpl_render_string(ctx, input, &output);
-    free(input);
-    kc_tpl_close(ctx);
-
-    if (rc != KC_TPL_OK) {
-        if (output) kc_tpl_free(output);
+    output = kc_tpl_render(tpl, vars, var_count);
+    if (output == NULL) {
+        fprintf(stderr, "tpl: %s\n", kc_tpl_error(tpl));
+        kc_tpl_close(tpl);
+        free(stdin_source);
+        free(vars);
         return 1;
     }
 
-    if (output) {
-        rc = printf("%s", output);
+    if (fputs(output, stdout) == EOF) {
         kc_tpl_free(output);
-        if (rc < 0) {
-            return 1;
-        }
+        kc_tpl_close(tpl);
+        free(stdin_source);
+        free(vars);
+        return 1;
     }
 
+    kc_tpl_free(output);
+    kc_tpl_close(tpl);
+    free(stdin_source);
+    free(vars);
     return 0;
 }
