@@ -16,7 +16,7 @@ endif()
 
 if(NOT MSVC)
     add_compile_options(-O3 -Wall -Wextra -Werror)
-    if(APPLE)
+    if(APPLE OR EMSCRIPTEN)
         add_compile_options(-Wno-unused-function)
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -40,7 +40,22 @@ set_source_files_properties(src/libwch.c PROPERTIES
     COMPILE_DEFINITIONS KC_WCH_BUILD_VERSION=${KC_WCH_BUILD_VERSION}
 )
 
-if(NOT WCH_TEST_EXTERNAL_ARTIFACTS)
+if(EMSCRIPTEN)
+    add_executable(wch_wasm src/libwch.c)
+    target_include_directories(wch_wasm PRIVATE src)
+    set_target_properties(wch_wasm PROPERTIES
+        OUTPUT_NAME "wch"
+        SUFFIX ".js"
+    )
+    target_link_options(wch_wasm PRIVATE
+        --no-entry
+        -sFS_DEBUG=1
+        -sFORCE_FILESYSTEM=1
+        -sEXPORTED_FUNCTIONS=_kc_wch_open,_kc_wch_on,_kc_wch_close,_kc_wch_version,_kc_wch_wasm_event,_malloc,_free
+    )
+endif()
+
+if(NOT WCH_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     add_executable(wch
         src/wch.c
         src/libwch.c
