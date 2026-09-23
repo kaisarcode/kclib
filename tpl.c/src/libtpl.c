@@ -27,7 +27,7 @@
 typedef struct {
     char key[64];
     char *val;
-} kc_tpl_var_t;
+} kc_tpl_scope_var_t;
 
 typedef struct {
     char name[64];
@@ -35,7 +35,7 @@ typedef struct {
 } kc_tpl_block_t;
 
 typedef struct kc_tpl_scope {
-    kc_tpl_var_t *vars;
+    kc_tpl_scope_var_t *vars;
     int var_n;
     int var_cap;
     kc_tpl_block_t blocks[64];
@@ -45,11 +45,11 @@ typedef struct kc_tpl_scope {
 } kc_tpl_scope_t;
 
 struct kc_tpl {
+    char *source;
     char root[KC_TPL_ROOT_CAP];
     char out[KC_TPL_OUTPUT_CAP];
     size_t out_n;
     char error[256];
-    kc_tpl_scope_t scope;
 };
 
 static const char *kc_tpl_comment_open = "{{/" "*";
@@ -284,15 +284,15 @@ static int kc_tpl_var_set(kc_tpl_scope_t *scope, const char *key, const char *va
     if (i == scope->var_n) {
         if (scope->var_n >= scope->var_cap) {
             int new_cap = scope->var_cap == 0 ? 16 : scope->var_cap * 2;
-            kc_tpl_var_t *new_vars = realloc(
-                scope->vars, (size_t)new_cap * sizeof(kc_tpl_var_t)
+            kc_tpl_scope_var_t *new_vars = realloc(
+                scope->vars, (size_t)new_cap * sizeof(kc_tpl_scope_var_t)
             );
             if (new_vars == NULL) {
                 return KC_TPL_ERROR;
             }
             memset(
                 new_vars + scope->var_n, 0,
-                (size_t)(new_cap - scope->var_n) * sizeof(kc_tpl_var_t)
+                (size_t)(new_cap - scope->var_n) * sizeof(kc_tpl_scope_var_t)
             );
             scope->vars = new_vars;
             scope->var_cap = new_cap;
@@ -1219,133 +1219,156 @@ static int kc_tpl_render_internal(kc_tpl_t *ctx, kc_tpl_scope_t *scope, char *tp
 }
 
 /**
- * Initialize a renderer context.
- * @param out Pointer to receive the context pointer.
+ * Creates a reusable template instance and copies the template source.
+ * @param out Pointer to receive the template instance.
+ * @param source Borrowed null-terminated template source.
+ * @param options Optional template options. NULL uses defaults.
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
-int kc_tpl_open(kc_tpl_t **out) {
-    kc_tpl_t *ctx;
+int kc_tpl_open(
+    kc_tpl_t **out,
+    const char *source,
+    const kc_tpl_options_t *options
+) {
+    kc_tpl_t *tpl;
+    const char *root = ".";
 
     if (out == NULL) {
         return KC_TPL_ERROR;
     }
+    *out = NULL;
 
-    ctx = (kc_tpl_t *)calloc(1U, sizeof(kc_tpl_t));
-    if (ctx == NULL) {
+    if (source == NULL) {
         return KC_TPL_ERROR;
     }
 
-    snprintf(ctx->root, sizeof(ctx->root), ".");
-    snprintf(ctx->error, sizeof(ctx->error), "ok");
-    *out = ctx;
+    if (options != NULL) {
+        if (options->root == NULL || options->root[0] == '\0') {
+            return KC_TPL_ERROR;
+        }
+        root = options->root;
+    }
+
+    tpl = (kc_tpl_t *)calloc(1U, sizeof(kc_tpl_t));
+    if (tpl == NULL) {
+        return KC_TPL_ERROR;
+    }
+
+    tpl->source = kc_tpl_dup(source);
+    if (tpl->source == NULL) {
+        free(tpl);
+        return KC_TPL_ERROR;
+    }
+
+    snprintf(tpl->root, sizeof(tpl->root), "%s", root);
+    snprintf(tpl->error, sizeof(tpl->error), "ok");
+    *out = tpl;
     return KC_TPL_OK;
 }
 
 /**
- * Release a renderer context and its owned data.
- * @param ctx Context pointer.
+ * Renders the stored template with one isolated set of variables.
+ * @param tpl Template instance.
+ * @param vars Optional variable array.
+ * @param var_count Number of entries in vars.
+ * @return Owned null-terminated output, or NULL on failure.
+ */
+char *kc_tpl_render(
+    kc_tpl_t *tpl,
+    const kc_tpl_var_t *vars,
+    size_t var_count
+) {
+    kc_tpl_scope_t scope;
+    char *work;
+    char *output;
+    size_t i;
+    int rc;
+
+    if (tpl == NULL) {
+        return NULL;
+    }
+
+    if (var_count > 0U && vars == NULL) {
+        kc_tpl_fail(tpl, "invalid variables", NULL);
+        return NULL;
+    }
+
+    memset(&scope, 0, sizeof(scope));
+
+    for (i = 0U; i < var_count; i++) {
+        if (
+            vars[i].key == NULL ||
+            vars[i].value == NULL ||
+            kc_tpl_var_set(&scope, vars[i].key, vars[i].value) != KC_TPL_OK
+        ) {
+            kc_tpl_scope_clear(&scope);
+            kc_tpl_fail(tpl, "variable assignment failed",
+                vars[i].key != NULL ? vars[i].key : NULL);
+            return NULL;
+        }
+    }
+
+    work = kc_tpl_dup(tpl->source);
+    if (work == NULL) {
+        kc_tpl_scope_clear(&scope);
+        kc_tpl_fail(tpl, "out of memory", NULL);
+        return NULL;
+    }
+
+    tpl->out_n = 0U;
+    tpl->out[0] = '\0';
+    snprintf(tpl->error, sizeof(tpl->error), "ok");
+
+    rc = kc_tpl_render_internal(tpl, &scope, work);
+    free(work);
+    kc_tpl_scope_clear(&scope);
+
+    if (rc != KC_TPL_OK) {
+        return NULL;
+    }
+
+    output = kc_tpl_dup(tpl->out);
+    if (output == NULL) {
+        kc_tpl_fail(tpl, "out of memory", NULL);
+        return NULL;
+    }
+
+    return output;
+}
+
+/**
+ * Returns the latest template error.
+ * @param tpl Template instance.
+ * @return Static or template-owned error text.
+ */
+const char *kc_tpl_error(const kc_tpl_t *tpl) {
+    if (tpl == NULL) {
+        return "invalid template";
+    }
+
+    return tpl->error;
+}
+
+/**
+ * Releases output returned by kc_tpl_render.
+ * @param ptr Output allocation to release.
  * @return None.
  */
-void kc_tpl_close(kc_tpl_t *ctx) {
-    if (ctx == NULL) {
+void kc_tpl_free(void *ptr) {
+    free(ptr);
+}
+
+/**
+ * Releases a template instance and its owned source.
+ * @param tpl Template instance, or NULL.
+ * @return None.
+ */
+void kc_tpl_close(kc_tpl_t *tpl) {
+    if (tpl == NULL) {
         return;
     }
 
-    kc_tpl_scope_clear(&ctx->scope);
-    free(ctx);
+    free(tpl->source);
+    free(tpl);
 }
 
-/**
- * Sets the include root used by include directives.
- * @param ctx Context pointer.
- * @param root Include root path.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_set_root(kc_tpl_t *ctx, const char *root) {
-    if (ctx == NULL || root == NULL || root[0] == '\0') {
-        return kc_tpl_fail(ctx, "invalid root", NULL);
-    }
-
-    snprintf(ctx->root, sizeof(ctx->root), "%s", root);
-    return KC_TPL_OK;
-}
-
-/**
- * Stores or updates one renderer variable.
- * @param ctx Context pointer.
- * @param key Variable key.
- * @param value Variable value.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_set_var(kc_tpl_t *ctx, const char *key, const char *value) {
-    if (ctx == NULL) {
-        return KC_TPL_ERROR;
-    }
-
-    if (kc_tpl_var_set(&ctx->scope, key, value) != KC_TPL_OK) {
-        return kc_tpl_fail(ctx, "variable assignment failed", key);
-    }
-
-    return KC_TPL_OK;
-}
-
-/**
- * Renders one template string into an owned output buffer.
- * @param ctx Context pointer.
- * @param input Template input.
- * @param output Destination pointer for owned output.
- * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
- */
-int kc_tpl_render_string(kc_tpl_t *ctx, const char *input, char **output) {
-    char *work;
-    char *copy;
-    int rc;
-
-    if (ctx == NULL || input == NULL || output == NULL) {
-        return kc_tpl_fail(ctx, "invalid argument", NULL);
-    }
-
-    *output = NULL;
-    work = kc_tpl_dup(input);
-    if (work == NULL) {
-        return kc_tpl_fail(ctx, "out of memory", NULL);
-    }
-
-    ctx->out_n = 0U;
-    ctx->out[0] = '\0';
-    rc = kc_tpl_render_internal(ctx, &ctx->scope, work);
-    free(work);
-    if (rc != KC_TPL_OK) {
-        return rc;
-    }
-
-    copy = kc_tpl_dup(ctx->out);
-    if (copy == NULL) {
-        return kc_tpl_fail(ctx, "out of memory", NULL);
-    }
-
-    *output = copy;
-    return KC_TPL_OK;
-}
-
-/**
- * Returns the latest context error.
- * @param ctx Context pointer.
- * @return Static or context-owned error text.
- */
-const char *kc_tpl_get_error(const kc_tpl_t *ctx) {
-    if (ctx == NULL) {
-        return "invalid context";
-    }
-
-    return ctx->error;
-}
-
-/**
- * Releases output returned by kc_tpl_render_string.
- * @param text Output allocation to release.
- * @return None.
- */
-void kc_tpl_free(char *text) {
-    free(text);
-}
