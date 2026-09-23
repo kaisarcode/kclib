@@ -757,7 +757,7 @@ static int kc_init_run_exec_sysv(
         return 1;
     }
 found:
-    return system(cmd) >= 0 ? 0 : 1;
+    return system(cmd) == 0 ? 0 : 1;
 }
 
 /**
@@ -1338,7 +1338,7 @@ static int kc_init_run_exec_win32(
         return 1;
     }
 found:
-    return system(cmd) >= 0 ? 0 : 1;
+    return system(cmd) == 0 ? 0 : 1;
 }
 
 /**
@@ -1566,174 +1566,336 @@ static int kc_init_run_list_one(kc_init_t *ctx, const char *key, kc_init_list_cb
 #endif
 }
 
+typedef struct {
+    char *key;
+    char *user;
+    char *cmd;
+} kc_init_collect_entry_t;
+
+typedef struct {
+    kc_init_collect_entry_t *entries;
+    size_t count;
+    size_t capacity;
+    int failed;
+} kc_init_collect_t;
+
 /**
- * Initialize a new init context.
+ * Release temporary list collector storage.
+ * @param collect Collector state.
+ * @return None.
+ */
+static void kc_init_collect_clear(kc_init_collect_t *collect) {
+    size_t i;
+
+    if (!collect) return;
+    for (i = 0; i < collect->count; i++) {
+        free(collect->entries[i].key);
+        free(collect->entries[i].user);
+        free(collect->entries[i].cmd);
+    }
+    free(collect->entries);
+    memset(collect, 0, sizeof(*collect));
+}
+
+/**
+ * Collect one backend list row into owned temporary storage.
+ * @param key Registration key.
+ * @param user Registration user.
+ * @param cmd Registration command.
+ * @param userdata Collector state.
+ * @return None.
+ */
+static void kc_init_collect_row(
+    const char *key,
+    const char *user,
+    const char *cmd,
+    void *userdata
+) {
+    kc_init_collect_t *collect;
+    kc_init_collect_entry_t *next;
+    kc_init_collect_entry_t *entry;
+    size_t capacity;
+
+    collect = (kc_init_collect_t *)userdata;
+    if (!collect || collect->failed) return;
+
+    if (collect->count == collect->capacity) {
+        capacity = collect->capacity ? collect->capacity * 2U : 8U;
+        next = (kc_init_collect_entry_t *)realloc(
+            collect->entries,
+            capacity * sizeof(*next)
+        );
+        if (!next) {
+            collect->failed = 1;
+            return;
+        }
+        collect->entries = next;
+        collect->capacity = capacity;
+    }
+
+    entry = &collect->entries[collect->count];
+    memset(entry, 0, sizeof(*entry));
+    entry->key = kc_init_strdup(key ? key : "");
+    entry->user = kc_init_strdup(user ? user : "");
+    entry->cmd = kc_init_strdup(cmd ? cmd : "");
+    if (!entry->key || !entry->user || !entry->cmd) {
+        free(entry->key);
+        free(entry->user);
+        free(entry->cmd);
+        memset(entry, 0, sizeof(*entry));
+        collect->failed = 1;
+        return;
+    }
+    collect->count++;
+}
+
+/**
+ * Materialize collected rows into one caller-owned allocation.
+ * @param collect Collector state.
+ * @param out_entries Receives the entry array.
+ * @param out_count Receives the entry count.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on allocation failure.
+ */
+static int kc_init_collect_finish(
+    const kc_init_collect_t *collect,
+    kc_init_entry_t **out_entries,
+    size_t *out_count
+) {
+    kc_init_entry_t *entries;
+    char *cursor;
+    size_t total;
+    size_t i;
+
+    *out_entries = NULL;
+    *out_count = 0U;
+    if (collect->count == 0U) return KC_INIT_OK;
+
+    if (collect->count > ((size_t)-1) / sizeof(*entries)) {
+        return KC_INIT_ERROR;
+    }
+    total = collect->count * sizeof(*entries);
+
+    for (i = 0; i < collect->count; i++) {
+        size_t sizes[3];
+        size_t j;
+
+        sizes[0] = strlen(collect->entries[i].key) + 1U;
+        sizes[1] = strlen(collect->entries[i].user) + 1U;
+        sizes[2] = strlen(collect->entries[i].cmd) + 1U;
+        for (j = 0; j < 3U; j++) {
+            if (sizes[j] > (size_t)-1 - total) return KC_INIT_ERROR;
+            total += sizes[j];
+        }
+    }
+
+    entries = (kc_init_entry_t *)malloc(total);
+    if (!entries) return KC_INIT_ERROR;
+    cursor = (char *)(entries + collect->count);
+
+    for (i = 0; i < collect->count; i++) {
+        size_t size;
+
+        size = strlen(collect->entries[i].key) + 1U;
+        memcpy(cursor, collect->entries[i].key, size);
+        entries[i].key = cursor;
+        cursor += size;
+
+        size = strlen(collect->entries[i].user) + 1U;
+        memcpy(cursor, collect->entries[i].user, size);
+        entries[i].user = cursor;
+        cursor += size;
+
+        size = strlen(collect->entries[i].cmd) + 1U;
+        memcpy(cursor, collect->entries[i].cmd, size);
+        entries[i].cmd = cursor;
+        cursor += size;
+    }
+
+    *out_entries = entries;
+    *out_count = collect->count;
+    return KC_INIT_OK;
+}
+
+/**
+ * Initialize a startup registry context.
  * @param out Output context pointer.
- * @param opts Init context options, or NULL for defaults.
+ * @param options Startup registry options, or NULL for defaults.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-int kc_init_open(kc_init_t **out, const kc_init_options_t *opts) {
-    kc_init_t *ctx;
+int kc_init_open(kc_init_t **out, const kc_init_options_t *options) {
+    kc_init_t *init;
     const char *dir;
 
-    if (!out) {
-        return KC_INIT_ERROR;
-    }
+    if (!out) return KC_INIT_ERROR;
     *out = NULL;
 
-    dir = opts && opts->dir ? opts->dir : KC_INIT_SYS_DIR;
+    dir = options && options->dir ? options->dir : KC_INIT_SYS_DIR;
+    if (!dir[0]) return KC_INIT_ERROR;
 
-    ctx = (kc_init_t *)calloc(1, sizeof(kc_init_t));
-    if (!ctx) {
-        return KC_INIT_ERROR;
-    }
+    init = (kc_init_t *)calloc(1, sizeof(*init));
+    if (!init) return KC_INIT_ERROR;
 
-    if ((size_t)snprintf(ctx->dir, sizeof(ctx->dir), "%s", dir)
-            >= sizeof(ctx->dir)) {
-        free(ctx);
+    if ((size_t)snprintf(init->dir, sizeof(init->dir), "%s", dir)
+            >= sizeof(init->dir)) {
+        free(init);
         return KC_INIT_ERROR;
     }
 
 #ifndef _WIN32
-    ctx->backend = kc_init_backend_from_string(opts ? opts->backend : NULL);
-    if (ctx->backend == KC_INIT_BACKEND_NONE) {
-        ctx->backend = kc_init_detect_backend();
+    if (options && options->backend) {
+        init->backend = kc_init_backend_from_string(options->backend);
+        if (init->backend == KC_INIT_BACKEND_NONE) {
+            free(init);
+            return KC_INIT_ERROR;
+        }
+    } else {
+        init->backend = kc_init_detect_backend();
     }
 #endif
 
-    *out = ctx;
+    *out = init;
     return KC_INIT_OK;
 }
 
 /**
- * Release an init context.
- * @param ctx Context pointer.
+ * Release a startup registry context.
+ * @param init Startup registry context, or NULL.
  * @return None.
  */
-void kc_init_close(kc_init_t *ctx) {
-    if (!ctx) {
-        return;
-    }
-
-    free(ctx);
+void kc_init_close(kc_init_t *init) {
+    free(init);
 }
 
 /**
- * Return the resolved metadata directory for an init context.
- * The returned string is borrowed context-owned storage. The caller must not
- * free or modify it, and it remains valid until the context is closed.
- * @param ctx Context pointer.
+ * Return the resolved metadata directory.
+ * @param init Startup registry context.
  * @return Borrowed metadata directory path, or NULL on invalid input.
  */
-const char *kc_init_path(const kc_init_t *ctx) {
-    if (!ctx) {
-        return NULL;
-    }
-
-    return ctx->dir;
+const char *kc_init_path(const kc_init_t *init) {
+    return init ? init->dir : NULL;
 }
 
 /**
- * Return the last error message from an init context.
- * The returned string is borrowed context-owned storage. The caller must not
- * free or modify it, and it remains valid until the context is closed. A later
- * operation on the same context may replace its contents.
- * @param ctx Context pointer.
- * @return Borrowed error string, or NULL if there is no current error text.
+ * Return the last context error message.
+ * @param init Startup registry context.
+ * @return Borrowed error text, or NULL when unset.
  */
-const char *kc_init_get_error(const kc_init_t *ctx) {
-    if (!ctx || !ctx->error[0]) {
-        return NULL;
-    }
-
-    return ctx->error;
+const char *kc_init_error(const kc_init_t *init) {
+    if (!init || !init->error[0]) return NULL;
+    return init->error;
 }
 
 /**
  * Register or replace a named startup command.
- * @param ctx Context pointer.
- * @param key Registration key name.
- * @param cmd Shell command string to run at startup.
+ * @param init Startup registry context.
+ * @param key Registration key.
+ * @param cmd One-line shell command.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-int kc_init_update(kc_init_t *ctx, const char *key, const char *cmd) {
-    if (!ctx || !key || !cmd) {
+int kc_init_set(kc_init_t *init, const char *key, const char *cmd) {
+    if (!init || !kc_init_key_valid(key) || !kc_init_cmd_valid(cmd)) {
         return KC_INIT_ERROR;
     }
 
-    if (kc_init_run_update(ctx, key, cmd) != 0) {
-        kc_init_set_error(ctx, "update failed");
+    if (kc_init_run_update(init, key, cmd) != 0) {
+        kc_init_set_error(init, "set failed");
         return KC_INIT_ERROR;
     }
     return KC_INIT_OK;
 }
 
 /**
- * Execute the registered command for a key immediately.
- * @param ctx Context pointer.
- * @param key Registration key name.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ * Execute one registered command immediately.
+ * @param init Startup registry context.
+ * @param key Registration key.
+ * @return KC_INIT_OK on success, KC_INIT_NOT_FOUND when absent,
+ *         or KC_INIT_ERROR on failure.
  */
-int kc_init_exec(kc_init_t *ctx, const char *key) {
-    if (!ctx || !key) {
-        return KC_INIT_ERROR;
+int kc_init_exec(kc_init_t *init, const char *key) {
+    if (!init || !kc_init_key_valid(key)) return KC_INIT_ERROR;
+
+    if (!kc_init_entry_exists(init, key)) {
+        kc_init_set_error(init, "not found");
+        return KC_INIT_NOT_FOUND;
     }
 
-    if (kc_init_run_exec(ctx, key) != 0) {
-        kc_init_set_error(ctx, "exec failed");
+    if (kc_init_run_exec(init, key) != 0) {
+        kc_init_set_error(init, "exec failed");
         return KC_INIT_ERROR;
     }
     return KC_INIT_OK;
 }
 
 /**
- * List registered startup entries.
- * Invokes cb synchronously only while this function is running. The callback
- * and userdata are not stored or retained, and userdata is passed unchanged.
- * The key, user, and cmd strings are borrowed and valid only during each
- * callback invocation; the caller must copy them for a longer lifetime.
- * @param ctx Context pointer.
- * @param key Optional registration key name, or NULL for all.
- * @param cb Callback invoked per entry, or NULL.
- * @param userdata Opaque pointer passed unchanged to cb and not retained.
+ * List startup registrations.
+ * @param init Startup registry context.
+ * @param key Optional registration key, or NULL for all.
+ * @param out_entries Receives the allocated entry array.
+ * @param out_count Receives the entry count.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-int kc_init_list(kc_init_t *ctx, const char *key, kc_init_list_cb_internal cb, void *userdata) {
-    if (!ctx) {
-        return KC_INIT_ERROR;
-    }
+int kc_init_list(
+    kc_init_t *init,
+    const char *key,
+    kc_init_entry_t **out_entries,
+    size_t *out_count
+) {
+    kc_init_collect_t collect;
+    int rc;
 
+    if (out_entries) *out_entries = NULL;
+    if (out_count) *out_count = 0U;
+    if (!init || !out_entries || !out_count) return KC_INIT_ERROR;
+    if (key && !kc_init_key_valid(key)) return KC_INIT_ERROR;
+
+    memset(&collect, 0, sizeof(collect));
     if (key) {
-        if (kc_init_run_list_one(ctx, key, cb, userdata) != 0) {
-            kc_init_set_error(ctx, "list failed");
-            return KC_INIT_ERROR;
-        }
-        return KC_INIT_OK;
+        rc = kc_init_run_list_one(init, key, kc_init_collect_row, &collect);
+        if (rc != 0 && !kc_init_entry_exists(init, key)) rc = 0;
+    } else {
+        rc = kc_init_run_list(init, kc_init_collect_row, &collect);
     }
 
-    if (kc_init_run_list(ctx, cb, userdata) != 0) {
-        kc_init_set_error(ctx, "list failed");
+    if (rc != 0 || collect.failed) {
+        kc_init_collect_clear(&collect);
+        kc_init_set_error(init, "list failed");
+        return KC_INIT_ERROR;
+    }
+
+    rc = kc_init_collect_finish(&collect, out_entries, out_count);
+    kc_init_collect_clear(&collect);
+    if (rc != KC_INIT_OK) {
+        kc_init_set_error(init, "list failed");
         return KC_INIT_ERROR;
     }
     return KC_INIT_OK;
 }
 
 /**
- * Remove a named startup registration.
- * @param ctx Context pointer.
- * @param key Registration key name.
+ * Remove one named startup registration.
+ * @param init Startup registry context.
+ * @param key Registration key.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-int kc_init_delete(kc_init_t *ctx, const char *key) {
-    if (!ctx || !key) {
-        return KC_INIT_ERROR;
-    }
+int kc_init_delete(kc_init_t *init, const char *key) {
+    if (!init || !kc_init_key_valid(key)) return KC_INIT_ERROR;
 
-    if (kc_init_run_delete(ctx, key) != 0) {
-        kc_init_set_error(ctx, "delete failed");
+    if (!kc_init_entry_exists(init, key)) return KC_INIT_OK;
+
+    if (kc_init_run_delete(init, key) != 0) {
+        kc_init_set_error(init, "delete failed");
         return KC_INIT_ERROR;
     }
     return KC_INIT_OK;
+}
+
+/**
+ * Release memory returned by the init library.
+ * @param ptr Allocation returned by the init library, or NULL.
+ * @return None.
+ */
+void kc_init_free(void *ptr) {
+    free(ptr);
 }
 
 #ifndef KC_INIT_BUILD_VERSION
