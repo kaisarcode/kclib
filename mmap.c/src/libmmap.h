@@ -43,9 +43,8 @@ int kc_mmap_open(kc_mmap_t **out, const char *path);
  * @param map Instance pointer.
  * @param out_data Receives the borrowed value pointer on KC_MMAP_OK.
  * @param out_size Receives the value size on KC_MMAP_OK.
- * @return KC_MMAP_OK when a value exists, KC_MMAP_NOT_FOUND when the backing
- *         file did not exist and no value has been set, or KC_MMAP_ERROR when
- *         the instance is invalid.
+ * @return KC_MMAP_OK when a value exists, KC_MMAP_NOT_FOUND when the current
+ *         value is null, or KC_MMAP_ERROR when the instance is invalid.
  */
 int kc_mmap_get(
     const kc_mmap_t *map,
@@ -56,10 +55,11 @@ int kc_mmap_get(
 /**
  * Replaces the current in-memory value without writing the backing file.
  *
- * NULL data with size zero is accepted and represents an empty value.
+ * NULL data with size zero sets the logical value to null. A non-NULL data
+ * pointer with size zero represents a real zero-byte value such as "".
  *
  * @param map Instance pointer.
- * @param data Borrowed input bytes, or NULL when size is zero.
+ * @param data Borrowed input bytes, or NULL to set null when size is zero.
  * @param size Input byte length.
  * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
  */
@@ -68,8 +68,8 @@ int kc_mmap_set(kc_mmap_t *map, const void *data, size_t size);
 /**
  * Persists the current value to the backing file.
  *
- * An empty value creates or truncates the file to zero bytes. Saving an
- * untouched missing value is an error because there is no current value.
+ * A zero-byte value creates or truncates the file to zero bytes. Saving null
+ * deletes the backing file and invalidates the instance.
  *
  * @param map Instance pointer.
  * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
@@ -79,8 +79,9 @@ int kc_mmap_save(kc_mmap_t *map);
 /**
  * Deletes the backing file and invalidates the instance.
  *
- * Deleting an already missing backing file still succeeds for a valid
- * instance. After this call, get/set/save/del return KC_MMAP_ERROR.
+ * This is shorthand for setting null and saving it. Deleting an already
+ * missing backing file still succeeds for a valid instance. After this call,
+ * get/set/save/del return KC_MMAP_ERROR.
  *
  * @param map Instance pointer.
  * @return KC_MMAP_OK on success, or KC_MMAP_ERROR on failure.
