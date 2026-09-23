@@ -427,10 +427,12 @@ test:
 				-DNETS_BUILD_TESTS=ON \
 				-DNETS_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll \
 				-DNETS_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll.a \
+				-DNETS_TEST_CLI=nets.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target nets_contract_test; \
-		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/nets_contract_test.exe all; \
+		cp $(CURDIR)/$(BIN_DIR)/x86_64/windows/nets.exe $(BUILD_DIR)/test-wine/nets.exe; \
+		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) nets_contract_test.exe all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
@@ -449,6 +451,7 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DNETS_BUILD_TESTS=ON \
 				-DNETS_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libnets.so \
+				-DNETS_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/nets \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target nets_contract_test; \
