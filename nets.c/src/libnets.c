@@ -52,7 +52,6 @@ struct kc_nets {
     kc_nets_handler_t handler;
     void *userdata;
     int stopped;
-    int self_close;
     kc_nets_socket_t socket;
 #ifdef _WIN32
     CRITICAL_SECTION lock;
@@ -574,8 +573,6 @@ static void *kc_nets_worker(void *userdata)
     unsigned char *response;
     size_t response_size;
     int status;
-    int self_close;
-
     nets = (kc_nets_t *)userdata;
     response = NULL;
     response_size = 0U;
@@ -583,19 +580,6 @@ static void *kc_nets_worker(void *userdata)
 
     nets->handler(status, response, response_size, nets->userdata);
     free(response);
-
-    kc_nets_lock(nets);
-    self_close = nets->self_close;
-    kc_nets_unlock(nets);
-
-    if (self_close) {
-#ifdef _WIN32
-        CloseHandle(nets->thread);
-#else
-        pthread_detach(pthread_self());
-#endif
-        kc_nets_destroy(nets);
-    }
 
 #ifdef _WIN32
     return 0;
@@ -707,22 +691,7 @@ int kc_nets_stop(kc_nets_t *nets) {
  * Stop if necessary and release one transfer.
  */
 void kc_nets_close(kc_nets_t *nets) {
-    int self;
-
     if (nets == NULL) return;
-
-#ifdef _WIN32
-    self = GetCurrentThreadId() == nets->thread_id;
-#else
-    self = pthread_equal(pthread_self(), nets->thread);
-#endif
-
-    if (self) {
-        kc_nets_lock(nets);
-        nets->self_close = 1;
-        kc_nets_unlock(nets);
-        return;
-    }
 
     kc_nets_stop(nets);
 #ifdef _WIN32
