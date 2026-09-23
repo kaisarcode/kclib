@@ -324,7 +324,7 @@ static int case_kc_init_exec(void) {
     const char *detail = "distinguishes a missing registration";
     kc_init_options_t options = {0};
     kc_init_t *init;
-    char dir[1024];
+    char dir[1024] = {0};
     int fail;
 
     init = NULL;
