@@ -88,18 +88,6 @@ static void kc_dmn_print_version(void) {
     printf("dmn build %llu\n", (unsigned long long)kc_dmn_version());
 }
 
-/**
- * List callback for CLI - prints key and socket path.
- * @param key Daemon key name.
- * @param sock Socket path.
- * @param userdata Unused.
- * @return None.
- */
-static void kc_dmn_cli_list_cb(const char *key, const char *sock, void *userdata) {
-    (void)userdata;
-    printf("%s\t%s\n", key, sock);
-}
-
 #ifdef _WIN32
 /**
  * Private Windows --_serve implementation.
@@ -214,74 +202,83 @@ static int kc_dmn_cli_serve_win32(
 #endif
 
 /**
- * Relays standard input and output through a daemon connection.
- * @param ctx Dmn context.
- * @param key Daemon key name.
+ * Relays standard input and output through an opened daemon stream.
+ * @param daemon Open daemon handle.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-static int kc_dmn_cli_relay(kc_dmn_t *ctx, const char *key) {
-    kc_dmn_conn_t *conn = NULL;
+static int kc_dmn_cli_relay(kc_dmn_t *daemon) {
+    kc_dmn_stream_t *stream = NULL;
     unsigned char buf[KC_DMN_BUF];
+    const unsigned char *eot;
+    size_t eot_size = 0;
     int stdin_open = 1;
-    int rc = KC_DMN_OK;
+    int rc;
 
-    if (kc_dmn_connect(ctx, key, &conn) != KC_DMN_OK)
-        return KC_DMN_ERROR;
+    eot = (const unsigned char *)kc_dmn_get_eot(daemon, &eot_size);
+    rc = kc_dmn_stream(daemon, &stream);
+    if (rc != KC_DMN_OK) return rc;
 
     while (stdin_open) {
         size_t n = fread(buf, 1, sizeof(buf), stdin);
-        void *data = NULL;
-        size_t data_size = 0;
-        int input_eot;
+        int input_eot = 0;
         int response_eot = 0;
 
         if (n == 0) {
-            if (ferror(stdin))
-                rc = KC_DMN_ERROR;
+            if (ferror(stdin)) rc = KC_DMN_ERROR;
             break;
         }
 
-        if (kc_dmn_send(conn, buf, n) != KC_DMN_OK) {
+        if (kc_dmn_stream_write(stream, buf, n) != KC_DMN_OK) {
             rc = KC_DMN_ERROR;
             break;
         }
-        input_eot = memchr(buf, 4, n) != NULL;
-        if (input_eot)
-            stdin_open = 0;
+
+        if (eot && eot_size > 0) {
+            size_t i;
+            for (i = 0; i + eot_size <= n; i++) {
+                if (memcmp(buf + i, eot, eot_size) == 0) {
+                    input_eot = 1;
+                    stdin_open = 0;
+                    break;
+                }
+            }
+        }
 
         do {
-            data = NULL;
-            data_size = 0;
-            rc = kc_dmn_recv(conn, sizeof(buf), &data, &data_size);
+            size_t data_size = 0;
+            rc = kc_dmn_stream_read(
+                stream,
+                buf,
+                sizeof(buf),
+                &data_size
+            );
             if (rc == KC_DMN_EOF) {
-                kc_dmn_free(data);
                 rc = KC_DMN_OK;
                 break;
             }
-            if (rc != KC_DMN_OK) {
-                kc_dmn_free(data);
-                break;
+            if (rc != KC_DMN_OK) break;
+
+            if (eot && eot_size > 0) {
+                size_t i;
+                for (i = 0; i + eot_size <= data_size; i++) {
+                    if (memcmp(buf + i, eot, eot_size) == 0) {
+                        response_eot = 1;
+                        break;
+                    }
+                }
             }
-            response_eot = memchr(data, 4, data_size) != NULL;
-            if (fwrite(data, 1, data_size, stdout) != data_size) {
-                kc_dmn_free(data);
-                rc = KC_DMN_ERROR;
-                break;
-            }
-            kc_dmn_free(data);
-            if (fflush(stdout) != 0) {
+
+            if (fwrite(buf, 1, data_size, stdout) != data_size ||
+                    fflush(stdout) != 0) {
                 rc = KC_DMN_ERROR;
                 break;
             }
         } while (input_eot && !response_eot);
 
-        if (rc != KC_DMN_OK || response_eot)
-            break;
-        if (!stdin_open)
-            break;
+        if (rc != KC_DMN_OK || response_eot || !stdin_open) break;
     }
 
-    kc_dmn_disconnect(conn);
+    kc_dmn_stream_close(stream);
     return rc;
 }
 
@@ -292,37 +289,21 @@ static int kc_dmn_cli_relay(kc_dmn_t *ctx, const char *key) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    kc_dmn_options_t *opts = kc_dmn_options_default();
-    const char *dir;
+    const char *dir = getenv("KC_DMN_DIR");
     int i = 1;
-
-    if (!opts) {
-        fprintf(stderr, "dmn: cannot allocate options\n");
-        return 1;
-    }
-
-    dir = getenv("KC_DMN_DIR");
-    if (dir && kc_dmn_options_set(opts, "dir", dir) != KC_DMN_OK) {
-        fprintf(stderr, "dmn: cannot set runtime directory\n");
-        kc_dmn_options_free(opts);
-        return 1;
-    }
 
     if (i >= argc) {
         kc_dmn_help();
-        kc_dmn_options_free(opts);
         return 1;
     }
 
     if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
         kc_dmn_help();
-        kc_dmn_options_free(opts);
         return 0;
     }
 
     if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
         kc_dmn_print_version();
-        kc_dmn_options_free(opts);
         return 0;
     }
 
@@ -330,172 +311,105 @@ int main(int argc, char **argv) {
     if (strcmp(argv[i], "--_serve") == 0) {
         char cmd[KC_DMN_BUF];
 
-        if (i + 2 >= argc) {
-            kc_dmn_options_free(opts);
-            return 1;
-        }
-
+        if (i + 2 >= argc) return 1;
         kc_dmn_join_args(cmd, sizeof(cmd), argv, i + 2, argc);
-        {
-            int rc = kc_dmn_cli_serve_win32(argv[i + 1], cmd) == 0 ? 0 : 1;
-            kc_dmn_options_free(opts);
-            return rc;
-        }
+        return kc_dmn_cli_serve_win32(argv[i + 1], cmd) == 0 ? 0 : 1;
     }
 #endif
 
     if (strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "--list") == 0) {
-        const char *key = (i + 2 == argc) ? argv[i + 1] : NULL;
-        kc_dmn_t *ctx = NULL;
+        const char *filter = (i + 2 == argc) ? argv[i + 1] : NULL;
+        kc_dmn_entry_t *entries = NULL;
+        size_t count = 0;
+        size_t n;
         int rc;
 
-        if (i + 2 < argc) {
-            kc_dmn_options_free(opts);
-            return 1;
+        if (i + 2 < argc) return 1;
+        rc = kc_dmn_list(dir, &entries, &count);
+        if (rc != KC_DMN_OK) return 1;
+        for (n = 0; n < count; n++) {
+            if (!filter || strcmp(filter, entries[n].name) == 0)
+                printf("%s\t%s\n", entries[n].name, entries[n].endpoint);
         }
-
-        if (kc_dmn_open(&ctx, opts) != KC_DMN_OK) {
-            fprintf(stderr, "dmn: cannot resolve runtime directory\n");
-            kc_dmn_options_free(opts);
-            return 1;
-        }
-
-        rc = kc_dmn_list(ctx, key, kc_dmn_cli_list_cb, NULL);
-        kc_dmn_close(ctx);
-        kc_dmn_options_free(opts);
-        return rc == KC_DMN_OK ? 0 : 1;
+        kc_dmn_free(entries);
+        return 0;
     }
 
     if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--delete") == 0) {
-        kc_dmn_t *ctx = NULL;
-        int rc;
-
-        if (i + 2 != argc) {
-            kc_dmn_options_free(opts);
-            return 1;
-        }
-
-        if (kc_dmn_open(&ctx, opts) != KC_DMN_OK) {
-            fprintf(stderr, "dmn: cannot resolve runtime directory\n");
-            kc_dmn_options_free(opts);
-            return 1;
-        }
-
-        rc = kc_dmn_delete(ctx, argv[i + 1]);
-        kc_dmn_close(ctx);
-        kc_dmn_options_free(opts);
-        return rc == KC_DMN_OK ? 0 : 1;
+        if (i + 2 != argc) return 1;
+        return kc_dmn_delete(argv[i + 1], dir) == KC_DMN_OK ? 0 : 1;
     }
 
     if (argv[i][0] == '-') {
         kc_dmn_help();
-            kc_dmn_options_free(opts);
         return 1;
     }
 
     if (i + 1 < argc) {
-        if (strcmp(argv[i + 1], "-d") == 0 || strcmp(argv[i + 1], "--delete") == 0) {
-            kc_dmn_t *ctx = NULL;
-            int rc;
-
-            if (i + 2 != argc) {
-                kc_dmn_options_free(opts);
-                return 1;
-            }
-
-            if (kc_dmn_open(&ctx, opts) != KC_DMN_OK) {
-                fprintf(stderr, "dmn: cannot resolve runtime directory\n");
-                kc_dmn_options_free(opts);
-                return 1;
-            }
-
-            rc = kc_dmn_delete(ctx, argv[i]);
-            kc_dmn_close(ctx);
-            kc_dmn_options_free(opts);
-            return rc == KC_DMN_OK ? 0 : 1;
+        if (strcmp(argv[i + 1], "-d") == 0 ||
+                strcmp(argv[i + 1], "--delete") == 0) {
+            if (i + 2 != argc) return 1;
+            return kc_dmn_delete(argv[i], dir) == KC_DMN_OK ? 0 : 1;
         }
 
-        if (strcmp(argv[i + 1], "-l") == 0 || strcmp(argv[i + 1], "--list") == 0) {
-            kc_dmn_t *ctx = NULL;
+        if (strcmp(argv[i + 1], "-l") == 0 ||
+                strcmp(argv[i + 1], "--list") == 0) {
+            kc_dmn_entry_t *entries = NULL;
+            size_t count = 0;
+            size_t n;
             int rc;
 
-            if (i + 2 != argc) {
-                kc_dmn_options_free(opts);
-                return 1;
+            if (i + 2 != argc) return 1;
+            rc = kc_dmn_list(dir, &entries, &count);
+            if (rc != KC_DMN_OK) return 1;
+            for (n = 0; n < count; n++) {
+                if (strcmp(argv[i], entries[n].name) == 0)
+                    printf("%s\t%s\n", entries[n].name, entries[n].endpoint);
             }
-
-            if (kc_dmn_open(&ctx, opts) != KC_DMN_OK) {
-                fprintf(stderr, "dmn: cannot resolve runtime directory\n");
-                kc_dmn_options_free(opts);
-                return 1;
-            }
-
-            rc = kc_dmn_list(ctx, argv[i], kc_dmn_cli_list_cb, NULL);
-            kc_dmn_close(ctx);
-            kc_dmn_options_free(opts);
-            return rc == KC_DMN_OK ? 0 : 1;
+            kc_dmn_free(entries);
+            return 0;
         }
 
-        if (strcmp(argv[i + 1], "-s") == 0 || strcmp(argv[i + 1], "--signal") == 0) {
-            kc_dmn_t *ctx = NULL;
+        if (strcmp(argv[i + 1], "-s") == 0 ||
+                strcmp(argv[i + 1], "--signal") == 0) {
+            kc_dmn_t *daemon = NULL;
+            int signal;
             int rc;
-            int signo = atoi(argv[i + 2]);
 
-            if (i + 3 != argc) {
-                kc_dmn_options_free(opts);
+            if (i + 3 != argc) return 1;
+            signal = atoi(argv[i + 2]);
+            if (kc_dmn_open(&daemon, argv[i]) != KC_DMN_OK) return 1;
+            if (dir && kc_dmn_set_dir(daemon, dir) != KC_DMN_OK) {
+                kc_dmn_close(daemon);
                 return 1;
             }
-
-            if (kc_dmn_open(&ctx, opts) != KC_DMN_OK) {
-                fprintf(stderr, "dmn: cannot resolve runtime directory\n");
-                kc_dmn_options_free(opts);
-                return 1;
-            }
-
-            rc = kc_dmn_signal(ctx, argv[i], signo);
-            kc_dmn_close(ctx);
-            kc_dmn_options_free(opts);
+            rc = kc_dmn_send_signal(daemon, signal);
+            kc_dmn_close(daemon);
             return rc == KC_DMN_OK ? 0 : 1;
         }
 
         {
-            kc_dmn_t *ctx = NULL;
+            kc_dmn_options_t options = {0};
             char cmd[KC_DMN_BUF];
-            int rc;
 
             kc_dmn_join_args(cmd, sizeof(cmd), argv, i + 1, argc);
-
-            if (kc_dmn_open(&ctx, opts) != KC_DMN_OK) {
-                fprintf(stderr, "dmn: cannot resolve runtime directory\n");
-                kc_dmn_options_free(opts);
-                return 1;
-            }
-
-            rc = kc_dmn_update(ctx, argv[i], cmd);
-            kc_dmn_close(ctx);
-            kc_dmn_options_free(opts);
-            return rc == KC_DMN_OK ? 0 : 1;
+            options.cmd = cmd;
+            options.dir = dir;
+            return kc_dmn_create(argv[i], &options) == KC_DMN_OK ? 0 : 1;
         }
     }
 
     {
-        kc_dmn_t *ctx = NULL;
+        kc_dmn_t *daemon = NULL;
         int rc;
 
-        if (kc_dmn_open(&ctx, opts) != KC_DMN_OK) {
-            fprintf(stderr, "dmn: cannot resolve runtime directory\n");
-            kc_dmn_close(ctx);
-            kc_dmn_options_free(opts);
+        if (kc_dmn_open(&daemon, argv[i]) != KC_DMN_OK) return 1;
+        if (dir && kc_dmn_set_dir(daemon, dir) != KC_DMN_OK) {
+            kc_dmn_close(daemon);
             return 1;
         }
-
-        rc = kc_dmn_cli_relay(ctx, argv[i]);
-        kc_dmn_close(ctx);
-        kc_dmn_options_free(opts);
+        rc = kc_dmn_cli_relay(daemon);
+        kc_dmn_close(daemon);
         return rc == KC_DMN_OK ? 0 : 1;
     }
-
-    kc_dmn_help();
-    kc_dmn_options_free(opts);
-    return 1;
 }
