@@ -608,12 +608,26 @@ static int case_kc_mmap_version(void) {
  */
 static int case_kc_mmap_cli(void) {
     char path[512];
-    char *set_args[4];
-    char *get_args[4];
-    char *del_args[4];
+    char *set_direct[] = {
+        (char *)KC_MMAP_TEST_CLI, path, "--set", "AB", NULL
+    };
+    char *set_stdin[] = {
+        (char *)KC_MMAP_TEST_CLI, path, "-set", NULL
+    };
+    char *get_args[] = {
+        (char *)KC_MMAP_TEST_CLI, path, "--get", NULL
+    };
+    char *del_args[] = {
+        (char *)KC_MMAP_TEST_CLI, path, "-del", NULL
+    };
     char *help_args[] = { (char *)KC_MMAP_TEST_CLI, "--help", NULL };
     char *version_args[] = { (char *)KC_MMAP_TEST_CLI, "-v", NULL };
-    char *bad_args[] = { (char *)KC_MMAP_TEST_CLI, "--nope", "x", NULL };
+    char *bad_args[] = {
+        (char *)KC_MMAP_TEST_CLI, path, "--nope", NULL
+    };
+    char *bad_get_value[] = {
+        (char *)KC_MMAP_TEST_CLI, path, "--get", "x", NULL
+    };
     char out[8192];
     char err[8192];
     int status = 0;
@@ -621,33 +635,29 @@ static int case_kc_mmap_cli(void) {
 
     if (KC_MMAP_TEST_CLI[0] == '\0') {
         case_result(0, "kc_mmap_cli",
-            "preserves set/get/del, diagnostics, help, and version");
+            "preserves path-first set/get/del, stdin, direct values, help, and version");
         return 0;
     }
 
     if (temp_path(path, sizeof(path), "cli")) return 1;
     remove(path);
 
-    set_args[0] = (char *)KC_MMAP_TEST_CLI;
-    set_args[1] = "--set";
-    set_args[2] = path;
-    set_args[3] = NULL;
-    get_args[0] = (char *)KC_MMAP_TEST_CLI;
-    get_args[1] = "-get";
-    get_args[2] = path;
-    get_args[3] = NULL;
-    del_args[0] = (char *)KC_MMAP_TEST_CLI;
-    del_args[1] = "--del";
-    del_args[2] = path;
-    del_args[3] = NULL;
-
-    fail += expect_int("CLI set exits 0", 0,
-        test_cli_run_input(set_args, "AB", 2U, out, sizeof(out),
+    fail += expect_int("CLI direct set exits 0", 0,
+        test_cli_run_input(set_direct, NULL, 0U, out, sizeof(out),
             err, sizeof(err), &status) ? 1 : status);
-    fail += expect_int("CLI get exits 0", 0,
+    fail += expect_int("CLI get direct value exits 0", 0,
         test_cli_run_input(get_args, NULL, 0U, out, sizeof(out),
             err, sizeof(err), &status) ? 1 : status);
-    fail += expect_string("CLI get output", "AB", out);
+    fail += expect_string("CLI get direct value output", "AB", out);
+
+    fail += expect_int("CLI stdin set exits 0", 0,
+        test_cli_run_input(set_stdin, "CD", 2U, out, sizeof(out),
+            err, sizeof(err), &status) ? 1 : status);
+    fail += expect_int("CLI get stdin value exits 0", 0,
+        test_cli_run_input(get_args, NULL, 0U, out, sizeof(out),
+            err, sizeof(err), &status) ? 1 : status);
+    fail += expect_string("CLI get stdin value output", "CD", out);
+
     fail += expect_int("CLI del exits 0", 0,
         test_cli_run_input(del_args, NULL, 0U, out, sizeof(out),
             err, sizeof(err), &status) ? 1 : status);
@@ -660,7 +670,8 @@ static int case_kc_mmap_cli(void) {
     fail += expect_int("CLI help exits 0", 0,
         test_cli_run_input(help_args, NULL, 0U, out, sizeof(out),
             err, sizeof(err), &status) ? 1 : status);
-    fail += expect_true("CLI help includes del", strstr(out, "--del") != NULL);
+    fail += expect_true("CLI help path-first usage",
+        strstr(out, "mmap <path> -set|--set [value]") != NULL);
     fail += expect_int("CLI version exits 0", 0,
         test_cli_run_input(version_args, NULL, 0U, out, sizeof(out),
             err, sizeof(err), &status) ? 1 : status);
@@ -669,10 +680,13 @@ static int case_kc_mmap_cli(void) {
     fail += expect_int("CLI unknown option exits 1", 1,
         test_cli_run_input(bad_args, NULL, 0U, out, sizeof(out),
             err, sizeof(err), &status) ? 1 : status);
+    fail += expect_int("CLI get value exits 1", 1,
+        test_cli_run_input(bad_get_value, NULL, 0U, out, sizeof(out),
+            err, sizeof(err), &status) ? 1 : status);
 
     remove(path);
     case_result(fail, "kc_mmap_cli",
-        "preserves set/get/del, diagnostics, help, and version");
+        "preserves path-first set/get/del, stdin, direct values, help, and version");
     return fail == 0 ? 0 : 1;
 }
 #endif
