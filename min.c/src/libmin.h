@@ -16,18 +16,38 @@
 extern "C" {
 #endif
 
-#define KC_MIN_MODE_CSS   1
-#define KC_MIN_MODE_JS    2
-#define KC_MIN_MODE_HTML  3
-
 /**
- * Minify a null-terminated source string using the requested mode.
- * @param mode One of KC_MIN_MODE_CSS, KC_MIN_MODE_JS, or KC_MIN_MODE_HTML.
- * @param input Borrowed null-terminated input source.
+ * Minify CSS conservatively.
+ * @param input Borrowed null-terminated CSS source.
  * @return Owned null-terminated minified string, or NULL on invalid input or
  * allocation failure.
  */
-char *kc_min_minify(int mode, const char *input);
+char *kc_min_css(const char *input);
+
+/**
+ * Minify JavaScript conservatively.
+ * @param input Borrowed null-terminated JavaScript source.
+ * @return Owned null-terminated minified string, or NULL on invalid input or
+ * allocation failure.
+ */
+char *kc_min_js(const char *input);
+
+/**
+ * Minify HTML conservatively.
+ * @param input Borrowed null-terminated HTML source.
+ * @return Owned null-terminated minified string, or NULL on invalid input or
+ * allocation failure.
+ */
+char *kc_min_html(const char *input);
+
+/**
+ * Minify generic text by collapsing whitespace runs to one space and trimming
+ * leading and trailing whitespace.
+ * @param input Borrowed null-terminated text source.
+ * @return Owned null-terminated minified string, or NULL on invalid input or
+ * allocation failure.
+ */
+char *kc_min_text(const char *input);
 
 /**
  * Release memory allocated by the min library.
