@@ -39,8 +39,8 @@ static void cli_help(const char *name) {
     printf("Usage: %s <command> [options]\n\n", name);
     printf("Commands:\n");
     printf("  parse [--all]                   Parse one HTTP message from stdin\n");
-    printf("  request [options]               Build an HTTP request from stdin body\n");
-    printf("  response [options]              Build an HTTP response from stdin body\n\n");
+    printf("  build request [options]         Build an HTTP request from stdin body\n");
+    printf("  build response [options]        Build an HTTP response from stdin body\n\n");
     printf("Parse options:\n");
     printf("  --all                           Print protocol metadata and all parsed fields\n\n");
     printf("Request options:\n");
@@ -337,13 +337,11 @@ int main(int argc, char **argv) {
         return cli_parse(all);
     }
 
-    if (strcmp(argv[i], "request") == 0) return cli_build(0, argc, argv, i + 1);
-    if (strcmp(argv[i], "response") == 0) return cli_build(1, argc, argv, i + 1);
-
-    /* Compatibility aliases while callers migrate from the old CLI shape. */
     if (strcmp(argv[i], "build") == 0 && i + 1 < argc) {
         if (strcmp(argv[i + 1], "request") == 0) return cli_build(0, argc, argv, i + 2);
         if (strcmp(argv[i + 1], "response") == 0) return cli_build(1, argc, argv, i + 2);
+        fprintf(stderr, "http: unknown build subcommand '%s'\n", argv[i + 1]);
+        return 1;
     }
 
     fprintf(stderr, "http: unknown command '%s'\n", argv[i]);
