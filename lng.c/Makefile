@@ -443,7 +443,7 @@ test:
 			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
+		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ] || ! grep -q '^LNG_TEST_CLI:' "$(BUILD_DIR)/test-wine/CMakeCache.txt"; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
@@ -495,7 +495,7 @@ test:
 			echo "missing native CLI: run make first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
+		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ] || ! grep -q '^LNG_TEST_CLI:' "$(BUILD_DIR)/test/CMakeCache.txt"; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DLNG_BUILD_TESTS=ON \
