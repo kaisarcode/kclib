@@ -157,6 +157,8 @@ struct kc_emb_worker {
     int shutdown;
 };
 
+typedef struct kc_emb kc_emb_state_t;
+
 struct kc_emb {
     kc_emb_worker_t *workers;
     int n_workers;
@@ -180,7 +182,7 @@ struct kc_emb {
  * @param ... Format arguments.
  * @return None.
  */
-static void kc_emb_set_error(kc_emb_t *ctx, const char *fmt, ...) {
+static void kc_emb_state_set_error(kc_emb_state_t *ctx, const char *fmt, ...) {
     va_list ap;
     if (!ctx || !fmt) return;
     va_start(ap, fmt);
@@ -903,29 +905,29 @@ static void kc_emb_worker_destroy(kc_emb_worker_t *w) {
  * @param out Pointer to receive the context pointer.
  * @return KC_EMB_OK on success, or KC_EMB_ERROR on failure.
  */
-int kc_emb_open(kc_emb_t **out) {
+static int kc_emb_state_open(kc_emb_state_t **out) {
     int n_workers;
-    kc_emb_t *ctx;
+    kc_emb_state_t *ctx;
 
     if (out) *out = NULL;
     if (!out) return KC_EMB_ERROR;
 
     n_workers = 1;
 
-    ctx = (kc_emb_t *)calloc(1, sizeof(kc_emb_t));
+    ctx = (kc_emb_state_t *)calloc(1, sizeof(kc_emb_state_t));
     if (!ctx) return KC_EMB_ERROR;
     ctx->error[0] = '\0';
 
     ctx->workers = (kc_emb_worker_t *)calloc(n_workers, sizeof(kc_emb_worker_t));
-    if (!ctx->workers) { kc_emb_set_error(ctx, "memory allocation failed"); free(ctx); return KC_EMB_ERROR; }
+    if (!ctx->workers) { kc_emb_state_set_error(ctx, "memory allocation failed"); free(ctx); return KC_EMB_ERROR; }
 
 #ifndef _WIN32
     if (pthread_mutex_init(&ctx->pool_mutex, NULL) != 0) {
-        kc_emb_set_error(ctx, "pthread_mutex_init failed");
+        kc_emb_state_set_error(ctx, "pthread_mutex_init failed");
         free(ctx->workers); free(ctx); return KC_EMB_ERROR;
     }
     if (pthread_cond_init(&ctx->pool_cond, NULL) != 0) {
-        kc_emb_set_error(ctx, "pthread_cond_init failed");
+        kc_emb_state_set_error(ctx, "pthread_cond_init failed");
         pthread_mutex_destroy(&ctx->pool_mutex);
         free(ctx->workers); free(ctx); return KC_EMB_ERROR;
     }
@@ -948,7 +950,7 @@ int kc_emb_open(kc_emb_t **out) {
 #else
         DeleteCriticalSection(&ctx->pool_mutex);
 #endif
-        kc_emb_set_error(ctx, "worker initialization failed");
+        kc_emb_state_set_error(ctx, "worker initialization failed");
         free(ctx->workers); free(ctx); return KC_EMB_ERROR;
     }
 
@@ -960,40 +962,11 @@ int kc_emb_open(kc_emb_t **out) {
 }
 
 /**
- * Release a emb pool and shut down all workers.
- * @param ctx Pool pointer.
- * @return No return value.
- */
-void kc_emb_close(kc_emb_t *ctx) {
-    if (!ctx) return;
-    for (int i = 0; i < ctx->n_workers; i++) kc_emb_worker_destroy(&ctx->workers[i]);
-#ifndef _WIN32
-    pthread_cond_destroy(&ctx->pool_cond);
-    pthread_mutex_destroy(&ctx->pool_mutex);
-#else
-    DeleteCriticalSection(&ctx->pool_mutex);
-#endif
-    free(ctx->workers);
-    ctx->workers = NULL;
-    free(ctx);
-}
-
-/**
- * Retrieve last error for context.
- * @param ctx Context pointer.
- * @return Borrowed error string or NULL.
- */
-const char *kc_emb_get_error(const kc_emb_t *ctx) {
-    if (!ctx) return NULL;
-    return ctx->error;
-}
-
-/**
- * Retrieve the embedding dimension.
- * @param ctx Pool pointer.
+ * Retrieve the fixed model embedding dimension from initialized state.
+ * @param ctx Internal state pointer.
  * @return Dimension size, or 0 on invalid input.
  */
-size_t kc_emb_dim(const kc_emb_t *ctx) {
+static size_t kc_emb_state_dim(const kc_emb_state_t *ctx) {
     return ctx ? (size_t)ctx->n_embd : 0;
 }
 
@@ -1006,7 +979,7 @@ size_t kc_emb_dim(const kc_emb_t *ctx) {
  * @param out_count Output count, equals dim on success.
  * @return KC_EMB_OK on success, KC_EMB_ERROR on failure.
  */
-int kc_emb_exec(kc_emb_t *ctx, const char *input, float **out_data, size_t *out_count) {
+static int kc_emb_state_exec(kc_emb_state_t *ctx, const char *input, float **out_data, size_t *out_count) {
     kc_emb_worker_t *w = NULL;
     float *out = NULL;
     size_t dim = 0;
@@ -1016,21 +989,21 @@ int kc_emb_exec(kc_emb_t *ctx, const char *input, float **out_data, size_t *out_
     if (out_count) *out_count = 0;
 
     if (!ctx || !input || !out_data || !out_count) {
-        if (ctx) kc_emb_set_error(ctx, "invalid argument");
+        if (ctx) kc_emb_state_set_error(ctx, "invalid argument");
         return KC_EMB_ERROR;
     }
 
     ctx->error[0] = '\0';
 
-    dim = kc_emb_dim(ctx);
+    dim = kc_emb_state_dim(ctx);
     if (dim == 0) {
-        kc_emb_set_error(ctx, "invalid argument");
+        kc_emb_state_set_error(ctx, "invalid argument");
         return KC_EMB_ERROR;
     }
 
     out = (float *)malloc(dim * sizeof(float));
     if (!out) {
-        kc_emb_set_error(ctx, "allocation failure");
+        kc_emb_state_set_error(ctx, "allocation failure");
         return KC_EMB_ERROR;
     }
 
@@ -1111,7 +1084,7 @@ int kc_emb_exec(kc_emb_t *ctx, const char *input, float **out_data, size_t *out_
 #endif
 
     if (result != KC_EMB_OK) {
-        kc_emb_set_error(ctx, "worker execution failure");
+        kc_emb_state_set_error(ctx, "worker execution failure");
         free(out);
         return KC_EMB_ERROR;
     }
@@ -1119,6 +1092,60 @@ int kc_emb_exec(kc_emb_t *ctx, const char *input, float **out_data, size_t *out_
     *out_data = out;
     *out_count = dim;
     return KC_EMB_OK;
+}
+
+
+static kc_emb_state_t *kc_emb_global = NULL;
+
+#ifndef _WIN32
+static pthread_once_t kc_emb_once = PTHREAD_ONCE_INIT;
+
+/**
+ * Initialize the fixed embedded model once per process.
+ * @return None.
+ */
+static void kc_emb_global_init(void) {
+    (void)kc_emb_state_open(&kc_emb_global);
+}
+#else
+static INIT_ONCE kc_emb_once = INIT_ONCE_STATIC_INIT;
+
+/**
+ * Initialize the fixed embedded model once per process.
+ * @param once Windows once-control object.
+ * @param param Unused callback parameter.
+ * @param context Unused callback context.
+ * @return TRUE after the initialization attempt.
+ */
+static BOOL CALLBACK kc_emb_global_init(PINIT_ONCE once, PVOID param, PVOID *context) {
+    (void)once;
+    (void)param;
+    (void)context;
+    (void)kc_emb_state_open(&kc_emb_global);
+    return TRUE;
+}
+#endif
+
+/**
+ * Generate an embedding using the single embedded model.
+ * @param input Null-terminated input text.
+ * @param out_data Destination for the caller-owned vector.
+ * @param out_count Destination for the vector element count.
+ * @return KC_EMB_OK on success, KC_EMB_ERROR on failure.
+ */
+int kc_emb_embed(const char *input, float **out_data, size_t *out_count) {
+    if (out_data) *out_data = NULL;
+    if (out_count) *out_count = 0;
+    if (!input || !out_data || !out_count) return KC_EMB_ERROR;
+
+#ifndef _WIN32
+    if (pthread_once(&kc_emb_once, kc_emb_global_init) != 0) return KC_EMB_ERROR;
+#else
+    if (!InitOnceExecuteOnce(&kc_emb_once, kc_emb_global_init, NULL, NULL)) return KC_EMB_ERROR;
+#endif
+
+    if (!kc_emb_global) return KC_EMB_ERROR;
+    return kc_emb_state_exec(kc_emb_global, input, out_data, out_count);
 }
 
 /**
