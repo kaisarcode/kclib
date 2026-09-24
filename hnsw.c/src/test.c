@@ -18,11 +18,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
+#ifndef __EMSCRIPTEN__
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -269,7 +269,6 @@ static int case_kc_hnsw_contract(void) {
     return fail;
 }
 
-#ifndef __EMSCRIPTEN__
 typedef struct {
     const kc_hnsw_t *hnsw;
     const float *query;
@@ -352,6 +351,7 @@ static int case_kc_hnsw_concurrency(void) {
     return fail;
 }
 
+#ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 static int cli_to_wide(const char *in, wchar_t *out, size_t cap) {
     return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
@@ -652,7 +652,7 @@ static int case_all(void) {
     int rc = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 5;
+    test_case_total = 6;
 #else
     test_case_total = 7;
 #endif
@@ -661,8 +661,8 @@ static int case_all(void) {
     rc += run_case(case_kc_hnsw_add_build);
     rc += run_case(case_kc_hnsw_search);
     rc += run_case(case_kc_hnsw_contract);
-#ifndef __EMSCRIPTEN__
     rc += run_case(case_kc_hnsw_concurrency);
+#ifndef __EMSCRIPTEN__
     rc += run_case(case_kc_hnsw_cli);
 #endif
     rc += run_case(case_kc_hnsw_version);
@@ -696,12 +696,12 @@ int main(int argc, char **argv) {
         test_case_current = 1;
         return case_kc_hnsw_contract();
     }
-#ifndef __EMSCRIPTEN__
     if (strcmp(argv[1], "kc_hnsw_concurrency") == 0) {
         test_case_total = 1;
         test_case_current = 1;
         return case_kc_hnsw_concurrency();
     }
+#ifndef __EMSCRIPTEN__
     if (strcmp(argv[1], "kc_hnsw_cli") == 0) {
         test_case_total = 1;
         test_case_current = 1;
