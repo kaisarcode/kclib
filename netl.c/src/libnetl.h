@@ -34,6 +34,7 @@ typedef struct kc_netl_connection kc_netl_connection_t;
 #define KC_NETL_EVENT_DATA        2
 #define KC_NETL_EVENT_CLOSE       3
 #define KC_NETL_EVENT_DATAGRAM    4
+#define KC_NETL_EVENT_WRITABLE    5
 
 typedef struct {
     const char *host;
@@ -66,6 +67,7 @@ int kc_netl_open(
 
 /**
  * Wait for one listener event.
+ * WRITABLE is emitted only after a TCP send was partial or returned EAGAIN.
  * Event data, host text, and connection handles are borrowed. DATA and
  * DATAGRAM bytes remain valid only until the next kc_netl_poll call.
  * A connection delivered with CLOSE remains valid only until the next poll.
