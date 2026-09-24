@@ -1,848 +1,1078 @@
 /**
- * test.c - libnetl public API tests.
- * Summary: Tests each public libnetl function through one CTest case.
+ * test.c - libnetl public API contract tests.
+ * Summary: Tests multiplexed TCP connections, UDP datagrams, and CLI surface.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
-#ifndef _WIN32
-#define _POSIX_C_SOURCE 200809L
-#endif
-
 #include "libnetl.h"
 
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <fcntl.h>
 #include <io.h>
 #include <process.h>
-#include <windows.h>
-#define getpid _getpid
+#include <sys/stat.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SOCKET test_fd_t;
+#define TEST_FD_INVALID INVALID_SOCKET
+#define TEST_CLOSE closesocket
+#define TEST_GETPID _getpid
+#define TEST_CLI_NAME "netl.exe"
 #else
-#include <fcntl.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
-#include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
-#define mkdir_one(path) mkdir(path, 0700)
+typedef int test_fd_t;
+#define TEST_FD_INVALID (-1)
+#define TEST_CLOSE close
+#define TEST_GETPID getpid
+#define TEST_CLI_NAME "netl"
 #endif
 
-/**
- * Describes list callback observations.
- */
-typedef struct {
-    const char *expected_key;
-    int count;
-    int exact_count;
-    char first_addrport[256];
-} list_state_t;
+static int test_case_total;
+static int test_case_current;
+static const char *test_program_path;
 
 /**
- * Records one list callback entry.
- * @param key Listener key name.
- * @param addrport Address and port string.
- * @param userdata List state pointer.
- * @return None.
- */
-static void record_list(const char *key, const char *addrport, void *userdata) {
-    list_state_t *state;
-
-    state = (list_state_t *)userdata;
-    if (state == NULL || key == NULL || addrport == NULL) return;
-    state->count++;
-    if (state->count == 1) {
-        snprintf(state->first_addrport, sizeof(state->first_addrport), "%s", addrport);
-    }
-    if (state->expected_key != NULL && strcmp(key, state->expected_key) == 0) {
-        state->exact_count++;
-    }
-}
-
-/**
- * Verifies one integer result.
- * @param name Check description.
- * @param expected Expected value.
- * @param actual Actual value.
- * @return 0 on success, 1 on failure.
- */
-static int expect_int(const char *name, int expected, int actual) {
-    if (expected != actual) {
-        printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Verifies one boolean condition.
- * @param name Check description.
- * @param condition Non-zero when the check passed.
- * @return 0 on success, 1 on failure.
- */
-static int expect_true(const char *name, int condition) {
-    if (!condition) {
-        printf("[FAIL] %s\n", name);
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Verifies one string result.
- * @param name Check description.
- * @param expected Expected string.
- * @param actual Actual string.
- * @return 0 on success, 1 on failure.
- */
-static int expect_string(const char *name, const char *expected, const char *actual) {
-    if (actual == NULL || strcmp(expected, actual) != 0) {
-        printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
-            actual != NULL ? actual : "NULL");
-        return 1;
-    }
-    return 0;
-}
-
-static int test_case_total = 0;
-static int test_case_current = 0;
-
-/**
- * Prints a test case result line.
- * @param fail Non-zero when the case failed.
- * @param name Test case name.
- * @param detail Test behavior detail.
+ * Print one top-level test result.
+ * @param fail Failure count.
+ * @param name Canonical case name.
+ * @param detail Case detail.
  * @return None.
  */
 static void case_result(int fail, const char *name, const char *detail) {
-    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        fail ? "FAIL" : "PASS", name, detail);
-}
-
-typedef int (*case_fn)(void);
-
-/**
- * Runs one test case with counter tracking.
- * @param rc Destination accumulator.
- * @param fn Test case function.
- * @return None.
- */
-static void run_case(int *rc, case_fn fn) {
     test_case_current++;
-    *rc += fn();
+    printf(
+        "[%d/%d] [%s] %s: %s\n",
+        test_case_current,
+        test_case_total,
+        fail ? "FAIL" : "PASS",
+        name,
+        detail
+    );
 }
 
-#ifndef _WIN32
 /**
- * Sleeps briefly to let processes reach readiness.
+ * Run one top-level case.
+ * @param rc Failure accumulator.
+ * @param fn Case function.
  * @return None.
  */
-static void short_sleep(void) {
-    struct timespec ts;
-
-    ts.tv_sec = 0;
-    ts.tv_nsec = 200000000L;
-    nanosleep(&ts, NULL);
+static void run_case(int *rc, int (*fn)(void)) {
+    if (fn() != 0) (*rc)++;
 }
-#endif
 
-#ifndef _WIN32
 /**
- * Finds a free TCP port by binding to port 0.
- * @return Port number, or 0 on failure.
+ * Verify one condition.
+ * @param label Check label.
+ * @param condition Condition.
+ * @return Failure count.
  */
-static unsigned short find_free_port(void) {
-    struct sockaddr_in addr;
-    socklen_t len = sizeof(addr);
-    int fd;
+static int expect_true(const char *label, int condition) {
+    if (condition) return 0;
+    fprintf(stderr, "FAIL: %s\n", label);
+    return 1;
+}
 
-    fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return 0;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = 0;
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        close(fd);
+/**
+ * Verify one integer result.
+ * @param label Check label.
+ * @param expected Expected value.
+ * @param actual Actual value.
+ * @return Failure count.
+ */
+static int expect_int(const char *label, int expected, int actual) {
+    if (expected == actual) return 0;
+    fprintf(
+        stderr,
+        "FAIL: %s: expected %d, got %d\n",
+        label,
+        expected,
+        actual
+    );
+    return 1;
+}
+
+/**
+ * Verify one byte sequence.
+ * @param label Check label.
+ * @param expected Expected bytes.
+ * @param expected_size Expected byte count.
+ * @param actual Actual bytes.
+ * @param actual_size Actual byte count.
+ * @return Failure count.
+ */
+static int expect_bytes(
+    const char *label,
+    const void *expected,
+    size_t expected_size,
+    const void *actual,
+    size_t actual_size
+) {
+    if (
+        expected_size == actual_size &&
+        (expected_size == 0U ||
+         memcmp(expected, actual, expected_size) == 0)
+    ) {
         return 0;
     }
-    if (getsockname(fd, (struct sockaddr *)&addr, &len) != 0) {
-        close(fd);
-        return 0;
+
+    fprintf(stderr, "FAIL: %s\n", label);
+    return 1;
+}
+
+/**
+ * Verify one buffer contains text.
+ * @param label Check label.
+ * @param data Buffer bytes.
+ * @param size Buffer size.
+ * @param needle Expected text.
+ * @return Failure count.
+ */
+static int expect_contains(
+    const char *label,
+    const void *data,
+    size_t size,
+    const char *needle
+) {
+    size_t needle_size = strlen(needle);
+    size_t i;
+
+    for (i = 0U; i + needle_size <= size; i++) {
+        if (
+            memcmp(
+                (const unsigned char *)data + i,
+                needle,
+                needle_size
+            ) == 0
+        ) {
+            return 0;
+        }
     }
-    close(fd);
-    return ntohs(addr.sin_port);
+
+    fprintf(stderr, "FAIL: %s\n", label);
+    return 1;
 }
 
 /**
- * Kills a process and reaps it to avoid zombies.
- * @param pid Process ID.
- * @return None.
+ * Configure a short receive timeout on one test socket.
+ * @param fd Socket descriptor.
+ * @return Zero on success, otherwise nonzero.
  */
-static void kill_and_reap(pid_t pid) {
-    if (pid <= 0) return;
-    kill(pid, SIGTERM);
-    waitpid(pid, NULL, 0);
-}
+static int test_socket_timeout(test_fd_t fd) {
+#ifdef _WIN32
+    DWORD timeout = 2000U;
+
+    return setsockopt(
+        fd,
+        SOL_SOCKET,
+        SO_RCVTIMEO,
+        (const char *)&timeout,
+        (int)sizeof(timeout)
+    ) == 0 ? 0 : 1;
+#else
+    struct timeval timeout;
+
+    timeout.tv_sec = 2;
+    timeout.tv_usec = 0;
+    return setsockopt(
+        fd,
+        SOL_SOCKET,
+        SO_RCVTIMEO,
+        &timeout,
+        (socklen_t)sizeof(timeout)
+    ) == 0 ? 0 : 1;
 #endif
-
-/**
- * Tests kc_netl_version.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_version(void) {
-    const char *name = "kc_netl_version";
-    const char *detail = "returns non-zero build timestamp";
-    int fail = expect_true("kc_netl_version returns non-zero build timestamp", kc_netl_version() != 0U);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_netl_strerror.
- * @return 0 on success, 1 on failure.
+ * Connect one IPv4 TCP client to a listener port.
+ * @param port Destination loopback port.
+ * @return Connected socket or TEST_FD_INVALID.
  */
-static int case_kc_netl_strerror(void) {
-    const char *name = "kc_netl_strerror";
-    const char *detail = "maps codes to messages";
-    int fail;
+static test_fd_t test_tcp_connect(unsigned short port) {
+    struct sockaddr_in address;
+    test_fd_t fd;
 
-    fail = 0;
-    fail += expect_string("strerror(OK)", "ok", kc_netl_strerror(KC_NETL_OK));
-    fail += expect_string("strerror(ERROR)", "error", kc_netl_strerror(KC_NETL_ERROR));
-    fail += expect_string("strerror(ENET)", "network error", kc_netl_strerror(KC_NETL_ENET));
-    fail += expect_string("strerror(unknown)", "unknown error", kc_netl_strerror(999));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd == TEST_FD_INVALID) return TEST_FD_INVALID;
+
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    if (
+        connect(
+            fd,
+            (const struct sockaddr *)&address,
+            (socklen_t)sizeof(address)
+        ) != 0
+    ) {
+        TEST_CLOSE(fd);
+        return TEST_FD_INVALID;
+    }
+
+    (void)test_socket_timeout(fd);
+    return fd;
 }
 
 /**
- * Tests kc_netl_options_default.
- * @return 0 on success, 1 on failure.
+ * Open one TCP listener and one accepted client connection.
+ * @param out_listener Receives listener.
+ * @param out_connection Receives accepted connection.
+ * @param out_client Receives client socket.
+ * @return Zero on success, otherwise nonzero.
  */
-static int case_kc_netl_options_default(void) {
-    const char *name = "kc_netl_options_default";
-    const char *detail = "returns zeroed options";
-    kc_netl_options_t opts;
+static int test_tcp_pair(
+    kc_netl_t **out_listener,
+    kc_netl_connection_t **out_connection,
+    test_fd_t *out_client
+) {
+    kc_netl_options_t options;
+    kc_netl_event_t event;
+    kc_netl_t *listener = NULL;
+    test_fd_t client = TEST_FD_INVALID;
+    int rc;
 
-    opts = kc_netl_options_default();
-    int fail = expect_true("kc_netl_options_default returns zeroed options", opts.reserved == 0);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    memset(&options, 0, sizeof(options));
+    options.host = "127.0.0.1";
+    options.protocol = KC_NETL_TCP;
+
+    rc = kc_netl_open(&listener, &options);
+    if (rc != KC_NETL_OK) return 1;
+
+    client = test_tcp_connect(kc_netl_port(listener));
+    if (client == TEST_FD_INVALID) {
+        kc_netl_close(listener);
+        return 1;
+    }
+
+    rc = kc_netl_poll(listener, &event, 2000);
+    if (
+        rc != KC_NETL_OK ||
+        event.type != KC_NETL_EVENT_CONNECTION ||
+        event.connection == NULL
+    ) {
+        TEST_CLOSE(client);
+        kc_netl_close(listener);
+        return 1;
+    }
+
+    *out_listener = listener;
+    *out_connection = event.connection;
+    *out_client = client;
+    return 0;
 }
 
 /**
- * Tests kc_netl_options_load_env.
- * @return 0 on success, 1 on failure.
+ * Read one expected byte sequence from a socket.
+ * @param fd Socket descriptor.
+ * @param expected Expected bytes.
+ * @param expected_size Expected byte count.
+ * @return Failure count.
  */
-static int case_kc_netl_options_load_env(void) {
-    const char *name = "kc_netl_options_load_env";
-    const char *detail = "loads environment options";
-    kc_netl_options_t opts;
-    int fail;
+static int test_socket_expect(
+    test_fd_t fd,
+    const void *expected,
+    size_t expected_size
+) {
+    unsigned char buffer[256];
+    size_t used = 0U;
 
-    fail = 0;
-    opts = kc_netl_options_default();
-    kc_netl_options_load_env(&opts);
-    fail += expect_true("load_env does not crash on valid opts", 1);
-    kc_netl_options_load_env(NULL);
-    fail += expect_true("load_env(NULL) does not crash", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    while (used < expected_size) {
+        int received = recv(
+            fd,
+            (char *)buffer + used,
+            (int)(expected_size - used),
+            0
+        );
+        if (received <= 0) return 1;
+        used += (size_t)received;
+    }
+
+    return expect_bytes(
+        "socket bytes",
+        expected,
+        expected_size,
+        buffer,
+        used
+    );
 }
 
 /**
- * Tests kc_netl_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_options_free(void) {
-    const char *name = "kc_netl_options_free";
-    const char *detail = "frees without crashing";
-    kc_netl_options_t opts;
-    int fail;
-
-    fail = 0;
-    opts = kc_netl_options_default();
-    kc_netl_options_free(&opts);
-    fail += expect_true("options_free does not crash", 1);
-    kc_netl_options_free(NULL);
-    fail += expect_true("options_free(NULL) does not crash", 1);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_netl_request_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_request_stop(void) {
-    const char *name = "kc_netl_request_stop";
-    const char *detail = "is idempotent";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("request_stop(NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_request_stop(NULL));
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("request_stop(ctx) returns OK", KC_NETL_OK,
-        kc_netl_request_stop(ctx));
-    fail += expect_int("request_stop is idempotent", KC_NETL_OK,
-        kc_netl_request_stop(ctx));
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_netl_open.
- * @return 0 on success, 1 on failure.
+ * Test kc_netl_open.
+ * @return Zero on success, otherwise nonzero.
  */
 static int case_kc_netl_open(void) {
-    const char *name = "kc_netl_open";
-    const char *detail = "validates arguments and allocates context";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    int fail;
+    kc_netl_options_t options;
+    kc_netl_t *listener = (kc_netl_t *)1;
+    int fail = 0;
 
-    fail = 0;
-    ctx = NULL;
-    opts = kc_netl_options_default();
-    fail += expect_int("open(NULL, opts) returns ERROR", KC_NETL_ERROR,
-        kc_netl_open(NULL, &opts));
-    fail += expect_int("open(out, NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_open(&ctx, NULL));
-    fail += expect_true("open error leaves output NULL", ctx == NULL);
-    fail += expect_int("open valid opts returns OK", KC_NETL_OK,
-        kc_netl_open(&ctx, &opts));
-    fail += expect_true("open creates valid context", ctx != NULL);
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    memset(&options, 0, sizeof(options));
+    options.host = "127.0.0.1";
+    options.protocol = KC_NETL_TCP;
+
+    fail += expect_int(
+        "NULL out",
+        KC_NETL_EINVAL,
+        kc_netl_open(NULL, &options)
+    );
+    fail += expect_int(
+        "NULL options",
+        KC_NETL_EINVAL,
+        kc_netl_open(&listener, NULL)
+    );
+    fail += expect_true("failed open clears output", listener == NULL);
+
+    options.protocol = 99;
+    fail += expect_int(
+        "invalid protocol",
+        KC_NETL_EINVAL,
+        kc_netl_open(&listener, &options)
+    );
+
+    options.protocol = KC_NETL_TCP;
+    fail += expect_int(
+        "TCP open",
+        KC_NETL_OK,
+        kc_netl_open(&listener, &options)
+    );
+    fail += expect_true("listener allocated", listener != NULL);
+    kc_netl_close(listener);
+
+    case_result(fail, "kc_netl_open", "binds one incoming listener");
+    return fail != 0;
 }
 
 /**
- * Tests kc_netl_close.
- * @return 0 on success, 1 on failure.
+ * Test kc_netl_poll.
+ * @return Zero on success, otherwise nonzero.
+ */
+static int case_kc_netl_poll(void) {
+    kc_netl_options_t options;
+    kc_netl_event_t event;
+    kc_netl_t *listener = NULL;
+    int fail = 0;
+
+    memset(&options, 0, sizeof(options));
+    options.host = "127.0.0.1";
+    options.protocol = KC_NETL_TCP;
+
+    fail += expect_int(
+        "open",
+        KC_NETL_OK,
+        kc_netl_open(&listener, &options)
+    );
+    fail += expect_int(
+        "immediate timeout",
+        KC_NETL_EAGAIN,
+        kc_netl_poll(listener, &event, 0)
+    );
+    fail += expect_int(
+        "NULL listener",
+        KC_NETL_EINVAL,
+        kc_netl_poll(NULL, &event, 0)
+    );
+    fail += expect_int(
+        "NULL event",
+        KC_NETL_EINVAL,
+        kc_netl_poll(listener, NULL, 0)
+    );
+    fail += expect_int(
+        "invalid timeout",
+        KC_NETL_EINVAL,
+        kc_netl_poll(listener, &event, -2)
+    );
+
+    kc_netl_close(listener);
+    case_result(fail, "kc_netl_poll", "waits for one event without serializing clients");
+    return fail != 0;
+}
+
+/**
+ * Test kc_netl_send.
+ * @return Zero on success, otherwise nonzero.
+ */
+static int case_kc_netl_send(void) {
+    kc_netl_t *listener = NULL;
+    kc_netl_connection_t *connection = NULL;
+    test_fd_t client = TEST_FD_INVALID;
+    size_t sent = 0U;
+    int fail = 0;
+
+    if (test_tcp_pair(&listener, &connection, &client) != 0) return 1;
+
+    fail += expect_int(
+        "send",
+        KC_NETL_OK,
+        kc_netl_send(connection, "pong", 4U, &sent)
+    );
+    fail += expect_true("sent bytes", sent == 4U);
+    fail += test_socket_expect(client, "pong", 4U);
+    fail += expect_int(
+        "NULL connection",
+        KC_NETL_EINVAL,
+        kc_netl_send(NULL, "x", 1U, &sent)
+    );
+
+    TEST_CLOSE(client);
+    kc_netl_close(listener);
+    case_result(fail, "kc_netl_send", "writes to one specific TCP connection");
+    return fail != 0;
+}
+
+/**
+ * Test kc_netl_sendto.
+ * @return Zero on success, otherwise nonzero.
+ */
+static int case_kc_netl_sendto(void) {
+    kc_netl_options_t options;
+    kc_netl_event_t event;
+    kc_netl_t *listener = NULL;
+    struct sockaddr_in address;
+    test_fd_t client = TEST_FD_INVALID;
+    char response[8];
+    int received;
+    int fail = 0;
+
+    memset(&options, 0, sizeof(options));
+    options.host = "127.0.0.1";
+    options.protocol = KC_NETL_UDP;
+    if (kc_netl_open(&listener, &options) != KC_NETL_OK) return 1;
+
+    client = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (client == TEST_FD_INVALID) {
+        kc_netl_close(listener);
+        return 1;
+    }
+    (void)test_socket_timeout(client);
+
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(kc_netl_port(listener));
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    if (
+        sendto(
+            client,
+            "ping",
+            4,
+            0,
+            (const struct sockaddr *)&address,
+            (socklen_t)sizeof(address)
+        ) != 4
+    ) {
+        TEST_CLOSE(client);
+        kc_netl_close(listener);
+        return 1;
+    }
+
+    fail += expect_int(
+        "datagram event",
+        KC_NETL_OK,
+        kc_netl_poll(listener, &event, 2000)
+    );
+    fail += expect_int(
+        "datagram type",
+        KC_NETL_EVENT_DATAGRAM,
+        event.type
+    );
+    fail += expect_bytes(
+        "datagram bytes",
+        "ping",
+        4U,
+        event.data,
+        event.data_size
+    );
+    fail += expect_true(
+        "datagram peer",
+        event.host != NULL && event.port != 0U
+    );
+
+    fail += expect_int(
+        "sendto reply",
+        KC_NETL_OK,
+        kc_netl_sendto(
+            listener,
+            event.host,
+            event.port,
+            "pong",
+            4U
+        )
+    );
+    received = recv(client, response, (int)sizeof(response), 0);
+    fail += expect_int("UDP response size", 4, received);
+    if (received == 4) {
+        fail += expect_bytes("UDP response", "pong", 4U, response, 4U);
+    }
+
+    TEST_CLOSE(client);
+    kc_netl_close(listener);
+    case_result(fail, "kc_netl_sendto", "preserves datagram and peer identity");
+    return fail != 0;
+}
+
+/**
+ * Test kc_netl_connection_close.
+ * @return Zero on success, otherwise nonzero.
+ */
+static int case_kc_netl_connection_close(void) {
+    kc_netl_t *listener = NULL;
+    kc_netl_connection_t *connection = NULL;
+    test_fd_t client = TEST_FD_INVALID;
+    size_t sent = 0U;
+    int fail = 0;
+
+    if (test_tcp_pair(&listener, &connection, &client) != 0) return 1;
+
+    kc_netl_connection_close(connection);
+    kc_netl_connection_close(connection);
+    fail += expect_int(
+        "send after close",
+        KC_NETL_ECLOSED,
+        kc_netl_send(connection, "x", 1U, &sent)
+    );
+    kc_netl_connection_close(NULL);
+
+    TEST_CLOSE(client);
+    kc_netl_close(listener);
+    case_result(fail, "kc_netl_connection_close", "closes one client independently");
+    return fail != 0;
+}
+
+/**
+ * Test kc_netl_port.
+ * @return Zero on success, otherwise nonzero.
+ */
+static int case_kc_netl_port(void) {
+    kc_netl_options_t options;
+    kc_netl_t *listener = NULL;
+    int fail = 0;
+
+    memset(&options, 0, sizeof(options));
+    options.host = "127.0.0.1";
+    options.protocol = KC_NETL_TCP;
+    if (kc_netl_open(&listener, &options) != KC_NETL_OK) return 1;
+
+    fail += expect_true("ephemeral port selected", kc_netl_port(listener) != 0U);
+    fail += expect_true("NULL port", kc_netl_port(NULL) == 0U);
+
+    kc_netl_close(listener);
+    case_result(fail, "kc_netl_port", "reports the actual bound port");
+    return fail != 0;
+}
+
+/**
+ * Test kc_netl_close.
+ * @return Zero on success, otherwise nonzero.
  */
 static int case_kc_netl_close(void) {
-    const char *name = "kc_netl_close";
-    const char *detail = "releases context";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    int fail;
+    kc_netl_options_t options;
+    kc_netl_t *listener = NULL;
+    int fail = 0;
 
-    fail = 0;
-    fail += expect_int("close(NULL) returns ERROR", KC_NETL_ERROR, kc_netl_close(NULL));
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("close releases context", KC_NETL_OK, kc_netl_close(ctx));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    memset(&options, 0, sizeof(options));
+    options.host = "127.0.0.1";
+    options.protocol = KC_NETL_TCP;
+    fail += expect_int(
+        "open",
+        KC_NETL_OK,
+        kc_netl_open(&listener, &options)
+    );
+    kc_netl_close(listener);
+    kc_netl_close(NULL);
+
+    case_result(fail, "kc_netl_close", "releases listener and active connections");
+    return fail != 0;
 }
 
 /**
- * Tests kc_netl_path.
- * @return 0 on success, 1 on failure.
+ * Test multiple TCP clients remain independent and concurrent.
+ * @return Zero on success, otherwise nonzero.
  */
-static int case_kc_netl_path(void) {
-    const char *name = "kc_netl_path";
-    const char *detail = "returns metadata file location";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    int fail;
+static int case_kc_netl_concurrency(void) {
+    kc_netl_options_t options;
+    kc_netl_event_t event;
+    kc_netl_t *listener = NULL;
+    kc_netl_connection_t *connection_a = NULL;
+    kc_netl_connection_t *connection_b = NULL;
+    test_fd_t client_a = TEST_FD_INVALID;
+    test_fd_t client_b = TEST_FD_INVALID;
+    size_t sent = 0U;
+    int saw_a = 0;
+    int saw_b = 0;
+    int i;
+    int fail = 0;
 
-    fail = 0;
-    fail += expect_true("path(NULL) returns NULL", kc_netl_path(NULL) == NULL);
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_true("path returns non-NULL string", kc_netl_path(ctx) != NULL);
-    fail += expect_true("path contains 'netl'", strstr(kc_netl_path(ctx), "netl") != NULL);
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
+    memset(&options, 0, sizeof(options));
+    options.host = "127.0.0.1";
+    options.protocol = KC_NETL_TCP;
+    if (kc_netl_open(&listener, &options) != KC_NETL_OK) return 1;
 
-/**
- * Tests kc_netl_update.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_update(void) {
-    const char *name = "kc_netl_update";
-    const char *detail = "validates and replaces registrations";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("update(NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_update(NULL, "key", "127.0.0.1", 8080, KC_NETL_TCP, "cat"));
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("update(ctx, NULL, ...) returns ERROR", KC_NETL_ERROR,
-        kc_netl_update(ctx, NULL, "127.0.0.1", 8080, KC_NETL_TCP, "cat"));
-    fail += expect_int("update(ctx, key, NULL, ...) returns ERROR", KC_NETL_ERROR,
-        kc_netl_update(ctx, "key", NULL, 8080, KC_NETL_TCP, "cat"));
-    fail += expect_int("update(ctx, key, host, port, proto, NULL) returns OK (cmd ignored)", KC_NETL_OK,
-        kc_netl_update(ctx, "key", "127.0.0.1", 8080, KC_NETL_TCP, NULL));
-    fail += expect_int("update(ctx, key, host, port, bad_proto, cmd) returns ERROR", KC_NETL_ERROR,
-        kc_netl_update(ctx, "key", "127.0.0.1", 8080, 99, "cat"));
-    fail += expect_int("update with valid TCP returns OK", KC_NETL_OK,
-        kc_netl_update(ctx, "testupd", "127.0.0.1", 9001, KC_NETL_TCP, "cat"));
-    fail += expect_int("update with valid UDP returns OK", KC_NETL_OK,
-        kc_netl_update(ctx, "testupd2", "127.0.0.1", 9002, KC_NETL_UDP, "cat"));
-    fail += expect_int("replace key returns OK", KC_NETL_OK,
-        kc_netl_update(ctx, "testupd", "127.0.0.1", 9003, KC_NETL_TCP, "echo"));
-    kc_netl_delete(ctx, "key");
-    kc_netl_delete(ctx, "testupd");
-    kc_netl_delete(ctx, "testupd2");
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_netl_list.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_list(void) {
-    const char *name = "kc_netl_list";
-    const char *detail = "enumerates registrations via callback";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    list_state_t state;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("list(NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_list(NULL, NULL, NULL, NULL));
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("list missing key returns ERROR", KC_NETL_ERROR,
-        kc_netl_list(ctx, "missing", NULL, NULL));
-    fail += expect_int("list with NULL callback returns OK", KC_NETL_OK,
-        kc_netl_list(ctx, NULL, NULL, NULL));
-    fail += expect_int("update key for list test", KC_NETL_OK,
-        kc_netl_update(ctx, "listed", "127.0.0.1", 9010, KC_NETL_TCP, "cat"));
-    memset(&state, 0, sizeof(state));
-    state.expected_key = "listed";
-    fail += expect_int("list exact key returns OK", KC_NETL_OK,
-        kc_netl_list(ctx, "listed", record_list, &state));
-    fail += expect_int("list exact key invokes callback", 1, state.exact_count);
-    fail += expect_true("list callback provides addrport", state.first_addrport[0] != '\0');
-    fail += expect_string("list addrport matches", "127.0.0.1:9010", state.first_addrport);
-    memset(&state, 0, sizeof(state));
-    state.expected_key = "listed";
-    fail += expect_int("list all returns OK", KC_NETL_OK,
-        kc_netl_list(ctx, NULL, record_list, &state));
-    fail += expect_true("list all includes listed key", state.exact_count >= 1);
-    kc_netl_delete(ctx, "listed");
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_netl_delete.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_delete(void) {
-    const char *name = "kc_netl_delete";
-    const char *detail = "removes registrations";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    list_state_t state;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("delete(NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_delete(NULL, "key"));
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("delete(ctx, NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_delete(ctx, NULL));
-    fail += expect_int("delete(ctx, empty) returns ERROR", KC_NETL_ERROR,
-        kc_netl_delete(ctx, ""));
-    fail += expect_int("delete missing key returns OK (no-op)", KC_NETL_OK,
-        kc_netl_delete(ctx, "missing"));
-    fail += expect_int("update key for delete test", KC_NETL_OK,
-        kc_netl_update(ctx, "delme", "127.0.0.1", 9020, KC_NETL_TCP, "cat"));
-    fail += expect_int("delete existing key returns OK", KC_NETL_OK,
-        kc_netl_delete(ctx, "delme"));
-    memset(&state, 0, sizeof(state));
-    state.expected_key = "delme";
-    fail += expect_int("list deleted key returns ERROR", KC_NETL_ERROR,
-        kc_netl_list(ctx, "delme", record_list, &state));
-    fail += expect_int("deleted key is not listed", 0, state.exact_count);
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_netl_set_pid.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_set_pid(void) {
-    const char *name = "kc_netl_set_pid";
-    const char *detail = "records listener process";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("set_pid(NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_set_pid(NULL, "key", 1234));
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("set_pid(ctx, NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_set_pid(ctx, NULL, 1234));
-    fail += expect_int("set_pid(ctx, key, pid) on missing key returns ERROR", KC_NETL_ERROR,
-        kc_netl_set_pid(ctx, "missing", 1234));
-    fail += expect_int("update key for set_pid test", KC_NETL_OK,
-        kc_netl_update(ctx, "setpid", "127.0.0.1", 9030, KC_NETL_TCP, "cat"));
-    fail += expect_int("set_pid on valid key returns OK", KC_NETL_OK,
-        kc_netl_set_pid(ctx, "setpid", 99999));
-    kc_netl_delete(ctx, "setpid");
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_netl_exec error paths.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_exec(void) {
-    const char *name = "kc_netl_exec";
-    const char *detail = "rejects invalid arguments";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("exec(NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_exec(NULL, "key"));
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("exec(ctx, NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_exec(ctx, NULL));
-    fail += expect_int("exec(ctx, empty) returns ERROR", KC_NETL_ERROR,
-        kc_netl_exec(ctx, ""));
-    fail += expect_int("exec(ctx, missing) returns ERROR", KC_NETL_ERROR,
-        kc_netl_exec(ctx, "nonexistent"));
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_netl_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_stop(void) {
-    const char *name = "kc_netl_stop";
-    const char *detail = "rejects invalid arguments";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    int fail;
-
-    fail = 0;
-    fail += expect_int("stop(NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_stop(NULL, "key"));
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("stop(ctx, NULL) returns ERROR", KC_NETL_ERROR,
-        kc_netl_stop(ctx, NULL));
-    fail += expect_int("stop(ctx, missing) returns ERROR", KC_NETL_ERROR,
-        kc_netl_stop(ctx, "nonexistent"));
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_netl_serve error paths.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_serve(void) {
-    const char *name = "kc_netl_serve";
-    const char *detail = "rejects invalid arguments";
-    int fail;
-
-    fail = 0;
-    fail += expect_int("serve(NULL, port, TCP, cmd) returns ERROR", KC_NETL_ERROR,
-        kc_netl_serve(NULL, 0, KC_NETL_TCP, NULL));
-    fail += expect_int("serve(host, port, TCP, empty_cmd) returns ERROR", KC_NETL_ERROR,
-        kc_netl_serve("127.0.0.1", 1, KC_NETL_TCP, ""));
-    fail += expect_int("serve(host, port, bad_proto, cmd) returns ERROR", KC_NETL_ERROR,
-        kc_netl_serve("127.0.0.1", 1, 99, "cat"));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-#ifndef _WIN32
-/**
- * Tests kc_netl_exec success by forking a listener, connecting, and killing it.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_exec_success(void) {
-    const char *name = "kc_netl_exec_success";
-    const char *detail = "bridges tcp stream";
-    kc_netl_t *ctx;
-    kc_netl_options_t opts;
-    unsigned short port;
-    pid_t pid;
-    int fail;
-
-    fail = 0;
-    port = find_free_port();
-    if (port == 0) {
-        fail += expect_true("find_free_port succeeded", 0);
-        case_result(fail, name, detail);
+    client_a = test_tcp_connect(kc_netl_port(listener));
+    client_b = test_tcp_connect(kc_netl_port(listener));
+    if (client_a == TEST_FD_INVALID || client_b == TEST_FD_INVALID) {
+        if (client_a != TEST_FD_INVALID) TEST_CLOSE(client_a);
+        if (client_b != TEST_FD_INVALID) TEST_CLOSE(client_b);
+        kc_netl_close(listener);
         return 1;
     }
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) return 1;
-    fail += expect_int("update for exec test", KC_NETL_OK,
-        kc_netl_update(ctx, "execsrv", "127.0.0.1", port, KC_NETL_TCP, "cat"));
-    pid = fork();
-    if (pid == 0) {
-        kc_netl_exec(ctx, "execsrv");
-        _exit(1);
-    }
-    short_sleep();
-    {
-        struct sockaddr_in addr;
-        int fd;
-        char buf[64];
-        ssize_t n;
 
-        fd = socket(AF_INET, SOCK_STREAM, 0);
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        addr.sin_port = htons(port);
-        fail += expect_int("connect to exec listener", 0,
-            connect(fd, (struct sockaddr *)&addr, sizeof(addr)));
-        write(fd, "ping\n", 5);
-        shutdown(fd, SHUT_WR);
-        memset(buf, 0, sizeof(buf));
-        n = read(fd, buf, sizeof(buf) - 1);
-        if (n > 0) buf[n] = '\0';
-        fail += expect_string("exec listener echoes back", "ping\n", buf);
-        close(fd);
+    for (i = 0; i < 2; i++) {
+        fail += expect_int(
+            "accept concurrent client",
+            KC_NETL_OK,
+            kc_netl_poll(listener, &event, 2000)
+        );
+        fail += expect_int(
+            "connection event",
+            KC_NETL_EVENT_CONNECTION,
+            event.type
+        );
     }
-    kill_and_reap(pid);
-    kc_netl_delete(ctx, "execsrv");
-    kc_netl_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+
+    (void)send(client_a, "A", 1, 0);
+    (void)send(client_b, "B", 1, 0);
+
+    for (i = 0; i < 2; i++) {
+        fail += expect_int(
+            "client data event",
+            KC_NETL_OK,
+            kc_netl_poll(listener, &event, 2000)
+        );
+        fail += expect_int("data type", KC_NETL_EVENT_DATA, event.type);
+        if (event.data_size == 1U &&
+            ((const char *)event.data)[0] == 'A') {
+            connection_a = event.connection;
+            saw_a = 1;
+        } else if (
+            event.data_size == 1U &&
+            ((const char *)event.data)[0] == 'B'
+        ) {
+            connection_b = event.connection;
+            saw_b = 1;
+        }
+    }
+
+    fail += expect_true("received client A", saw_a);
+    fail += expect_true("received client B", saw_b);
+    fail += expect_true(
+        "connections have distinct identity",
+        connection_a != NULL &&
+        connection_b != NULL &&
+        connection_a != connection_b
+    );
+
+    if (connection_a != NULL) {
+        fail += expect_int(
+            "targeted send",
+            KC_NETL_OK,
+            kc_netl_send(connection_a, "reply-a", 7U, &sent)
+        );
+        fail += expect_true("targeted send size", sent == 7U);
+        fail += test_socket_expect(client_a, "reply-a", 7U);
+        kc_netl_connection_close(connection_a);
+        fail += expect_int(
+            "closed A stays isolated",
+            KC_NETL_ECLOSED,
+            kc_netl_send(connection_a, "x", 1U, &sent)
+        );
+    }
+
+    (void)send(client_b, "still", 5, 0);
+    fail += expect_int(
+        "B remains active",
+        KC_NETL_OK,
+        kc_netl_poll(listener, &event, 2000)
+    );
+    fail += expect_int("B data event", KC_NETL_EVENT_DATA, event.type);
+    fail += expect_true("B identity retained", event.connection == connection_b);
+    fail += expect_bytes("B bytes", "still", 5U, event.data, event.data_size);
+
+    TEST_CLOSE(client_a);
+    TEST_CLOSE(client_b);
+    kc_netl_close(listener);
+    case_result(fail, "kc_netl_concurrency", "keeps simultaneous clients independent");
+    return fail != 0;
 }
 
 /**
- * Tests kc_netl_serve success path with TCP listener.
- * @return 0 on success, 1 on failure.
+ * Test kc_netl_strerror.
+ * @return Zero on success, otherwise nonzero.
  */
-static int case_kc_netl_serve_success(void) {
-    const char *name = "kc_netl_serve_success";
-    const char *detail = "dispatches to command";
-    unsigned short port;
-    pid_t pid;
-    int fail;
+static int case_kc_netl_strerror(void) {
+    int fail = 0;
 
-    fail = 0;
-    port = find_free_port();
-    if (port == 0) {
-        fail += expect_true("find_free_port succeeded", 0);
-        case_result(fail, name, detail);
-        return 1;
-    }
-    pid = fork();
-    if (pid == 0) {
-        kc_netl_serve("127.0.0.1", port, KC_NETL_TCP, "cat");
-        _exit(1);
-    }
-    short_sleep();
-    {
-        struct sockaddr_in addr;
-        int fd;
-        char buf[64];
-        ssize_t n;
+    fail += expect_true("OK", strcmp(kc_netl_strerror(KC_NETL_OK), "ok") == 0);
+    fail += expect_true(
+        "EINVAL",
+        strcmp(kc_netl_strerror(KC_NETL_EINVAL), "invalid argument") == 0
+    );
+    fail += expect_true(
+        "ENET",
+        strcmp(kc_netl_strerror(KC_NETL_ENET), "network error") == 0
+    );
+    fail += expect_true(
+        "EAGAIN",
+        strcmp(kc_netl_strerror(KC_NETL_EAGAIN), "try again") == 0
+    );
+    fail += expect_true(
+        "ECLOSED",
+        strcmp(kc_netl_strerror(KC_NETL_ECLOSED), "connection closed") == 0
+    );
+    fail += expect_true(
+        "ENOMEM",
+        strcmp(kc_netl_strerror(KC_NETL_ENOMEM), "out of memory") == 0
+    );
 
-        fd = socket(AF_INET, SOCK_STREAM, 0);
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        addr.sin_port = htons(port);
-        fail += expect_int("connect to serve listener", 0,
-            connect(fd, (struct sockaddr *)&addr, sizeof(addr)));
-        write(fd, "hello\n", 6);
-        shutdown(fd, SHUT_WR);
-        memset(buf, 0, sizeof(buf));
-        n = read(fd, buf, sizeof(buf) - 1);
-        if (n > 0) buf[n] = '\0';
-        fail += expect_string("serve listener echoes back", "hello\n", buf);
-        close(fd);
-    }
-    kill_and_reap(pid);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    case_result(fail, "kc_netl_strerror", "maps public status values");
+    return fail != 0;
 }
 
 /**
- * Tests two contexts coexist with isolated state.
- * @return 0 on success, 1 on failure.
+ * Test kc_netl_version.
+ * @return Zero on success, otherwise nonzero.
  */
-static int case_kc_netl_multictx(void) {
-    const char *name = "kc_netl_multictx";
-    const char *detail = "keeps contexts independent";
-    kc_netl_t *a;
-    kc_netl_t *b;
-    kc_netl_options_t opts;
-    int fail;
+static int case_kc_netl_version(void) {
+    int fail = 0;
 
-    fail = 0;
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&a, &opts) != KC_NETL_OK) return 1;
-    if (kc_netl_open(&b, &opts) != KC_NETL_OK) {
-        kc_netl_close(a);
-        return 1;
-    }
-    fail += expect_int("stop a returns OK", KC_NETL_OK, kc_netl_request_stop(a));
-    fail += expect_int("stop b returns OK", KC_NETL_OK, kc_netl_request_stop(b));
-    fail += expect_int("stop a again returns OK", KC_NETL_OK, kc_netl_request_stop(a));
-    fail += expect_true("a path still valid", kc_netl_path(a) != NULL);
-    fail += expect_true("b path still valid", kc_netl_path(b) != NULL);
-    fail += expect_int("close a returns OK", KC_NETL_OK, kc_netl_close(a));
-    fail += expect_int("close b returns OK", KC_NETL_OK, kc_netl_close(b));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    (void)kc_netl_version();
+    case_result(fail, "kc_netl_version", "returns the compiled build version");
+    return fail != 0;
 }
+
+/**
+ * Resolve the staged CLI path beside the test executable.
+ * @param out Destination path.
+ * @param cap Destination capacity.
+ * @return Zero on success, otherwise nonzero.
+ */
+static int test_cli_path(char *out, size_t cap) {
+    const char *slash;
+    const char *backslash;
+    const char *separator;
+    size_t dir_size;
+    int written;
+
+    if (test_program_path == NULL) return 1;
+    slash = strrchr(test_program_path, '/');
+    backslash = strrchr(test_program_path, '\\');
+    separator = slash;
+    if (
+        backslash != NULL &&
+        (separator == NULL || backslash > separator)
+    ) {
+        separator = backslash;
+    }
+
+    if (separator == NULL) {
+#ifdef _WIN32
+        written = snprintf(out, cap, ".\\%s", TEST_CLI_NAME);
 #else
-/**
- * POSIX-only exec success test stub for Windows.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_exec_success(void) {
-    const char *name = "kc_netl_exec_success";
-    const char *detail = "bridges tcp stream";
-    case_result(0, name, detail);
+        written = snprintf(out, cap, "./%s", TEST_CLI_NAME);
+#endif
+        return written > 0 && (size_t)written < cap ? 0 : 1;
+    }
+
+    dir_size = (size_t)(separator - test_program_path + 1);
+    if (dir_size + strlen(TEST_CLI_NAME) + 1U > cap) return 1;
+    memcpy(out, test_program_path, dir_size);
+    memcpy(
+        out + dir_size,
+        TEST_CLI_NAME,
+        strlen(TEST_CLI_NAME) + 1U
+    );
     return 0;
 }
 
 /**
- * POSIX-only serve success test stub for Windows.
- * @return 0 on success, 1 on failure.
+ * Read one file into an allocated buffer.
+ * @param path File path.
+ * @param out Receives allocated bytes.
+ * @param out_size Receives byte count.
+ * @return Zero on success, otherwise nonzero.
  */
-static int case_kc_netl_serve_success(void) {
-    const char *name = "kc_netl_serve_success";
-    const char *detail = "dispatches to command";
-    case_result(0, name, detail);
-    return 0;
-}
+static int test_read_file(
+    const char *path,
+    unsigned char **out,
+    size_t *out_size
+) {
+    FILE *file;
+    long end;
+    unsigned char *data;
+    size_t size;
 
-/**
- * Tests two contexts coexist with isolated state on Windows.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_netl_multictx(void) {
-    const char *name = "kc_netl_multictx";
-    const char *detail = "keeps contexts independent";
-    kc_netl_t *a;
-    kc_netl_t *b;
-    kc_netl_options_t opts;
-    int fail;
-
-    fail = 0;
-    opts = kc_netl_options_default();
-    if (kc_netl_open(&a, &opts) != KC_NETL_OK) return 1;
-    if (kc_netl_open(&b, &opts) != KC_NETL_OK) {
-        kc_netl_close(a);
+    *out = NULL;
+    *out_size = 0U;
+    file = fopen(path, "rb");
+    if (file == NULL) return 1;
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
         return 1;
     }
-    fail += expect_int("stop a returns OK", KC_NETL_OK, kc_netl_request_stop(a));
-    fail += expect_int("stop b returns OK", KC_NETL_OK, kc_netl_request_stop(b));
-    fail += expect_int("stop a again returns OK", KC_NETL_OK, kc_netl_request_stop(a));
-    fail += expect_int("close a returns OK", KC_NETL_OK, kc_netl_close(a));
-    fail += expect_int("close b returns OK", KC_NETL_OK, kc_netl_close(b));
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    end = ftell(file);
+    if (end < 0 || fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return 1;
+    }
+
+    size = (size_t)end;
+    data = (unsigned char *)malloc(size != 0U ? size : 1U);
+    if (data == NULL) {
+        fclose(file);
+        return 1;
+    }
+    if (size != 0U && fread(data, 1, size, file) != size) {
+        free(data);
+        fclose(file);
+        return 1;
+    }
+
+    fclose(file);
+    *out = data;
+    *out_size = size;
+    return 0;
 }
+
+/**
+ * Run one simple CLI invocation and capture stdout and stderr.
+ * @param arg Optional single CLI argument.
+ * @param out Receives stdout bytes.
+ * @param out_size Receives stdout size.
+ * @param err Receives stderr bytes.
+ * @param err_size Receives stderr size.
+ * @return Child process exit code, or -1 for harness failure.
+ */
+static int test_cli_run(
+    const char *arg,
+    unsigned char **out,
+    size_t *out_size,
+    unsigned char **err,
+    size_t *err_size
+) {
+    char cli[1024];
+    char out_path[128];
+    char err_path[128];
+    long pid = (long)TEST_GETPID();
+    int rc;
+
+    *out = NULL;
+    *out_size = 0U;
+    *err = NULL;
+    *err_size = 0U;
+    if (test_cli_path(cli, sizeof(cli)) != 0) return -1;
+
+    snprintf(out_path, sizeof(out_path), "netl-cli-%ld-out.tmp", pid);
+    snprintf(err_path, sizeof(err_path), "netl-cli-%ld-err.tmp", pid);
+
+#ifdef _WIN32
+    {
+        const char *argv[3];
+        int out_fd;
+        int err_fd;
+        int save_out;
+        int save_err;
+
+        argv[0] = cli;
+        argv[1] = arg != NULL && arg[0] != '\0' ? arg : NULL;
+        argv[2] = NULL;
+
+        out_fd = _open(
+            out_path,
+            _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+            _S_IREAD | _S_IWRITE
+        );
+        err_fd = _open(
+            err_path,
+            _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+            _S_IREAD | _S_IWRITE
+        );
+        if (out_fd < 0 || err_fd < 0) {
+            if (out_fd >= 0) _close(out_fd);
+            if (err_fd >= 0) _close(err_fd);
+            return -1;
+        }
+
+        save_out = _dup(1);
+        save_err = _dup(2);
+        if (save_out < 0 || save_err < 0) {
+            if (save_out >= 0) _close(save_out);
+            if (save_err >= 0) _close(save_err);
+            _close(out_fd);
+            _close(err_fd);
+            return -1;
+        }
+
+        fflush(stdout);
+        fflush(stderr);
+        _dup2(out_fd, 1);
+        _dup2(err_fd, 2);
+        _close(out_fd);
+        _close(err_fd);
+        rc = (int)_spawnv(_P_WAIT, cli, argv);
+        fflush(stdout);
+        fflush(stderr);
+        _dup2(save_out, 1);
+        _dup2(save_err, 2);
+        _close(save_out);
+        _close(save_err);
+    }
+#else
+    {
+        char command[4096];
+
+        if (arg != NULL && arg[0] != '\0') {
+            snprintf(
+                command,
+                sizeof(command),
+                "\"%s\" %s > \"%s\" 2> \"%s\"",
+                cli,
+                arg,
+                out_path,
+                err_path
+            );
+        } else {
+            snprintf(
+                command,
+                sizeof(command),
+                "\"%s\" > \"%s\" 2> \"%s\"",
+                cli,
+                out_path,
+                err_path
+            );
+        }
+        rc = system(command);
+    }
 #endif
 
+    if (
+        test_read_file(out_path, out, out_size) != 0 ||
+        test_read_file(err_path, err, err_size) != 0
+    ) {
+        free(*out);
+        free(*err);
+        *out = NULL;
+        *err = NULL;
+        *out_size = 0U;
+        *err_size = 0U;
+        rc = -1;
+    }
+
+    remove(out_path);
+    remove(err_path);
+    return rc;
+}
+
 /**
- * Runs all test cases in a single process.
- * @return 0 on success, nonzero on failure.
+ * Test the shipped CLI surface as one grouped contract.
+ * @return Zero on success, otherwise nonzero.
+ */
+static int case_kc_netl_cli(void) {
+    unsigned char *out = NULL;
+    unsigned char *err = NULL;
+    size_t out_size = 0U;
+    size_t err_size = 0U;
+    int rc;
+    int fail = 0;
+
+    rc = test_cli_run("--version", &out, &out_size, &err, &err_size);
+    fail += expect_int("CLI version exit", 0, rc);
+    fail += expect_contains("CLI version", out, out_size, "netl build ");
+    free(out);
+    free(err);
+
+    out = NULL;
+    err = NULL;
+    rc = test_cli_run("--help", &out, &out_size, &err, &err_size);
+    fail += expect_int("CLI help exit", 0, rc);
+    fail += expect_contains("CLI help", out, out_size, "Usage:");
+    free(out);
+    free(err);
+
+    out = NULL;
+    err = NULL;
+    rc = test_cli_run("", &out, &out_size, &err, &err_size);
+    fail += expect_true("CLI missing args fails", rc != 0);
+    fail += expect_contains("CLI missing args usage", out, out_size, "Usage:");
+    free(out);
+    free(err);
+
+    case_result(fail, "kc_netl_cli", "covers direct listener CLI help and version");
+    return fail != 0;
+}
+
+/**
+ * Run all contract cases.
+ * @return Zero on success, otherwise nonzero.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 19;
+
+    test_case_total = 11;
     test_case_current = 0;
-    run_case(&rc, case_kc_netl_version);
-    run_case(&rc, case_kc_netl_strerror);
-    run_case(&rc, case_kc_netl_options_default);
-    run_case(&rc, case_kc_netl_options_load_env);
-    run_case(&rc, case_kc_netl_options_free);
-    run_case(&rc, case_kc_netl_request_stop);
     run_case(&rc, case_kc_netl_open);
+    run_case(&rc, case_kc_netl_poll);
+    run_case(&rc, case_kc_netl_send);
+    run_case(&rc, case_kc_netl_sendto);
+    run_case(&rc, case_kc_netl_connection_close);
+    run_case(&rc, case_kc_netl_port);
     run_case(&rc, case_kc_netl_close);
-    run_case(&rc, case_kc_netl_path);
-    run_case(&rc, case_kc_netl_update);
-    run_case(&rc, case_kc_netl_list);
-    run_case(&rc, case_kc_netl_delete);
-    run_case(&rc, case_kc_netl_set_pid);
-    run_case(&rc, case_kc_netl_exec);
-    run_case(&rc, case_kc_netl_stop);
-    run_case(&rc, case_kc_netl_serve);
-    run_case(&rc, case_kc_netl_exec_success);
-    run_case(&rc, case_kc_netl_serve_success);
-    run_case(&rc, case_kc_netl_multictx);
+    run_case(&rc, case_kc_netl_concurrency);
+    run_case(&rc, case_kc_netl_strerror);
+    run_case(&rc, case_kc_netl_version);
+    run_case(&rc, case_kc_netl_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
 /**
- * Runs one named test case.
+ * Test program entry point.
  * @param argc Argument count.
  * @param argv Argument vector.
- * @return 0 on success, 1 or 2 on failure.
+ * @return Process status.
  */
 int main(int argc, char **argv) {
+    test_program_path = argv[0];
+
     if (argc != 2) {
-        fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
+        fprintf(stderr, "test case: expected one argument\n");
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_netl_version") == 0) return case_kc_netl_version();
-    if (strcmp(argv[1], "kc_netl_strerror") == 0) return case_kc_netl_strerror();
-    if (strcmp(argv[1], "kc_netl_options_default") == 0) return case_kc_netl_options_default();
-    if (strcmp(argv[1], "kc_netl_options_load_env") == 0) return case_kc_netl_options_load_env();
-    if (strcmp(argv[1], "kc_netl_options_free") == 0) return case_kc_netl_options_free();
-    if (strcmp(argv[1], "kc_netl_request_stop") == 0) return case_kc_netl_request_stop();
     if (strcmp(argv[1], "kc_netl_open") == 0) return case_kc_netl_open();
+    if (strcmp(argv[1], "kc_netl_poll") == 0) return case_kc_netl_poll();
+    if (strcmp(argv[1], "kc_netl_send") == 0) return case_kc_netl_send();
+    if (strcmp(argv[1], "kc_netl_sendto") == 0) return case_kc_netl_sendto();
+    if (strcmp(argv[1], "kc_netl_connection_close") == 0) {
+        return case_kc_netl_connection_close();
+    }
+    if (strcmp(argv[1], "kc_netl_port") == 0) return case_kc_netl_port();
     if (strcmp(argv[1], "kc_netl_close") == 0) return case_kc_netl_close();
-    if (strcmp(argv[1], "kc_netl_path") == 0) return case_kc_netl_path();
-    if (strcmp(argv[1], "kc_netl_update") == 0) return case_kc_netl_update();
-    if (strcmp(argv[1], "kc_netl_list") == 0) return case_kc_netl_list();
-    if (strcmp(argv[1], "kc_netl_delete") == 0) return case_kc_netl_delete();
-    if (strcmp(argv[1], "kc_netl_set_pid") == 0) return case_kc_netl_set_pid();
-    if (strcmp(argv[1], "kc_netl_exec") == 0) return case_kc_netl_exec();
-    if (strcmp(argv[1], "kc_netl_exec_success") == 0) return case_kc_netl_exec_success();
-    if (strcmp(argv[1], "kc_netl_stop") == 0) return case_kc_netl_stop();
-    if (strcmp(argv[1], "kc_netl_serve") == 0) return case_kc_netl_serve();
-    if (strcmp(argv[1], "kc_netl_serve_success") == 0) return case_kc_netl_serve_success();
-    if (strcmp(argv[1], "kc_netl_multictx") == 0) return case_kc_netl_multictx();
+    if (strcmp(argv[1], "kc_netl_concurrency") == 0) {
+        return case_kc_netl_concurrency();
+    }
+    if (strcmp(argv[1], "kc_netl_strerror") == 0) {
+        return case_kc_netl_strerror();
+    }
+    if (strcmp(argv[1], "kc_netl_version") == 0) {
+        return case_kc_netl_version();
+    }
+    if (strcmp(argv[1], "kc_netl_cli") == 0) return case_kc_netl_cli();
+
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
