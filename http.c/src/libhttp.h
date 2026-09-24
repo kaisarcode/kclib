@@ -88,12 +88,12 @@ typedef struct {
 } kc_http_response_build_t;
 
 typedef void (*kc_http_request_fn)(
-    const kc_http_request_build_t *request,
+    const kc_http_request_t *request,
     void *userdata
 );
 
 typedef void (*kc_http_response_fn)(
-    const kc_http_response_build_t *response,
+    const kc_http_response_t *response,
     void *userdata
 );
 
@@ -147,7 +147,7 @@ void kc_http_parser_close(kc_http_parser_t *parser);
  * @return Function result.
  */
 int kc_http_request(
-    const kc_http_request_t *request,
+    const kc_http_request_build_t *request,
     void **out_data,
     size_t *out_size
 );
@@ -162,7 +162,7 @@ int kc_http_request(
  * @return Function result.
  */
 int kc_http_response(
-    const kc_http_response_t *response,
+    const kc_http_response_build_t *response,
     void **out_data,
     size_t *out_size
 );
