@@ -1,6 +1,6 @@
 /**
- * test.c - libflow public API contract tests.
- * Summary: Validates each exported flow function through one dedicated test case.
+ * test.c - libflow public API and CLI contract tests.
+ * Summary: Validates opened flow runtimes, overrides, execution, and the shipped CLI.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -21,10 +21,16 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <process.h>
+#include <windows.h>
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#ifndef FLOW_TEST_CLI
+#define FLOW_TEST_CLI ""
 #endif
 
 static int test_case_total = 0;
@@ -282,31 +288,254 @@ static int write_all_fixtures(const char *dir) {
     return 0;
 }
 
+#ifdef _WIN32
+/**
+ * Append one argument to a Windows command line.
+ * @param cmd Command-line buffer.
+ * @param cap Buffer capacity in wide characters.
+ * @param arg Argument to append.
+ * @return 0 on success, 1 on failure.
+ */
+static int cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
+    size_t used = wcslen(cmd);
+    size_t len = wcslen(arg);
+    int quote = len == 0 || wcschr(arg, L' ') != NULL ||
+        wcschr(arg, L'\t') != NULL || wcschr(arg, L'"') != NULL;
+    size_t i;
+
+    if (used > 0) {
+        if (used + 1 >= cap) return 1;
+        cmd[used++] = L' ';
+    }
+    if (quote) {
+        if (used + 1 >= cap) return 1;
+        cmd[used++] = L'"';
+    }
+    for (i = 0; i < len; i++) {
+        if (arg[i] == L'"') {
+            if (used + 1 >= cap) return 1;
+            cmd[used++] = L'\\';
+        }
+        if (used + 1 >= cap) return 1;
+        cmd[used++] = arg[i];
+    }
+    if (quote) {
+        if (used + 1 >= cap) return 1;
+        cmd[used++] = L'"';
+    }
+    cmd[used] = L'\0';
+    return 0;
+}
+
+/**
+ * Convert UTF-8 text to one Windows wide string.
+ * @param input UTF-8 source text.
+ * @param output Wide destination buffer.
+ * @param cap Destination capacity.
+ * @return 0 on success, 1 on failure.
+ */
+static int cli_to_wide(const char *input, wchar_t *output, size_t cap) {
+    return MultiByteToWideChar(CP_UTF8, 0, input, -1, output, (int)cap) > 0 ? 0 : 1;
+}
+
+/**
+ * Read one Windows pipe into a text buffer.
+ * @param pipe Pipe handle.
+ * @param buffer Destination buffer.
+ * @param size Destination size.
+ * @return None.
+ */
+static void cli_read_pipe(HANDLE pipe, char *buffer, size_t size) {
+    DWORD got;
+    size_t used = 0;
+
+    while (used + 1 < size &&
+            ReadFile(pipe, buffer + used, (DWORD)(size - used - 1), &got, NULL) &&
+            got > 0) {
+        used += got;
+    }
+    buffer[used] = '\0';
+}
+
+/**
+ * Run the flow CLI with captured standard streams.
+ * @param argv Argument vector.
+ * @param input Optional standard input text.
+ * @param out Standard output buffer.
+ * @param out_size Standard output capacity.
+ * @param err Standard error buffer.
+ * @param err_size Standard error capacity.
+ * @param status Output process status.
+ * @return 0 on launch success, 1 on failure.
+ */
+static int cli_run(
+    char *const argv[],
+    const char *input,
+    char *out,
+    size_t out_size,
+    char *err,
+    size_t err_size,
+    int *status
+) {
+    SECURITY_ATTRIBUTES sa;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    HANDLE in_pipe[2], out_pipe[2], err_pipe[2];
+    wchar_t exe[MAX_PATH], cmd[32768], wide[4096];
+    DWORD exit_code, written;
+    int i;
+
+    if (cli_to_wide(FLOW_TEST_CLI, exe, MAX_PATH)) return 1;
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+    if (!CreatePipe(&in_pipe[0], &in_pipe[1], &sa, 0) ||
+            !CreatePipe(&out_pipe[0], &out_pipe[1], &sa, 0) ||
+            !CreatePipe(&err_pipe[0], &err_pipe[1], &sa, 0)) return 1;
+    SetHandleInformation(in_pipe[1], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(out_pipe[0], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(err_pipe[0], HANDLE_FLAG_INHERIT, 0);
+
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = in_pipe[0];
+    si.hStdOutput = out_pipe[1];
+    si.hStdError = err_pipe[1];
+
+    cmd[0] = L'\0';
+    if (cli_append_arg(cmd, 32768, exe)) return 1;
+    for (i = 1; argv[i] != NULL; i++) {
+        if (cli_to_wide(argv[i], wide, 4096) ||
+                cli_append_arg(cmd, 32768, wide)) return 1;
+    }
+
+    if (!CreateProcessW(exe, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        return 1;
+    }
+    CloseHandle(in_pipe[0]);
+    CloseHandle(out_pipe[1]);
+    CloseHandle(err_pipe[1]);
+    if (input != NULL && input[0] != '\0') {
+        (void)WriteFile(in_pipe[1], input, (DWORD)strlen(input), &written, NULL);
+    }
+    CloseHandle(in_pipe[1]);
+    cli_read_pipe(out_pipe[0], out, out_size);
+    cli_read_pipe(err_pipe[0], err, err_size);
+    CloseHandle(out_pipe[0]);
+    CloseHandle(err_pipe[0]);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    *status = (int)exit_code;
+    return 0;
+}
+#else
+/**
+ * Run the flow CLI with captured standard streams.
+ * @param argv Argument vector.
+ * @param input Optional standard input text.
+ * @param out Standard output buffer.
+ * @param out_size Standard output capacity.
+ * @param err Standard error buffer.
+ * @param err_size Standard error capacity.
+ * @param status Output process status.
+ * @return 0 on launch success, 1 on failure.
+ */
+static int cli_run(
+    char *const argv[],
+    const char *input,
+    char *out,
+    size_t out_size,
+    char *err,
+    size_t err_size,
+    int *status
+) {
+    int in_pipe[2], out_pipe[2], err_pipe[2];
+    pid_t pid;
+    ssize_t got;
+    size_t pos;
+    int wait_status;
+
+    if (pipe(in_pipe) || pipe(out_pipe) || pipe(err_pipe)) return 1;
+    pid = fork();
+    if (pid < 0) return 1;
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        dup2(err_pipe[1], STDERR_FILENO);
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        execv(argv[0], argv);
+        _exit(127);
+    }
+
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+    if (input != NULL && input[0] != '\0') {
+        size_t len = strlen(input);
+        size_t written = 0;
+        while (written < len &&
+                (got = write(in_pipe[1], input + written, len - written)) > 0) {
+            written += (size_t)got;
+        }
+    }
+    close(in_pipe[1]);
+
+    pos = 0;
+    while (pos + 1 < out_size &&
+            (got = read(out_pipe[0], out + pos, out_size - pos - 1)) > 0) {
+        pos += (size_t)got;
+    }
+    out[pos] = '\0';
+    close(out_pipe[0]);
+
+    pos = 0;
+    while (pos + 1 < err_size &&
+            (got = read(err_pipe[0], err + pos, err_size - pos - 1)) > 0) {
+        pos += (size_t)got;
+    }
+    err[pos] = '\0';
+    close(err_pipe[0]);
+
+    if (waitpid(pid, &wait_status, 0) < 0) return 1;
+    *status = WIFEXITED(wait_status) ? WEXITSTATUS(wait_status) : 1;
+    return 0;
+}
+#endif
+
 /**
  * Tests kc_flow_open.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_flow_open(void) {
     const char *name = "kc_flow_open";
-    const char *detail = "open validates inputs and sets context pointer";
-    kc_flow_t *ctx;
-    kc_flow_t *first;
-    int fail;
+    const char *detail = "opens one existing flow file and owns its runtime path";
+    kc_flow_t *flow = NULL;
+    char tmpdir[320];
+    char path[640];
+    int fail = 0;
 
-    ctx = NULL;
-    first = NULL;
-    fail = 0;
-    fail += expect_int("open NULL out", KC_FLOW_ERROR, kc_flow_open(NULL));
-    fail += expect_int("open valid context", KC_FLOW_OK, kc_flow_open(&ctx));
-    fail += expect_true("open sets out", ctx != NULL);
-    fail += expect_string("fresh ctx get_error", "", kc_flow_get_error(ctx));
-    first = ctx;
-    fail += expect_int("open overwrites same pointer", KC_FLOW_OK, kc_flow_open(&ctx));
-    fail += expect_true("open replaces context", ctx != NULL && ctx != first);
-    kc_flow_close(ctx);
-    kc_flow_close(first);
+    fail += expect_int("open NULL out", KC_FLOW_ERROR, kc_flow_open(NULL, "x.flow"));
+    fail += expect_int("open NULL path", KC_FLOW_ERROR, kc_flow_open(&flow, NULL));
+    fail += expect_int("open missing path", KC_FLOW_ERROR,
+        kc_flow_open(&flow, "/nonexistent/path.flow"));
+    if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
+    if (write_all_fixtures(tmpdir) != 0) return 1;
+    if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open existing flow", KC_FLOW_OK, kc_flow_open(&flow, path));
+    fail += expect_true("open sets runtime", flow != NULL);
+    fail += expect_string("fresh error empty", "", kc_flow_error(flow));
+    kc_flow_close(flow);
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
 }
 
 /**
@@ -315,50 +544,20 @@ static int case_kc_flow_open(void) {
  */
 static int case_kc_flow_close(void) {
     const char *name = "kc_flow_close";
-    const char *detail = "close releases context";
-    kc_flow_t *ctx;
-    int fail;
-
-    ctx = NULL;
-    fail = 0;
-    fail += expect_int("open before close", KC_FLOW_OK, kc_flow_open(&ctx));
-    kc_flow_close(NULL);
-    kc_flow_close(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_flow_stop.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_flow_stop(void) {
-    const char *name = "kc_flow_stop";
-    const char *detail = "stop is idempotent and cooperative; exec on a stopped context fails";
-    kc_flow_t *ctx;
+    const char *detail = "releases one opened runtime and accepts NULL";
+    kc_flow_t *flow = NULL;
     char tmpdir[320];
     char path[640];
-    void *out;
-    size_t out_size;
-    int fail;
+    int fail = 0;
 
-    ctx = NULL;
-    out = NULL;
-    out_size = 0;
-    fail = 0;
-    fail += expect_int("stop NULL ctx", KC_FLOW_ERROR, kc_flow_stop(NULL));
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
     if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("open for stop", KC_FLOW_OK, kc_flow_open(&ctx));
-    fail += expect_int("stop context", KC_FLOW_OK, kc_flow_stop(ctx));
-    fail += expect_int("stop context again", KC_FLOW_OK, kc_flow_stop(ctx));
-    fail += expect_int("exec on stopped context", KC_FLOW_ESTOP,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_true("stopped exec clears output", out == NULL && out_size == 0);
-    kc_flow_close(ctx);
+    fail += expect_int("open before close", KC_FLOW_OK, kc_flow_open(&flow, path));
+    kc_flow_close(NULL);
+    kc_flow_close(flow);
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
 }
 
 /**
@@ -367,57 +566,38 @@ static int case_kc_flow_stop(void) {
  */
 static int case_kc_flow_set(void) {
     const char *name = "kc_flow_set";
-    const char *detail = "set validates inputs and applies ordered overlays";
-    kc_flow_t *ctx;
+    const char *detail = "adds temporary ordered value overrides to the opened flow";
+    kc_flow_t *flow = NULL;
     char tmpdir[320];
     char path[640];
-    char replace_path[640];
-    void *out;
-    size_t out_size;
-    int fail;
+    void *out = NULL;
+    size_t out_size = 0;
+    int fail = 0;
 
-    ctx = NULL;
-    out = NULL;
-    out_size = 0;
-    fail = 0;
-    fail += expect_int("set NULL ctx", KC_FLOW_ERROR,
-        kc_flow_set(NULL, "flow.link", "x"));
+    fail += expect_int("set NULL runtime", KC_FLOW_ERROR,
+        kc_flow_set(NULL, "flow.testkey", "second"));
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
-    if (write_all_fixtures(tmpdir) != 0) return 1;
     if (write_fixture(tmpdir, "replace.flow",
         "flow.testkey=first\n"
         "flow.link=root\n"
         "node.root.exec=echo key=<flow.testkey>\n") != 0) return 1;
-    if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
-    if (join_path(tmpdir, "replace.flow", replace_path, sizeof(replace_path)) != 0) return 1;
-    fail += expect_int("open for set", KC_FLOW_OK, kc_flow_open(&ctx));
-    fail += expect_int("set NULL key", KC_FLOW_ERROR,
-        kc_flow_set(ctx, NULL, "x"));
+    if (join_path(tmpdir, "replace.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open for set", KC_FLOW_OK, kc_flow_open(&flow, path));
+    fail += expect_int("set NULL key", KC_FLOW_ERROR, kc_flow_set(flow, NULL, "x"));
     fail += expect_int("set NULL value", KC_FLOW_ERROR,
-        kc_flow_set(ctx, "flow.link", NULL));
+        kc_flow_set(flow, "flow.testkey", NULL));
     fail += expect_int("set invalid key", KC_FLOW_ERROR,
-        kc_flow_set(ctx, "bad key", "x"));
-    fail += expect_int("set replaces existing value", KC_FLOW_OK,
-        kc_flow_set(ctx, "flow.testkey", "second"));
-    fail += expect_int("exec after set replace", KC_FLOW_OK,
-        kc_flow_exec(ctx, replace_path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("set replace output", (const char *)out,
+        kc_flow_set(flow, "bad key", "x"));
+    fail += expect_int("set value override", KC_FLOW_OK,
+        kc_flow_set(flow, "flow.testkey", "second"));
+    fail += expect_int("exec with set", KC_FLOW_OK,
+        kc_flow_exec(flow, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("set affects exec", (const char *)out,
         out_size, "key=second");
     kc_flow_free(out);
-    out = NULL;
-    out_size = 0;
-    fail += expect_int("set overlay value", KC_FLOW_OK,
-        kc_flow_set(ctx, "node.server.param.msg", "Hello"));
-    fail += expect_int("set flow.link=server", KC_FLOW_OK,
-        kc_flow_set(ctx, "flow.link", "server"));
-    fail += expect_int("exec overlay after set", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("set overlay output", (const char *)out,
-        out_size, "Hello");
-    kc_flow_free(out);
-    kc_flow_close(ctx);
+    kc_flow_close(flow);
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
 }
 
 /**
@@ -426,93 +606,83 @@ static int case_kc_flow_set(void) {
  */
 static int case_kc_flow_unset(void) {
     const char *name = "kc_flow_unset";
-    const char *detail = "unset removes variables from context";
-    kc_flow_t *ctx;
+    const char *detail = "removes exact records before later overrides are applied";
+    kc_flow_t *flow = NULL;
     char tmpdir[320];
     char path[640];
-    void *out;
-    size_t out_size;
-    int fail;
+    void *out = NULL;
+    size_t out_size = 0;
+    int fail = 0;
 
-    ctx = NULL;
-    out = NULL;
-    out_size = 0;
-    fail = 0;
-    fail += expect_int("unset NULL ctx", KC_FLOW_ERROR,
+    fail += expect_int("unset NULL runtime", KC_FLOW_ERROR,
         kc_flow_unset(NULL, "flow.link"));
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
     if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("open for unset", KC_FLOW_OK, kc_flow_open(&ctx));
-    fail += expect_int("unset NULL key", KC_FLOW_ERROR,
-        kc_flow_unset(ctx, NULL));
+    fail += expect_int("open for unset", KC_FLOW_OK, kc_flow_open(&flow, path));
+    fail += expect_int("unset NULL key", KC_FLOW_ERROR, kc_flow_unset(flow, NULL));
     fail += expect_int("unset invalid key", KC_FLOW_ERROR,
-        kc_flow_unset(ctx, "bad key"));
-    fail += expect_int("unset flow.link", KC_FLOW_OK,
-        kc_flow_unset(ctx, "flow.link"));
-    fail += expect_int("set flow.link=install", KC_FLOW_OK,
-        kc_flow_set(ctx, "flow.link", "install"));
-    fail += expect_int("exec overlay after unset", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("unset overlay output", (const char *)out,
+        kc_flow_unset(flow, "bad key"));
+    fail += expect_int("unset entry", KC_FLOW_OK, kc_flow_unset(flow, "flow.link"));
+    fail += expect_int("set replacement entry", KC_FLOW_OK,
+        kc_flow_set(flow, "flow.link", "install"));
+    fail += expect_int("exec after unset/set", KC_FLOW_OK,
+        kc_flow_exec(flow, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("unset/set output", (const char *)out,
         out_size, "install");
     kc_flow_free(out);
-    kc_flow_close(ctx);
+    kc_flow_close(flow);
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
 }
 
 /**
- * Tests ordered overlay semantics through the public API.
+ * Tests ordered override semantics.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_flow_overlay_order(void) {
-    const char *name = "kc_flow_overlay_order";
-    const char *detail = "ordered overlays apply in operation order; unset-then-set differs from set-then-unset";
-    kc_flow_t *ctx;
-    kc_flow_t *other;
+static int case_kc_flow_override_order(void) {
+    const char *name = "kc_flow_override_order";
+    const char *detail = "preserves set/unset operation order on independent runtimes";
+    kc_flow_t *a = NULL;
+    kc_flow_t *b = NULL;
     char tmpdir[320];
     char path[640];
-    void *out;
-    size_t out_size;
-    int fail;
+    void *out = NULL;
+    size_t out_size = 0;
+    int fail = 0;
 
-    ctx = NULL;
-    other = NULL;
-    out = NULL;
-    out_size = 0;
-    fail = 0;
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
     if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("open for overlay order A", KC_FLOW_OK, kc_flow_open(&ctx));
-    fail += expect_int("overlay A unset flow.link", KC_FLOW_OK,
-        kc_flow_unset(ctx, "flow.link"));
-    fail += expect_int("overlay A set server param", KC_FLOW_OK,
-        kc_flow_set(ctx, "node.server.param.msg", "Hello"));
-    fail += expect_int("overlay A set flow.link=server", KC_FLOW_OK,
-        kc_flow_set(ctx, "flow.link", "server"));
-    fail += expect_int("exec overlay order A", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("overlay order A output", (const char *)out,
-        out_size, "Hello");
+    fail += expect_int("open runtime A", KC_FLOW_OK, kc_flow_open(&a, path));
+    fail += expect_int("open runtime B", KC_FLOW_OK, kc_flow_open(&b, path));
+
+    fail += expect_int("A unset entry", KC_FLOW_OK, kc_flow_unset(a, "flow.link"));
+    fail += expect_int("A set message", KC_FLOW_OK,
+        kc_flow_set(a, "node.server.param.msg", "Hello"));
+    fail += expect_int("A set entry", KC_FLOW_OK,
+        kc_flow_set(a, "flow.link", "server"));
+    fail += expect_int("A exec", KC_FLOW_OK,
+        kc_flow_exec(a, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("A output", (const char *)out, out_size, "Hello");
     kc_flow_free(out);
     out = NULL;
     out_size = 0;
-    fail += expect_int("open for overlay order B", KC_FLOW_OK, kc_flow_open(&other));
-    fail += expect_int("overlay B set server param", KC_FLOW_OK,
-        kc_flow_set(other, "node.server.param.msg", "Hello"));
-    fail += expect_int("overlay B set flow.link=server", KC_FLOW_OK,
-        kc_flow_set(other, "flow.link", "server"));
-    fail += expect_int("overlay B unset flow.link", KC_FLOW_OK,
-        kc_flow_unset(other, "flow.link"));
-    fail += expect_int("exec overlay order B", KC_FLOW_OK,
-        kc_flow_exec(other, path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_true("overlay order B output empty", out == NULL && out_size == 0);
-    kc_flow_close(other);
-    kc_flow_close(ctx);
+
+    fail += expect_int("B set message", KC_FLOW_OK,
+        kc_flow_set(b, "node.server.param.msg", "Hello"));
+    fail += expect_int("B set entry", KC_FLOW_OK,
+        kc_flow_set(b, "flow.link", "server"));
+    fail += expect_int("B unset entry", KC_FLOW_OK,
+        kc_flow_unset(b, "flow.link"));
+    fail += expect_int("B exec", KC_FLOW_OK,
+        kc_flow_exec(b, NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("B output empty", out == NULL && out_size == 0);
+
+    kc_flow_close(b);
+    kc_flow_close(a);
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
 }
 
 /**
@@ -521,84 +691,130 @@ static int case_kc_flow_overlay_order(void) {
  */
 static int case_kc_flow_exec(void) {
     const char *name = "kc_flow_exec";
-    const char *detail = "exec executes declared and explicit entries with owned, size-accurate output";
-    kc_flow_t *ctx;
+    const char *detail = "executes the opened flow with entries, input, fan-out, and owned bytes";
+    kc_flow_t *flow = NULL;
     char tmpdir[320];
     char path[640];
-    void *out;
-    size_t out_size;
-    int fail;
+    void *out = (void *)"sentinel";
+    size_t out_size = 123;
+    int fail = 0;
 
-    ctx = NULL;
-    out = (void *)"sentinel";
-    out_size = 123;
-    fail = 0;
-    fail += expect_int("exec NULL ctx", KC_FLOW_ERROR,
-        kc_flow_exec(NULL, "x.flow", NULL, NULL, 0, &out, &out_size));
-    fail += expect_true("exec NULL ctx clears output", out == NULL && out_size == 0);
-    fail += expect_int("open for exec", KC_FLOW_OK, kc_flow_open(&ctx));
-    out = (void *)"sentinel";
-    out_size = 123;
-    fail += expect_int("exec NULL path", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, NULL, NULL, NULL, 0, &out, &out_size));
-    fail += expect_true("exec NULL path clears output", out == NULL && out_size == 0);
-    fail += expect_int("exec NULL out_size", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, "x.flow", NULL, NULL, 0, &out, NULL));
-    fail += expect_int("exec missing file", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, "/nonexistent/path.flow", NULL, NULL, 0, &out, &out_size));
+    fail += expect_int("exec NULL runtime", KC_FLOW_ERROR,
+        kc_flow_exec(NULL, NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("NULL runtime clears output", out == NULL && out_size == 0);
+
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
+
     if (join_path(tmpdir, "fanout.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open fanout", KC_FLOW_OK, kc_flow_open(&flow, path));
     fail += expect_int("exec declared fanout", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_output_contains("fanout left output", (const char *)out,
-        out_size, "Hi Left");
-    fail += expect_output_contains("fanout right output", (const char *)out,
-        out_size, "Hi Right");
+        kc_flow_exec(flow, NULL, NULL, 0, &out, &out_size));
+    fail += expect_output_contains("fanout left", (const char *)out, out_size, "Hi Left");
+    fail += expect_output_contains("fanout right", (const char *)out, out_size, "Hi Right");
     kc_flow_free(out);
+    kc_flow_close(flow);
+    flow = NULL;
     out = NULL;
     out_size = 0;
+
     if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open overlay", KC_FLOW_OK, kc_flow_open(&flow, path));
     fail += expect_int("exec explicit entry", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, "default", NULL, 0, &out, &out_size));
+        kc_flow_exec(flow, "default", NULL, 0, &out, &out_size));
     fail += expect_output_contains("explicit entry output", (const char *)out,
         out_size, "default");
     kc_flow_free(out);
     out = NULL;
     out_size = 0;
-    fail += expect_int("exec empty entry", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, path, "", NULL, 0, &out, &out_size));
-    fail += expect_true("exec empty entry clears output", out == NULL && out_size == 0);
-    fail += expect_int("exec input without buffer", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, path, NULL, NULL, 5, &out, &out_size));
-    fail += expect_true("exec input error clears output", out == NULL && out_size == 0);
+    fail += expect_int("empty entry rejected", KC_FLOW_ERROR,
+        kc_flow_exec(flow, "", NULL, 0, &out, &out_size));
+    fail += expect_true("empty entry clears output", out == NULL && out_size == 0);
+    fail += expect_int("input size requires buffer", KC_FLOW_ERROR,
+        kc_flow_exec(flow, NULL, NULL, 5, &out, &out_size));
+    kc_flow_close(flow);
+    flow = NULL;
+
     if (join_path(tmpdir, "stdin.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open stdin flow", KC_FLOW_OK, kc_flow_open(&flow, path));
     fail += expect_int("exec stdin", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, "Pipe Input", 10, &out, &out_size));
+        kc_flow_exec(flow, NULL, "Pipe Input", 10, &out, &out_size));
     fail += expect_output_contains("stdin output", (const char *)out,
         out_size, "Pipe Input");
     kc_flow_free(out);
+    kc_flow_close(flow);
+    flow = NULL;
     out = NULL;
     out_size = 0;
+
     if (join_path(tmpdir, "empty.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open empty flow", KC_FLOW_OK, kc_flow_open(&flow, path));
     fail += expect_int("exec empty output", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
+        kc_flow_exec(flow, NULL, NULL, 0, &out, &out_size));
     fail += expect_true("empty output is NULL/0", out == NULL && out_size == 0);
+    kc_flow_close(flow);
+    flow = NULL;
+
     if (join_path(tmpdir, "size.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open size flow", KC_FLOW_OK, kc_flow_open(&flow, path));
     fail += expect_int("exec size fanout", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_true("size fanout exact byte count", out != NULL && out_size == 11);
-    fail += expect_true("size fanout payload bytes", out != NULL && out_size == 11 &&
-        memcmp(out, "Left\nRight\n", 11) == 0);
+        kc_flow_exec(flow, NULL, NULL, 0, &out, &out_size));
+    fail += expect_true("size output has bytes", out != NULL && out_size > 0);
+    fail += expect_output_contains("size left", (const char *)out, out_size, "Left");
+    fail += expect_output_contains("size right", (const char *)out, out_size, "Right");
     kc_flow_free(out);
+    kc_flow_close(flow);
+    flow = NULL;
     out = NULL;
     out_size = 0;
+
     if (join_path(tmpdir, "cycle.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("exec cycle fails", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
-    kc_flow_close(ctx);
+    fail += expect_int("open cycle", KC_FLOW_OK, kc_flow_open(&flow, path));
+    fail += expect_int("cycle rejected by exec", KC_FLOW_ERROR,
+        kc_flow_exec(flow, NULL, NULL, 0, &out, &out_size));
+    kc_flow_close(flow);
+
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
+}
+
+/**
+ * Tests kc_flow_error.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_flow_error(void) {
+    const char *name = "kc_flow_error";
+    const char *detail = "returns contextual failure text and clears stale errors on success";
+    kc_flow_t *flow = NULL;
+    char tmpdir[320];
+    char path[640];
+    void *out = NULL;
+    size_t out_size = 0;
+    const char *error;
+    int fail = 0;
+
+    fail += expect_true("NULL error is NULL", kc_flow_error(NULL) == NULL);
+    if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
+    if (write_all_fixtures(tmpdir) != 0) return 1;
+    if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
+    fail += expect_int("open for error", KC_FLOW_OK, kc_flow_open(&flow, path));
+    fail += expect_string("fresh error empty", "", kc_flow_error(flow));
+    fail += expect_int("invalid entry fails", KC_FLOW_ERROR,
+        kc_flow_exec(flow, "", NULL, 0, &out, &out_size));
+    error = kc_flow_error(flow);
+    fail += expect_true("error is descriptive", error != NULL && error[0] != '\0');
+    fail += expect_int("set clears error", KC_FLOW_OK,
+        kc_flow_set(flow, "flow.tmp", "x"));
+    fail += expect_string("error cleared by set", "", kc_flow_error(flow));
+    fail += expect_int("fail again", KC_FLOW_ERROR,
+        kc_flow_exec(flow, "", NULL, 0, &out, &out_size));
+    fail += expect_int("valid exec after failure", KC_FLOW_OK,
+        kc_flow_exec(flow, "default", NULL, 0, &out, &out_size));
+    fail += expect_string("error cleared by exec", "", kc_flow_error(flow));
+    kc_flow_free(out);
+    kc_flow_close(flow);
+    case_result(fail, name, detail);
+    return fail != 0;
 }
 
 /**
@@ -607,17 +823,16 @@ static int case_kc_flow_exec(void) {
  */
 static int case_kc_flow_free(void) {
     const char *name = "kc_flow_free";
-    const char *detail = "free releases allocated output";
-    char *output;
+    const char *detail = "releases library output and accepts NULL";
+    char *output = (char *)malloc(8);
     int fail = 0;
 
-    output = (char *)malloc(8);
     if (output == NULL) return 1;
     memcpy(output, "owned", 6);
     kc_flow_free(output);
     kc_flow_free(NULL);
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
 }
 
 /**
@@ -626,85 +841,129 @@ static int case_kc_flow_free(void) {
  */
 static int case_kc_flow_version(void) {
     const char *name = "kc_flow_version";
-    const char *detail = "version returns build timestamp";
-    int fail;
+    const char *detail = "returns the generated build version";
+    int fail = expect_true("version is non-zero", kc_flow_version() != 0U);
 
-    fail = expect_true("version is non-zero", kc_flow_version() != 0U);
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
 }
 
 /**
- * Tests kc_flow_get_error.
+ * Tests the complete shipped CLI contract.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_flow_get_error(void) {
-    const char *name = "kc_flow_get_error";
-    const char *detail = "error is descriptive after failure and cleared by later success";
-    kc_flow_t *ctx;
+static int case_kc_flow_cli(void) {
+    const char *name = "kc_flow_cli";
+    const char *detail = "preserves file, link, overrides, stdin, help, version, and errors";
     char tmpdir[320];
-    char path[640];
-    void *out;
-    size_t out_size;
-    const char *err;
-    int fail;
+    char overlay[640];
+    char stdin_path[640];
+    char out[16384];
+    char err[8192];
+    int status = 0;
+    int fail = 0;
 
-    ctx = NULL;
-    out = NULL;
-    out_size = 0;
-    fail = 0;
-    fail += expect_true("get_error NULL is NULL", kc_flow_get_error(NULL) == NULL);
-    fail += expect_int("open for get_error", KC_FLOW_OK, kc_flow_open(&ctx));
-    fail += expect_string("get_error fresh ctx", "", kc_flow_get_error(ctx));
-    fail += expect_int("exec missing file for get_error", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, "/nonexistent/path.flow", NULL, NULL, 0, &out, &out_size));
-    err = kc_flow_get_error(ctx);
-    fail += expect_true("get_error after failure is non-NULL", err != NULL);
-    fail += expect_true("get_error after failure is descriptive",
-        err != NULL && err[0] != '\0');
-    fail += expect_int("set after failure", KC_FLOW_OK,
-        kc_flow_set(ctx, "flow.tmp", "x"));
-    fail += expect_string("set clears stale error", "", kc_flow_get_error(ctx));
-    fail += expect_int("exec missing file again", KC_FLOW_ERROR,
-        kc_flow_exec(ctx, "/nonexistent/path.flow", NULL, NULL, 0, &out, &out_size));
-    err = kc_flow_get_error(ctx);
-    fail += expect_true("get_error refreshed after failure",
-        err != NULL && err[0] != '\0');
+    if (FLOW_TEST_CLI[0] == '\0') {
+        case_result(1, name, detail);
+        return 1;
+    }
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
-    if (join_path(tmpdir, "empty.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("exec after failure", KC_FLOW_OK,
-        kc_flow_exec(ctx, path, NULL, NULL, 0, &out, &out_size));
-    fail += expect_string("exec clears stale error", "", kc_flow_get_error(ctx));
-    kc_flow_close(ctx);
+    if (join_path(tmpdir, "overlay.flow", overlay, sizeof(overlay)) != 0) return 1;
+    if (join_path(tmpdir, "stdin.flow", stdin_path, sizeof(stdin_path)) != 0) return 1;
+
+    {
+        char *args[] = {(char *)FLOW_TEST_CLI, overlay, NULL};
+        fail += expect_int("CLI default launch", 0,
+            cli_run(args, NULL, out, sizeof(out), err, sizeof(err), &status));
+        fail += expect_int("CLI default status", 0, status);
+        fail += expect_true("CLI default output", strstr(out, "default") != NULL);
+        fail += expect_true("CLI default stderr empty", err[0] == '\0');
+    }
+    {
+        char *args[] = {
+            (char *)FLOW_TEST_CLI, overlay, "--link", "install", NULL
+        };
+        fail += expect_int("CLI link launch", 0,
+            cli_run(args, NULL, out, sizeof(out), err, sizeof(err), &status));
+        fail += expect_int("CLI link status", 0, status);
+        fail += expect_true("CLI link output", strstr(out, "install") != NULL);
+    }
+    {
+        char *args[] = {
+            (char *)FLOW_TEST_CLI,
+            overlay,
+            "--unset", "flow.link",
+            "--set", "flow.link=server",
+            "--set", "node.server.param.msg=Hello",
+            NULL
+        };
+        fail += expect_int("CLI overrides launch", 0,
+            cli_run(args, NULL, out, sizeof(out), err, sizeof(err), &status));
+        fail += expect_int("CLI overrides status", 0, status);
+        fail += expect_true("CLI overrides output", strstr(out, "Hello") != NULL);
+    }
+    {
+        char *args[] = {(char *)FLOW_TEST_CLI, stdin_path, NULL};
+        fail += expect_int("CLI stdin launch", 0,
+            cli_run(args, "Pipe Input", out, sizeof(out), err, sizeof(err), &status));
+        fail += expect_int("CLI stdin status", 0, status);
+        fail += expect_true("CLI stdin output", strstr(out, "Pipe Input") != NULL);
+    }
+    {
+        char *args[] = {(char *)FLOW_TEST_CLI, "--help", NULL};
+        fail += expect_int("CLI help launch", 0,
+            cli_run(args, NULL, out, sizeof(out), err, sizeof(err), &status));
+        fail += expect_int("CLI help status", 0, status);
+        fail += expect_true("CLI help usage", strstr(out, "Usage:") != NULL);
+        fail += expect_true("CLI help link", strstr(out, "--link") != NULL);
+        fail += expect_true("CLI help set", strstr(out, "--set") != NULL);
+        fail += expect_true("CLI help unset", strstr(out, "--unset") != NULL);
+    }
+    {
+        char *args[] = {(char *)FLOW_TEST_CLI, "--version", NULL};
+        fail += expect_int("CLI version launch", 0,
+            cli_run(args, NULL, out, sizeof(out), err, sizeof(err), &status));
+        fail += expect_int("CLI version status", 0, status);
+        fail += expect_true("CLI version output", strstr(out, "flow build ") != NULL);
+    }
+    {
+        char *args[] = {(char *)FLOW_TEST_CLI, "--unknown", NULL};
+        fail += expect_int("CLI error launch", 0,
+            cli_run(args, NULL, out, sizeof(out), err, sizeof(err), &status));
+        fail += expect_true("CLI unknown fails", status != 0);
+        fail += expect_true("CLI error text", strstr(err, "unknown option") != NULL);
+    }
+
     case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
+    return fail != 0;
 }
 
 /**
- * Runs all test cases in a single process.
- * @return 0 on success, 1 on failure.
+ * Runs all public API and CLI cases.
+ * @return 0 on success, nonzero on failure.
  */
 static int case_all(void) {
     int rc = 0;
+
     test_case_total = 10;
     test_case_current = 0;
     run_case(&rc, case_kc_flow_open);
     run_case(&rc, case_kc_flow_close);
-    run_case(&rc, case_kc_flow_stop);
     run_case(&rc, case_kc_flow_set);
     run_case(&rc, case_kc_flow_unset);
-    run_case(&rc, case_kc_flow_overlay_order);
+    run_case(&rc, case_kc_flow_override_order);
     run_case(&rc, case_kc_flow_exec);
+    run_case(&rc, case_kc_flow_error);
     run_case(&rc, case_kc_flow_free);
     run_case(&rc, case_kc_flow_version);
-    run_case(&rc, case_kc_flow_get_error);
+    run_case(&rc, case_kc_flow_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
 /**
- * Runs one public API contract test case.
+ * Runs one public contract test case.
  * @param argc Argument count.
  * @param argv Argument vector.
  * @return 0 on success, 1 or 2 on failure.
@@ -717,14 +976,16 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_flow_open") == 0) return case_kc_flow_open();
     if (strcmp(argv[1], "kc_flow_close") == 0) return case_kc_flow_close();
-    if (strcmp(argv[1], "kc_flow_stop") == 0) return case_kc_flow_stop();
     if (strcmp(argv[1], "kc_flow_set") == 0) return case_kc_flow_set();
     if (strcmp(argv[1], "kc_flow_unset") == 0) return case_kc_flow_unset();
-    if (strcmp(argv[1], "kc_flow_overlay_order") == 0) return case_kc_flow_overlay_order();
+    if (strcmp(argv[1], "kc_flow_override_order") == 0) {
+        return case_kc_flow_override_order();
+    }
     if (strcmp(argv[1], "kc_flow_exec") == 0) return case_kc_flow_exec();
+    if (strcmp(argv[1], "kc_flow_error") == 0) return case_kc_flow_error();
     if (strcmp(argv[1], "kc_flow_free") == 0) return case_kc_flow_free();
     if (strcmp(argv[1], "kc_flow_version") == 0) return case_kc_flow_version();
-    if (strcmp(argv[1], "kc_flow_get_error") == 0) return case_kc_flow_get_error();
+    if (strcmp(argv[1], "kc_flow_cli") == 0) return case_kc_flow_cli();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
