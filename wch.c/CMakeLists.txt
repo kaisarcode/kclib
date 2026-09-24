@@ -8,6 +8,7 @@ endif()
 
 option(WCH_NATIVE "Enable native hardware optimizations" OFF)
 option(WCH_BUILD_TESTS "Build wch tests" OFF)
+set(WCH_TEST_CLI "" CACHE STRING "Path to the wch CLI used by contract tests")
 
 set(WCH_TEST_EXTERNAL_ARTIFACTS OFF)
 if(WCH_BUILD_TESTS AND WCH_TEST_SHARED_LIBRARY)
@@ -105,6 +106,18 @@ if(WCH_BUILD_TESTS)
     add_executable(wch_contract_test src/test.c)
     target_include_directories(wch_contract_test PRIVATE src)
     target_link_libraries(wch_contract_test PRIVATE ${WCH_TEST_SHARED_TARGET})
+
+    if(WCH_TEST_CLI)
+        target_compile_definitions(
+            wch_contract_test
+            PRIVATE WCH_TEST_CLI="${WCH_TEST_CLI}"
+        )
+    elseif(TARGET wch)
+        target_compile_definitions(
+            wch_contract_test
+            PRIVATE WCH_TEST_CLI="$<TARGET_FILE:wch>"
+        )
+    endif()
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(wch_contract_test PRIVATE m)
