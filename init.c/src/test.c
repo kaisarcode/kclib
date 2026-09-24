@@ -618,8 +618,10 @@ static int case_kc_init_cli(void) {
 #ifdef _WIN32
         {
             HANDLE null_handle;
-            HANDLE stdout_handle;
-            HANDLE stderr_handle;
+            STARTUPINFOA startup;
+            PROCESS_INFORMATION process;
+            char command_line[4096];
+            DWORD exit_code;
 
             null_handle = CreateFileA(
                 "NUL",
@@ -630,27 +632,47 @@ static int case_kc_init_cli(void) {
                 FILE_ATTRIBUTE_NORMAL,
                 NULL
             );
-            stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-            stderr_handle = GetStdHandle(STD_ERROR_HANDLE);
+            memset(&startup, 0, sizeof(startup));
+            memset(&process, 0, sizeof(process));
+            startup.cb = sizeof(startup);
+            startup.dwFlags = STARTF_USESTDHANDLES;
+            startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+            startup.hStdOutput = null_handle;
+            startup.hStdError = null_handle;
+
             if (null_handle == INVALID_HANDLE_VALUE ||
-                    !SetStdHandle(STD_OUTPUT_HANDLE, null_handle) ||
-                    !SetStdHandle(STD_ERROR_HANDLE, null_handle)) {
-                if (null_handle != INVALID_HANDLE_VALUE) {
-                    CloseHandle(null_handle);
-                }
+                    (size_t)snprintf(
+                        command_line,
+                        sizeof(command_line),
+                        "\"%s\" --dir \"%s\" --list",
+                        INIT_TEST_CLI,
+                        dir
+                    ) >= sizeof(command_line) ||
+                    !CreateProcessA(
+                        NULL,
+                        command_line,
+                        NULL,
+                        NULL,
+                        TRUE,
+                        0,
+                        NULL,
+                        NULL,
+                        &startup,
+                        &process
+                    )) {
                 rc = -1;
             } else {
-                rc = (int)_spawnl(
-                    _P_WAIT,
-                    INIT_TEST_CLI,
-                    INIT_TEST_CLI,
-                    "--dir",
-                    dir,
-                    "--list",
-                    NULL
-                );
-                (void)SetStdHandle(STD_OUTPUT_HANDLE, stdout_handle);
-                (void)SetStdHandle(STD_ERROR_HANDLE, stderr_handle);
+                WaitForSingleObject(process.hProcess, INFINITE);
+                if (!GetExitCodeProcess(process.hProcess, &exit_code)) {
+                    rc = -1;
+                } else {
+                    rc = (int)exit_code;
+                }
+                CloseHandle(process.hThread);
+                CloseHandle(process.hProcess);
+            }
+
+            if (null_handle != INVALID_HANDLE_VALUE) {
                 CloseHandle(null_handle);
             }
         }
