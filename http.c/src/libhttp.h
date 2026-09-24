@@ -59,13 +59,41 @@ typedef struct {
     size_t chunk_size;
 } kc_http_response_t;
 
+typedef struct {
+    const char *version;
+    const char *method;
+    const char *target;
+    const kc_http_field_t *headers;
+    size_t header_count;
+    const void *body;
+    size_t body_size;
+    const kc_http_field_t *trailers;
+    size_t trailer_count;
+    int chunked;
+    const size_t *chunk_size;
+} kc_http_request_build_t;
+
+typedef struct {
+    const char *version;
+    const int *status;
+    const char *reason;
+    const kc_http_field_t *headers;
+    size_t header_count;
+    const void *body;
+    size_t body_size;
+    const kc_http_field_t *trailers;
+    size_t trailer_count;
+    int chunked;
+    const size_t *chunk_size;
+} kc_http_response_build_t;
+
 typedef void (*kc_http_request_fn)(
-    const kc_http_request_t *request,
+    const kc_http_request_build_t *request,
     void *userdata
 );
 
 typedef void (*kc_http_response_fn)(
-    const kc_http_response_t *response,
+    const kc_http_response_build_t *response,
     void *userdata
 );
 
@@ -113,6 +141,8 @@ void kc_http_parser_close(kc_http_parser_t *parser);
  * Build one HTTP request into newly allocated wire bytes.
  *
  * NULL method, target, and version select GET, /, and HTTP/1.1 respectively.
+ * NULL chunk_size selects the internal chunk-size default. A non-NULL
+ * chunk_size is explicit and must be greater than zero.
  * The caller releases the returned buffer with kc_http_free().
  * @return Function result.
  */
@@ -125,9 +155,10 @@ int kc_http_request(
 /**
  * Build one HTTP response into newly allocated wire bytes.
  *
- * A zero status selects 200. NULL version selects HTTP/1.1 and NULL reason
- * derives the standard reason phrase. The caller releases the returned buffer
- * with kc_http_free().
+ * NULL status selects 200. NULL version selects HTTP/1.1 and NULL reason
+ * derives the standard reason phrase. NULL chunk_size selects the internal
+ * chunk-size default. Non-NULL status and chunk_size values are explicit.
+ * The caller releases the returned buffer with kc_http_free().
  * @return Function result.
  */
 int kc_http_response(
