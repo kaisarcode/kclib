@@ -50,11 +50,12 @@ unbounded output queues.
 ```c
 #include "libnetl.h"
 
+int backlog = 128;
 kc_netl_options_t options = {
     .host = "0.0.0.0",
     .port = 8080,
     .protocol = KC_NETL_TCP,
-    .backlog = 128
+    .backlog = &backlog
 };
 
 kc_netl_t *server = NULL;
