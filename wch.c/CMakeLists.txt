@@ -48,6 +48,7 @@ if(NOT WCH_TEST_EXTERNAL_ARTIFACTS)
     )
 
     target_include_directories(wch PRIVATE src)
+    target_compile_definitions(wch PRIVATE KC_WCH_CLI=1)
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(wch pthread m)
