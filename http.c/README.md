@@ -1,82 +1,262 @@
 # http.c - HTTP Protocol Parser and Builder
 
-`http.c` is an HTTP protocol parser and builder library and CLI. It reads
-HTTP wire bytes from `stdin`, emits normalized message metadata plus the raw
-logical body, and builds HTTP wire messages from raw payload bytes and
-metadata.
+\`http.c\` is an HTTP protocol layer. It incrementally parses HTTP byte streams
+into complete structured requests/responses and builds HTTP wire bytes from
+structured requests/responses.
 
-It composes with stream tools such as [`netl`](../netl.c) and
-[`nets`](../nets.c):
+It does not listen on ports, own sockets, route requests, or perform outgoing
+network transfers. Those responsibilities belong to transport libraries such as
+\`netl.c\` and \`nets.c\`.
 
-```bash
-netl 127.0.0.1:8080 'http parse | app'
+The intended scripting composition is:
 
-app | http build response --status 200 | nets 127.0.0.1:8080
-```
+\`\`\`js
+const parser = http.parser();
+
+client.on("data", (data) => {
+    parser.write(data);
+});
+
+parser.on("request", (request) => {
+    const response = http.response({
+        status: 200,
+        headers: [["content-type", "text/plain"]],
+        body: "hello"
+    });
+
+    client.send(response);
+});
+\`\`\`
+
+One parser belongs to one HTTP byte stream. A write may complete zero, one, or
+multiple HTTP messages.
 
 ---
 
 ## CLI
 
-### Examples
+### Parse
 
-Parse one HTTP request from stdin:
+\`http parse\` reads stdin incrementally and exits as soon as one complete HTTP
+message is available. It does not wait for EOF after the message has completed,
+which allows it to operate directly on a TCP connection stream.
 
-```bash
+\`\`\`bash
 printf 'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n' | http parse
-```
+\`\`\`
 
-Parse all messages from a keep-alive stream:
+Default output contains application-facing request/response fields, headers,
+and raw logical body bytes. \`--all\` prints protocol metadata, body length, and
+trailers as well.
 
-```bash
-cat stream.bin | http parse --all
-```
+\`\`\`bash
+printf 'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n' | http parse --all
+\`\`\`
 
-Build a POST request:
+For a request, default metadata is:
 
-```bash
-printf 'hello' | http build request \
+\`\`\`text
+request.method=GET
+request.target=/
+request.path=/
+request.query=
+header.host=localhost
+\`\`\`
+
+With \`--all\`, protocol metadata such as \`http.type\`, \`http.version\`,
+\`body.length\`, and trailers are also emitted.
+
+### Build
+
+The normalized command names mirror the reusable API:
+
+\`\`\`bash
+printf 'hello' | http request \
     --method POST \
     --target /api \
     --header 'host: localhost' \
     --header 'content-type: text/plain'
-```
+\`\`\`
 
-Build a 200 response:
-
-```bash
-cat index.html | http build response \
+\`\`\`bash
+printf 'hello' | http response \
     --status 200 \
-    --header 'content-type: text/html'
-```
+    --header 'content-type: text/plain'
+\`\`\`
 
-Build a chunked response:
+\`http build request\` and \`http build response\` remain temporary compatibility
+aliases for existing shell consumers.
 
-```bash
-cat large.bin | http build response \
-    --status 200 \
-    --header 'content-type: application/octet-stream' \
-    --chunked
-```
+Request and response builders support:
+
+- \`--version <version>\`
+- repeatable \`--header <name: value>\`
+- \`--chunked\`
+- \`--chunk-size <n>\`
+- repeatable \`--trailer <name: value>\`
+
+Requests additionally support \`--method\` and \`--target\`. Responses support
+\`--status\` and \`--reason\`.
 
 ---
 
-### Commands
+## Public API
 
-| Command | Description |
+The public surface has three semantic capabilities:
+
+\`\`\`text
+parser
+request
+response
+\`\`\`
+
+### Parser lifecycle
+
+\`\`\`c
+static void on_request(const kc_http_request_t *request, void *userdata) {
+    /* request and all nested data are borrowed for this callback only */
+}
+
+static void on_error(int status, void *userdata) {
+    fprintf(stderr, "%s\n", kc_http_strerror(status));
+}
+
+kc_http_parser_t *parser = NULL;
+
+if (kc_http_parser_open(
+        &parser,
+        on_request,
+        NULL,
+        on_error,
+        userdata) != KC_HTTP_OK) {
+    /* handle allocation/argument failure */
+}
+
+/* Feed each chunk belonging to this one stream. */
+kc_http_parser_write(parser, chunk, chunk_size);
+
+/* Finalize when that stream closes. */
+kc_http_parser_close(parser);
+\`\`\`
+
+The parser buffers incomplete messages internally. When a write completes more
+than one message, the callback is invoked once per complete message. Header names
+are normalized lowercase, chunked HTTP/1 bodies are dechunked, and trailers are
+reported separately.
+
+Requests and responses delivered to callbacks are borrowed and valid only for
+the duration of the callback. A scripting bridge is expected to copy them into
+normal language objects before the callback returns.
+
+### Build a request
+
+\`\`\`c
+const kc_http_field_t headers[] = {
+    { "Host", "example.com" }
+};
+
+kc_http_request_t request = {0};
+request.method = "GET";
+request.target = "/";
+request.headers = headers;
+request.header_count = 1;
+
+void *wire = NULL;
+size_t wire_size = 0;
+
+if (kc_http_request(&request, &wire, &wire_size) == KC_HTTP_OK) {
+    /* send wire bytes */
+    kc_http_free(wire);
+}
+\`\`\`
+
+### Build a response
+
+\`\`\`c
+kc_http_response_t response = {0};
+response.status = 200;
+response.body = "hello";
+response.body_size = 5;
+
+void *wire = NULL;
+size_t wire_size = 0;
+
+if (kc_http_response(&response, &wire, &wire_size) == KC_HTTP_OK) {
+    /* send wire bytes */
+    kc_http_free(wire);
+}
+\`\`\`
+
+Builder inputs are borrowed for the duration of the call. Returned wire bytes
+are owned by the caller and released with \`kc_http_free()\`.
+
+Defaults are:
+
+- request method: \`GET\`
+- request target: \`/\`
+- request/response version: \`1.1\`
+- response status: \`200\`
+- response reason: derived from status
+- chunk size when chunked: \`8192\`
+
+---
+
+## Transport composition
+
+\`http.c\` deliberately has no client/server socket API.
+
+For an HTTP server, \`netl.c\` owns listening, accepted TCP connections, and
+connection identity. Each accepted connection gets its own HTTP parser:
+
+\`\`\`js
+netl.listen({ port: 8080, protocol: "tcp" });
+
+netl.on("connection", (client) => {
+    const parser = http.parser();
+
+    parser.on("request", (request) => {
+        client.send(http.response({ status: 200 }));
+    });
+
+    client.on("data", (data) => {
+        parser.write(data);
+    });
+
+    client.on("close", () => {
+        parser.close();
+    });
+});
+\`\`\`
+
+\`nets.c\` remains an independent outbound transfer API. Its returned bytes may
+also be fed to an HTTP parser when the transfer carries HTTP.
+
+---
+
+## Protocol support
+
+| Version | Status |
 | :--- | :--- |
-| `parse` | Parse one HTTP message from stdin and emit normalized output. |
-| `parse --all` | Parse all HTTP messages from stdin until EOF. |
-| `build request` | Build an HTTP request from stdin body. |
-| `build response` | Build an HTTP response from stdin body. |
+| HTTP/0.9 | Parsed |
+| HTTP/1.0 | Parse and build |
+| HTTP/1.1 | Incremental parse and build, Content-Length, chunked, trailers |
+| HTTP/2 | Existing HEADERS/DATA frame parse/build capability retained |
+| HTTP/3 | Existing HEADERS/DATA frame parse/build capability retained |
 
-### Parse options
+---
 
-| Option | Description |
+## Source Layout
+
+| File | Role |
 | :--- | :--- |
-| `--all` | Parse all messages until EOF, separated by `---`. |
+| \`src/http.c\` | CLI projection of the public API |
+| \`src/libhttp.c\` | Reusable parser and builders |
+| \`src/libhttp.h\` | Public C contract |
+| \`src/test.c\` | Public contract tests |
 
-### Build request options
+---
+
+## Build request options
 
 | Option | Description |
 | :--- | :--- |
