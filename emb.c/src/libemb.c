@@ -132,65 +132,6 @@ typedef struct {
     size_t norm_input_size;
 } kc_emb_ctx_t;
 
-typedef struct kc_emb_worker kc_emb_worker_t;
-
-struct kc_emb_worker {
-    kc_emb_ctx_t *ectx;
-
-#ifndef _WIN32
-    pthread_t thread;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond_req;
-    pthread_cond_t cond_res;
-#else
-    HANDLE thread;
-    CRITICAL_SECTION mutex;
-    CONDITION_VARIABLE cond_req;
-    CONDITION_VARIABLE cond_res;
-#endif
-
-    const char *input;
-    float *out;
-    int result;
-    int has_req;
-    int done;
-    int shutdown;
-};
-
-typedef struct kc_emb kc_emb_state_t;
-
-struct kc_emb {
-    kc_emb_worker_t *workers;
-    int n_workers;
-    int n_embd;
-
-#ifndef _WIN32
-    pthread_mutex_t pool_mutex;
-    pthread_cond_t pool_cond;
-#else
-    CRITICAL_SECTION pool_mutex;
-    CONDITION_VARIABLE pool_cond;
-#endif
-
-    char error[256];
-};
-
-/**
- * Sets an error message on the context.
- * @param ctx Context pointer.
- * @param fmt Printf-style format string.
- * @param ... Format arguments.
- * @return None.
- */
-static void kc_emb_state_set_error(kc_emb_state_t *ctx, const char *fmt, ...) {
-    va_list ap;
-    if (!ctx || !fmt) return;
-    va_start(ap, fmt);
-    vsnprintf(ctx->error, sizeof(ctx->error), fmt, ap);
-    va_end(ap);
-    ctx->error[sizeof(ctx->error) - 1] = '\0';
-}
-
 /**
  * Check if a character is ASCII whitespace.
  * @param c Input character.
@@ -767,351 +708,25 @@ failure:
     return KC_EMB_ERROR;
 }
 
-#ifndef __EMSCRIPTEN__
-#ifndef _WIN32
-/**
- * Worker thread entry point. Waits for requests and executes inference.
- * @param arg Pointer to the worker struct.
- * @return NULL on completion.
- */
-static void *kc_emb_worker_thread(void *arg) {
-#else
-/**
- * Worker thread entry point. Waits for requests and executes inference.
- * @param arg Pointer to the worker struct.
- * @return 0 on completion.
- */
-static DWORD WINAPI kc_emb_worker_thread(LPVOID arg) {
-#endif
-    kc_emb_worker_t *w = (kc_emb_worker_t *)arg;
-
-#ifndef _WIN32
-    pthread_mutex_lock(&w->mutex);
-    while (!w->shutdown) {
-        while (!w->has_req && !w->shutdown) {
-            pthread_cond_wait(&w->cond_req, &w->mutex);
-        }
-        if (w->shutdown) break;
-        w->result = kc_emb_ctx_exec(w->ectx, w->input, w->out);
-        w->has_req = 0;
-        w->done = 1;
-        pthread_cond_signal(&w->cond_res);
-    }
-    pthread_mutex_unlock(&w->mutex);
-    return NULL;
-#else
-    EnterCriticalSection(&w->mutex);
-    while (!w->shutdown) {
-        while (!w->has_req && !w->shutdown) {
-            SleepConditionVariableCS(&w->cond_req, &w->mutex, INFINITE);
-        }
-        if (w->shutdown) break;
-        w->result = kc_emb_ctx_exec(w->ectx, w->input, w->out);
-        w->has_req = 0;
-        w->done = 1;
-        WakeConditionVariable(&w->cond_res);
-    }
-    LeaveCriticalSection(&w->mutex);
-    return 0;
-#endif
-}
-#endif
-
-/**
- * Initialize a worker: allocate its context and start its thread.
- * @param w Worker pointer.
- * @return 0 on success, -1 on failure.
- */
-static int kc_emb_worker_init(kc_emb_worker_t *w) {
-    w->ectx = kc_emb_ctx_open();
-    if (!w->ectx) return -1;
-
-    w->input    = NULL;
-    w->out      = NULL;
-    w->result   = 0;
-    w->has_req  = 0;
-    w->done     = 0;
-    w->shutdown = 0;
-
-#ifdef __EMSCRIPTEN__
-#elif !defined(_WIN32)
-    if (pthread_mutex_init(&w->mutex, NULL) != 0) {
-        kc_emb_ctx_free(w->ectx); w->ectx = NULL;
-        return -1;
-    }
-    if (pthread_cond_init(&w->cond_req, NULL) != 0) {
-        pthread_mutex_destroy(&w->mutex);
-        kc_emb_ctx_free(w->ectx); w->ectx = NULL;
-        return -1;
-    }
-    if (pthread_cond_init(&w->cond_res, NULL) != 0) {
-        pthread_cond_destroy(&w->cond_req);
-        pthread_mutex_destroy(&w->mutex);
-        kc_emb_ctx_free(w->ectx); w->ectx = NULL;
-        return -1;
-    }
-    if (pthread_create(&w->thread, NULL, kc_emb_worker_thread, w) != 0) {
-        pthread_cond_destroy(&w->cond_res);
-        pthread_cond_destroy(&w->cond_req);
-        pthread_mutex_destroy(&w->mutex);
-        kc_emb_ctx_free(w->ectx); w->ectx = NULL;
-        return -1;
-    }
-#else
-    InitializeCriticalSection(&w->mutex);
-    InitializeConditionVariable(&w->cond_req);
-    InitializeConditionVariable(&w->cond_res);
-    w->thread = CreateThread(NULL, 0, kc_emb_worker_thread, w, 0, NULL);
-    if (!w->thread) {
-        DeleteCriticalSection(&w->mutex);
-        kc_emb_ctx_free(w->ectx); w->ectx = NULL;
-        return -1;
-    }
-#endif
-    return 0;
-}
-
-/**
- * Signal a worker to shut down, join its thread, and free its context.
- * @param w Worker pointer.
- * @return No return value.
- */
-static void kc_emb_worker_destroy(kc_emb_worker_t *w) {
-#ifdef __EMSCRIPTEN__
-#elif !defined(_WIN32)
-    pthread_mutex_lock(&w->mutex);
-    w->shutdown = 1;
-    pthread_cond_signal(&w->cond_req);
-    pthread_mutex_unlock(&w->mutex);
-    pthread_join(w->thread, NULL);
-    pthread_cond_destroy(&w->cond_res);
-    pthread_cond_destroy(&w->cond_req);
-    pthread_mutex_destroy(&w->mutex);
-#else
-    EnterCriticalSection(&w->mutex);
-    w->shutdown = 1;
-    WakeConditionVariable(&w->cond_req);
-    LeaveCriticalSection(&w->mutex);
-    WaitForSingleObject(w->thread, INFINITE);
-    CloseHandle(w->thread);
-    DeleteCriticalSection(&w->mutex);
-#endif
-    kc_emb_ctx_free(w->ectx);
-    w->ectx = NULL;
-}
-
-/**
- * Initialize a new emb pool.
- * @param out Pointer to receive the context pointer.
- * @return KC_EMB_OK on success, or KC_EMB_ERROR on failure.
- */
-static int kc_emb_state_open(kc_emb_state_t **out) {
-    int n_workers;
-    kc_emb_state_t *ctx;
-
-    if (out) *out = NULL;
-    if (!out) return KC_EMB_ERROR;
-
-    n_workers = 1;
-
-    ctx = (kc_emb_state_t *)calloc(1, sizeof(kc_emb_state_t));
-    if (!ctx) return KC_EMB_ERROR;
-    ctx->error[0] = '\0';
-
-    ctx->workers = (kc_emb_worker_t *)calloc(n_workers, sizeof(kc_emb_worker_t));
-    if (!ctx->workers) { kc_emb_state_set_error(ctx, "memory allocation failed"); free(ctx); return KC_EMB_ERROR; }
-
-#ifndef _WIN32
-    if (pthread_mutex_init(&ctx->pool_mutex, NULL) != 0) {
-        kc_emb_state_set_error(ctx, "pthread_mutex_init failed");
-        free(ctx->workers); free(ctx); return KC_EMB_ERROR;
-    }
-    if (pthread_cond_init(&ctx->pool_cond, NULL) != 0) {
-        kc_emb_state_set_error(ctx, "pthread_cond_init failed");
-        pthread_mutex_destroy(&ctx->pool_mutex);
-        free(ctx->workers); free(ctx); return KC_EMB_ERROR;
-    }
-#else
-    InitializeCriticalSection(&ctx->pool_mutex);
-    InitializeConditionVariable(&ctx->pool_cond);
-#endif
-
-    int started = 0;
-    for (int i = 0; i < n_workers; i++) {
-        if (kc_emb_worker_init(&ctx->workers[i]) != 0) break;
-        started++;
-    }
-
-    if (started == 0) {
-        for (int i = 0; i < started; i++) kc_emb_worker_destroy(&ctx->workers[i]);
-#ifndef _WIN32
-        pthread_cond_destroy(&ctx->pool_cond);
-        pthread_mutex_destroy(&ctx->pool_mutex);
-#else
-        DeleteCriticalSection(&ctx->pool_mutex);
-#endif
-        kc_emb_state_set_error(ctx, "worker initialization failed");
-        free(ctx->workers); free(ctx); return KC_EMB_ERROR;
-    }
-
-    ctx->n_workers = started;
-    ctx->n_embd    = ctx->workers[0].ectx->n_embd;
-
-    *out = ctx;
-    return KC_EMB_OK;
-}
-
-/**
- * Retrieve the fixed model embedding dimension from initialized state.
- * @param ctx Internal state pointer.
- * @return Dimension size, or 0 on invalid input.
- */
-static size_t kc_emb_state_dim(const kc_emb_state_t *ctx) {
-    return ctx ? (size_t)ctx->n_embd : 0;
-}
-
-/**
- * Generate an embedding for the given input text.
- * @param ctx Pool pointer.
- * @param input Null-terminated input text.
- * @param out_data Output pointer to receive caller-owned float
- * buffer; free with kc_emb_free().
- * @param out_count Output count, equals dim on success.
- * @return KC_EMB_OK on success, KC_EMB_ERROR on failure.
- */
-static int kc_emb_state_exec(kc_emb_state_t *ctx, const char *input, float **out_data, size_t *out_count) {
-    kc_emb_worker_t *w = NULL;
-    float *out = NULL;
-    size_t dim = 0;
-    int result = KC_EMB_ERROR;
-
-    if (out_data) *out_data = NULL;
-    if (out_count) *out_count = 0;
-
-    if (!ctx || !input || !out_data || !out_count) {
-        if (ctx) kc_emb_state_set_error(ctx, "invalid argument");
-        return KC_EMB_ERROR;
-    }
-
-    ctx->error[0] = '\0';
-
-    dim = kc_emb_state_dim(ctx);
-    if (dim == 0) {
-        kc_emb_state_set_error(ctx, "invalid argument");
-        return KC_EMB_ERROR;
-    }
-
-    out = (float *)malloc(dim * sizeof(float));
-    if (!out) {
-        kc_emb_state_set_error(ctx, "allocation failure");
-        return KC_EMB_ERROR;
-    }
-
-#ifdef __EMSCRIPTEN__
-    w = &ctx->workers[0];
-    w->input   = input;
-    w->out     = out;
-    w->done    = 0;
-    w->has_req = 1;
-    w->result  = kc_emb_ctx_exec(w->ectx, w->input, w->out);
-    w->has_req = 0;
-    w->done    = 1;
-    result = w->result;
-#elif !defined(_WIN32)
-    pthread_mutex_lock(&ctx->pool_mutex);
-    while (1) {
-        for (int i = 0; i < ctx->n_workers; i++) {
-            kc_emb_worker_t *cand = &ctx->workers[i];
-            pthread_mutex_lock(&cand->mutex);
-            if (!cand->has_req) {
-                w = cand;
-                break;
-            }
-            pthread_mutex_unlock(&cand->mutex);
-        }
-        if (w) break;
-        pthread_cond_wait(&ctx->pool_cond, &ctx->pool_mutex);
-    }
-    pthread_mutex_unlock(&ctx->pool_mutex);
-
-    w->input  = input;
-    w->out    = out;
-    w->done   = 0;
-    w->has_req = 1;
-    pthread_cond_signal(&w->cond_req);
-
-    while (!w->done) {
-        pthread_cond_wait(&w->cond_res, &w->mutex);
-    }
-    result = w->result;
-    pthread_mutex_unlock(&w->mutex);
-
-    pthread_mutex_lock(&ctx->pool_mutex);
-    pthread_cond_signal(&ctx->pool_cond);
-    pthread_mutex_unlock(&ctx->pool_mutex);
-#else
-    EnterCriticalSection(&ctx->pool_mutex);
-    while (1) {
-        for (int i = 0; i < ctx->n_workers; i++) {
-            kc_emb_worker_t *cand = &ctx->workers[i];
-            EnterCriticalSection(&cand->mutex);
-            if (!cand->has_req) {
-                w = cand;
-                break;
-            }
-            LeaveCriticalSection(&cand->mutex);
-        }
-        if (w) break;
-        SleepConditionVariableCS(&ctx->pool_cond, &ctx->pool_mutex, INFINITE);
-    }
-    LeaveCriticalSection(&ctx->pool_mutex);
-
-    w->input  = input;
-    w->out    = out;
-    w->done   = 0;
-    w->has_req = 1;
-    WakeConditionVariable(&w->cond_req);
-
-    while (!w->done) {
-        SleepConditionVariableCS(&w->cond_res, &w->mutex, INFINITE);
-    }
-    result = w->result;
-    LeaveCriticalSection(&w->mutex);
-
-    EnterCriticalSection(&ctx->pool_mutex);
-    WakeConditionVariable(&ctx->pool_cond);
-    LeaveCriticalSection(&ctx->pool_mutex);
-#endif
-
-    if (result != KC_EMB_OK) {
-        kc_emb_state_set_error(ctx, "worker execution failure");
-        free(out);
-        return KC_EMB_ERROR;
-    }
-    ctx->error[0] = '\0';
-    *out_data = out;
-    *out_count = dim;
-    return KC_EMB_OK;
-}
-
-
-static kc_emb_state_t *kc_emb_global = NULL;
+static kc_emb_ctx_t *kc_emb_global_ctx = NULL;
 
 #ifndef _WIN32
 static pthread_once_t kc_emb_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t kc_emb_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /**
- * Initialize the fixed embedded model once per process.
+ * Initialize the single embedded model once per process.
  * @return None.
  */
 static void kc_emb_global_init(void) {
-    (void)kc_emb_state_open(&kc_emb_global);
+    kc_emb_global_ctx = kc_emb_ctx_open();
 }
 #else
 static INIT_ONCE kc_emb_once = INIT_ONCE_STATIC_INIT;
+static CRITICAL_SECTION kc_emb_mutex;
 
 /**
- * Initialize the fixed embedded model once per process.
+ * Initialize the single embedded model once per process.
  * @param once Windows once-control object.
  * @param param Unused callback parameter.
  * @param context Unused callback context.
@@ -1121,19 +736,25 @@ static BOOL CALLBACK kc_emb_global_init(PINIT_ONCE once, PVOID param, PVOID *con
     (void)once;
     (void)param;
     (void)context;
-    (void)kc_emb_state_open(&kc_emb_global);
+    kc_emb_global_ctx = kc_emb_ctx_open();
+    if (kc_emb_global_ctx) InitializeCriticalSection(&kc_emb_mutex);
     return TRUE;
 }
 #endif
 
 /**
  * Generate an embedding using the single embedded model.
+ * Calls are serialized because the prepared GGML compute state is reused.
  * @param input Null-terminated input text.
  * @param out_data Destination for the caller-owned vector.
  * @param out_count Destination for the vector element count.
  * @return KC_EMB_OK on success, KC_EMB_ERROR on failure.
  */
 int kc_emb_embed(const char *input, float **out_data, size_t *out_count) {
+    float *out;
+    size_t dim;
+    int result;
+
     if (out_data) *out_data = NULL;
     if (out_count) *out_count = 0;
     if (!input || !out_data || !out_count) return KC_EMB_ERROR;
@@ -1141,11 +762,37 @@ int kc_emb_embed(const char *input, float **out_data, size_t *out_count) {
 #ifndef _WIN32
     if (pthread_once(&kc_emb_once, kc_emb_global_init) != 0) return KC_EMB_ERROR;
 #else
-    if (!InitOnceExecuteOnce(&kc_emb_once, kc_emb_global_init, NULL, NULL)) return KC_EMB_ERROR;
+    if (!InitOnceExecuteOnce(&kc_emb_once, kc_emb_global_init, NULL, NULL)) {
+        return KC_EMB_ERROR;
+    }
+#endif
+    if (!kc_emb_global_ctx || kc_emb_global_ctx->n_embd <= 0) return KC_EMB_ERROR;
+
+    dim = (size_t)kc_emb_global_ctx->n_embd;
+    out = (float *)malloc(dim * sizeof(float));
+    if (!out) return KC_EMB_ERROR;
+
+#ifndef _WIN32
+    if (pthread_mutex_lock(&kc_emb_mutex) != 0) {
+        free(out);
+        return KC_EMB_ERROR;
+    }
+    result = kc_emb_ctx_exec(kc_emb_global_ctx, input, out);
+    pthread_mutex_unlock(&kc_emb_mutex);
+#else
+    EnterCriticalSection(&kc_emb_mutex);
+    result = kc_emb_ctx_exec(kc_emb_global_ctx, input, out);
+    LeaveCriticalSection(&kc_emb_mutex);
 #endif
 
-    if (!kc_emb_global) return KC_EMB_ERROR;
-    return kc_emb_state_exec(kc_emb_global, input, out_data, out_count);
+    if (result != KC_EMB_OK) {
+        free(out);
+        return KC_EMB_ERROR;
+    }
+
+    *out_data = out;
+    *out_count = dim;
+    return KC_EMB_OK;
 }
 
 /**
