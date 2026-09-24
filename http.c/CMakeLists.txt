@@ -43,7 +43,7 @@ if(EMSCRIPTEN)
         --no-entry
         -sSTANDALONE_WASM=1
         -sSTACK_SIZE=1048576
-        -sEXPORTED_FUNCTIONS=_kc_http_open,_kc_http_close,_kc_http_set_method,_kc_http_set_target,_kc_http_set_version,_kc_http_set_status,_kc_http_set_reason,_kc_http_set_chunked,_kc_http_set_chunk_size,_kc_http_add_header,_kc_http_add_trailer,_kc_http_parse,_kc_http_build_request,_kc_http_build_response,_kc_http_free,_kc_http_get_error,_kc_http_version
+        -sEXPORTED_FUNCTIONS=_kc_http_parser_open,_kc_http_parser_write,_kc_http_parser_close,_kc_http_request,_kc_http_response,_kc_http_free,_kc_http_strerror,_kc_http_version
     )
 endif()
 
