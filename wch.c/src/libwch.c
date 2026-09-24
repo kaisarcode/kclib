@@ -75,6 +75,7 @@ typedef struct {
     int recursive;
 } kc_wch_registration_t;
 
+#if !defined(_WIN32) || defined(KC_WCH_CLI)
 typedef struct {
     const char *command;
     const char *dir;
@@ -1297,6 +1298,8 @@ static void kc_wch_native_close(kc_wch_native_t *w) {
 
     kc_wch_release(w);
 }
+#endif
+
 
 struct kc_wch {
     char name[KC_WCH_NAME_MAX];
@@ -1917,6 +1920,7 @@ static int kc_wch_append_event(
     return rc;
 }
 
+#if !defined(_WIN32) || defined(KC_WCH_CLI)
 /**
  * Map one native event type to the resident event index.
  * @param type Native event type.
@@ -2088,6 +2092,8 @@ static void kc_wch_dispatch_event(
     }
 #endif
 }
+
+#endif
 
 #if !defined(_WIN32) || defined(KC_WCH_CLI)
 /**
