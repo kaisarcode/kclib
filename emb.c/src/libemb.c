@@ -742,6 +742,26 @@ static BOOL CALLBACK kc_emb_global_init(PINIT_ONCE once, PVOID param, PVOID *con
 #endif
 
 /**
+ * Return the embedding dimension declared by the embedded model.
+ * @return Model embedding dimension, or zero if initialization fails.
+ */
+size_t kc_emb_dimension(void) {
+#ifndef _WIN32
+    if (pthread_once(&kc_emb_once, kc_emb_global_init) != 0) {
+        return 0;
+    }
+#else
+    if (!InitOnceExecuteOnce(&kc_emb_once, kc_emb_global_init, NULL, NULL)) {
+        return 0;
+    }
+#endif
+    if (!kc_emb_global_ctx || kc_emb_global_ctx->n_embd <= 0) {
+        return 0;
+    }
+    return (size_t)kc_emb_global_ctx->n_embd;
+}
+
+/**
  * Generate an embedding using the single embedded model.
  * Calls are serialized because the prepared GGML compute state is reused.
  * @param input Null-terminated input text.
