@@ -69,9 +69,9 @@ static int run_case(case_fn fn) {
 }
 
 /**
- * Open one index for a test using library defaults.
+ * Open one index for a test with one explicit metric.
  * @param dimension Vector dimension.
- * @param metric Metric constant, or zero to keep the default.
+ * @param metric Metric constant.
  * @return Open index, or NULL on failure.
  */
 static kc_hnsw_t *open_index(size_t dimension, int metric) {
@@ -79,9 +79,7 @@ static kc_hnsw_t *open_index(size_t dimension, int metric) {
     kc_hnsw_t *hnsw = NULL;
 
     options.dimension = dimension;
-    if (metric != 0) {
-        options.metric = metric;
-    }
+    options.metric = metric;
     if (kc_hnsw_open(&hnsw, &options) != KC_HNSW_OK) return NULL;
     return hnsw;
 }
@@ -166,7 +164,7 @@ static int case_kc_hnsw_add_build(void) {
     const float b[] = {0.0f, 1.0f};
     const float c[] = {1.0f, 1.0f};
     kc_hnsw_result_t *results = (kc_hnsw_result_t *)1;
-    kc_hnsw_t *hnsw = open_index(2, 0);
+    kc_hnsw_t *hnsw = open_index(2, KC_HNSW_METRIC_COSINE);
     size_t count = 99;
     int fail = 0;
 
@@ -289,7 +287,7 @@ static int case_kc_hnsw_contract(void) {
     const char *detail = "clears outputs and handles empty indexes and invalid arguments";
     const float q[] = {1.0f, 0.0f};
     kc_hnsw_result_t *results = (kc_hnsw_result_t *)1;
-    kc_hnsw_t *hnsw = open_index(2, 0);
+    kc_hnsw_t *hnsw = open_index(2, KC_HNSW_METRIC_COSINE);
     size_t count = 99;
     int fail = 0;
 
@@ -378,7 +376,7 @@ static int case_kc_hnsw_concurrency(void) {
     const float x[] = {1.0f, 0.0f};
     const float y[] = {0.0f, 1.0f};
     search_worker_t workers[2];
-    kc_hnsw_t *hnsw = open_index(2, 0);
+    kc_hnsw_t *hnsw = open_index(2, KC_HNSW_METRIC_COSINE);
     int fail = 0;
 
 #ifdef _WIN32
