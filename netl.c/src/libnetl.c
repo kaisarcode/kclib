@@ -13,6 +13,7 @@
 
 #include "libnetl.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,6 +65,8 @@ struct kc_netl {
     unsigned short port;
     kc_netl_connection_t *connections;
     kc_netl_connection_t *retired;
+    size_t poll_offset;
+    int prefer_accept;
     unsigned char buffer[KC_NETL_BUFFER_SIZE];
     char peer_host[KC_NETL_HOST_SIZE];
 };
@@ -167,9 +170,13 @@ static int kc_netl_peer_text(
  * @return None.
  */
 static void kc_netl_free_retired(kc_netl_t *listener) {
-    if (listener->retired == NULL) return;
-    free(listener->retired);
-    listener->retired = NULL;
+    kc_netl_connection_t *connection;
+
+    while (listener->retired != NULL) {
+        connection = listener->retired;
+        listener->retired = connection->next;
+        free(connection);
+    }
 }
 
 /**
@@ -205,6 +212,10 @@ static void kc_netl_connection_shutdown(kc_netl_connection_t *connection) {
         connection->fd = KC_NETL_FD_INVALID;
     }
     kc_netl_unlink(connection);
+    if (connection->listener != NULL) {
+        connection->next = connection->listener->retired;
+        connection->listener->retired = connection;
+    }
 }
 
 /**
@@ -520,7 +531,6 @@ static int kc_netl_receive_connection(
     if (received < 0) return KC_NETL_ENET;
 
     kc_netl_connection_shutdown(connection);
-    listener->retired = connection;
     event->type = KC_NETL_EVENT_CLOSE;
     event->connection = connection;
     event->host = connection->host;
@@ -593,38 +603,60 @@ int kc_netl_poll(
         return KC_NETL_ENET;
     }
 
-    if ((fds[0].revents & POLLIN) != 0) {
-        rc = listener->protocol == KC_NETL_TCP
-            ? kc_netl_accept(listener, event)
-            : kc_netl_receive_datagram(listener, event);
+    if (listener->protocol == KC_NETL_UDP) {
+        rc = (fds[0].revents & POLLIN) != 0
+            ? kc_netl_receive_datagram(listener, event)
+            : KC_NETL_EAGAIN;
         free(fds);
         free(map);
         return rc;
     }
 
-    for (index = 1U; index <= count; index++) {
-        short revents = fds[index].revents;
+    if ((fds[0].revents & POLLIN) != 0 && listener->prefer_accept) {
+        rc = kc_netl_accept(listener, event);
+        if (rc == KC_NETL_OK) listener->prefer_accept = 0;
+        free(fds);
+        free(map);
+        return rc;
+    }
 
-        if (revents == 0) continue;
-        if ((revents & POLLIN) != 0) {
-            rc = kc_netl_receive_connection(
-                listener,
-                map[index],
-                event
-            );
-            break;
-        }
-        if ((revents & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
+    if (count != 0U) {
+        size_t offset = listener->poll_offset % count;
+        size_t step;
+
+        for (step = 0U; step < count; step++) {
+            index = 1U + ((offset + step) % count);
+            if (fds[index].revents == 0) continue;
+
             connection = map[index];
-            kc_netl_connection_shutdown(connection);
-            listener->retired = connection;
-            event->type = KC_NETL_EVENT_CLOSE;
-            event->connection = connection;
-            event->host = connection->host;
-            event->port = connection->port;
-            rc = KC_NETL_OK;
-            break;
+            if ((fds[index].revents & POLLIN) != 0) {
+                rc = kc_netl_receive_connection(
+                    listener,
+                    connection,
+                    event
+                );
+            } else if (
+                (fds[index].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0
+            ) {
+                kc_netl_connection_shutdown(connection);
+                event->type = KC_NETL_EVENT_CLOSE;
+                event->connection = connection;
+                event->host = connection->host;
+                event->port = connection->port;
+                rc = KC_NETL_OK;
+            }
+
+            if (rc == KC_NETL_OK) {
+                listener->poll_offset = (offset + step + 1U) % count;
+                listener->prefer_accept = 1;
+                break;
+            }
         }
+    }
+
+    if (rc != KC_NETL_OK && (fds[0].revents & POLLIN) != 0) {
+        rc = kc_netl_accept(listener, event);
+        if (rc == KC_NETL_OK) listener->prefer_accept = 0;
     }
 
     free(fds);
@@ -746,11 +778,6 @@ int kc_netl_sendto(
 void kc_netl_connection_close(kc_netl_connection_t *connection) {
     if (connection == NULL) return;
     kc_netl_connection_shutdown(connection);
-    if (connection->listener != NULL &&
-        connection->listener->retired == connection) {
-        return;
-    }
-    free(connection);
 }
 
 /**
