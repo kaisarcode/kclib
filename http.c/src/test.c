@@ -113,6 +113,7 @@ typedef struct {
     char path[128];
     char query[128];
     int status;
+    int chunked;
     char reason[128];
     char host[128];
     char trailer_sum[128];
@@ -130,6 +131,7 @@ static void on_request(const kc_http_request_t *request, void *userdata) {
     parser_state_t *state = (parser_state_t *)userdata;
     size_t i;
     state->requests++;
+    state->chunked = request->chunked;
     copy_text(state->method, sizeof(state->method), request->method);
     copy_text(state->target, sizeof(state->target), request->target);
     copy_text(state->path, sizeof(state->path), request->path);
@@ -161,6 +163,7 @@ static void on_response(const kc_http_response_t *response, void *userdata) {
     parser_state_t *state = (parser_state_t *)userdata;
     state->responses++;
     state->status = response->status;
+    state->chunked = response->chunked;
     copy_text(state->reason, sizeof(state->reason), response->reason);
     state->body_size = response->body_size < sizeof(state->body)
         ? response->body_size : sizeof(state->body);
@@ -248,6 +251,7 @@ static int case_kc_http_parser_write(void) {
         fail += expect_int("chunked completion", KC_HTTP_OK,
             kc_http_parser_write(parser, chunk_b, sizeof(chunk_b) - 1U));
         fail += expect_int("chunked callback", 4, state.requests);
+        fail += expect_int("chunked framing", 1, state.chunked);
         fail += expect_bytes("dechunked body", "hibye", 5U, state.body, state.body_size);
         fail += expect_true("parsed trailer", strcmp(state.trailer_sum, "yes") == 0);
     }
