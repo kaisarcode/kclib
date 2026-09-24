@@ -274,7 +274,6 @@ Different runtimes are independent. Concurrent mutation or execution through
 the same runtime is not a supported contract. Execution is synchronous; there
 is no public cancellation API.
 
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
@@ -301,7 +300,11 @@ make test wine
 
 The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
 
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
+Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`. The normal suite includes one grouped CLI contract case covering the shipped command interface.
+
+WebAssembly is not a supported target. Executing local commands and child
+flows through native process facilities is the core capability of `flow.c`,
+so a WASM build would not provide the same runtime contract.
 
 ### Multiarch Builds
 
