@@ -55,7 +55,8 @@ typedef struct {
 /**
  * Open one incoming TCP or UDP listener.
  * NULL or empty host binds all interfaces. Port zero requests an ephemeral
- * operating-system-selected port. NULL max_pending_connections uses the internal default.
+ * operating-system-selected port. NULL max_pending_connections uses the
+ * internal default.
  * @param out Receives the listener handle.
  * @param options Listener options.
  * @return KC_NETL_OK on success, or a negative status code.
