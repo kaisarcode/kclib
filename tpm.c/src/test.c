@@ -128,8 +128,8 @@ static int case_kc_tpm_open(void) {
         kc_tpm_open(&default_tpm, "hello world hello world", NULL));
     fail += expect_true("default open returns profile", default_tpm != NULL);
 
-    options.ngram_size = 3;
-    fail += expect_int("open accepts explicit default", KC_TPM_OK,
+    memset(&options, 0, sizeof(options));
+    fail += expect_int("open accepts empty options", KC_TPM_OK,
         kc_tpm_open(&explicit_tpm, "hello world hello world", &options));
     fail += expect_true("explicit open returns profile", explicit_tpm != NULL);
 
@@ -138,16 +138,18 @@ static int case_kc_tpm_open(void) {
             kc_tpm_score(default_tpm, "hello world", &default_score));
         fail += expect_int("explicit profile scores immediately", KC_TPM_OK,
             kc_tpm_score(explicit_tpm, "hello world", &explicit_score));
-        fail += expect_true("default equals explicit n=3",
+        fail += expect_true("NULL options equal omitted ngram option",
             default_score == explicit_score);
     }
 
     kc_tpm_close(default_tpm);
     kc_tpm_close(explicit_tpm);
 
+    memset(&options, 0, sizeof(options));
+    options.has_ngram_size = 1;
     options.ngram_size = 0;
     tpm = (kc_tpm_t *)(uintptr_t)1;
-    fail += expect_int("open rejects n below range", KC_TPM_ERROR,
+    fail += expect_int("open rejects explicit n below range", KC_TPM_ERROR,
         kc_tpm_open(&tpm, "abc", &options));
     fail += expect_true("invalid option clears output", tpm == NULL);
 
