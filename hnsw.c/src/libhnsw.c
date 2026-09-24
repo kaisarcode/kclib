@@ -15,8 +15,6 @@
 
 #include <math.h>
 #include <stdint.h>
-#include <stdarg.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,7 +71,6 @@ struct kc_hnsw {
     SRWLOCK rwlock;
 #endif
     uint64_t rng_state;
-    atomic_int stop_requested;
 };
 
 typedef struct {
@@ -105,21 +102,12 @@ static int score_better(int metric, double a, double b);
 static int score_worse(int metric, double a, double b);
 static int kc_hnsw_heap_has_priority(int metric, double s1, double s2, int worst_first);
 
-static int kc_hnsw_search_level(const kc_hnsw_t *graph_hnsw, const kc_hnsw_t *stop_hnsw,
-    const float *query, double query_norm, size_t entry_idx, int level, int ef,
+static int kc_hnsw_search_level(const kc_hnsw_t *hnsw,
+    const float *query, double query_norm, size_t entry_idx, int level, int effort,
     kc_hnsw_heap_t *results);
 static int kc_hnsw_add_edge(kc_hnsw_t *hnsw, size_t src_idx, size_t dst_idx, int level);
 static void kc_hnsw_neighbor_list_init(kc_hnsw_neighbor_list_t *list);
 static void kc_hnsw_neighbor_list_free(kc_hnsw_neighbor_list_t *list);
-
-/**
- * Checks whether clean termination has been requested for an index.
- * @param hnsw Index whose stop state is checked.
- * @return Nonzero when termination was requested, otherwise zero.
- */
-static int kc_hnsw_is_stopped(const kc_hnsw_t *hnsw) {
-    return atomic_load_explicit(&hnsw->stop_requested, memory_order_relaxed);
-}
 
 /**
  * Creates default vector index options.
@@ -130,9 +118,9 @@ kc_hnsw_options_t kc_hnsw_options_default(void) {
 
     memset(&opts, 0, sizeof(opts));
     opts.metric = KC_HNSW_METRIC_COSINE;
-    opts.m = KC_HNSW_HNSW_M;
-    opts.ef_construction = KC_HNSW_HNSW_EF_CONSTRUCTION;
-    opts.ef_search = KC_HNSW_HNSW_EF_SEARCH;
+    opts.max_connections = KC_HNSW_HNSW_M;
+    opts.build_effort = KC_HNSW_HNSW_EF_CONSTRUCTION;
+    opts.search_effort = KC_HNSW_HNSW_EF_SEARCH;
     return opts;
 }
 
@@ -205,10 +193,10 @@ int kc_hnsw_open(kc_hnsw_t **out, const kc_hnsw_options_t *options) {
     if (out == NULL ||
         options == NULL ||
         options->dimension == 0 ||
-        !kc_hnsw_metric_valid(options->metric) ||
-        options->m <= 0 ||
-        options->ef_construction <= 0 ||
-        options->ef_search <= 0) {
+        !kc_hnsw_metric_valid(options->max_connectionsetric) ||
+        options->max_connections <= 0 ||
+        options->build_effort <= 0 ||
+        options->search_effort <= 0) {
         return KC_HNSW_EINVAL;
     }
 
@@ -218,13 +206,12 @@ int kc_hnsw_open(kc_hnsw_t **out, const kc_hnsw_options_t *options) {
     }
 
     hnsw->dimension = options->dimension;
-    hnsw->metric = options->metric;
+    hnsw->metric = options->max_connectionsetric;
     hnsw->max_level = -1;
     hnsw->entry_point_set = 0;
-    hnsw->M = options->m;
-    hnsw->ef_construction = options->ef_construction;
-    hnsw->ef_search = options->ef_search;
-    atomic_init(&hnsw->stop_requested, 0);
+    hnsw->M = options->max_connections;
+    hnsw->ef_construction = options->build_effort;
+    hnsw->ef_search = options->search_effort;
 #ifndef _WIN32
     if (pthread_rwlock_init(&hnsw->rwlock, NULL) != 0) {
         free(hnsw);
@@ -273,17 +260,6 @@ void kc_hnsw_close(kc_hnsw_t *hnsw) {
 }
 
 /**
- * Requests clean termination for one vector index context.
- * @param hnsw Index pointer.
- * @return Status code.
- */
-int kc_hnsw_stop(kc_hnsw_t *hnsw) {
-    if (hnsw == NULL) return KC_HNSW_EINVAL;
-    atomic_store_explicit(&hnsw->stop_requested, 1, memory_order_relaxed);
-    return KC_HNSW_OK;
-}
-
-/**
  * Reserves capacity without acquiring the lock.
  * @param hnsw Index pointer.
  * @param capacity Target vector capacity.
@@ -302,27 +278,6 @@ static int kc_hnsw_reserve_locked(kc_hnsw_t *hnsw, size_t capacity) {
     hnsw->items = items;
     hnsw->capacity = capacity;
     return KC_HNSW_OK;
-}
-
-/**
- * Reserves capacity for a target number of vectors.
- * Acquires an exclusive write lock internally.
- * @param hnsw Index pointer.
- * @param capacity Target vector capacity.
- * @return Status code.
- */
-int kc_hnsw_reserve(kc_hnsw_t *hnsw, size_t capacity) {
-    int rc;
-
-    if (hnsw == NULL) {
-        return KC_HNSW_EINVAL;
-    }
-    if (kc_hnsw_wlock(hnsw) != KC_HNSW_OK) {
-        return KC_HNSW_EINVAL;
-    }
-    rc = kc_hnsw_reserve_locked(hnsw, capacity);
-    kc_hnsw_wunlock(hnsw);
-    return rc;
 }
 
 /**
@@ -388,11 +343,6 @@ int kc_hnsw_add(kc_hnsw_t *hnsw, const char *id, const float *values) {
 int kc_hnsw_build(kc_hnsw_t *hnsw) {
     if (hnsw == NULL) return KC_HNSW_EINVAL;
     if (kc_hnsw_wlock(hnsw) != KC_HNSW_OK) return KC_HNSW_EINVAL;
-    if (kc_hnsw_is_stopped(hnsw)) {
-        kc_hnsw_wunlock(hnsw);
-        return KC_HNSW_ESTOP;
-    }
-
     if (hnsw->count == 0) {
         kc_hnsw_wunlock(hnsw);
         return KC_HNSW_OK;
@@ -425,10 +375,6 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
     int rc = KC_HNSW_OK;
 
     for (size_t i = 0; i < tmp_hnsw.count; i++) {
-        if (kc_hnsw_is_stopped(hnsw)) {
-            rc = KC_HNSW_ESTOP;
-            goto fail;
-        }
         int level = kc_hnsw_random_level(&tmp_hnsw);
         tmp_items[i].level = level;
         tmp_items[i].neighbors = (kc_hnsw_neighbor_list_t *)calloc(level + 1, sizeof(kc_hnsw_neighbor_list_t));
@@ -454,10 +400,6 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
         for (int l = tmp_hnsw.max_level; l > level; l--) {
             int changed = 1;
             while (changed) {
-                if (kc_hnsw_is_stopped(hnsw)) {
-                    rc = KC_HNSW_ESTOP;
-                    goto fail;
-                }
                 changed = 0;
                 kc_hnsw_neighbor_list_t *neighbors = &tmp_items[curr_idx].neighbors[l];
                 for (size_t n = 0; n < neighbors->count; n++) {
@@ -475,18 +417,14 @@ int kc_hnsw_build(kc_hnsw_t *hnsw) {
 
         for (int l = (level < tmp_hnsw.max_level ? level : tmp_hnsw.max_level); l >= 0; l--) {
             kc_hnsw_heap_t *candidates = kc_hnsw_heap_create(tmp_hnsw.ef_construction, tmp_hnsw.metric, 1);
-            if (kc_hnsw_is_stopped(hnsw)) {
-                rc = KC_HNSW_ESTOP;
-                goto fail;
-            }
             if (!candidates) {
                 rc = KC_HNSW_ENOMEM;
                 goto fail;
             }
-            if (kc_hnsw_search_level(&tmp_hnsw, hnsw, tmp_items[i].values, tmp_items[i].norm,
+            if (kc_hnsw_search_level(&tmp_hnsw, tmp_items[i].values, tmp_items[i].norm,
                     curr_idx, l, tmp_hnsw.ef_construction, candidates) != KC_HNSW_OK) {
                 kc_hnsw_heap_destroy(candidates);
-                rc = kc_hnsw_is_stopped(hnsw) ? KC_HNSW_ESTOP : KC_HNSW_ENOMEM;
+                rc = KC_HNSW_ENOMEM;
                 goto fail;
             }
             
@@ -596,10 +534,6 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
     }
     if (ctx == NULL || query == NULL || out_results == NULL || out_count == NULL) return KC_HNSW_EINVAL;
     if (kc_hnsw_rlock(mhnsw) != KC_HNSW_OK) return KC_HNSW_EINVAL;
-    if (kc_hnsw_is_stopped(mhnsw)) {
-        kc_hnsw_runlock(mhnsw);
-        return KC_HNSW_ESTOP;
-    }
     if (limit == 0 || hnsw->count == 0) {
         kc_hnsw_runlock(mhnsw);
         return KC_HNSW_OK;
@@ -610,10 +544,10 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
     }
 
     int ef = hnsw->ef_search;
-    if ((size_t)ef < limit) ef = (int)limit;
+    if ((size_t)effort < limit) ef = (int)limit;
     if (ef < 64) ef = 64;
 
-    int use_brute_force = (hnsw->count <= (size_t)ef || hnsw->count <= 1024);
+    int use_brute_force = (hnsw->count <= (size_t)effort || hnsw->count <= 1024);
     double q_norm = kc_hnsw_vector_norm(query, hnsw->dimension);
     size_t candidates_count = 0;
     kc_hnsw_node_score_t *results = NULL;
@@ -625,11 +559,6 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
             return KC_HNSW_ENOMEM;
         }
         for (size_t i = 0; i < hnsw->count; i++) {
-            if (kc_hnsw_is_stopped(mhnsw)) {
-                free(results);
-                kc_hnsw_runlock(mhnsw);
-                return KC_HNSW_ESTOP;
-            }
             if (hnsw->items[i].id == NULL) continue;
             double d = kc_hnsw_dist(hnsw, query, q_norm, hnsw->items[i].values, hnsw->items[i].norm);
             results[candidates_count].idx = i;
@@ -643,10 +572,6 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
         for (int l = hnsw->max_level; l > 0; l--) {
             int changed = 1;
             while (changed) {
-                if (kc_hnsw_is_stopped(mhnsw)) {
-                    kc_hnsw_runlock(mhnsw);
-                    return KC_HNSW_ESTOP;
-                }
                 changed = 0;
                 kc_hnsw_neighbor_list_t *neighbors = &hnsw->items[curr_idx].neighbors[l];
                 for (size_t n = 0; n < neighbors->count; n++) {
@@ -666,10 +591,10 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
             kc_hnsw_runlock(mhnsw);
             return KC_HNSW_ENOMEM;
         }
-        if (kc_hnsw_search_level(hnsw, hnsw, query, q_norm, curr_idx, 0, ef, top_k) != KC_HNSW_OK) {
+        if (kc_hnsw_search_level(hnsw, query, q_norm, curr_idx, 0, ef, top_k) != KC_HNSW_OK) {
             kc_hnsw_heap_destroy(top_k);
             kc_hnsw_runlock(mhnsw);
-            return kc_hnsw_is_stopped(mhnsw) ? KC_HNSW_ESTOP : KC_HNSW_ENOMEM;
+            return KC_HNSW_ENOMEM;
         }
         candidates_count = top_k->size;
         results = (kc_hnsw_node_score_t *)malloc(candidates_count * sizeof(kc_hnsw_node_score_t));
@@ -688,11 +613,6 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
     }
 
     for (size_t x = 0; x < candidates_count; x++) {
-        if (kc_hnsw_is_stopped(mhnsw)) {
-            free(results);
-            kc_hnsw_runlock(mhnsw);
-            return KC_HNSW_ESTOP;
-        }
         for (size_t y = x + 1; y < candidates_count; y++) {
             if (score_worse(hnsw->metric, results[x].score, results[y].score)) {
                 kc_hnsw_node_score_t tmp = results[x];
@@ -704,11 +624,6 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
 
     size_t written = 0;
     for (size_t i = 0; i < candidates_count && written < limit; i++) {
-        if (kc_hnsw_is_stopped(mhnsw)) {
-            free(results);
-            kc_hnsw_runlock(mhnsw);
-            return KC_HNSW_ESTOP;
-        }
         if (hnsw->items[results[i].idx].id == NULL) continue;
         int match = 0;
         if (hnsw->metric == KC_HNSW_METRIC_L2) {
@@ -752,30 +667,29 @@ void kc_hnsw_free(void *ptr) {
 
 /**
  * Performs a search at a specific HNSW level.
- * @param graph_hnsw Index pointer used for graph access.
- * @param stop_hnsw Index pointer used for cancellation checks.
+ * @param hnsw Index pointer.
  * @param query Query vector.
  * @param query_norm Precomputed query norm.
  * @param entry_idx Starting node index.
  * @param level Graph level to search.
- * @param ef Search budget (ef).
+ * @param effort Search effort budget.
  * @param results Output heap to store found nodes.
  * @return Status code.
  */
-static int kc_hnsw_search_level(const kc_hnsw_t *graph_hnsw, const kc_hnsw_t *stop_hnsw,
-    const float *query, double query_norm, size_t entry_idx, int level, int ef,
+static int kc_hnsw_search_level(const kc_hnsw_t *hnsw,
+    const float *query, double query_norm, size_t entry_idx, int level, int effort,
     kc_hnsw_heap_t *results) {
-    kc_hnsw_heap_t *candidates = kc_hnsw_heap_create(ef * 2, graph_hnsw->metric, 0);
+    kc_hnsw_heap_t *candidates = kc_hnsw_heap_create(effort * 2, hnsw->metric, 0);
     if (!candidates) return KC_HNSW_ENOMEM;
     
-    char *visited = (char *)calloc(graph_hnsw->count, 1);
+    char *visited = (char *)calloc(hnsw->count, 1);
     if (!visited) {
         kc_hnsw_heap_destroy(candidates);
         return KC_HNSW_ENOMEM;
     }
 
-    double d = kc_hnsw_dist(graph_hnsw, query, query_norm,
-            graph_hnsw->items[entry_idx].values, graph_hnsw->items[entry_idx].norm);
+    double d = kc_hnsw_dist(hnsw, query, query_norm,
+            hnsw->items[entry_idx].values, hnsw->items[entry_idx].norm);
     if (kc_hnsw_heap_push(candidates, entry_idx, d) != KC_HNSW_OK ||
         kc_hnsw_heap_push(results, entry_idx, d) != KC_HNSW_OK) {
         free(visited);
@@ -785,41 +699,31 @@ static int kc_hnsw_search_level(const kc_hnsw_t *graph_hnsw, const kc_hnsw_t *st
     visited[entry_idx] = 1;
 
     while (candidates->size > 0) {
-        if (kc_hnsw_is_stopped(stop_hnsw)) {
-            free(visited);
-            kc_hnsw_heap_destroy(candidates);
-            return KC_HNSW_ESTOP;
-        }
         kc_hnsw_node_score_t c = kc_hnsw_heap_pop(candidates);
         
         kc_hnsw_node_score_t worst_res = results->data[0];
-        if (results->size >= (size_t)ef &&
-            score_worse(graph_hnsw->metric, c.score, worst_res.score)) {
+        if (results->size >= (size_t)effort &&
+            score_worse(hnsw->metric, c.score, worst_res.score)) {
             break;
         }
 
-        kc_hnsw_neighbor_list_t *neighbors = &graph_hnsw->items[c.idx].neighbors[level];
+        kc_hnsw_neighbor_list_t *neighbors = &hnsw->items[c.idx].neighbors[level];
         for (size_t n = 0; n < neighbors->count; n++) {
-            if (kc_hnsw_is_stopped(stop_hnsw)) {
-                free(visited);
-                kc_hnsw_heap_destroy(candidates);
-                return KC_HNSW_ESTOP;
-            }
             size_t v_idx = neighbors->edges[n].target_idx;
             if (!visited[v_idx]) {
                 visited[v_idx] = 1;
-                double v_dist = kc_hnsw_dist(graph_hnsw, query, query_norm,
-                        graph_hnsw->items[v_idx].values, graph_hnsw->items[v_idx].norm);
+                double v_dist = kc_hnsw_dist(hnsw, query, query_norm,
+                        hnsw->items[v_idx].values, hnsw->items[v_idx].norm);
                 
                 worst_res = results->data[0];
-                if (results->size < (size_t)ef || score_better(graph_hnsw->metric, v_dist, worst_res.score)) {
+                if (results->size < (size_t)effort || score_better(hnsw->metric, v_dist, worst_res.score)) {
                     if (kc_hnsw_heap_push(candidates, v_idx, v_dist) != KC_HNSW_OK ||
                         kc_hnsw_heap_push(results, v_idx, v_dist) != KC_HNSW_OK) {
                         free(visited);
                         kc_hnsw_heap_destroy(candidates);
                         return KC_HNSW_ENOMEM;
                     }
-                    if (results->size > (size_t)ef) {
+                    if (results->size > (size_t)effort) {
                         kc_hnsw_heap_pop(results);
                     }
                 }
@@ -1153,33 +1057,6 @@ size_t kc_hnsw_count(const kc_hnsw_t *hnsw) {
 }
 
 /**
- * Resolves one metric name into a metric constant.
- * @param name Metric text name.
- * @return Metric constant, or 0 on invalid input.
- */
-int kc_hnsw_metric_from_string(const char *name) {
-    if (!name) return 0;
-    if (strcmp(name, "cosine") == 0) return KC_HNSW_METRIC_COSINE;
-    if (strcmp(name, "inner") == 0 || strcmp(name, "inner_product") == 0) return KC_HNSW_METRIC_INNER_PRODUCT;
-    if (strcmp(name, "l2") == 0 || strcmp(name, "euclidean") == 0) return KC_HNSW_METRIC_L2;
-    return 0;
-}
-
-/**
- * Resolves one metric constant into a metric name.
- * @param metric Metric constant.
- * @return Static metric name, or NULL on invalid input.
- */
-const char *kc_hnsw_metric_to_string(int metric) {
-    switch (metric) {
-        case KC_HNSW_METRIC_COSINE: return "cosine";
-        case KC_HNSW_METRIC_INNER_PRODUCT: return "inner";
-        case KC_HNSW_METRIC_L2: return "l2";
-        default: return NULL;
-    }
-}
-
-/**
  * Resolves one status code into text.
  * @param rc Status code.
  * @return Static string.
@@ -1190,7 +1067,6 @@ const char *kc_hnsw_strerror(int rc) {
         case KC_HNSW_EINVAL: return "invalid argument";
         case KC_HNSW_ENOMEM: return "out of memory";
         case KC_HNSW_ESTATE: return "invalid state";
-        case KC_HNSW_ESTOP: return "stopped";
         default: return "unknown error";
     }
 }
