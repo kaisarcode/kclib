@@ -1388,6 +1388,11 @@ static int kc_wch_line_valid(const char *value) {
  * @return Zero on success, nonzero on failure.
  */
 static int kc_wch_default_dir(char *out, size_t cap) {
+    const char *override = getenv("KC_WCH_DIR");
+
+    if (override != NULL && override[0] != '\0') {
+        return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : 1;
+    }
 #ifdef _WIN32
     char temp[MAX_PATH];
     DWORD size = GetTempPathA((DWORD)sizeof(temp), temp);
@@ -1409,23 +1414,6 @@ static int kc_wch_default_dir(char *out, size_t cap) {
 #endif
 }
 
-/**
- * Resolve a configured or default resident runtime directory.
- * @param dir Configured directory, or NULL.
- * @param out Output path buffer.
- * @param cap Output buffer capacity.
- * @return Zero on success, nonzero on failure.
- */
-static int kc_wch_resolve_dir(
-    const char *dir,
-    char *out,
-    size_t cap
-) {
-    if (dir != NULL && dir[0] != '\0') {
-        return (size_t)snprintf(out, cap, "%s", dir) < cap ? 0 : 1;
-    }
-    return kc_wch_default_dir(out, cap);
-}
 
 /**
  * Ensure one resident runtime directory exists.
@@ -2861,8 +2849,7 @@ int kc_wch_create(
             !kc_wch_line_valid(options->cmd)) {
         return KC_WCH_ERROR;
     }
-    if (kc_wch_resolve_dir(
-            options->dir,
+    if (kc_wch_default_dir(
             dir,
             sizeof(dir)
         ) != 0) {
@@ -2935,14 +2922,12 @@ int kc_wch_open(
 }
 
 /**
- * List registered resident watchers.
- * @param dir Runtime directory, or NULL.
+ * List registered resident watchers in the active runtime directory.
  * @param out_entries Output entry array.
  * @param out_count Output entry count.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
 int kc_wch_list(
-    const char *dir,
     kc_wch_entry_t **out_entries,
     size_t *out_count
 ) {
@@ -2960,8 +2945,7 @@ int kc_wch_list(
     if (out_count != NULL) *out_count = 0U;
     if (out_entries == NULL || out_count == NULL)
         return KC_WCH_ERROR;
-    if (kc_wch_resolve_dir(
-            dir,
+    if (kc_wch_default_dir(
             resolved,
             sizeof(resolved)
         ) != 0) {
@@ -3069,18 +3053,15 @@ int kc_wch_list(
 /**
  * Delete one named resident watcher.
  * @param name Watcher name.
- * @param dir Runtime directory, or NULL.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
 int kc_wch_delete(
-    const char *name,
-    const char *dir
+    const char *name
 ) {
     char resolved[KC_WCH_PATH_MAX];
 
     if (!kc_wch_name_valid(name)) return KC_WCH_ERROR;
-    if (kc_wch_resolve_dir(
-            dir,
+    if (kc_wch_default_dir(
             resolved,
             sizeof(resolved)
         ) != 0) {
@@ -3178,47 +3159,6 @@ int kc_wch_set_cmd(
  */
 const char *kc_wch_get_cmd(const kc_wch_t *w) {
     return w != NULL ? w->cmd : NULL;
-}
-
-/**
- * Change the runtime directory targeted by a watcher handle.
- * @param w Watcher handle.
- * @param dir Runtime directory, or NULL.
- * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
- */
-int kc_wch_set_dir(
-    kc_wch_t *w,
-    const char *dir
-) {
-    char resolved[KC_WCH_PATH_MAX];
-
-    if (w == NULL) return KC_WCH_ERROR;
-    if (kc_wch_resolve_dir(
-            dir,
-            resolved,
-            sizeof(resolved)
-        ) != 0) {
-        return KC_WCH_ERROR;
-    }
-    if ((size_t)snprintf(
-            w->dir,
-            sizeof(w->dir),
-            "%s",
-            resolved
-        ) >= sizeof(w->dir)) {
-        return KC_WCH_ERROR;
-    }
-    (void)kc_wch_load_handle(w);
-    return KC_WCH_OK;
-}
-
-/**
- * Return the runtime directory targeted by a watcher handle.
- * @param w Watcher handle.
- * @return Borrowed runtime directory, or NULL.
- */
-const char *kc_wch_get_dir(const kc_wch_t *w) {
-    return w != NULL ? w->dir : NULL;
 }
 
 /**
