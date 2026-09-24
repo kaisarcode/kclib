@@ -144,6 +144,7 @@ void kc_http_free(void *ptr);
 
 /**
  * Return a static string for a public status code.
+ * @return Static error string.
  */
 const char *kc_http_strerror(int status);
 
