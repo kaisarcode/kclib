@@ -189,37 +189,41 @@ static int cli_dispatch_udp(
     const void *data,
     size_t data_size
 ) {
-    int pipefd[2];
-    pid_t pid;
-    size_t offset = 0U;
+    pid_t worker = fork();
 
-    if (pipe(pipefd) != 0) return 1;
-    pid = fork();
-    if (pid < 0) {
+    if (worker < 0) return 1;
+    if (worker == 0) {
+        int pipefd[2];
+        pid_t child;
+        size_t offset = 0U;
+
+        if (pipe(pipefd) != 0) _exit(1);
+        child = fork();
+        if (child < 0) _exit(1);
+        if (child == 0) {
+            close(pipefd[1]);
+            if (dup2(pipefd[0], STDIN_FILENO) < 0) _exit(1);
+            if (pipefd[0] > STDERR_FILENO) close(pipefd[0]);
+            execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+            _exit(1);
+        }
+
         close(pipefd[0]);
+        while (offset < data_size) {
+            ssize_t written = write(
+                pipefd[1],
+                (const unsigned char *)data + offset,
+                data_size - offset
+            );
+            if (written <= 0) break;
+            offset += (size_t)written;
+        }
         close(pipefd[1]);
-        return 1;
-    }
-    if (pid == 0) {
-        close(pipefd[1]);
-        if (dup2(pipefd[0], STDIN_FILENO) < 0) _exit(1);
-        if (pipefd[0] > STDERR_FILENO) close(pipefd[0]);
-        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
-        _exit(1);
+        (void)waitpid(child, NULL, 0);
+        _exit(offset == data_size ? 0 : 1);
     }
 
-    close(pipefd[0]);
-    while (offset < data_size) {
-        ssize_t written = write(
-            pipefd[1],
-            (const unsigned char *)data + offset,
-            data_size - offset
-        );
-        if (written <= 0) break;
-        offset += (size_t)written;
-    }
-    close(pipefd[1]);
-    return offset == data_size ? 0 : 1;
+    return 0;
 }
 #else
 typedef struct {
@@ -454,18 +458,19 @@ static int cli_dispatch_tcp(
     return 0;
 }
 
+typedef struct {
+    char command[NETL_CLI_COMMAND_SIZE];
+    unsigned char *data;
+    size_t data_size;
+} cli_udp_worker_t;
+
 /**
- * Dispatch one UDP datagram to a child command.
- * @param command Command line.
- * @param data Datagram bytes.
- * @param data_size Datagram size.
- * @return Zero when launched, otherwise nonzero.
+ * Run one UDP command without blocking the listener loop.
+ * @param arg Worker state.
+ * @return Thread result.
  */
-static int cli_dispatch_udp(
-    const char *command,
-    const void *data,
-    size_t data_size
-) {
+static DWORD WINAPI cli_udp_worker(LPVOID arg) {
+    cli_udp_worker_t *worker = (cli_udp_worker_t *)arg;
     SECURITY_ATTRIBUTES attributes = {
         sizeof(SECURITY_ATTRIBUTES),
         NULL,
@@ -473,8 +478,8 @@ static int cli_dispatch_udp(
     };
     STARTUPINFOA startup;
     PROCESS_INFORMATION process;
-    HANDLE input_read;
-    HANDLE input_write;
+    HANDLE input_read = NULL;
+    HANDLE input_write = NULL;
     char command_line[NETL_CLI_COMMAND_SIZE];
     DWORD written = 0U;
 
@@ -487,7 +492,7 @@ static int cli_dispatch_udp(
             &attributes,
             0
         )) {
-        return 1;
+        goto done;
     }
 
     SetHandleInformation(input_write, HANDLE_FLAG_INHERIT, 0);
@@ -496,7 +501,7 @@ static int cli_dispatch_udp(
     startup.hStdInput = input_read;
     startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    snprintf(command_line, sizeof(command_line), "%s", command);
+    snprintf(command_line, sizeof(command_line), "%s", worker->command);
 
     if (!CreateProcessA(
             NULL,
@@ -510,25 +515,71 @@ static int cli_dispatch_udp(
             &startup,
             &process
         )) {
-        CloseHandle(input_read);
-        CloseHandle(input_write);
-        return 1;
+        goto done;
     }
 
     CloseHandle(input_read);
-    if (data_size != 0U) {
+    input_read = NULL;
+    if (worker->data_size != 0U) {
         (void)WriteFile(
             input_write,
-            data,
-            (DWORD)data_size,
+            worker->data,
+            (DWORD)worker->data_size,
             &written,
             NULL
         );
     }
     CloseHandle(input_write);
+    input_write = NULL;
     CloseHandle(process.hProcess);
     CloseHandle(process.hThread);
-    return written == (DWORD)data_size ? 0 : 1;
+
+done:
+    if (input_read != NULL) CloseHandle(input_read);
+    if (input_write != NULL) CloseHandle(input_write);
+    free(worker->data);
+    free(worker);
+    return 0;
+}
+
+/**
+ * Dispatch one UDP datagram to an asynchronous command worker.
+ * @param command Command line.
+ * @param data Datagram bytes.
+ * @param data_size Datagram size.
+ * @return Zero when launched, otherwise nonzero.
+ */
+static int cli_dispatch_udp(
+    const char *command,
+    const void *data,
+    size_t data_size
+) {
+    cli_udp_worker_t *worker;
+    HANDLE thread;
+
+    worker = (cli_udp_worker_t *)calloc(1, sizeof(*worker));
+    if (worker == NULL) return 1;
+    snprintf(worker->command, sizeof(worker->command), "%s", command);
+    worker->data_size = data_size;
+
+    if (data_size != 0U) {
+        worker->data = (unsigned char *)malloc(data_size);
+        if (worker->data == NULL) {
+            free(worker);
+            return 1;
+        }
+        memcpy(worker->data, data, data_size);
+    }
+
+    thread = CreateThread(NULL, 0, cli_udp_worker, worker, 0, NULL);
+    if (thread == NULL) {
+        free(worker->data);
+        free(worker);
+        return 1;
+    }
+
+    CloseHandle(thread);
+    return 0;
 }
 #endif
 
