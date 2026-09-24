@@ -607,6 +607,7 @@ static int test_cli_run(
 #ifdef _WIN32
     {
         char argbuf[2048];
+        char argsrc[2048];
         char *argv[64];
         char *src;
         char *dst;
@@ -619,10 +620,10 @@ static int test_cli_run(
         int save_err;
 
         if (strlen(args) >= sizeof(argbuf)) return -1;
-        strcpy(argbuf, args);
+        strcpy(argsrc, args);
         argv[0] = cli;
 
-        src = argbuf;
+        src = argsrc;
         dst = argbuf;
         while (*src != '\0') {
             int quoted = 0;
