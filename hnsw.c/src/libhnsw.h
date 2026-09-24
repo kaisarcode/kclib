@@ -35,25 +35,21 @@ typedef struct {
 
 typedef struct {
     size_t dimension;
+    int has_metric;
     int metric;
+    int has_max_connections;
     int max_connections;
+    int has_build_effort;
     int build_effort;
+    int has_search_effort;
     int search_effort;
 } kc_hnsw_options_t;
 
 /**
- * Return index options initialized with the library defaults.
- * dimension has no default and remains zero; the caller must set it.
- * All other fields contain their concrete default values.
- * @return Default-initialized options.
- */
-kc_hnsw_options_t kc_hnsw_options_default(void);
-
-/**
  * Create one in-memory index.
- * dimension is required. Every option value is interpreted literally.
- * Use kc_hnsw_options_default() before overriding individual fields when
- * library defaults are desired.
+ * dimension is required. Optional fields are applied only when their matching
+ * has_* field is nonzero; otherwise the library uses its internal default.
+ * Explicit option values are interpreted literally.
  * @param out Receives the new index.
  * @param options Index configuration.
  * @return KC_HNSW_OK on success, or a negative status code.
