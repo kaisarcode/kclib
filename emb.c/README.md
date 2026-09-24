@@ -1,6 +1,6 @@
 # emb.c - Vector Embedding Library
 
-`emb.c` is a portable C library and CLI for generating vector embeddings from text using a GGML-based model. It is designed as a composable primitive.
+`emb.c` is a portable C library and CLI for generating text embeddings with one fixed local model: [BAAI/bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5). The model is embedded into the built artifact and inference runs locally through vendored GGML.
 
 ---
 
@@ -46,68 +46,64 @@ Results are printed as space-separated floats, one line per input text:
 
 ## Public API
 
-### Types and Status
+`emb.c` exposes one embedding operation because it ships one predefined model and one input type: text.
 
 ```c
-typedef struct kc_emb kc_emb_t;
+#include "libemb.h"
 
-#define KC_EMB_OK     0
+#define KC_EMB_OK 0
 #define KC_EMB_ERROR -1
+
+int kc_emb_embed(
+    const char *input,
+    float **out_data,
+    size_t *out_count
+);
+
+void kc_emb_free(void *ptr);
+uint64_t kc_emb_version(void);
 ```
 
-### Functions
-
-| Function | Returns | Description |
-| :------- | :------ | :---------- |
-| `kc_emb_version(void)` | `uint64_t` | Return the build version timestamp. |
-| `kc_emb_open(kc_emb_t **out)` | `int` | Allocate and initialize embedding context. Heavyweight operation; embeds one local model (`lib/model.gguf`). Returns `KC_EMB_OK` on success, `KC_EMB_ERROR` on failure. |
-| `kc_emb_close(kc_emb_t *ctx)` | `void` | Release a context and all associated resources. |
-| `kc_emb_dim(const kc_emb_t *ctx)` | `size_t` | Return embedding dimension derived from the embedded model; 0 if `ctx` is NULL. Not a hardcoded constant. |
-| `kc_emb_exec(kc_emb_t *ctx, const char *input, float **vec, size_t *count)` | `int` | Generate embedding for `input`; on success sets `*vec` to caller-owned float array of `*count` floats, to be freed with `kc_emb_free`. Input is borrowed only during the call; empty string is valid. Blocking and serialized; multiple calls on one context are serialized. Returns `KC_EMB_OK` or `KC_EMB_ERROR`. Example: `kc_emb_exec(ctx, "hello", &vec, &count)`. |
-| `kc_emb_free(void *ptr)` | `void` | Free array returned by `kc_emb_exec`. Safe with NULL. |
-| `kc_emb_get_error(const kc_emb_t *ctx)` | `const char *` | Borrowed contextual error string; valid until next mutating operation on `ctx` or `kc_emb_close`. Empty string on fresh context with no error; NULL if `ctx` is NULL. |
+- `kc_emb_embed` generates an embedding for one null-terminated input string. Empty input is valid.
+- `input` is borrowed only for the duration of the call and is never retained.
+- On success, `*out_data` is a caller-owned float array and `*out_count` is its element count. The embedded BGE small v1.5 model currently returns 384 floats.
+- Release vectors with `kc_emb_free()`; `kc_emb_free(NULL)` is safe.
+- Invalid arguments or initialization/inference/allocation failures return `KC_EMB_ERROR` and reset available outputs to `NULL` / `0`.
+- `kc_emb_version` returns the generated build timestamp.
+- Model loading, GGML compute state, and serialization are internal. Callers do not open, configure, query, or close a model.
 
 ### Example
 
 ```c
 #include "libemb.h"
 
-kc_emb_t *ctx = NULL;
-if (kc_emb_open(&ctx) == KC_EMB_OK) {
-    float *vec = NULL;
-    size_t count = 0;
-    if (kc_emb_exec(ctx, "The quick brown fox", &vec, &count) == KC_EMB_OK) {
-        // use vec[0..count-1]
-    }
-    kc_emb_free(vec);
-    kc_emb_close(ctx);
+float *vec = NULL;
+size_t count = 0;
+
+if (kc_emb_embed("The quick brown fox", &vec, &count) == KC_EMB_OK) {
+    /* use vec[0..count-1] */
 }
+
+kc_emb_free(vec);
 ```
 
-Error details:
+A natural scripting binding is therefore mechanical:
 
-```c
-if (kc_emb_exec(ctx, "hello", &vec, &count) != KC_EMB_OK) {
-    const char *msg = kc_emb_get_error(ctx);
-    // msg borrowed, valid until next mutating op or close
-}
+```js
+const vector = emb.embed("The quick brown fox");
 ```
 
----
+No lifecycle object or semantic wrapper is required.
 
-## Lifecycle
+### Runtime model
 
-- `kc_emb_open(&ctx)` - heavyweight allocation; parses the one embedded local model (`lib/model.gguf`), prepares GGML backend, tokenizer, and worker state. One embedded model only.
-- `kc_emb_dim(ctx)` - model-derived dimension; `size_t`, 0 for NULL.
-- `kc_emb_exec(ctx, input, &vec, &count)` - blocking, serialized execution; multiple calls on the same context are serialized. Input is borrowed only during the call; empty input remains valid. Returns owned `float` array via `*vec` with length `*count`; caller owns the array and must release it with `kc_emb_free`.
-- `kc_emb_get_error(ctx)` - borrowed contextual error string; valid until next mutating operation on the same context or `kc_emb_close`; empty string if no error; NULL for NULL `ctx`.
-- `kc_emb_close(ctx)` - releases the context and all associated resources.
+The embedded model is **BAAI/bge-small-en-v1.5**, published by the Beijing Academy of Artificial Intelligence (BAAI) as part of FlagEmbedding. The upstream model is distributed under the **MIT License**:
 
-Notes:
+- Model: https://huggingface.co/BAAI/bge-small-en-v1.5
+- FlagEmbedding: https://github.com/FlagOpen/FlagEmbedding
+- Upstream license: MIT
 
-- One embedded local model (`lib/model.gguf`) linked into the artifact. No model downloads, no network dependency, no remote fallback.
-- No hidden vector allocations beyond the explicit owned array returned via `kc_emb_exec` and freed with `kc_emb_free`.
-- Input string lifetime is caller-owned before and after the call; only borrowed during `kc_emb_exec`.
+`lib/model.gguf` contains the local GGUF representation used by this project. The model is linked into the produced artifacts; `emb.c` performs no downloads and has no network or hosted-service dependency.
 
 ---
 
@@ -121,7 +117,7 @@ make clean && make
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile the test executable, link dynamically against the generated shared library, and run directly.
+The portable test entry point is `make test`. Native and Wine runs execute four reusable public-API cases plus one grouped `kc_emb_cli` case covering argument input, stdin input, vector output, help, version, stdout/stderr, and exit status.
 
 ```bash
 make
@@ -135,7 +131,7 @@ make x86_64/windows
 make test wine
 ```
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+The portable C test source is `src/test.c`. WASM runs the four reusable API cases and excludes the host CLI process harness. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
 
 Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
 
@@ -150,10 +146,10 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/emb.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_emb_*` API with its existing signatures, ownership, lifecycle, status codes, and vector contract. It contains the reusable embedding capability, not the `emb` CLI: `src/emb.c` is not compiled into the module.
-- The module embeds `lib/model.gguf` and the vendored GGML runtime (with the generic WebAssembly CPU kernels). The Emscripten build runs single-threaded: execution is performed inline in the caller while preserving the serialized, blocking contract of `kc_emb_exec()`.
+- The module exports `kc_emb_embed`, `kc_emb_free`, and `kc_emb_version`. It contains the reusable embedding capability, not the `emb` CLI: `src/emb.c` is not compiled into the module.
+- The module embeds `lib/model.gguf` and the vendored GGML runtime (with the generic WebAssembly CPU kernels). Calls remain blocking and reuse the same fixed-model inference capability.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the same public-contract tests under Node.js. It requires `bin/wasm32/wasm/emb.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles `src/test.c` with Emscripten and runs the four reusable public-API contract cases under Node.js. It requires `bin/wasm32/wasm/emb.wasm` and reports how to build it when it is absent.
 
 ### Multiarch Builds
 
@@ -192,7 +188,7 @@ make wasm32/wasm
 | Path | Description |
 |------|-------------|
 | `lib/ggml/` | Tensor computation library for machine learning |
-| `lib/model.gguf` | Embedded model weights |
+| `lib/model.gguf` | Embedded GGUF representation of BAAI/bge-small-en-v1.5 |
 
 ---
 
@@ -242,4 +238,4 @@ If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Plea
 
 [![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
 
-This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
+The `emb.c` source code is distributed under the **GNU General Public License version 3 (GPLv3)**. The embedded `BAAI/bge-small-en-v1.5` model is an upstream BAAI/FlagEmbedding work distributed under the **MIT License**; its attribution and source are documented above.
