@@ -3374,7 +3374,16 @@ static int kc_flow_run_node(
             size_t out_size = 0;
             const char *ignore = kc_flow_store_get(&node_data, "ignore_error");
             int ignore_val = (ignore && strcmp(ignore, "1") == 0);
-            if (!command || kc_flow_run_command(ctx, command, flow_path, active.items[i].data, active.items[i].size, model, flow_data, node, &node_data, &out, &out_size, ignore_val) != KC_FLOW_OK) {
+            if (!command) {
+                rc = kc_flow_fail(ctx, "node command failed");
+                break;
+            }
+            if (kc_flow_is_stopped(ctx)) {
+                free(command);
+                rc = kc_flow_fail_stop(ctx);
+                break;
+            }
+            if (kc_flow_run_command(ctx, command, flow_path, active.items[i].data, active.items[i].size, model, flow_data, node, &node_data, &out, &out_size, ignore_val) != KC_FLOW_OK) {
                 free(command);
                 rc = kc_flow_fail(ctx, "node command failed");
                 break;
