@@ -21,6 +21,12 @@ extern "C" {
 #define KC_EMB_ERROR -1
 
 /**
+ * Return the fixed embedding dimension of the embedded model.
+ * @return Model embedding dimension, or zero if initialization fails.
+ */
+size_t kc_emb_dimension(void);
+
+/**
  * Generate an embedding for one input text using the embedded model.
  * Input is borrowed for the duration of the call. On success, out_data receives
  * a caller-owned float array and out_count receives its element count.
