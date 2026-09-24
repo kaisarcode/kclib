@@ -2161,13 +2161,13 @@ int kc_wch_internal_serve(
 }
 #endif
 
+#ifdef _WIN32
 /**
  * Locate the companion Windows wch executable.
  * @param out Output executable path.
  * @param cap Output buffer capacity.
  * @return Zero on success, nonzero on failure.
  */
-#ifdef _WIN32
 static int kc_wch_companion_exe(char *out, size_t cap) {
     const char *override = getenv("KC_WCH_EXE");
     HMODULE module;
