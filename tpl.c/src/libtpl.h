@@ -35,7 +35,7 @@ typedef struct {
  * Creates a reusable template instance and copies the template source.
  * @param out Pointer to receive the template instance.
  * @param source Borrowed null-terminated template source.
- * @param options Optional template options. NULL uses defaults.
+ * @param options Optional template options. NULL root uses the default ".".
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
 int kc_tpl_open(
