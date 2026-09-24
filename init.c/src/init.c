@@ -36,9 +36,9 @@ static int kc_init_valid_name(const char *name) {
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return 0;
     for (p = (const unsigned char *)name; *p; p++) {
         if (!((*p >= 'a' && *p <= 'z') ||
-              (*p >= 'A' && *p <= 'Z') ||
-              (*p >= '0' && *p <= '9') ||
-              *p == '.' || *p == '_' || *p == '-')) {
+            (*p >= 'A' && *p <= 'Z') ||
+            (*p >= '0' && *p <= '9') ||
+            *p == '.' || *p == '_' || *p == '-')) {
             return 0;
         }
     }
