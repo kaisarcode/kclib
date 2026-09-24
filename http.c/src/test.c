@@ -729,6 +729,29 @@ static int test_cli_run(
     return rc;
 }
 
+static void test_cli_dump(
+    const char *label,
+    int rc,
+    const unsigned char *out,
+    size_t out_size,
+    const unsigned char *err,
+    size_t err_size
+) {
+    if (rc == 0 && out_size != 0U && err_size == 0U) return;
+    fprintf(stderr, "CLI DEBUG %s rc=%d stdout=%zu stderr=%zu\n",
+        label, rc, out_size, err_size);
+    if (out_size != 0U) {
+        fprintf(stderr, "CLI STDOUT: ");
+        fwrite(out, 1, out_size, stderr);
+        fprintf(stderr, "\n");
+    }
+    if (err_size != 0U) {
+        fprintf(stderr, "CLI STDERR: ");
+        fwrite(err, 1, err_size, stderr);
+        fprintf(stderr, "\n");
+    }
+}
+
 static int case_kc_http_cli(void) {
     static const char request[] =
         "GET /x?q=1 HTTP/1.1\r\n"
@@ -749,6 +772,7 @@ static int case_kc_http_cli(void) {
         &err,
         &err_size
     );
+    test_cli_dump("parse", rc, out, out_size, err, err_size);
     fail += expect_int("cli parse exit", 0, rc);
     fail += expect_contains("cli method", out, out_size, "request.method=GET\n");
     fail += expect_contains("cli target", out, out_size, "request.target=/x?q=1\n");
@@ -770,6 +794,7 @@ static int case_kc_http_cli(void) {
         &err,
         &err_size
     );
+    test_cli_dump("parse --all", rc, out, out_size, err, err_size);
     fail += expect_int("cli parse all exit", 0, rc);
     fail += expect_contains("cli all type", out, out_size, "http.type=request\n");
     fail += expect_contains("cli all version", out, out_size, "http.version=1.1\n");
@@ -788,6 +813,7 @@ static int case_kc_http_cli(void) {
         &err,
         &err_size
     );
+    test_cli_dump("build request", rc, out, out_size, err, err_size);
     fail += expect_int("cli build request exit", 0, rc);
     fail += expect_contains("cli request line", out, out_size, "POST /submit HTTP/1.1\r\n");
     fail += expect_contains("cli request header", out, out_size, "X-Test: yes\r\n");
@@ -806,6 +832,7 @@ static int case_kc_http_cli(void) {
         &err,
         &err_size
     );
+    test_cli_dump("build response", rc, out, out_size, err, err_size);
     fail += expect_int("cli build response exit", 0, rc);
     fail += expect_contains("cli response line", out, out_size, "HTTP/1.1 201 Created\r\n");
     fail += expect_contains("cli response header", out, out_size, "Content-Type: text/plain\r\n");
