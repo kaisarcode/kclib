@@ -2639,6 +2639,13 @@ static void http_parser_emit(
         request.body_size = msg->body_len;
         request.trailers = trailers;
         request.trailer_count = (size_t)msg->ntrailer;
+        for (i = 0; i < msg->nhdr; i++) {
+            if (strcmp(msg->hdrs[i].name, "transfer-encoding") == 0 &&
+                strstr(msg->hdrs[i].value, "chunked") != NULL) {
+                request.chunked = 1;
+                break;
+            }
+        }
         parser->request_handler(&request, parser->userdata);
     } else if (msg->type == HTTP_TYPE_RESPONSE && parser->response_handler != NULL) {
         kc_http_response_t response;
@@ -2652,6 +2659,13 @@ static void http_parser_emit(
         response.body_size = msg->body_len;
         response.trailers = trailers;
         response.trailer_count = (size_t)msg->ntrailer;
+        for (i = 0; i < msg->nhdr; i++) {
+            if (strcmp(msg->hdrs[i].name, "transfer-encoding") == 0 &&
+                strstr(msg->hdrs[i].value, "chunked") != NULL) {
+                response.chunked = 1;
+                break;
+            }
+        }
         parser->response_handler(&response, parser->userdata);
     }
 }
