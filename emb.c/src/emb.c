@@ -35,8 +35,17 @@ static void kc_print_help(const char *name) {
     printf("Usage:\n");
     printf("    %s <input>\n", name);
     printf("    %s < input\n", name);
+    printf("    %s -d | --dim\n", name);
     printf("    %s -h | --help\n", name);
     printf("    %s -v | --version\n", name);
+}
+
+/**
+ * Print the embedded model vector dimension.
+ * @return None.
+ */
+static void kc_print_dimension(void) {
+    printf("%zu\n", kc_emb_dimension());
 }
 
 /**
@@ -125,6 +134,10 @@ int main(int argc, char **argv) {
     int status = 0;
 
     if (argc >= 2) {
+        if (strcmp(argv[1], "-d") == 0 || strcmp(argv[1], "--dim") == 0) {
+            kc_print_dimension();
+            return 0;
+        }
         if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
             kc_print_help(argv[0]);
             return 0;
