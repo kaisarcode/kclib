@@ -105,7 +105,7 @@ The index is a persistent in-memory object. The only required configuration is t
 ```c
 #include "libhnsw.h"
 
-kc_hnsw_options_t options = kc_hnsw_options_default();
+kc_hnsw_options_t options = {0};
 kc_hnsw_t *index = NULL;
 kc_hnsw_result_t *results = NULL;
 size_t result_count = 0;
@@ -131,9 +131,9 @@ if (kc_hnsw_open(&index, &options) == KC_HNSW_OK) {
 
 ### Options and defaults
 
-`kc_hnsw_options_t` uses descriptive public names:
+`kc_hnsw_options_t` represents the required dimension plus independently optional configuration:
 
-| Field | Meaning | Default |
+| Option | Meaning | Internal default |
 | :--- | :--- | :--- |
 | `dimension` | Number of values in every vector | Required |
 | `metric` | How vectors are compared | `KC_HNSW_METRIC_COSINE` |
@@ -141,15 +141,19 @@ if (kc_hnsw_open(&index, &options) == KC_HNSW_OK) {
 | `build_effort` | Work spent building a higher-quality search graph | `64` |
 | `search_effort` | Work spent finding better matches during a search | `64` |
 
-`kc_hnsw_options_default()` returns the concrete defaults for every optional field. Set the required dimension, then override only the options that need different values:
+Each optional value has a matching `has_*` field. When the flag is zero, that option is omitted and the library applies its internal default. When the flag is nonzero, the supplied value is interpreted literally.
+
+For example, to override only search effort:
 
 ```c
-kc_hnsw_options_t options = kc_hnsw_options_default();
+kc_hnsw_options_t options = {0};
+
 options.dimension = 384;
+options.has_search_effort = 1;
 options.search_effort = 128;
 ```
 
-Every field is interpreted literally by `kc_hnsw_open()`. Zero is not a default sentinel: it is invalid for `metric`, `max_connections`, `build_effort`, and `search_effort`.
+There is no public default-initialization helper. Bindings can map property presence in a Lua table or JavaScript object mechanically to the corresponding `has_*` fields without duplicating default values outside the library.
 
 ### Lifecycle and ownership
 
@@ -212,7 +216,7 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/hnsw.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the normalized reusable index API: `kc_hnsw_options_default`, `kc_hnsw_open`, `kc_hnsw_add`, `kc_hnsw_build`, `kc_hnsw_search`, `kc_hnsw_free`, `kc_hnsw_dimension`, `kc_hnsw_metric`, `kc_hnsw_count`, `kc_hnsw_close`, `kc_hnsw_strerror`, and `kc_hnsw_version`. The CLI is not compiled into the module.
+- The module exports the normalized reusable index API: `kc_hnsw_open`, `kc_hnsw_add`, `kc_hnsw_build`, `kc_hnsw_search`, `kc_hnsw_free`, `kc_hnsw_dimension`, `kc_hnsw_metric`, `kc_hnsw_count`, `kc_hnsw_close`, `kc_hnsw_strerror`, and `kc_hnsw_version`. The CLI is not compiled into the module.
 
 `make test wasm` compiles `src/test.c` with Emscripten and runs the reusable public-API contract tests under Node.js. Native and Wine tests additionally run the grouped `kc_hnsw_cli` case against the shipped executable.
 
