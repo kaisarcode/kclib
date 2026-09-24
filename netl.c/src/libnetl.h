@@ -25,6 +25,7 @@ typedef struct kc_netl_connection kc_netl_connection_t;
 #define KC_NETL_ENET     -2
 #define KC_NETL_EAGAIN   -3
 #define KC_NETL_ECLOSED  -4
+#define KC_NETL_ENOMEM   -5
 
 #define KC_NETL_TCP       1
 #define KC_NETL_UDP       2
@@ -115,7 +116,8 @@ int kc_netl_sendto(
 
 /**
  * Close one TCP connection without closing its listener.
- * NULL and already-closed connections are accepted.
+ * NULL and already-closed connections are accepted. The borrowed connection
+ * handle remains valid until the next kc_netl_poll call or listener close.
  * @param connection Connection handle.
  * @return None.
  */
