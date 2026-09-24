@@ -22,7 +22,6 @@ typedef struct kc_dmn_stream kc_dmn_stream_t;
 
 typedef struct {
     const char *cmd;
-    const char *dir;
     const void *eot;
     size_t eot_size;
 } kc_dmn_options_t;
@@ -66,15 +65,13 @@ int kc_dmn_open(
 );
 
 /**
- * List daemons in one runtime directory.
+ * List daemons in the active runtime directory.
  * Returned entries share one allocation released with kc_dmn_free().
- * @param dir Runtime directory, or NULL for the default.
  * @param out_entries Output entry array.
  * @param out_count Output entry count.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
 int kc_dmn_list(
-    const char *dir,
     kc_dmn_entry_t **out_entries,
     size_t *out_count
 );
@@ -82,12 +79,10 @@ int kc_dmn_list(
 /**
  * Delete one named daemon.
  * @param name Daemon name.
- * @param dir Runtime directory, or NULL for the default.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
 int kc_dmn_delete(
-    const char *name,
-    const char *dir
+    const char *name
 );
 
 /**
@@ -110,25 +105,6 @@ const char *kc_dmn_get_cmd(
     const kc_dmn_t *dmn
 );
 
-/**
- * Change the runtime directory targeted by a daemon handle.
- * @param dmn Daemon handle.
- * @param dir Runtime directory, or NULL for the default.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_set_dir(
-    kc_dmn_t *dmn,
-    const char *dir
-);
-
-/**
- * Return the runtime directory targeted by a daemon handle.
- * @param dmn Daemon handle.
- * @return Borrowed runtime directory, or NULL on invalid input.
- */
-const char *kc_dmn_get_dir(
-    const kc_dmn_t *dmn
-);
 
 /**
  * Replace the daemon EOT marker.
