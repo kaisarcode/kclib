@@ -480,7 +480,8 @@ static int kc_netl_accept(
             &connection->port
         ) != KC_NETL_OK
     ) {
-        kc_netl_connection_shutdown(connection);
+        kc_netl_unlink(connection);
+        KC_NETL_CLOSE(connection->fd);
         free(connection);
         return KC_NETL_ENET;
     }
