@@ -232,6 +232,7 @@ printf "Hello" | ./bin/x86_64/linux/flow file.flow --link page
 #include "libflow.h"
 
 kc_flow_t *flow = NULL;
+kc_flow_run_t *run = NULL;
 void *output = NULL;
 size_t output_size = 0;
 
@@ -240,39 +241,82 @@ if (kc_flow_open(&flow, "file.flow") != KC_FLOW_OK) {
 }
 
 kc_flow_set(flow, "flow.hello", "Hello");
-kc_flow_exec(flow, NULL, NULL, 0, &output, &output_size);
 
-/* output is caller-owned; successful empty output is NULL with size 0 */
+if (kc_flow_run(flow, &run, NULL, NULL, 0) != KC_FLOW_OK) {
+    kc_flow_close(flow);
+    return 1;
+}
+
+/* The run now advances independently and can be stopped at any time. */
+if (kc_flow_run_wait(run, &output, &output_size) != KC_FLOW_OK) {
+    const char *error = kc_flow_run_error(run);
+    (void)error;
+}
+
+/* Successful non-empty output is caller-owned. */
 kc_flow_free(output);
+kc_flow_run_close(run);
 kc_flow_close(flow);
 ```
 
-The runtime copies the opened path. `kc_flow_set()` and `kc_flow_unset()`
-append ordered temporary overrides. Each `kc_flow_exec()` reads the opened
-flow file, applies those overrides in order, validates the effective document,
-and executes it. Overrides never modify the source file.
+The opened flow owns its copied source path and ordered temporary overrides.
+Each `kc_flow_run()` snapshots that state, the optional entry, and its input
+before returning. The run then advances independently through the existing
+branch engine. Later changes to the opened flow do not alter an already-started
+run, and closing the opened flow does not invalidate existing runs.
 
-The natural scripting projection is namespaced rather than class-based. A
-binding may expose the same capability as `flow.open`, `flow.set`,
-`flow.unset`, and `flow.exec`; the native `close` operation is lifecycle
-plumbing that a binding may handle through its normal finalizer.
+Branches keep their existing semantics: each step receives the previous step's
+output, fan-out creates independent branches that do not merge, and terminal
+branch outputs form the successful run result.
+
+A cooperative stop belongs to one run, not to the opened flow.
+`kc_flow_run_stop()` never kills the command currently executing. The current
+step finishes normally; before another step begins, the run observes the stop
+request and completes with `KC_FLOW_ESTOP`.
+
+A natural JavaScript projection is:
+
+```js
+const f = flow.open("file.flow");
+
+f.set("flow.hello", "Hello");
+
+const run = f.run({
+    input: "input data"
+});
+
+setTimeout(() => {
+    run.stop();
+}, 5000);
+
+const output = await run;
+```
+
+The C ABI remains handle-based; JavaScript or Lua bindings may project those
+handles into natural objects. Native close functions remain lifecycle plumbing
+that bindings can integrate with their normal finalizers.
 
 ---
 
 ## Lifecycle
 
-- `kc_flow_open()` - opens one existing flow file and returns a runtime associated with its copied path.
-- `kc_flow_set()` - appends one ordered temporary value override.
-- `kc_flow_unset()` - appends one ordered temporary exact-key removal.
-- `kc_flow_exec()` - executes the opened flow from declared entries, or from one explicit entry when `entry` is non-NULL. Input may contain arbitrary bytes. Output is caller-owned and released with `kc_flow_free()`; empty success yields NULL with size 0.
-- `kc_flow_error()` - returns the borrowed last contextual error string. A fresh runtime returns an empty string; successful set, unset, and exec operations clear stale contextual errors.
-- `kc_flow_free()` - releases output data owned by the caller.
-- `kc_flow_close()` - releases the runtime, its copied path, and its temporary overrides.
-- `kc_flow_version()` - returns the build version.
+- `kc_flow_open()` opens one existing flow file and copies its path.
+- `kc_flow_set()` and `kc_flow_unset()` append ordered temporary overrides to the opened flow.
+- `kc_flow_run()` starts one independent non-blocking run from a snapshot of the opened flow, optional entry, and input.
+- `kc_flow_run_stop()` cooperatively stops that run after its current step finishes.
+- `kc_flow_run_wait()` waits for completion and returns `KC_FLOW_OK`, `KC_FLOW_ESTOP`, or `KC_FLOW_ERROR`. Successful non-empty output is caller-owned and released with `kc_flow_free()`.
+- `kc_flow_run_error()` returns the borrowed contextual error for that run.
+- `kc_flow_run_close()` releases the run. If it is still active, close requests a cooperative stop and joins it before release.
+- `kc_flow_free()` releases successful output transferred to the caller.
+- `kc_flow_close()` releases the opened flow. Existing runs remain valid because they own independent snapshots.
+- `kc_flow_version()` returns the build version.
 
-Different runtimes are independent. Concurrent mutation or execution through
-the same runtime is not a supported contract. Execution is synchronous; there
-is no public cancellation API.
+Multiple runs created from one opened flow are independent. Each run owns its
+stop request, execution error, branch traversal, and final result.
+
+WebAssembly is not a supported target. Executing local commands and child
+flows through native process facilities is the core capability of `flow.c`,
+so a WASM build would not provide the same runtime contract.
 
 ## Build
 
