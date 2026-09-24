@@ -116,7 +116,6 @@ const char *kc_wch_get_path(const kc_wch_t *w);
 int kc_wch_set_cmd(kc_wch_t *w, const char *cmd);
 const char *kc_wch_get_cmd(const kc_wch_t *w);
 
-
 int kc_wch_set_recursive(kc_wch_t *w, int recursive);
 int kc_wch_get_recursive(const kc_wch_t *w);
 ```
