@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define KC_HTTP_ERROR      (-1)
+
 #define HTTP_HDR_MAX      256
 #define HTTP_CHUNK_DEFAULT 8192
 #define HTTP_PREFACE_MAX  24
@@ -3035,6 +3037,14 @@ int kc_http_parser_write(
         int complete;
 
         if (parser->len == 0U) return KC_HTTP_OK;
+
+        if (parser->len < 24U &&
+            memcmp(
+                parser->data,
+                "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",
+                parser->len) == 0) {
+            return KC_HTTP_OK;
+        }
 
         if ((parser->len >= 1U && parser->data[0] < 0x20U) ||
             (parser->len >= 24U &&
