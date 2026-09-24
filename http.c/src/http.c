@@ -1,6 +1,5 @@
 /**
- * http.c - HTTP protocol parser and builder.
- * Summary: Command line interface for parsing and building HTTP messages.
+ * http.c - HTTP protocol parser and builder CLI.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -13,452 +12,329 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define HTTP_CLI_HDR_MAX 256
+#define HTTP_CLI_FIELD_MAX 256
 
-/**
- * Print command usage to stdout.
- * @param name Program executable name.
- * @return None.
- */
-static void kc_http_help(const char *name) {
-    printf("Usage: %s <command> [options]\n", name);
-    printf("\n");
+typedef struct {
+    int all;
+    int emitted;
+    int failed;
+} cli_parse_state_t;
+
+static void cli_help(const char *name) {
+    printf("Usage: %s <command> [options]\n\n", name);
     printf("Commands:\n");
-    printf("  parse [--all]                   Parse one (or all) HTTP messages from stdin\n");
-    printf("  build request  [options]        Build an HTTP request from stdin body\n");
-    printf("  build response [options]        Build an HTTP response from stdin body\n");
-    printf("\n");
+    printf("  parse [--all]                   Parse one HTTP message from stdin\n");
+    printf("  request [options]               Build an HTTP request from stdin body\n");
+    printf("  response [options]              Build an HTTP response from stdin body\n\n");
     printf("Parse options:\n");
-    printf("  --all                           Parse all messages until EOF\n");
-    printf("\n");
-    printf("Build request options:\n");
+    printf("  --all                           Print protocol metadata and all parsed fields\n\n");
+    printf("Request options:\n");
     printf("  --method <method>               HTTP method (default: GET)\n");
     printf("  --target <target>               Request target (default: /)\n");
     printf("  --version <version>             HTTP version (default: 1.1)\n");
-    printf("  --header <name: value>          Add a request header\n");
+    printf("  --header <name: value>          Add a header\n");
     printf("  --chunked                       Use chunked transfer encoding\n");
-    printf("  --chunk-size <n>                Chunk size in bytes (default: 8192)\n");
-    printf("\n");
-    printf("Build response options:\n");
-    printf("  --status <code>                 HTTP status code (default: 200)\n");
-    printf("  --reason <phrase>               Reason phrase (default: derived from status)\n");
+    printf("  --chunk-size <n>                Chunk size (default: 8192)\n");
+    printf("  --trailer <name: value>         Add a trailer\n\n");
+    printf("Response options:\n");
+    printf("  --status <code>                 HTTP status (default: 200)\n");
+    printf("  --reason <phrase>               Reason phrase (default: derived)\n");
     printf("  --version <version>             HTTP version (default: 1.1)\n");
-    printf("  --header <name: value>          Add a response header\n");
+    printf("  --header <name: value>          Add a header\n");
     printf("  --chunked                       Use chunked transfer encoding\n");
-    printf("  --chunk-size <n>                Chunk size in bytes (default: 8192)\n");
-    printf("  --trailer <name: value>         Add a trailer (chunked only)\n");
-    printf("\n");
+    printf("  --chunk-size <n>                Chunk size (default: 8192)\n");
+    printf("  --trailer <name: value>         Add a trailer\n\n");
     printf("Common options:\n");
     printf("  -h, --help                      Show this help\n");
     printf("  -v, --version                   Show version\n");
 }
 
-/**
- * Print version information to stdout.
- * @return None.
- */
-static void kc_http_print_version(void) {
-    printf("http build %llu\n", (unsigned long long)kc_http_version());
-}
+static int cli_split_field(const char *text, kc_http_field_t *field) {
+    const char *colon;
+    char *name;
+    char *value;
+    size_t name_len;
 
-/**
- * Read all of stdin into a malloc'd buffer.
- * @param out_data Receives malloc'd buffer.
- * @param out_size Receives data size.
- * @return 0 on success, -1 on failure.
- */
-static int kc_http_read_stdin(unsigned char **out_data, size_t *out_size) {
-    unsigned char *data = NULL;
-    size_t used = 0;
-    size_t cap = 0;
-    unsigned char buf[8192];
-    size_t n;
+    colon = strchr(text, ':');
+    if (colon == NULL) return -1;
+    name_len = (size_t)(colon - text);
+    while (name_len > 0U && (text[name_len - 1U] == ' ' || text[name_len - 1U] == '\t')) name_len--;
+    while (*++colon == ' ' || *colon == '\t') {}
 
-    while ((n = fread(buf, 1, sizeof(buf), stdin)) > 0) {
-        if (used + n > cap) {
-            size_t nc = cap ? cap * 2 : 8192;
-            unsigned char *tmp;
-            while (nc < used + n) nc *= 2;
-            tmp = (unsigned char *)realloc(data, nc);
-            if (!tmp) { free(data); return -1; }
-            data = tmp;
-            cap = nc;
-        }
-        memcpy(data + used, buf, n);
-        used += n;
-    }
-    if (ferror(stdin)) { free(data); return -1; }
-    if (data == NULL) {
-        data = (unsigned char *)malloc(1);
-        if (data == NULL) return -1;
-    }
-    *out_data = data;
-    *out_size = used;
-    return 0;
-}
-
-/**
- * Print a contextual library error when one is available.
- * @param ctx HTTP context pointer.
- * @param operation Failed operation description.
- * @return None.
- */
-static void cli_report_error(const kc_http_t *ctx, const char *operation) {
-    const char *error = kc_http_get_error(ctx);
-
-    if (error) {
-        fprintf(stderr, "http: %s: %s\n", operation, error);
-    } else {
-        fprintf(stderr, "http: %s\n", operation);
-    }
-}
-
-/**
- * Write caller-owned output bytes to stdout.
- * @param out Output bytes.
- * @param out_len Output byte count.
- * @return 0 on success, -1 on failure.
- */
-static int cli_write_output(const void *out, size_t out_len) {
-    if (out_len != 0 && fwrite(out, 1, out_len, stdout) != out_len) {
-        fprintf(stderr, "http: stdout write failed\n");
+    name = (char *)malloc(name_len + 1U);
+    if (name == NULL) return -1;
+    memcpy(name, text, name_len);
+    name[name_len] = '\0';
+    value = (char *)malloc(strlen(colon) + 1U);
+    if (value == NULL) {
+        free(name);
         return -1;
     }
+    strcpy(value, colon);
+    field->name = name;
+    field->value = value;
     return 0;
 }
 
-/**
- * Split a command-line field into a malloc'd name and a borrowed value.
- * @param field Command-line field in name: value form.
- * @param value Receives the value portion.
- * @return Malloc'd name, or NULL for malformed input or allocation failure.
- */
-static char *cli_split_field(const char *field, const char **value) {
-    const char *colon;
-    const char *field_value;
-    char       *name;
-    size_t      name_len;
-
-    if (!field || !value) return NULL;
-    colon = strchr(field, ':');
-    if (!colon || colon == field) return NULL;
-    name_len = (size_t)(colon - field);
-    name = (char *)malloc(name_len + 1);
-    if (!name) return NULL;
-    memcpy(name, field, name_len);
-    name[name_len] = '\0';
-    field_value = colon + 1;
-    while (*field_value == ' ' || *field_value == '\t') field_value++;
-    *value = field_value;
-    return name;
+static void cli_free_fields(kc_http_field_t *fields, size_t count) {
+    size_t i;
+    for (i = 0; i < count; i++) {
+        free((void *)fields[i].name);
+        free((void *)fields[i].value);
+    }
 }
 
-/**
- * Execute the parse operation and write normalized output to stdout.
- * @param all Parse all messages until EOF.
- * @param body Input bytes.
- * @param body_len Input byte count.
- * @return Process exit code.
- */
-static int cli_do_parse(int all, const void *body, size_t body_len) {
-    kc_http_t *ctx = NULL;
-    void *out = NULL;
-    size_t out_len = 0;
-    int rc = 1;
+static void cli_print_fields(const kc_http_field_t *fields, size_t count, const char *prefix) {
+    size_t i;
+    for (i = 0; i < count; i++) {
+        printf("%s%s=%s\n", prefix, fields[i].name, fields[i].value);
+    }
+}
 
-    if (kc_http_open(&ctx) != KC_HTTP_OK) {
-        fprintf(stderr, "http: context allocation failed\n");
+static void cli_request_cb(const kc_http_request_t *request, void *userdata) {
+    cli_parse_state_t *state = (cli_parse_state_t *)userdata;
+    if (state->emitted) return;
+
+    if (state->all) {
+        printf("http.type=request\n");
+        printf("http.version=%s\n", request->version ? request->version : "");
+    }
+    printf("request.method=%s\n", request->method ? request->method : "");
+    printf("request.target=%s\n", request->target ? request->target : "");
+    printf("request.path=%s\n", request->path ? request->path : "");
+    printf("request.query=%s\n", request->query ? request->query : "");
+    cli_print_fields(request->headers, request->header_count, "header.");
+    if (state->all) {
+        printf("body.length=%zu\n", request->body_size);
+        cli_print_fields(request->trailers, request->trailer_count, "trailer.");
+    }
+    if (request->body_size != 0U) {
+        printf("\n");
+        fwrite(request->body, 1, request->body_size, stdout);
+    }
+    state->emitted = 1;
+}
+
+static void cli_response_cb(const kc_http_response_t *response, void *userdata) {
+    cli_parse_state_t *state = (cli_parse_state_t *)userdata;
+    if (state->emitted) return;
+
+    if (state->all) {
+        printf("http.type=response\n");
+        printf("http.version=%s\n", response->version ? response->version : "");
+    }
+    printf("response.status=%d\n", response->status);
+    printf("response.reason=%s\n", response->reason ? response->reason : "");
+    cli_print_fields(response->headers, response->header_count, "header.");
+    if (state->all) {
+        printf("body.length=%zu\n", response->body_size);
+        cli_print_fields(response->trailers, response->trailer_count, "trailer.");
+    }
+    if (response->body_size != 0U) {
+        printf("\n");
+        fwrite(response->body, 1, response->body_size, stdout);
+    }
+    state->emitted = 1;
+}
+
+static void cli_error_cb(int status, void *userdata) {
+    cli_parse_state_t *state = (cli_parse_state_t *)userdata;
+    state->failed = status;
+}
+
+static int cli_parse(int all) {
+    unsigned char buf[8192];
+    kc_http_parser_t *parser = NULL;
+    cli_parse_state_t state;
+    int rc;
+
+    memset(&state, 0, sizeof(state));
+    state.all = all;
+
+    rc = kc_http_parser_open(&parser, cli_request_cb, cli_response_cb, cli_error_cb, &state);
+    if (rc != KC_HTTP_OK) {
+        fprintf(stderr, "http: %s\n", kc_http_strerror(rc));
         return 1;
     }
-    if (kc_http_parse(ctx, body, body_len, all, &out, &out_len) != KC_HTTP_OK) {
-        cli_report_error(ctx, "parse failed");
-        goto done;
-    }
-    if (cli_write_output(out, out_len) != 0) goto done;
-    rc = 0;
 
-done:
-    kc_http_free(out);
-    kc_http_close(ctx);
-    return rc;
+    while (!state.emitted) {
+        size_t n = fread(buf, 1, sizeof(buf), stdin);
+        if (n != 0U) {
+            rc = kc_http_parser_write(parser, buf, n);
+            if (rc != KC_HTTP_OK) break;
+        }
+        if (n < sizeof(buf)) {
+            if (ferror(stdin)) {
+                state.failed = KC_HTTP_EPARSE;
+                break;
+            }
+            if (feof(stdin)) break;
+        }
+    }
+
+    kc_http_parser_close(parser);
+    if (state.failed != 0 || !state.emitted) {
+        fprintf(stderr, "http: %s\n", kc_http_strerror(
+            state.failed != 0 ? state.failed : KC_HTTP_EPARSE));
+        return 1;
+    }
+    return 0;
 }
 
-/**
- * Execute a build operation and write wire bytes to stdout.
- * @param response Non-zero for response build, zero for request build.
- * @param method Method string, or NULL for default.
- * @param target Target string, or NULL for default.
- * @param version Version string, or NULL for default.
- * @param status Status code, or 0 for default.
- * @param reason Reason phrase, or NULL for default.
- * @param chunked Non-zero to use chunked encoding.
- * @param chunk_size Chunk size in bytes, or 0 for default.
- * @param hdrs Header list.
- * @param nhdr Header count.
- * @param trl Trailer list.
- * @param ntrl Trailer count.
- * @param body Input bytes.
- * @param body_len Input byte count.
- * @return Process exit code.
- */
-static int cli_do_build(int response, const char *method,
-    const char *target, const char *version, int status, const char *reason,
-    int chunked, unsigned long chunk_size, const char **hdrs, int nhdr,
-    const char **trl, int ntrl, const void *body, size_t body_len) {
-    kc_http_t *ctx = NULL;
-    void *out = NULL;
-    size_t out_len = 0;
+static int cli_build(int response_mode, int argc, char **argv, int start) {
+    kc_http_field_t headers[HTTP_CLI_FIELD_MAX];
+    kc_http_field_t trailers[HTTP_CLI_FIELD_MAX];
+    size_t header_count = 0U;
+    size_t trailer_count = 0U;
+    const char *method = NULL;
+    const char *target = NULL;
+    const char *version = NULL;
+    const char *reason = NULL;
+    int status = 0;
+    int chunked = 0;
+    size_t chunk_size = 0U;
+    unsigned char *body = NULL;
+    size_t body_size = 0U;
+    size_t body_cap = 0U;
+    void *wire = NULL;
+    size_t wire_size = 0U;
     int i;
     int rc = 1;
 
-    if (kc_http_open(&ctx) != KC_HTTP_OK) {
-        fprintf(stderr, "http: context allocation failed\n");
-        return 1;
+    memset(headers, 0, sizeof(headers));
+    memset(trailers, 0, sizeof(trailers));
+
+    for (i = start; i < argc; i++) {
+        if (strcmp(argv[i], "--method") == 0 && i + 1 < argc) method = argv[++i];
+        else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) target = argv[++i];
+        else if (strcmp(argv[i], "--version") == 0 && i + 1 < argc) version = argv[++i];
+        else if (strcmp(argv[i], "--status") == 0 && i + 1 < argc) status = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--reason") == 0 && i + 1 < argc) reason = argv[++i];
+        else if (strcmp(argv[i], "--chunked") == 0) chunked = 1;
+        else if (strcmp(argv[i], "--chunk-size") == 0 && i + 1 < argc) chunk_size = (size_t)strtoull(argv[++i], NULL, 10);
+        else if (strcmp(argv[i], "--header") == 0 && i + 1 < argc && header_count < HTTP_CLI_FIELD_MAX) {
+            if (cli_split_field(argv[++i], &headers[header_count]) != 0) goto done;
+            header_count++;
+        } else if (strcmp(argv[i], "--trailer") == 0 && i + 1 < argc && trailer_count < HTTP_CLI_FIELD_MAX) {
+            if (cli_split_field(argv[++i], &trailers[trailer_count]) != 0) goto done;
+            trailer_count++;
+        } else {
+            fprintf(stderr, "http: invalid option '%s'\n", argv[i]);
+            goto done;
+        }
     }
 
-    if ((method && kc_http_set_method(ctx, method) != KC_HTTP_OK) ||
-        (target && kc_http_set_target(ctx, target) != KC_HTTP_OK) ||
-        (version && kc_http_set_version(ctx, version) != KC_HTTP_OK) ||
-        (status > 0 && kc_http_set_status(ctx, status) != KC_HTTP_OK) ||
-        (reason && kc_http_set_reason(ctx, reason) != KC_HTTP_OK) ||
-        (chunked && kc_http_set_chunked(ctx, 1) != KC_HTTP_OK) ||
-        (chunk_size > 0 && kc_http_set_chunk_size(ctx, (size_t)chunk_size) != KC_HTTP_OK)) {
-        cli_report_error(ctx, "build configuration failed");
+    for (;;) {
+        unsigned char tmp[8192];
+        size_t n = fread(tmp, 1, sizeof(tmp), stdin);
+        if (n != 0U) {
+            unsigned char *next;
+            if (body_size + n < body_size) goto done;
+            if (body_size + n > body_cap) {
+                size_t cap = body_cap ? body_cap * 2U : 8192U;
+                while (cap < body_size + n) cap *= 2U;
+                next = (unsigned char *)realloc(body, cap);
+                if (next == NULL) goto done;
+                body = next;
+                body_cap = cap;
+            }
+            memcpy(body + body_size, tmp, n);
+            body_size += n;
+        }
+        if (n < sizeof(tmp)) {
+            if (ferror(stdin)) goto done;
+            break;
+        }
+    }
+
+    if (response_mode) {
+        kc_http_response_t response;
+        memset(&response, 0, sizeof(response));
+        response.version = version;
+        response.status = status;
+        response.reason = reason;
+        response.headers = headers;
+        response.header_count = header_count;
+        response.body = body;
+        response.body_size = body_size;
+        response.trailers = trailers;
+        response.trailer_count = trailer_count;
+        response.chunked = chunked;
+        response.chunk_size = chunk_size;
+        rc = kc_http_response(&response, &wire, &wire_size);
+    } else {
+        kc_http_request_t request;
+        memset(&request, 0, sizeof(request));
+        request.version = version;
+        request.method = method;
+        request.target = target;
+        request.headers = headers;
+        request.header_count = header_count;
+        request.body = body;
+        request.body_size = body_size;
+        request.trailers = trailers;
+        request.trailer_count = trailer_count;
+        request.chunked = chunked;
+        request.chunk_size = chunk_size;
+        rc = kc_http_request(&request, &wire, &wire_size);
+    }
+
+    if (rc != KC_HTTP_OK) {
+        fprintf(stderr, "http: %s\n", kc_http_strerror(rc));
+        rc = 1;
         goto done;
     }
-    for (i = 0; i < nhdr; i++) {
-        const char *value;
-        char *name = cli_split_field(hdrs[i], &value);
 
-        if (!name) {
-            fprintf(stderr, "http: malformed header '%s'\n", hdrs[i]);
-            goto done;
-        }
-        if (kc_http_add_header(ctx, name, value) != KC_HTTP_OK) {
-            free(name);
-            cli_report_error(ctx, "add header failed");
-            goto done;
-        }
-        free(name);
-    }
-    for (i = 0; i < ntrl; i++) {
-        const char *value;
-        char *name = cli_split_field(trl[i], &value);
-
-        if (!name) {
-            fprintf(stderr, "http: malformed trailer '%s'\n", trl[i]);
-            goto done;
-        }
-        if (kc_http_add_trailer(ctx, name, value) != KC_HTTP_OK) {
-            free(name);
-            cli_report_error(ctx, "add trailer failed");
-            goto done;
-        }
-        free(name);
-    }
-    if ((response ? kc_http_build_response(ctx, body, body_len, &out, &out_len)
-    : kc_http_build_request(ctx, body, body_len, &out, &out_len)) != KC_HTTP_OK) {
-        cli_report_error(ctx, response ? "build response failed" : "build request failed");
-        goto done;
-    }
-    if (cli_write_output(out, out_len) != 0) goto done;
+    if (wire_size != 0U) fwrite(wire, 1, wire_size, stdout);
     rc = 0;
 
 done:
-    kc_http_free(out);
-    kc_http_close(ctx);
+    kc_http_free(wire);
+    free(body);
+    cli_free_fields(headers, header_count);
+    cli_free_fields(trailers, trailer_count);
     return rc;
 }
 
-/**
- * Execute the command line interface.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return Process exit code.
- */
 int main(int argc, char **argv) {
     int i = 1;
-    const char *cmd = NULL;
-    const char *sub = NULL;
 
-    if (i < argc && (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)) {
-        kc_http_help(argv[0]);
-        return 0;
-    }
-    if (i < argc && (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0)) {
-        kc_http_print_version();
-        return 0;
-    }
-
-    if (i >= argc) {
+    if (argc < 2) {
         fprintf(stderr, "http: missing command\n");
-        kc_http_help(argv[0]);
         return 1;
     }
+    if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+        cli_help(argv[0]);
+        return 0;
+    }
+    if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+        printf("http build %llu\n", (unsigned long long)kc_http_version());
+        return 0;
+    }
 
-    cmd = argv[i++];
-
-    if (strcmp(cmd, "parse") == 0) {
-        unsigned char *stdin_data = NULL;
-        size_t stdin_size = 0;
+    if (strcmp(argv[i], "parse") == 0) {
         int all = 0;
-        int fail = 0;
-        int rc;
-
-        while (i < argc && !fail) {
-            if (strcmp(argv[i], "--all") == 0) {
-                all = 1;
-            } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-                kc_http_help(argv[0]);
-                return 0;
-            } else {
-                fprintf(stderr, "http: unknown option '%s'\n", argv[i]);
-                fail = 1;
+        i++;
+        while (i < argc) {
+            if (strcmp(argv[i], "--all") == 0) all = 1;
+            else {
+                fprintf(stderr, "http: invalid option '%s'\n", argv[i]);
+                return 1;
             }
             i++;
         }
-
-        if (!fail && kc_http_read_stdin(&stdin_data, &stdin_size) != 0) {
-            fprintf(stderr, "http: out of memory\n");
-            fail = 1;
-        }
-        if (fail) {
-            free(stdin_data);
-            return 1;
-        }
-
-        rc = cli_do_parse(all, stdin_data, stdin_size);
-        free(stdin_data);
-        return rc;
-
-    } else if (strcmp(cmd, "build") == 0) {
-        const char *method = NULL;
-        const char *target = NULL;
-        const char *version = NULL;
-        const char *reason = NULL;
-        const char *hdrs[HTTP_CLI_HDR_MAX];
-        const char *trl[HTTP_CLI_HDR_MAX];
-        int nhdr = 0;
-        int ntrl = 0;
-        int status = 0;
-        int chunked = 0;
-        unsigned long chunk_size = 0;
-        unsigned char *stdin_data = NULL;
-        size_t stdin_size = 0;
-        int response = 0;
-        int fail = 0;
-        int rc;
-
-        if (i >= argc) {
-            fprintf(stderr, "http: 'build' requires a subcommand: request or response\n");
-            return 1;
-        }
-        sub = argv[i++];
-
-        if (strcmp(sub, "request") == 0) {
-            response = 0;
-        } else if (strcmp(sub, "response") == 0) {
-            response = 1;
-        } else {
-            fprintf(stderr, "http: unknown build subcommand '%s'\n", sub);
-            return 1;
-        }
-
-        while (i < argc && !fail) {
-            if (strcmp(argv[i], "--method") == 0) {
-                if (++i >= argc) {
-                    fprintf(stderr, "http: missing value for --method\n");
-                    fail = 1;
-                } else {
-                    method = argv[i];
-                }
-            } else if (strcmp(argv[i], "--target") == 0) {
-                if (++i >= argc) {
-                    fprintf(stderr, "http: missing value for --target\n");
-                    fail = 1;
-                } else {
-                    target = argv[i];
-                }
-            } else if (strcmp(argv[i], "--version") == 0) {
-                if (++i >= argc) {
-                    fprintf(stderr, "http: missing value for --version\n");
-                    fail = 1;
-                } else {
-                    version = argv[i];
-                }
-            } else if (strcmp(argv[i], "--status") == 0) {
-                if (++i >= argc) {
-                    fprintf(stderr, "http: missing value for --status\n");
-                    fail = 1;
-                } else {
-                    status = (int)strtol(argv[i], NULL, 10);
-                }
-            } else if (strcmp(argv[i], "--reason") == 0) {
-                if (++i >= argc) {
-                    fprintf(stderr, "http: missing value for --reason\n");
-                    fail = 1;
-                } else {
-                    reason = argv[i];
-                }
-            } else if (strcmp(argv[i], "--header") == 0) {
-                if (++i >= argc) {
-                    fprintf(stderr, "http: missing value for --header\n");
-                    fail = 1;
-                } else if (nhdr >= HTTP_CLI_HDR_MAX) {
-                    fprintf(stderr, "http: too many headers\n");
-                    fail = 1;
-                } else {
-                    hdrs[nhdr++] = argv[i];
-                }
-            } else if (strcmp(argv[i], "--trailer") == 0) {
-                if (!response) {
-                    fprintf(stderr, "http: trailers only supported for build response\n");
-                    fail = 1;
-                } else if (++i >= argc) {
-                    fprintf(stderr, "http: missing value for --trailer\n");
-                    fail = 1;
-                } else if (ntrl >= HTTP_CLI_HDR_MAX) {
-                    fprintf(stderr, "http: too many trailers\n");
-                    fail = 1;
-                } else {
-                    trl[ntrl++] = argv[i];
-                }
-            } else if (strcmp(argv[i], "--chunked") == 0) {
-                chunked = 1;
-            } else if (strcmp(argv[i], "--chunk-size") == 0) {
-                if (++i >= argc) {
-                    fprintf(stderr, "http: missing value for --chunk-size\n");
-                    fail = 1;
-                } else {
-                    chunk_size = strtoul(argv[i], NULL, 10);
-                }
-            } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-                kc_http_help(argv[0]);
-                return 0;
-            } else {
-                fprintf(stderr, "http: unknown option '%s'\n", argv[i]);
-                fail = 1;
-            }
-            i++;
-        }
-
-        if (!fail && kc_http_read_stdin(&stdin_data, &stdin_size) != 0) {
-            fprintf(stderr, "http: out of memory\n");
-            fail = 1;
-        }
-        if (fail) {
-            free(stdin_data);
-            return 1;
-        }
-
-        rc = cli_do_build(response, method, target, version, status,
-            reason, chunked, chunk_size, hdrs, nhdr, trl, ntrl,
-            stdin_data, stdin_size);
-        free(stdin_data);
-        return rc;
-
-    } else {
-        fprintf(stderr, "http: unknown command '%s'\n", cmd);
-        return 1;
+        return cli_parse(all);
     }
+
+    if (strcmp(argv[i], "request") == 0) return cli_build(0, argc, argv, i + 1);
+    if (strcmp(argv[i], "response") == 0) return cli_build(1, argc, argv, i + 1);
+
+    /* Compatibility aliases while callers migrate from the old CLI shape. */
+    if (strcmp(argv[i], "build") == 0 && i + 1 < argc) {
+        if (strcmp(argv[i + 1], "request") == 0) return cli_build(0, argc, argv, i + 2);
+        if (strcmp(argv[i + 1], "response") == 0) return cli_build(1, argc, argv, i + 2);
+    }
+
+    fprintf(stderr, "http: unknown command '%s'\n", argv[i]);
+    return 1;
 }
