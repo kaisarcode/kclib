@@ -354,7 +354,7 @@ int kc_netl_open(
     }
 
     listener = (kc_netl_t *)calloc(1, sizeof(*listener));
-    if (listener == NULL) return KC_NETL_EINVAL;
+    if (listener == NULL) return KC_NETL_ENOMEM;
     listener->fd = KC_NETL_FD_INVALID;
     listener->protocol = options->protocol;
     listener->backlog = options->backlog;
@@ -424,7 +424,7 @@ static int kc_netl_accept(
     connection = (kc_netl_connection_t *)calloc(1, sizeof(*connection));
     if (connection == NULL) {
         KC_NETL_CLOSE(fd);
-        return KC_NETL_EINVAL;
+        return KC_NETL_ENOMEM;
     }
 
     connection->listener = listener;
@@ -572,7 +572,7 @@ int kc_netl_poll(
     if (fds == NULL || map == NULL) {
         free(fds);
         free(map);
-        return KC_NETL_EINVAL;
+        return KC_NETL_ENOMEM;
     }
 
     fds[0].fd = listener->fd;
@@ -689,6 +689,7 @@ int kc_netl_send(
         return KC_NETL_EINVAL;
     }
     if (connection->closed) return KC_NETL_ECLOSED;
+    if (data_size > (size_t)INT_MAX) return KC_NETL_EINVAL;
     if (data_size == 0U) return KC_NETL_OK;
 
     sent = (int)send(
@@ -848,6 +849,7 @@ const char *kc_netl_strerror(int status) {
         case KC_NETL_ENET: return "network error";
         case KC_NETL_EAGAIN: return "try again";
         case KC_NETL_ECLOSED: return "connection closed";
+        case KC_NETL_ENOMEM: return "out of memory";
         default: return "unknown error";
     }
 }
