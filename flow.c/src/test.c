@@ -747,7 +747,7 @@ static int case_kc_flow_run(void) {
     size_t out_size = 123;
     int fail = 0;
 
-    fail += expect_int("exec NULL runtime", KC_FLOW_ERROR,
+    fail += expect_int("run NULL flow", KC_FLOW_ERROR,
         flow_run_sync(NULL, NULL, NULL, 0, &out, &out_size));
     fail += expect_true("NULL runtime clears output", out == NULL && out_size == 0);
 
@@ -794,6 +794,25 @@ static int case_kc_flow_run(void) {
     flow = NULL;
     out = NULL;
     out_size = 0;
+
+    {
+        kc_flow_run_t *run = NULL;
+        if (join_path(tmpdir, "stdin.flow", path, sizeof(path)) != 0) return 1;
+        fail += expect_int("open flow for detached run", KC_FLOW_OK,
+            kc_flow_open(&flow, path));
+        fail += expect_int("start detached run", KC_FLOW_OK,
+            kc_flow_run(flow, &run, NULL, "Snapshot", 8));
+        kc_flow_close(flow);
+        flow = NULL;
+        fail += expect_int("detached run survives flow close", KC_FLOW_OK,
+            kc_flow_run_wait(run, &out, &out_size));
+        fail += expect_output_contains("detached run output",
+            (const char *)out, out_size, "Snapshot");
+        kc_flow_free(out);
+        out = NULL;
+        out_size = 0;
+        kc_flow_run_close(run);
+    }
 
     if (join_path(tmpdir, "empty.flow", path, sizeof(path)) != 0) return 1;
     fail += expect_int("open empty flow", KC_FLOW_OK, kc_flow_open(&flow, path));
