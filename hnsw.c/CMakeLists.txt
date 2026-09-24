@@ -101,6 +101,11 @@ if(HNSW_BUILD_TESTS)
     if(EMSCRIPTEN)
         add_executable(hnsw_contract_test src/test.c ${LIB_SOURCES})
         target_include_directories(hnsw_contract_test PRIVATE src)
+        target_compile_options(hnsw_contract_test PRIVATE -pthread)
+        target_link_options(hnsw_contract_test PRIVATE
+            -pthread
+            -sPTHREAD_POOL_SIZE=2
+        )
     else()
         if(HNSW_TEST_SHARED_LIBRARY)
             add_library(hnsw_test_shared SHARED IMPORTED)
