@@ -97,7 +97,6 @@ Request and response builders support:
 Requests additionally support `--method` and `--target`. Responses support
 `--status`, `--reason`, and repeatable `--trailer <name: value>`.
 
-
 Common options:
 
 - `-h`, `--help`
