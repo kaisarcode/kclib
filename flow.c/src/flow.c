@@ -255,8 +255,8 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    if (kc_flow_open(&ctx) != KC_FLOW_OK) {
-        rc = kc_flow_cli_fail("allocation failure");
+    if (kc_flow_open(&ctx, run_path) != KC_FLOW_OK) {
+        rc = kc_flow_cli_fail("unable to open flow file");
         goto cleanup;
     }
 
@@ -274,14 +274,10 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (link) {
-        rc = kc_flow_exec(ctx, run_path, link, input, input_size, &output, &output_size);
-    } else {
-        rc = kc_flow_exec(ctx, run_path, NULL, input, input_size, &output, &output_size);
-    }
+    rc = kc_flow_exec(ctx, link, input, input_size, &output, &output_size);
 
     if (rc != KC_FLOW_OK) {
-        const char *err = kc_flow_get_error(ctx);
+        const char *err = kc_flow_error(ctx);
         fprintf(stderr, "flow: %s\n", err ? err : "execution failed");
         rc = 1;
         goto cleanup;
