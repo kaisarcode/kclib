@@ -126,3 +126,14 @@ if(LNG_BUILD_TESTS)
         )
     endif()
 endif()
+
+if(LNG_BUILD_TESTS)
+    if(LNG_TEST_CLI)
+        set(LNG_TEST_CLI_TARGET_PATH "${LNG_TEST_CLI}")
+    else()
+        set(LNG_TEST_CLI_TARGET_PATH "")
+    endif()
+    target_compile_definitions(lng_contract_test PRIVATE
+        LNG_TEST_CLI="${LNG_TEST_CLI_TARGET_PATH}"
+    )
+endif()
