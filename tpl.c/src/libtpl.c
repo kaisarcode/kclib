@@ -1371,4 +1371,3 @@ void kc_tpl_close(kc_tpl_t *tpl) {
     free(tpl->source);
     free(tpl);
 }
-
