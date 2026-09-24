@@ -307,14 +307,18 @@ static int case_kc_tpl_open(void) {
     fail += expect_true("NULL source clears output", tpl == NULL);
 
     options.root = NULL;
-    fail += expect_int("open NULL root", KC_TPL_ERROR,
+    fail += expect_int("open omitted root", KC_TPL_OK,
         kc_tpl_open(&tpl, source, &options));
+    fail += expect_true("open omitted root returns template", tpl != NULL);
+    kc_tpl_close(tpl);
+    tpl = NULL;
+
     options.root = "";
     fail += expect_int("open empty root", KC_TPL_ERROR,
         kc_tpl_open(&tpl, source, &options));
 
     options.root = ".";
-    fail += expect_int("open valid template", KC_TPL_OK,
+    fail += expect_int("open explicit root", KC_TPL_OK,
         kc_tpl_open(&tpl, source, &options));
     fail += expect_true("open returns template", tpl != NULL);
 
