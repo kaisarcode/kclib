@@ -59,10 +59,6 @@ OSXCROSS_IOSSIM_AARCH64_CC := $(OSXCROSS_ROOT)/bin/iossim64-clang
 OSXCROSS_IOSSIM_X86_64_CC := $(OSXCROSS_ROOT)/bin/iossimx64-clang
 WINE ?= wine
 WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
-WASM_EMCMAKE ?= emcmake
-WASM_EMCC    ?= emcc
-WASM_NODE    ?= node
-
 BUILD_DIR := .build
 BIN_DIR   := bin
 CMAKE     ?= cmake
@@ -156,7 +152,7 @@ endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
-.PHONY: all test wine wasm clean \
+.PHONY: all test wine clean \
 	x86_64/linux x86_64/windows x86_64/macos \
 	x86_64/iossim \
 	i686/linux i686/windows \
@@ -167,8 +163,7 @@ endif
 	powerpc64le/linux \
 	mips/linux mipsel/linux mips64el/linux \
 	s390x/linux \
-	loongarch64/linux \
-	wasm32/wasm
+	loongarch64/linux
 
 all: \
 	x86_64/linux x86_64/windows x86_64/macos \
@@ -181,8 +176,7 @@ all: \
 	powerpc64le/linux \
 	mips/linux mipsel/linux mips64el/linux \
 	s390x/linux \
-	loongarch64/linux \
-	wasm32/wasm
+	loongarch64/linux
 
 ## Linux
 
@@ -401,30 +395,6 @@ aarch64/android:
 armv7/android:
 	$(call android_target,armv7,armeabi-v7a)
 
-## WebAssembly
-
-define wasm_target
-	@mkdir -p $(BIN_DIR)/wasm32/wasm
-	@if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1 || ! command -v $(WASM_EMCC) >/dev/null 2>&1; then \
-		echo "Missing Emscripten SDK toolchain: $(WASM_EMCMAKE)/$(WASM_EMCC)" >&2; \
-		exit 1; \
-	fi
-	@if [ ! -f $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt ]; then \
-		$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm \
-			-DCMAKE_BUILD_TYPE=Release \
-			-DKC_WCH_BUILD_VERSION=$(BUILD_VERSION) \
-			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
-			-G Ninja -Wno-dev > /dev/null; \
-	fi
-	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DKC_WCH_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/wch.js $(BIN_DIR)/wasm32/wasm/wch.js
-	@cp $(BUILD_DIR)/wasm32-wasm/out/wch.wasm $(BIN_DIR)/wasm32/wasm/wch.wasm
-	@echo "OK wasm32/wasm"
-endef
-
-wasm32/wasm:
-	$(call wasm_target)
-
 ## Utility
 
 test:
@@ -441,19 +411,19 @@ test:
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
-			cmake -S . -B $(BUILD_DIR)/test-wine \
-				-DCMAKE_BUILD_TYPE=Release \
-				-DCMAKE_SYSTEM_NAME=Windows \
-				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
-				-DWCH_BUILD_TESTS=ON \
-				-DWCH_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwch.dll \
-				-DWCH_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwch.dll.a \
-				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
-				-G Ninja -Wno-dev > /dev/null; \
-		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
+			-DWCH_BUILD_TESTS=ON \
+			-DWCH_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwch.dll \
+			-DWCH_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwch.dll.a \
+			-DWCH_TEST_CLI=wch.exe \
+			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target wch_contract_test || exit 1; \
-		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/wch_contract_test.exe all; \
+		cp $(CURDIR)/$(BIN_DIR)/x86_64/windows/wch.exe $(BUILD_DIR)/test-wine/wch.exe; \
+		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) wch_contract_test.exe all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
@@ -463,14 +433,13 @@ test:
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
-			cmake -S . -B $(BUILD_DIR)/test \
-				-DCMAKE_BUILD_TYPE=Release \
-				-DWCH_BUILD_TESTS=ON \
-				-DWCH_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				$(NATIVE_IMPORT_LIBRARY) \
-				-G Ninja -Wno-dev > /dev/null; \
-		fi; \
+		cmake -S . -B $(BUILD_DIR)/test \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DWCH_BUILD_TESTS=ON \
+			-DWCH_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+			-DWCH_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/wch$(NATIVE_EXE_EXT) \
+			$(NATIVE_IMPORT_LIBRARY) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target wch_contract_test || exit 1; \
 		$(BUILD_DIR)/test/wch_contract_test all; \
 	fi
@@ -482,12 +451,6 @@ wine:
 	fi
 	@:
 
-wasm:
-	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
-		echo "Use 'make test wasm' to run tests through Emscripten and Node.js." >&2; \
-		exit 1; \
-	fi
-	@:
 
 clean:
 	@rm -rf $(BUILD_DIR)
