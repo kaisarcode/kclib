@@ -1149,8 +1149,12 @@ static int kc_wch_native_open(
 #endif
 
             name = slash + 1;
+            if (strlen(name) + 2U > sizeof(w->filter_name)) {
+                free(w);
+                return KC_WCH_ERROR;
+            }
             w->filter_name[0] = '/';
-            snprintf(w->filter_name + 1, PATH_MAX - 1, "%s", name);
+            memcpy(w->filter_name + 1, name, strlen(name) + 1U);
             *slash = '\0';
 
             if (parent[0] == '\0') {
@@ -1163,8 +1167,12 @@ static int kc_wch_native_open(
             }
 #endif
         } else {
+            if (strlen(path) + 2U > sizeof(w->filter_name)) {
+                free(w);
+                return KC_WCH_ERROR;
+            }
             w->filter_name[0] = '/';
-            snprintf(w->filter_name + 1, PATH_MAX - 1, "%s", path);
+            memcpy(w->filter_name + 1, path, strlen(path) + 1U);
             snprintf(parent, PATH_MAX, ".");
         }
 
