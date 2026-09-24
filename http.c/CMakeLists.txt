@@ -112,5 +112,19 @@ if(HTTP_BUILD_TESTS)
                 $<TARGET_FILE:${HTTP_TEST_SHARED_TARGET}>
                 $<TARGET_FILE_DIR:http_contract_test>
         )
+
+        if(HTTP_TEST_CLI_EXECUTABLE)
+            add_custom_command(TARGET http_contract_test POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${HTTP_TEST_CLI_EXECUTABLE}"
+                    "$<TARGET_FILE_DIR:http_contract_test>/http${CMAKE_EXECUTABLE_SUFFIX}"
+            )
+        elseif(TARGET http)
+            add_custom_command(TARGET http_contract_test POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:http>
+                    "$<TARGET_FILE_DIR:http_contract_test>/http${CMAKE_EXECUTABLE_SUFFIX}"
+            )
+        endif()
     endif()
 endif()
