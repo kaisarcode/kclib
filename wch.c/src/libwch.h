@@ -22,7 +22,6 @@ typedef struct kc_wch kc_wch_t;
 typedef struct {
     const char *path;
     const char *cmd;
-    const char *dir;
     int recursive;
 } kc_wch_options_t;
 
@@ -66,15 +65,13 @@ int kc_wch_open(
 );
 
 /**
- * List registered watchers.
+ * List registered watchers in the active runtime directory.
  * Returned entries share one allocation released with kc_wch_free().
- * @param dir Runtime directory, or NULL for the default.
  * @param out_entries Output entry array.
  * @param out_count Output entry count.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
 int kc_wch_list(
-    const char *dir,
     kc_wch_entry_t **out_entries,
     size_t *out_count
 );
@@ -82,12 +79,10 @@ int kc_wch_list(
 /**
  * Delete one named resident watcher.
  * @param name Watcher name.
- * @param dir Runtime directory, or NULL for the default.
  * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
  */
 int kc_wch_delete(
-    const char *name,
-    const char *dir
+    const char *name
 );
 
 /**
@@ -130,25 +125,6 @@ const char *kc_wch_get_cmd(
     const kc_wch_t *w
 );
 
-/**
- * Change the runtime directory targeted by a watcher handle.
- * @param w Watcher handle.
- * @param dir Runtime directory, or NULL for the default.
- * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
- */
-int kc_wch_set_dir(
-    kc_wch_t *w,
-    const char *dir
-);
-
-/**
- * Return the runtime directory targeted by a watcher handle.
- * @param w Watcher handle.
- * @return Borrowed runtime directory, or NULL on invalid input.
- */
-const char *kc_wch_get_dir(
-    const kc_wch_t *w
-);
 
 /**
  * Replace recursive observation mode.
