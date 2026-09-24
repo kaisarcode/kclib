@@ -33,11 +33,12 @@
  */
 static void kc_print_help(const char *name) {
     printf("Usage:\n");
-    printf("    %s <input>\n", name);
-    printf("    %s < input\n", name);
-    printf("    %s -d | --dim\n", name);
-    printf("    %s -h | --help\n", name);
-    printf("    %s -v | --version\n", name);
+    printf("  %s <input>\n", name);
+    printf("  %s < input\n\n", name);
+    printf("Options:\n");
+    printf("  -d, --dim       Show embedded model vector dimension\n");
+    printf("  -h, --help      Show this help\n");
+    printf("  -v, --version   Show version\n");
 }
 
 /**
