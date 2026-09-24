@@ -75,6 +75,7 @@ if(FLOW_BUILD_TESTS)
     target_link_libraries(flow_contract_test PRIVATE ${FLOW_TEST_SHARED_TARGET})
     target_compile_definitions(flow_contract_test PRIVATE
         FLOW_TEST_ETC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/etc"
+        FLOW_TEST_CLI="${FLOW_TEST_CLI}"
     )
 
     add_custom_command(TARGET flow_contract_test POST_BUILD
