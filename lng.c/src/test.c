@@ -318,9 +318,9 @@ static int expect_string(const char *name, const char *expected, const char *act
 /**
  * Detect with independently optional threshold and limit values.
  * @param text Input text.
- * @param has_threshold Whether threshold is explicitly supplied.
+ * @param threshold_set Whether threshold is explicitly supplied.
  * @param threshold Threshold value.
- * @param has_limit Whether limit is explicitly supplied.
+ * @param limit_set Whether limit is explicitly supplied.
  * @param limit Limit value.
  * @param out_results Result array destination.
  * @param out_count Result count destination.
@@ -328,19 +328,17 @@ static int expect_string(const char *name, const char *expected, const char *act
  */
 static int detect_with_options(
     const char *text,
-    int has_threshold,
+    int threshold_set,
     double threshold,
-    int has_limit,
+    int limit_set,
     size_t limit,
     kc_lng_result_t **out_results,
     size_t *out_count
 ) {
     kc_lng_options_t options = {0};
 
-    options.has_threshold = has_threshold;
-    options.threshold = threshold;
-    options.has_limit = has_limit;
-    options.limit = limit;
+    options.threshold = threshold_set ? &threshold : NULL;
+    options.limit = limit_set ? &limit : NULL;
     return kc_lng_detect(text, &options, out_results, out_count);
 }
 
