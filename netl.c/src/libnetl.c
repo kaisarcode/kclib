@@ -661,9 +661,11 @@ int kc_netl_poll(
     fds[0].fd = listener->fd;
     fds[0].events = POLLIN;
     index = 1U;
-    for (connection = listener->connections;
-         connection != NULL;
-         connection = connection->next) {
+    for (
+        connection = listener->connections;
+        connection != NULL;
+        connection = connection->next
+    ) {
         fds[index].fd = connection->fd;
         fds[index].events = POLLIN;
         if (connection->want_write) fds[index].events |= POLLOUT;
