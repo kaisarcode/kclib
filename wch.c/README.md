@@ -47,7 +47,7 @@ name and path:
 
 The event names are `add`, `upd`, and `del`.
 
-`KC_WCH_DIR` selects the CLI runtime directory.
+`KC_WCH_DIR` is an advanced process-level override for the runtime directory. Normal API and CLI callers do not need to select a directory.
 
 ## Public API
 
@@ -57,7 +57,6 @@ typedef struct kc_wch kc_wch_t;
 typedef struct {
     const char *path;
     const char *cmd;
-    const char *dir;
     int recursive;
 } kc_wch_options_t;
 
@@ -95,8 +94,7 @@ int kc_wch_open(
 void kc_wch_close(kc_wch_t *w);
 
 int kc_wch_delete(
-    const char *name,
-    const char *dir
+    const char *name
 );
 ```
 
@@ -118,8 +116,6 @@ const char *kc_wch_get_path(const kc_wch_t *w);
 int kc_wch_set_cmd(kc_wch_t *w, const char *cmd);
 const char *kc_wch_get_cmd(const kc_wch_t *w);
 
-int kc_wch_set_dir(kc_wch_t *w, const char *dir);
-const char *kc_wch_get_dir(const kc_wch_t *w);
 
 int kc_wch_set_recursive(kc_wch_t *w, int recursive);
 int kc_wch_get_recursive(const kc_wch_t *w);
@@ -129,9 +125,6 @@ Each public mutable property has a matching getter.
 
 Changing `path`, `cmd`, or `recursive` updates the persistent watcher and
 restarts its resident process while preserving its name.
-
-`set_dir` changes which runtime directory the local handle targets. Passing
-`NULL` restores the default runtime directory.
 
 ### Temporary subscriptions
 
@@ -164,7 +157,6 @@ Passing a NULL handler clears the selected event subscription.
 
 ```c
 int kc_wch_list(
-    const char *dir,
     kc_wch_entry_t **out_entries,
     size_t *out_count
 );
@@ -189,18 +181,14 @@ uint64_t kc_wch_version(void);
 wch.create("my_watcher", {
     path = "./src",
     cmd = "make build",
-    dir = "/tmp/wch",
     recursive = true
 })
 
 local watchers = wch.list()
 
 local watcher = wch.open("my_watcher")
-watcher:set_dir("/tmp/wch")
-
 print(watcher:get_path())
 print(watcher:get_cmd())
-print(watcher:get_dir())
 print(watcher:get_recursive())
 
 watcher:set_path("./lib")
@@ -221,7 +209,7 @@ end)
 
 watcher:close()
 
-wch.delete("my_watcher", "/tmp/wch")
+wch.delete("my_watcher")
 ```
 
 The intended binding is mechanical. The public C names map directly to the
@@ -235,8 +223,7 @@ The native filesystem backends remain private implementation details:
 - Apple platforms use kqueue.
 - Windows uses ReadDirectoryChangesW.
 
-The resident watcher persists registration metadata and process state in its
-runtime directory.
+The resident watcher persists registration metadata and process state in its runtime directory. On POSIX, wch prefers `XDG_RUNTIME_DIR`, with `/tmp` as a fallback; Windows uses the system temporary directory. This is runtime state rather than persistent configuration.
 
 The persistent command continues running on events even when no client has the
 watcher open.
