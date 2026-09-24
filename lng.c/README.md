@@ -78,10 +78,8 @@ typedef struct {
 } kc_lng_result_t;
 
 typedef struct {
-    int has_threshold;
-    double threshold;
-    int has_limit;
-    size_t limit;
+    const double *threshold;
+    const size_t *limit;
 } kc_lng_options_t;
 
 int kc_lng_detect(const char *text, const kc_lng_options_t *options,
@@ -94,7 +92,7 @@ uint64_t kc_lng_version(void);
 - Ownership - array returned via `out_results` is heap-allocated and caller-owned; release with `kc_lng_free()`. Each `code` string points to static library-owned storage; caller must not free or modify it. Detection does not retain input.
 - `kc_lng_free` - release memory allocated by `kc_lng_detect`. `NULL` safe (no-op).
 - `kc_lng_version` - returns build version as Unix timestamp.
-- `kc_lng_options_t` represents independently optional configuration. `has_threshold == 0` omits threshold and uses `0.001`; `has_limit == 0` omits limit and uses `1`. When a matching `has_*` field is nonzero, the supplied value is interpreted literally. Explicit threshold `0.0` is valid; explicit limit `0` is invalid. Limits above 32 are clamped to 32.
+- `kc_lng_options_t` represents independently optional configuration with nullable pointers. `threshold == NULL` uses `0.001`; `limit == NULL` uses `1`. Non-NULL pointers are explicit and interpreted literally. A pointer to threshold `0.0` is valid; a pointer to limit `0` is invalid. Limits above 32 are clamped to 32.
 - Threshold filters results; limit bounds output count. Zero matches is a successful result with count zero, not an error. No network, external model, or persistent state is required.
 
 ### Example
@@ -105,9 +103,9 @@ uint64_t kc_lng_version(void);
 kc_lng_result_t *results = NULL;
 size_t count = 0;
 
+size_t limit = 3;
 kc_lng_options_t options = {
-    .has_limit = 1,
-    .limit = 3
+    .limit = &limit
 };
 
 if (kc_lng_detect(
@@ -130,11 +128,11 @@ A natural scripting binding can expose the same stateless capability directly:
 const results = lng.detect(text, { limit: 3 });
 ```
 
-The binding maps JavaScript property presence mechanically to the matching
-`has_*` fields. Omitted properties use library-owned defaults, so bindings do
-not duplicate default values. The bridge otherwise only adapts C array ownership
-and strings mechanically; it does not need a context, lifecycle object, setters,
-callbacks, or semantic wrapper.
+The binding maps JavaScript property presence mechanically to nullable option
+pointers. Omitted properties become NULL, so bindings do not duplicate default
+values. The bridge otherwise only adapts C array ownership and strings
+mechanically; it does not need a context, lifecycle object, setters, callbacks,
+or semantic wrapper.
 
 ## Lifecycle
 
