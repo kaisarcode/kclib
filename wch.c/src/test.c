@@ -465,7 +465,7 @@ static int case_kc_wch_delete(void) {
  * Test kc_wch_set_path and kc_wch_get_path.
  * @return Zero on success, nonzero on failure.
  */
-static int case_kc_wch_path(void) {
+static int case_wch_path(const char *case_name) {
     char dir[1024];
     char watched[1024];
     char watched_two[1024];
@@ -516,15 +516,31 @@ static int case_kc_wch_path(void) {
     remove_test_dir(watched);
     remove_test_dir(watched_two);
     remove_test_dir(dir);
-    case_result(fail, "kc_wch_set_path", "sets and gets the watched path");
+    case_result(fail, case_name, "sets and gets the watched path");
     return fail != 0;
+}
+
+/**
+ * Test kc_wch_set_path.
+ * @return Zero on success, nonzero on failure.
+ */
+static int case_kc_wch_set_path(void) {
+    return case_wch_path("kc_wch_set_path");
+}
+
+/**
+ * Test kc_wch_get_path.
+ * @return Zero on success, nonzero on failure.
+ */
+static int case_kc_wch_get_path(void) {
+    return case_wch_path("kc_wch_get_path");
 }
 
 /**
  * Test kc_wch_set_cmd and kc_wch_get_cmd.
  * @return Zero on success, nonzero on failure.
  */
-static int case_kc_wch_cmd(void) {
+static int case_wch_cmd(const char *case_name) {
     char dir[1024];
     char watched[1024];
     kc_wch_t *watcher = NULL;
@@ -562,15 +578,31 @@ static int case_kc_wch_cmd(void) {
     (void)kc_wch_delete("cmd", dir);
     remove_test_dir(watched);
     remove_test_dir(dir);
-    case_result(fail, "kc_wch_set_cmd", "sets and gets the event command");
+    case_result(fail, case_name, "sets and gets the event command");
     return fail != 0;
+}
+
+/**
+ * Test kc_wch_set_cmd.
+ * @return Zero on success, nonzero on failure.
+ */
+static int case_kc_wch_set_cmd(void) {
+    return case_wch_cmd("kc_wch_set_cmd");
+}
+
+/**
+ * Test kc_wch_get_cmd.
+ * @return Zero on success, nonzero on failure.
+ */
+static int case_kc_wch_get_cmd(void) {
+    return case_wch_cmd("kc_wch_get_cmd");
 }
 
 /**
  * Test kc_wch_set_dir and kc_wch_get_dir.
  * @return Zero on success, nonzero on failure.
  */
-static int case_kc_wch_dir(void) {
+static int case_wch_dir(const char *case_name) {
     char dir[1024];
     kc_wch_t *watcher = NULL;
     int fail = 0;
@@ -596,15 +628,31 @@ static int case_kc_wch_dir(void) {
     kc_wch_close(watcher);
     remove_test_dir(dir);
 
-    case_result(fail, "kc_wch_set_dir", "sets and gets the runtime directory");
+    case_result(fail, case_name, "sets and gets the runtime directory");
     return fail != 0;
+}
+
+/**
+ * Test kc_wch_set_dir.
+ * @return Zero on success, nonzero on failure.
+ */
+static int case_kc_wch_set_dir(void) {
+    return case_wch_dir("kc_wch_set_dir");
+}
+
+/**
+ * Test kc_wch_get_dir.
+ * @return Zero on success, nonzero on failure.
+ */
+static int case_kc_wch_get_dir(void) {
+    return case_wch_dir("kc_wch_get_dir");
 }
 
 /**
  * Test recursive setters and getters.
  * @return Zero on success, nonzero on failure.
  */
-static int case_kc_wch_recursive(void) {
+static int case_wch_recursive(const char *case_name) {
     char dir[1024];
     char watched[1024];
     kc_wch_t *watcher = NULL;
@@ -645,11 +693,26 @@ static int case_kc_wch_recursive(void) {
     remove_test_dir(watched);
     remove_test_dir(dir);
     case_result(
-        fail,
-        "kc_wch_set_recursive",
+        fail, case_name,
         "sets and gets recursive observation mode"
     );
     return fail != 0;
+}
+
+/**
+ * Test kc_wch_set_recursive.
+ * @return Zero on success, nonzero on failure.
+ */
+static int case_kc_wch_set_recursive(void) {
+    return case_wch_recursive("kc_wch_set_recursive");
+}
+
+/**
+ * Test kc_wch_get_recursive.
+ * @return Zero on success, nonzero on failure.
+ */
+static int case_kc_wch_get_recursive(void) {
+    return case_wch_recursive("kc_wch_get_recursive");
 }
 
 /**
@@ -853,16 +916,20 @@ static int case_kc_wch_cli(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 13;
+    test_case_total = 17;
     test_case_current = 0;
     run_case(&rc, case_kc_wch_create);
     run_case(&rc, case_kc_wch_open);
     run_case(&rc, case_kc_wch_list);
     run_case(&rc, case_kc_wch_delete);
-    run_case(&rc, case_kc_wch_path);
-    run_case(&rc, case_kc_wch_cmd);
-    run_case(&rc, case_kc_wch_dir);
-    run_case(&rc, case_kc_wch_recursive);
+    run_case(&rc, case_kc_wch_set_path);
+    run_case(&rc, case_kc_wch_get_path);
+    run_case(&rc, case_kc_wch_set_cmd);
+    run_case(&rc, case_kc_wch_get_cmd);
+    run_case(&rc, case_kc_wch_set_dir);
+    run_case(&rc, case_kc_wch_get_dir);
+    run_case(&rc, case_kc_wch_set_recursive);
+    run_case(&rc, case_kc_wch_get_recursive);
     run_case(&rc, case_kc_wch_on);
     run_case(&rc, case_kc_wch_free);
     run_case(&rc, case_kc_wch_close);
@@ -894,14 +961,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_wch_open") == 0) return case_kc_wch_open();
     if (strcmp(argv[1], "kc_wch_list") == 0) return case_kc_wch_list();
     if (strcmp(argv[1], "kc_wch_delete") == 0) return case_kc_wch_delete();
-    if (strcmp(argv[1], "kc_wch_set_path") == 0) return case_kc_wch_path();
-    if (strcmp(argv[1], "kc_wch_get_path") == 0) return case_kc_wch_path();
-    if (strcmp(argv[1], "kc_wch_set_cmd") == 0) return case_kc_wch_cmd();
-    if (strcmp(argv[1], "kc_wch_get_cmd") == 0) return case_kc_wch_cmd();
-    if (strcmp(argv[1], "kc_wch_set_dir") == 0) return case_kc_wch_dir();
-    if (strcmp(argv[1], "kc_wch_get_dir") == 0) return case_kc_wch_dir();
-    if (strcmp(argv[1], "kc_wch_set_recursive") == 0) return case_kc_wch_recursive();
-    if (strcmp(argv[1], "kc_wch_get_recursive") == 0) return case_kc_wch_recursive();
+    if (strcmp(argv[1], "kc_wch_set_path") == 0) return case_kc_wch_set_path();
+    if (strcmp(argv[1], "kc_wch_get_path") == 0) return case_kc_wch_get_path();
+    if (strcmp(argv[1], "kc_wch_set_cmd") == 0) return case_kc_wch_set_cmd();
+    if (strcmp(argv[1], "kc_wch_get_cmd") == 0) return case_kc_wch_get_cmd();
+    if (strcmp(argv[1], "kc_wch_set_dir") == 0) return case_kc_wch_set_dir();
+    if (strcmp(argv[1], "kc_wch_get_dir") == 0) return case_kc_wch_get_dir();
+    if (strcmp(argv[1], "kc_wch_set_recursive") == 0) return case_kc_wch_set_recursive();
+    if (strcmp(argv[1], "kc_wch_get_recursive") == 0) return case_kc_wch_get_recursive();
     if (strcmp(argv[1], "kc_wch_on") == 0) return case_kc_wch_on();
     if (strcmp(argv[1], "kc_wch_free") == 0) return case_kc_wch_free();
     if (strcmp(argv[1], "kc_wch_close") == 0) return case_kc_wch_close();
