@@ -35,8 +35,6 @@ else()
     add_definitions(-DGGML_USE_CPU -DGGML_VERSION="1" -DGGML_COMMIT="custom")
 endif()
 
-
-
 set_source_files_properties(src/libemb.c PROPERTIES
     COMPILE_DEFINITIONS KC_EMB_BUILD_VERSION=${EMB_BUILD_VERSION}
 )
