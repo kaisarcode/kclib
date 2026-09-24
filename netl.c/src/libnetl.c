@@ -378,8 +378,10 @@ int kc_netl_open(
     *out = NULL;
     if (
         options == NULL ||
-        (options->protocol != KC_NETL_TCP &&
-         options->protocol != KC_NETL_UDP) ||
+        (
+            options->protocol != KC_NETL_TCP &&
+            options->protocol != KC_NETL_UDP
+        ) ||
         options->backlog < 0
     ) {
         return KC_NETL_EINVAL;
@@ -417,9 +419,11 @@ static size_t kc_netl_connection_count(const kc_netl_t *listener) {
     const kc_netl_connection_t *connection;
     size_t count = 0U;
 
-    for (connection = listener->connections;
-         connection != NULL;
-         connection = connection->next) {
+    for (
+        connection = listener->connections;
+        connection != NULL;
+        connection = connection->next
+    ) {
         count++;
     }
     return count;
