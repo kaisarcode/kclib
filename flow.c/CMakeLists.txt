@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(flow C)
 
 set(CMAKE_C_STANDARD 11)
+find_package(Threads REQUIRED)
 
 if(NOT DEFINED FLOW_BUILD_VERSION)
     set(FLOW_BUILD_VERSION 0)
@@ -36,11 +37,13 @@ if(NOT FLOW_TEST_EXTERNAL_ARTIFACTS)
     add_library(flow_static STATIC src/libflow.c)
     set_target_properties(flow_static PROPERTIES OUTPUT_NAME "flow")
     target_include_directories(flow_static PUBLIC src)
+    target_link_libraries(flow_static PRIVATE Threads::Threads)
 
     add_library(flow_shared SHARED src/libflow.c)
     set_target_properties(flow_shared PROPERTIES OUTPUT_NAME "flow")
     set_target_properties(flow_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_include_directories(flow_shared PUBLIC src)
+    target_link_libraries(flow_shared PRIVATE Threads::Threads)
 
     add_executable(flow src/flow.c)
     target_include_directories(flow PRIVATE src)
