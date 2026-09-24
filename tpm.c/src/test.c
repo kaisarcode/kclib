@@ -205,7 +205,10 @@ static int case_kc_tpm_score(void) {
     const char *detail = "reuses one profile for bounded similarity scoring";
     kc_tpm_t *tpm = NULL;
     kc_tpm_t *normalized_tpm = NULL;
-    kc_tpm_options_t options = { .ngram_size = 3 };
+    kc_tpm_options_t options = {
+        .has_ngram_size = 1,
+        .ngram_size = 3
+    };
     char *large_text = NULL;
     double matching_score = -1.0;
     double mismatching_score = -1.0;
