@@ -754,11 +754,24 @@ static int case_kc_wch_on(void) {
 
     if (make_test_dir(dir, sizeof(dir), "on") != 0) return 1;
     if (make_watched_dir(watched, sizeof(watched), dir) != 0) return 1;
-    fail += expect_int(
-        "create watcher",
-        KC_WCH_OK,
-        create_watcher("events", dir, watched)
-    );
+    {
+        kc_wch_options_t options;
+
+        memset(&options, 0, sizeof(options));
+        options.path = watched;
+#ifdef _WIN32
+        options.cmd = "echo > NUL";
+#else
+        options.cmd = "echo > /dev/null";
+#endif
+        options.dir = dir;
+        options.recursive = 0;
+        fail += expect_int(
+            "create watcher",
+            KC_WCH_OK,
+            kc_wch_create("events", &options)
+        );
+    }
     sleep_ms(250);
     fail += expect_int(
         "open watcher",
