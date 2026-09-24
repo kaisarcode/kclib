@@ -80,6 +80,7 @@ typedef void (*kc_http_error_fn)(
  * Parsed requests and responses are borrowed and remain valid only for the
  * duration of their callback. One write may emit zero, one, or multiple
  * complete messages.
+ * @return Function result.
  */
 int kc_http_parser_open(
     kc_http_parser_t **out,
@@ -91,6 +92,7 @@ int kc_http_parser_open(
 
 /**
  * Feed bytes from the parser's stream.
+ * @return Function result.
  */
 int kc_http_parser_write(
     kc_http_parser_t *parser,
@@ -103,6 +105,7 @@ int kc_http_parser_write(
  *
  * If buffered bytes form an incomplete message, the error callback is invoked
  * with KC_HTTP_EPARSE before the parser is released.
+ * @return None.
  */
 void kc_http_parser_close(kc_http_parser_t *parser);
 
@@ -111,6 +114,7 @@ void kc_http_parser_close(kc_http_parser_t *parser);
  *
  * NULL method, target, and version select GET, /, and HTTP/1.1 respectively.
  * The caller releases the returned buffer with kc_http_free().
+ * @return Function result.
  */
 int kc_http_request(
     const kc_http_request_t *request,
@@ -124,6 +128,7 @@ int kc_http_request(
  * A zero status selects 200. NULL version selects HTTP/1.1 and NULL reason
  * derives the standard reason phrase. The caller releases the returned buffer
  * with kc_http_free().
+ * @return Function result.
  */
 int kc_http_response(
     const kc_http_response_t *response,
@@ -133,6 +138,7 @@ int kc_http_response(
 
 /**
  * Release memory returned by kc_http_request() or kc_http_response().
+ * @return None.
  */
 void kc_http_free(void *ptr);
 
@@ -143,6 +149,7 @@ const char *kc_http_strerror(int status);
 
 /**
  * Return the build version generated at compile time.
+ * @return Build version.
  */
 uint64_t kc_http_version(void);
 
