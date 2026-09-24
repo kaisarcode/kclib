@@ -183,14 +183,14 @@ int kc_hnsw_open(kc_hnsw_t **out, const kc_hnsw_options_t *options) {
         return KC_HNSW_EINVAL;
     }
 
-    metric = options->has_metric ?
-        options->metric : KC_HNSW_METRIC_COSINE;
-    max_connections = options->has_max_connections ?
-        options->max_connections : KC_HNSW_HNSW_M;
-    build_effort = options->has_build_effort ?
-        options->build_effort : KC_HNSW_HNSW_EF_CONSTRUCTION;
-    search_effort = options->has_search_effort ?
-        options->search_effort : KC_HNSW_HNSW_EF_SEARCH;
+    metric = options->metric != NULL ?
+        *options->metric : KC_HNSW_METRIC_COSINE;
+    max_connections = options->max_connections != NULL ?
+        *options->max_connections : KC_HNSW_HNSW_M;
+    build_effort = options->build_effort != NULL ?
+        *options->build_effort : KC_HNSW_HNSW_EF_CONSTRUCTION;
+    search_effort = options->search_effort != NULL ?
+        *options->search_effort : KC_HNSW_HNSW_EF_SEARCH;
 
     if (!kc_hnsw_metric_valid(metric) ||
         max_connections <= 0 ||
