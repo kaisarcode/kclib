@@ -599,6 +599,18 @@ static int test_cli_run(
     snprintf(err_path, sizeof(err_path), "http-cli-%ld-err.tmp", pid);
 
     if (test_write_file(in_path, input, input_size) != 0) return -1;
+#ifdef _WIN32
+    snprintf(
+        command,
+        sizeof(command),
+        "\"\"%s\" %s < \"%s\" > \"%s\" 2> \"%s\"\"",
+        cli,
+        args,
+        in_path,
+        out_path,
+        err_path
+    );
+#else
     snprintf(
         command,
         sizeof(command),
@@ -609,6 +621,7 @@ static int test_cli_run(
         out_path,
         err_path
     );
+#endif
     rc = system(command);
 
     if (test_read_file(out_path, out, out_size) != 0 ||
