@@ -96,7 +96,6 @@ int kc_dmn_delete(
 int kc_dmn_set_cmd(kc_dmn_t *dmn, const char *cmd);
 const char *kc_dmn_get_cmd(const kc_dmn_t *dmn);
 
-
 int kc_dmn_set_eot(
     kc_dmn_t *dmn,
     const void *eot,
