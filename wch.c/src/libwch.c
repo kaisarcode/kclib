@@ -1,6 +1,6 @@
 /**
  * libwch.c - File and directory change notification library
- * Summary: Portable native file watcher - inotify, kqueue, ReadDirectoryChangesW.
+ * Summary: Resident watcher with native filesystem backends.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -80,7 +80,6 @@ typedef struct {
     const char *dir;
     const char *name;
 } kc_wch_dispatch_t;
-
 
 typedef struct kc_wch_native kc_wch_native_t;
 
@@ -1290,7 +1289,6 @@ static void kc_wch_native_close(kc_wch_native_t *w) {
 
     kc_wch_release(w);
 }
-
 
 struct kc_wch {
     char name[KC_WCH_NAME_MAX];
