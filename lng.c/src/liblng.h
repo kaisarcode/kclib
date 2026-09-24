@@ -23,10 +23,8 @@ extern "C" {
 typedef struct { const char *code; double score; } kc_lng_result_t;
 
 typedef struct {
-    int has_threshold;
-    double threshold;
-    int has_limit;
-    size_t limit;
+    const double *threshold;
+    const size_t *limit;
 } kc_lng_options_t;
 
 /**
@@ -39,8 +37,9 @@ typedef struct {
  * (KC_LNG_OK with *out_count == 0, *out_results == NULL).
  *
  * @param text Input text (must be non-NULL; empty string yields no results).
- * @param options Optional detection configuration. Explicit threshold must
- * be finite and in [0,1]; explicit limit must be greater than zero.
+ * @param options Optional detection configuration. NULL fields use defaults.
+ * Explicit threshold must be finite and in [0,1]; explicit limit must be
+ * greater than zero.
  * @param out_results Out: allocated array owned by caller,
  * released with kc_lng_free(). NULL on zero results or error.
  * @param out_count Out: number of results in *out_results.
