@@ -398,6 +398,7 @@ static DWORD WINAPI cli_tcp_worker(LPVOID arg) {
     );
 
     WaitForSingleObject(process.hProcess, INFINITE);
+    shutdown(worker->socket, SD_RECEIVE);
     if (input_thread != NULL) {
         WaitForSingleObject(input_thread, INFINITE);
         CloseHandle(input_thread);
@@ -641,10 +642,8 @@ int main(int argc, char **argv) {
     for (i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--tcp") == 0) {
             protocol = KC_NETL_TCP;
-            command_start++;
         } else if (strcmp(argv[i], "--udp") == 0) {
             protocol = KC_NETL_UDP;
-            command_start++;
         } else {
             break;
         }
