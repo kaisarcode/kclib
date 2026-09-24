@@ -2089,7 +2089,7 @@ static void kc_wch_dispatch_event(
  * @param name Watcher name.
  * @return Process exit status.
  */
-int kc_wch_internal_serve(
+static int kc_wch_serve_resident(
     const char *dir,
     const char *name
 ) {
@@ -2147,6 +2147,21 @@ int kc_wch_internal_serve(
     return 0;
 #endif
 }
+
+#ifdef KC_WCH_CLI
+/**
+ * Run the private resident service entry for the CLI.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @return Process exit status.
+ */
+int kc_wch_internal_serve(
+    const char *dir,
+    const char *name
+) {
+    return kc_wch_serve_resident(dir, name);
+}
+#endif
 
 /**
  * Locate the companion Windows wch executable.
@@ -2300,7 +2315,7 @@ static int kc_wch_run_update(
         }
         if (pid == 0) {
             if (setsid() < 0) _exit(1);
-            _exit(kc_wch_internal_serve(
+            _exit(kc_wch_serve_resident(
                 dir,
                 registration->name
             ));
