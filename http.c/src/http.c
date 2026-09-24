@@ -12,6 +12,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #define HTTP_CLI_FIELD_MAX 256
 
 typedef struct {
@@ -19,6 +25,15 @@ typedef struct {
     int emitted;
     int failed;
 } cli_parse_state_t;
+
+static int cli_stream_read(void *data, size_t size) {
+#ifdef _WIN32
+    return _read(_fileno(stdin), data, (unsigned int)size);
+#else
+    ssize_t count = read(fileno(stdin), data, size);
+    return count < 0 ? -1 : (int)count;
+#endif
+}
 
 static void cli_help(const char *name) {
     printf("Usage: %s <command> [options]\n\n", name);
@@ -158,18 +173,14 @@ static int cli_parse(int all) {
     }
 
     while (!state.emitted) {
-        size_t n = fread(buf, 1, sizeof(buf), stdin);
-        if (n != 0U) {
-            rc = kc_http_parser_write(parser, buf, n);
-            if (rc != KC_HTTP_OK) break;
+        int n = cli_stream_read(buf, sizeof(buf));
+        if (n < 0) {
+            state.failed = KC_HTTP_EPARSE;
+            break;
         }
-        if (n < sizeof(buf)) {
-            if (ferror(stdin)) {
-                state.failed = KC_HTTP_EPARSE;
-                break;
-            }
-            if (feof(stdin)) break;
-        }
+        if (n == 0) break;
+        rc = kc_http_parser_write(parser, buf, (size_t)n);
+        if (rc != KC_HTTP_OK) break;
     }
 
     kc_http_parser_close(parser);
