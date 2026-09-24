@@ -49,8 +49,7 @@ static void cli_help(const char *name) {
     printf("  --version <version>             HTTP version (default: 1.1)\n");
     printf("  --header <name: value>          Add a header\n");
     printf("  --chunked                       Use chunked transfer encoding\n");
-    printf("  --chunk-size <n>                Chunk size (default: 8192)\n");
-    printf("  --trailer <name: value>         Add a trailer\n\n");
+    printf("  --chunk-size <n>                Chunk size (default: 8192)\n\n");
     printf("Response options:\n");
     printf("  --status <code>                 HTTP status (default: 200)\n");
     printf("  --reason <phrase>               Reason phrase (default: derived)\n");
@@ -216,17 +215,30 @@ static int cli_build(int response_mode, int argc, char **argv, int start) {
     memset(trailers, 0, sizeof(trailers));
 
     for (i = start; i < argc; i++) {
-        if (strcmp(argv[i], "--method") == 0 && i + 1 < argc) method = argv[++i];
-        else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) target = argv[++i];
-        else if (strcmp(argv[i], "--version") == 0 && i + 1 < argc) version = argv[++i];
-        else if (strcmp(argv[i], "--status") == 0 && i + 1 < argc) status = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--reason") == 0 && i + 1 < argc) reason = argv[++i];
+        if (!response_mode &&
+            strcmp(argv[i], "--method") == 0 && i + 1 < argc) {
+            method = argv[++i];
+        } else if (!response_mode &&
+                   strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
+            target = argv[++i];
+        } else if (strcmp(argv[i], "--version") == 0 && i + 1 < argc) {
+            version = argv[++i];
+        } else if (response_mode &&
+                   strcmp(argv[i], "--status") == 0 && i + 1 < argc) {
+            status = atoi(argv[++i]);
+        } else if (response_mode &&
+                   strcmp(argv[i], "--reason") == 0 && i + 1 < argc) {
+            reason = argv[++i];
+        }
         else if (strcmp(argv[i], "--chunked") == 0) chunked = 1;
         else if (strcmp(argv[i], "--chunk-size") == 0 && i + 1 < argc) chunk_size = (size_t)strtoull(argv[++i], NULL, 10);
         else if (strcmp(argv[i], "--header") == 0 && i + 1 < argc && header_count < HTTP_CLI_FIELD_MAX) {
             if (cli_split_field(argv[++i], &headers[header_count]) != 0) goto done;
             header_count++;
-        } else if (strcmp(argv[i], "--trailer") == 0 && i + 1 < argc && trailer_count < HTTP_CLI_FIELD_MAX) {
+        } else if (response_mode &&
+                   strcmp(argv[i], "--trailer") == 0 &&
+                   i + 1 < argc &&
+                   trailer_count < HTTP_CLI_FIELD_MAX) {
             if (cli_split_field(argv[++i], &trailers[trailer_count]) != 0) goto done;
             trailer_count++;
         } else {
