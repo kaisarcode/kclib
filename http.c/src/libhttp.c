@@ -467,6 +467,10 @@ static const char *http_default_reason(int status) {
     }
 }
 
+/**
+ * http1 parse request line.
+ * @return Function result.
+ */
 static int http1_parse_request_line(char *line, http_msg_t *msg);
 
 /**
@@ -775,8 +779,6 @@ static int http1_parse(http_src_t *src, http_msg_t *msg) {
     }
     return 0;
 }
-
-
 
 /**
  * Emit context headers plus auto Content-Length or Transfer-Encoding.
@@ -2504,6 +2506,7 @@ http_buf_t *b) {
 
 /**
  * Release only heap-owned field strings in an internal build context.
+ * @return None.
  */
 static void http_build_fields_free(kc_http_t *ctx) {
     int i;
@@ -2515,6 +2518,7 @@ static void http_build_fields_free(kc_http_t *ctx) {
 
 /**
  * Copy public fields into the internal builder representation.
+ * @return Function result.
  */
 static int http_build_fields(
     kc_http_t *ctx,
@@ -2566,6 +2570,7 @@ struct kc_http_parser {
 
 /**
  * Grow and append bytes to a parser buffer.
+ * @return Function result.
  */
 static int http_parser_append(
     kc_http_parser_t *parser,
@@ -2600,6 +2605,7 @@ static int http_parser_append(
 
 /**
  * Publish one parsed message through the matching borrowed callback.
+ * @return None.
  */
 static void http_parser_emit(
     kc_http_parser_t *parser,
@@ -2672,6 +2678,7 @@ static void http_parser_emit(
 
 /**
  * Compare an ASCII field name with a lowercase literal.
+ * @return Function result.
  */
 static int http_name_equal(
     const unsigned char *name,
@@ -2691,6 +2698,7 @@ static int http_name_equal(
 
 /**
  * Return whether an ASCII field value contains token "chunked".
+ * @return Function result.
  */
 static int http_value_has_chunked(
     const unsigned char *value,
@@ -2716,6 +2724,7 @@ static int http_value_has_chunked(
  * Find the end of the HTTP/1 header block.
  *
  * Returns 1 when found and stores the first body offset, zero when incomplete.
+ * @return Function result.
  */
 static int http1_headers_end(
     const unsigned char *data,
@@ -2742,6 +2751,7 @@ static int http1_headers_end(
 
 /**
  * Read one unsigned decimal Content-Length value.
+ * @return Function result.
  */
 static int http_decimal_size(
     const unsigned char *value,
@@ -2775,6 +2785,7 @@ static int http_decimal_size(
  *
  * Returns 1 and the consumed size for a complete body, zero when incomplete,
  * or -1 for malformed framing.
+ * @return Function result.
  */
 static int http1_chunked_size(
     const unsigned char *data,
@@ -2844,6 +2855,7 @@ static int http1_chunked_size(
  *
  * Returns 1 with its wire size, zero when more bytes are required, or -1 for
  * framing that is already known to be invalid.
+ * @return Function result.
  */
 static int http1_message_size(
     const unsigned char *data,
@@ -2887,22 +2899,31 @@ static int http1_message_size(
 
         if (http_name_equal(data + pos, colon - pos, "content-length")) {
             size_t parsed;
-            if (http_decimal_size(
+            if (
+                http_decimal_size(
                     data + value_start,
                     content_end - value_start,
-                    &parsed) != 0) {
+                    &parsed
+                ) != 0
+            ) {
                 return -1;
             }
             if (have_content_length && parsed != content_length) return -1;
             content_length = parsed;
             have_content_length = 1;
-        } else if (http_name_equal(
-                       data + pos,
-                       colon - pos,
-                       "transfer-encoding")) {
-            if (http_value_has_chunked(
+        } else if (
+            http_name_equal(
+                data + pos,
+                colon - pos,
+                "transfer-encoding"
+            )
+        ) {
+            if (
+                http_value_has_chunked(
                     data + value_start,
-                    content_end - value_start)) {
+                    content_end - value_start
+                )
+            ) {
                 chunked = 1;
             }
         }
@@ -2928,6 +2949,7 @@ static int http1_message_size(
 
 /**
  * Parse one complete HTTP/1 message from exactly one wire slice.
+ * @return Function result.
  */
 static int http_parser_parse_http1(
     kc_http_parser_t *parser,
@@ -2961,6 +2983,7 @@ static int http_parser_parse_http1(
  * frame parsers historically do not distinguish truncation from malformed
  * framing. Complete malformed input will still be rejected when the stream
  * closes.
+ * @return Function result.
  */
 static int http_parser_try_binary(kc_http_parser_t *parser) {
     static const unsigned char preface[] = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
@@ -2995,6 +3018,7 @@ static int http_parser_try_binary(kc_http_parser_t *parser) {
 
 /**
  * Create an incremental HTTP parser for one byte stream.
+ * @return Function result.
  */
 int kc_http_parser_open(
     kc_http_parser_t **out,
@@ -3024,6 +3048,7 @@ int kc_http_parser_open(
 
 /**
  * Feed bytes from one HTTP byte stream.
+ * @return Function result.
  */
 int kc_http_parser_write(
     kc_http_parser_t *parser,
@@ -3060,9 +3085,17 @@ int kc_http_parser_write(
             return KC_HTTP_OK;
         }
 
-        if ((parser->len >= 1U && parser->data[0] < 0x20U) ||
-            (parser->len >= 24U &&
-             memcmp(parser->data, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n", 24U) == 0)) {
+        if (
+            (parser->len >= 1U && parser->data[0] < 0x20U) ||
+            (
+                parser->len >= 24U &&
+                memcmp(
+                    parser->data,
+                    "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n",
+                    24U
+                ) == 0
+            )
+        ) {
             (void)http_parser_try_binary(parser);
             return KC_HTTP_OK;
         }
@@ -3095,6 +3128,7 @@ int kc_http_parser_write(
 
 /**
  * Finalize and release one parser.
+ * @return None.
  */
 void kc_http_parser_close(kc_http_parser_t *parser) {
     if (parser == NULL) return;
@@ -3107,6 +3141,7 @@ void kc_http_parser_close(kc_http_parser_t *parser) {
 
 /**
  * Build one HTTP request into allocated wire bytes.
+ * @return Function result.
  */
 int kc_http_request(
     const kc_http_request_t *request,
@@ -3185,6 +3220,7 @@ int kc_http_request(
 
 /**
  * Build one HTTP response into allocated wire bytes.
+ * @return Function result.
  */
 int kc_http_response(
     const kc_http_response_t *response,
@@ -3264,6 +3300,7 @@ int kc_http_response(
 
 /**
  * Release caller-owned output memory.
+ * @return None.
  */
 void kc_http_free(void *ptr) {
     free(ptr);
@@ -3288,6 +3325,7 @@ const char *kc_http_strerror(int status) {
 
 /**
  * Return the build version generated at compile time.
+ * @return Build version.
  */
 uint64_t kc_http_version(void) {
     return (uint64_t)KC_HTTP_BUILD_VERSION;
