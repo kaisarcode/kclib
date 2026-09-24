@@ -242,8 +242,10 @@ static int cli_build(int response_mode, int argc, char **argv, int start) {
     const char *version = NULL;
     const char *reason = NULL;
     int status = 0;
+    int status_set = 0;
     int chunked = 0;
     size_t chunk_size = 0U;
+    int chunk_size_set = 0;
     unsigned char *body = NULL;
     size_t body_size = 0U;
     size_t body_cap = 0U;
@@ -279,6 +281,7 @@ static int cli_build(int response_mode, int argc, char **argv, int start) {
             i + 1 < argc
         ) {
             status = atoi(argv[++i]);
+            status_set = 1;
         } else if (
             response_mode &&
             strcmp(argv[i], "--reason") == 0 &&
@@ -292,6 +295,7 @@ static int cli_build(int response_mode, int argc, char **argv, int start) {
             i + 1 < argc
         ) {
             chunk_size = (size_t)strtoull(argv[++i], NULL, 10);
+            chunk_size_set = 1;
         } else if (
             strcmp(argv[i], "--header") == 0 &&
             i + 1 < argc &&
@@ -337,10 +341,10 @@ static int cli_build(int response_mode, int argc, char **argv, int start) {
     }
 
     if (response_mode) {
-        kc_http_response_t response;
+        kc_http_response_build_t response;
         memset(&response, 0, sizeof(response));
         response.version = version;
-        response.status = status;
+        response.status = status_set ? &status : NULL;
         response.reason = reason;
         response.headers = headers;
         response.header_count = header_count;
@@ -349,10 +353,10 @@ static int cli_build(int response_mode, int argc, char **argv, int start) {
         response.trailers = trailers;
         response.trailer_count = trailer_count;
         response.chunked = chunked;
-        response.chunk_size = chunk_size;
+        response.chunk_size = chunk_size_set ? &chunk_size : NULL;
         rc = kc_http_response(&response, &wire, &wire_size);
     } else {
-        kc_http_request_t request;
+        kc_http_request_build_t request;
         memset(&request, 0, sizeof(request));
         request.version = version;
         request.method = method;
@@ -364,7 +368,7 @@ static int cli_build(int response_mode, int argc, char **argv, int start) {
         request.trailers = trailers;
         request.trailer_count = trailer_count;
         request.chunked = chunked;
-        request.chunk_size = chunk_size;
+        request.chunk_size = chunk_size_set ? &chunk_size : NULL;
         rc = kc_http_request(&request, &wire, &wire_size);
     }
 
