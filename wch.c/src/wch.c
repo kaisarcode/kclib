@@ -251,13 +251,13 @@ int main(int argc, char **argv) {
     }
 
     if (argc == 3 &&
-            (strcmp(argv[2], "-l") == 0 ||
-             strcmp(argv[2], "--list") == 0)) {
+        (strcmp(argv[2], "-l") == 0 ||
+        strcmp(argv[2], "--list") == 0)) {
         return kc_wch_print_list(dir, argv[1]);
     }
     if (argc == 3 &&
-            (strcmp(argv[2], "-d") == 0 ||
-             strcmp(argv[2], "--delete") == 0)) {
+        (strcmp(argv[2], "-d") == 0 ||
+        strcmp(argv[2], "--delete") == 0)) {
         return kc_wch_delete(argv[1], dir) == KC_WCH_OK ? 0 : 1;
     }
 
@@ -269,8 +269,8 @@ int main(int argc, char **argv) {
 
         memset(&options, 0, sizeof(options));
         if (index < argc &&
-                (strcmp(argv[index], "-r") == 0 ||
-                 strcmp(argv[index], "--recursive") == 0)) {
+            (strcmp(argv[index], "-r") == 0 ||
+            strcmp(argv[index], "--recursive") == 0)) {
             recursive = 1;
             index++;
         }
