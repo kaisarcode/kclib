@@ -110,21 +110,6 @@ static void kc_hnsw_neighbor_list_init(kc_hnsw_neighbor_list_t *list);
 static void kc_hnsw_neighbor_list_free(kc_hnsw_neighbor_list_t *list);
 
 /**
- * Creates default vector index options.
- * @return Default-initialized options.
- */
-kc_hnsw_options_t kc_hnsw_options_default(void) {
-    kc_hnsw_options_t opts;
-
-    memset(&opts, 0, sizeof(opts));
-    opts.metric = KC_HNSW_METRIC_COSINE;
-    opts.max_connections = KC_HNSW_HNSW_M;
-    opts.build_effort = KC_HNSW_HNSW_EF_CONSTRUCTION;
-    opts.search_effort = KC_HNSW_HNSW_EF_SEARCH;
-    return opts;
-}
-
-/**
  * Acquire a shared read lock on the index.
  * @param hnsw Index pointer.
  * @return KC_HNSW_OK on success, KC_HNSW_EINVAL on failure.
@@ -198,10 +183,14 @@ int kc_hnsw_open(kc_hnsw_t **out, const kc_hnsw_options_t *options) {
         return KC_HNSW_EINVAL;
     }
 
-    metric = options->metric;
-    max_connections = options->max_connections;
-    build_effort = options->build_effort;
-    search_effort = options->search_effort;
+    metric = options->has_metric ?
+        options->metric : KC_HNSW_METRIC_COSINE;
+    max_connections = options->has_max_connections ?
+        options->max_connections : KC_HNSW_HNSW_M;
+    build_effort = options->has_build_effort ?
+        options->build_effort : KC_HNSW_HNSW_EF_CONSTRUCTION;
+    search_effort = options->has_search_effort ?
+        options->search_effort : KC_HNSW_HNSW_EF_SEARCH;
 
     if (!kc_hnsw_metric_valid(metric) ||
         max_connections <= 0 ||
