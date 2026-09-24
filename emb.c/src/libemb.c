@@ -20,7 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <stdarg.h>
 
 #ifndef KC_EMB_BUILD_VERSION
 #define KC_EMB_BUILD_VERSION 0
@@ -151,7 +150,7 @@ static int kc_tolower(int c) {
 }
 
 /**
- * Count available CPU threads for one inference worker.
+ * Count available CPU threads for local inference.
  * @return Positive CPU count.
  */
 static int kc_emb_cpu_count(void) {
@@ -189,7 +188,7 @@ static uint32_t hash_str(const char *str) {
 
 /**
  * Build the vocabulary hash table from the loaded vocab array.
- * @param ectx Worker context pointer.
+ * @param ectx Inference context pointer.
  * @return 0 on success, -1 on allocation failure.
  */
 static int build_vocab_hash(kc_emb_ctx_t *ectx) {
@@ -226,7 +225,7 @@ static void kc_ggml_log_callback(enum ggml_log_level level, const char *text, vo
 
 /**
  * Look up a token string in the vocabulary hash table.
- * @param ectx Worker context pointer.
+ * @param ectx Inference context pointer.
  * @param str Token string.
  * @return Token ID or -1 if not found.
  */
@@ -264,8 +263,8 @@ static uint32_t get_kv_u32(const struct gguf_context *ctx, const char *key, uint
 }
 
 /**
- * Release all resources held by a worker context.
- * @param ectx Worker context pointer.
+ * Release all resources held by a inference context.
+ * @param ectx Inference context pointer.
  * @return No return value.
  */
 static void kc_emb_ctx_free(kc_emb_ctx_t *ectx) {
@@ -323,7 +322,7 @@ static void kc_emb_ctx_free(kc_emb_ctx_t *ectx) {
 }
 
 /**
- * Allocate and initialize one worker inference context.
+ * Allocate and initialize the inference context.
  * @return Worker context pointer or NULL on failure.
  */
 static kc_emb_ctx_t *kc_emb_ctx_open(void) {
@@ -465,7 +464,7 @@ failure:
 
 /**
  * Tokenize input text using WordPiece segmentation.
- * @param ectx Worker context pointer.
+ * @param ectx Inference context pointer.
  * @param input Input text.
  * @param tokens Output token ID array.
  * @param n_tokens Output token count.
@@ -581,8 +580,8 @@ float eps) {
 }
 
 /**
- * Run inference on one worker context and write the result to out.
- * @param ectx Worker context pointer.
+ * Run inference on the prepared context and write the result to out.
+ * @param ectx Inference context pointer.
  * @param input Input text.
  * @param out Caller-supplied output buffer of n_embd floats.
  * @return KC_EMB_OK on success, KC_EMB_ERROR on failure.
