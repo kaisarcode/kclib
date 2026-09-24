@@ -124,8 +124,10 @@ static int expect_bytes(
 ) {
     if (
         expected_size == actual_size &&
-        (expected_size == 0U ||
-         memcmp(expected, actual, expected_size) == 0)
+        (
+            expected_size == 0U ||
+            memcmp(expected, actual, expected_size) == 0
+        )
     ) {
         return 0;
     }
