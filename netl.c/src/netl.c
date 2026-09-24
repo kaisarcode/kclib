@@ -33,6 +33,12 @@
 
 #define NETL_CLI_COMMAND_SIZE 4096
 
+/**
+ * Transfer an accepted TCP socket from the public listener to CLI dispatch.
+ * This symbol exists only in the netl executable build.
+ * @param connection Accepted TCP connection.
+ * @return Native socket value, or -1 on failure.
+ */
 intptr_t kc_netl_cli_take_connection(kc_netl_connection_t *connection);
 
 /**
