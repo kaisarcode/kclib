@@ -84,6 +84,7 @@ typedef struct {
     int status;
     char reason[128];
     char host[128];
+    char trailer_sum[128];
     unsigned char body[256];
     size_t body_size;
 } parser_state_t;
@@ -103,9 +104,19 @@ static void on_request(const kc_http_request_t *request, void *userdata) {
     copy_text(state->path, sizeof(state->path), request->path);
     copy_text(state->query, sizeof(state->query), request->query);
     state->host[0] = '\0';
+    state->trailer_sum[0] = '\0';
     for (i = 0; i < request->header_count; i++) {
         if (strcmp(request->headers[i].name, "host") == 0) {
             copy_text(state->host, sizeof(state->host), request->headers[i].value);
+        }
+    }
+    for (i = 0; i < request->trailer_count; i++) {
+        if (strcmp(request->trailers[i].name, "x-sum") == 0) {
+            copy_text(
+                state->trailer_sum,
+                sizeof(state->trailer_sum),
+                request->trailers[i].value
+            );
         }
     }
     state->body_size = request->body_size < sizeof(state->body)
@@ -192,6 +203,24 @@ static int case_kc_http_parser_write(void) {
         kc_http_parser_write(parser, two, sizeof(two) - 1U));
     fail += expect_int("two more callbacks", 3, state.requests);
 
+    {
+        static const char chunk_a[] =
+            "POST /chunk HTTP/1.1\r\n"
+            "Transfer-Encoding: chunked\r\n\r\n"
+            "2\r\nhi\r\n3\r\nb";
+        static const char chunk_b[] =
+            "ye\r\n0\r\nX-Sum: yes\r\n\r\n";
+
+        fail += expect_int("chunked first fragment", KC_HTTP_OK,
+            kc_http_parser_write(parser, chunk_a, sizeof(chunk_a) - 1U));
+        fail += expect_int("chunked still incomplete", 3, state.requests);
+        fail += expect_int("chunked completion", KC_HTTP_OK,
+            kc_http_parser_write(parser, chunk_b, sizeof(chunk_b) - 1U));
+        fail += expect_int("chunked callback", 4, state.requests);
+        fail += expect_bytes("dechunked body", "hibye", 5U, state.body, state.body_size);
+        fail += expect_true("parsed trailer", strcmp(state.trailer_sum, "yes") == 0);
+    }
+
     fail += expect_int("malformed framing", KC_HTTP_EPARSE,
         kc_http_parser_write(parser, bad, sizeof(bad) - 1U));
     fail += expect_int("error callback", 1, state.errors);
@@ -272,6 +301,39 @@ static int case_kc_http_request(void) {
     fail += expect_contains("trailer", data, size, "0\r\nX-Sum: yes\r\n\r\n");
     kc_http_free(data);
 
+    {
+        const char *versions[] = { "2", "3" };
+        size_t vi;
+        for (vi = 0U; vi < 2U; vi++) {
+            kc_http_parser_t *parser = NULL;
+            parser_state_t state;
+
+            memset(&request, 0, sizeof(request));
+            request.version = versions[vi];
+            request.method = "GET";
+            request.target = "/proto";
+            fail += expect_int("protocol request build", KC_HTTP_OK,
+                kc_http_request(&request, &data, &size));
+
+            memset(&state, 0, sizeof(state));
+            fail += expect_int("protocol parser open", KC_HTTP_OK,
+                kc_http_parser_open(
+                    &parser,
+                    on_request,
+                    on_response,
+                    on_error,
+                    &state
+                ));
+            fail += expect_int("protocol request parse", KC_HTTP_OK,
+                kc_http_parser_write(parser, data, size));
+            fail += expect_int("protocol request callback", 1, state.requests);
+            fail += expect_true("protocol target", strcmp(state.target, "/proto") == 0);
+            kc_http_parser_close(parser);
+            kc_http_free(data);
+            data = NULL;
+        }
+    }
+
     request.body = NULL;
     request.body_size = 1U;
     fail += expect_int("invalid body", KC_HTTP_EINVAL,
@@ -318,6 +380,37 @@ static int case_kc_http_response(void) {
     fail += expect_bytes("response body", "created", 7U, state.body, state.body_size);
     kc_http_parser_close(parser);
     kc_http_free(data);
+
+    {
+        const char *versions[] = { "2", "3" };
+        size_t vi;
+        for (vi = 0U; vi < 2U; vi++) {
+            memset(&response, 0, sizeof(response));
+            response.version = versions[vi];
+            response.status = 204;
+
+            fail += expect_int("protocol response build", KC_HTTP_OK,
+                kc_http_response(&response, &data, &size));
+
+            memset(&state, 0, sizeof(state));
+            parser = NULL;
+            fail += expect_int("protocol response parser open", KC_HTTP_OK,
+                kc_http_parser_open(
+                    &parser,
+                    on_request,
+                    on_response,
+                    on_error,
+                    &state
+                ));
+            fail += expect_int("protocol response parse", KC_HTTP_OK,
+                kc_http_parser_write(parser, data, size));
+            fail += expect_int("protocol response callback", 1, state.responses);
+            fail += expect_int("protocol response status", 204, state.status);
+            kc_http_parser_close(parser);
+            kc_http_free(data);
+            data = NULL;
+        }
+    }
 
     memset(&response, 0, sizeof(response));
     response.status = 99;
