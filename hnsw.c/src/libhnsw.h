@@ -51,8 +51,11 @@ kc_hnsw_options_t kc_hnsw_options_default(void);
 
 /**
  * Create one in-memory index.
+ * dimension is required. Zero metric, max_connections, build_effort, and
+ * search_effort values select the library defaults, so zero-initialized
+ * partial options are valid.
  * @param out Receives the new index.
- * @param options Index options initialized with kc_hnsw_options_default().
+ * @param options Index configuration.
  * @return KC_HNSW_OK on success, or a negative status code.
  */
 int kc_hnsw_open(
