@@ -3146,7 +3146,7 @@ void kc_http_parser_close(kc_http_parser_t *parser) {
  * @return Function result.
  */
 int kc_http_request(
-    const kc_http_request_t *request,
+    const kc_http_request_build_t *request,
     void **out_data,
     size_t *out_size
 ) {
@@ -3167,10 +3167,13 @@ int kc_http_request(
         ? request->target : "/");
     ctx.version = (char *)(request != NULL && request->version != NULL
         ? request->version : "1.1");
-    ctx.chunk_size = request != NULL && request->chunk_size != 0U
-        ? request->chunk_size : HTTP_CHUNK_DEFAULT;
+    ctx.chunk_size = request != NULL && request->chunk_size != NULL
+        ? *request->chunk_size : HTTP_CHUNK_DEFAULT;
 
     if (request != NULL) {
+        if (request->chunk_size != NULL && *request->chunk_size == 0U) {
+            return KC_HTTP_EINVAL;
+        }
         if (request->body == NULL && request->body_size != 0U) {
             return KC_HTTP_EINVAL;
         }
@@ -3225,7 +3228,7 @@ int kc_http_request(
  * @return Function result.
  */
 int kc_http_response(
-    const kc_http_response_t *response,
+    const kc_http_response_build_t *response,
     void **out_data,
     size_t *out_size
 ) {
@@ -3242,13 +3245,20 @@ int kc_http_response(
     memset(&ctx, 0, sizeof(ctx));
     ctx.version = (char *)(response != NULL && response->version != NULL
         ? response->version : "1.1");
-    ctx.status = response != NULL && response->status != 0
-        ? response->status : 200;
+    ctx.status = response != NULL && response->status != NULL
+        ? *response->status : 200;
     ctx.reason = (char *)(response != NULL ? response->reason : NULL);
-    ctx.chunk_size = response != NULL && response->chunk_size != 0U
-        ? response->chunk_size : HTTP_CHUNK_DEFAULT;
+    ctx.chunk_size = response != NULL && response->chunk_size != NULL
+        ? *response->chunk_size : HTTP_CHUNK_DEFAULT;
 
     if (ctx.status < 100 || ctx.status > 599) return KC_HTTP_EINVAL;
+    if (
+        response != NULL &&
+        response->chunk_size != NULL &&
+        *response->chunk_size == 0U
+    ) {
+        return KC_HTTP_EINVAL;
+    }
 
     if (response != NULL) {
         if (response->body == NULL && response->body_size != 0U) {
