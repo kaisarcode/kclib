@@ -47,7 +47,7 @@ if(EMSCRIPTEN)
     target_link_options(hnsw_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_hnsw_options_default,_kc_hnsw_open,_kc_hnsw_close,_kc_hnsw_reserve,_kc_hnsw_add,_kc_hnsw_build,_kc_hnsw_search,_kc_hnsw_free,_kc_hnsw_stop,_kc_hnsw_dimension,_kc_hnsw_metric,_kc_hnsw_count,_kc_hnsw_metric_from_string,_kc_hnsw_metric_to_string,_kc_hnsw_strerror,_kc_hnsw_version
+        -sEXPORTED_FUNCTIONS=_kc_hnsw_options_default,_kc_hnsw_open,_kc_hnsw_close,_kc_hnsw_add,_kc_hnsw_build,_kc_hnsw_search,_kc_hnsw_free,_kc_hnsw_dimension,_kc_hnsw_metric,_kc_hnsw_count,_kc_hnsw_strerror,_kc_hnsw_version
     )
 endif()
 
