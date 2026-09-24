@@ -499,11 +499,11 @@ int kc_lng_detect(
     threshold = 0.001;
     limit = 1;
     if (options != NULL) {
-        if (options->has_threshold) {
-            threshold = options->threshold;
+        if (options->threshold != NULL) {
+            threshold = *options->threshold;
         }
-        if (options->has_limit) {
-            limit = options->limit;
+        if (options->limit != NULL) {
+            limit = *options->limit;
         }
     }
 
