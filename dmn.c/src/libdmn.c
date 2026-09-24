@@ -116,6 +116,11 @@ struct kc_dmn_stream {
  * @return 0 on success, 1 on failure.
  */
 static int kc_dmn_runtime_dir(char *out, size_t cap) {
+    const char *override = getenv("KC_DMN_DIR");
+
+    if (override && override[0]) {
+        return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : 1;
+    }
 #ifdef _WIN32
     char tmp[MAX_PATH];
     DWORD r = GetTempPathA((DWORD)sizeof(tmp), tmp);
@@ -222,19 +227,6 @@ static int kc_dmn_cmd_valid(const char *cmd) {
     return strchr(cmd, '\n') == NULL && strchr(cmd, '\r') == NULL;
 }
 
-/**
- * Resolve a configured or default runtime directory.
- * @param dir Configured directory, or NULL.
- * @param out Output path buffer.
- * @param cap Output buffer capacity.
- * @return Zero on success, non-zero on failure.
- */
-static int kc_dmn_resolve_dir(const char *dir, char *out, size_t cap) {
-    if (dir && dir[0]) {
-        return (size_t)snprintf(out, cap, "%s", dir) < cap ? 0 : 1;
-    }
-    return kc_dmn_runtime_dir(out, cap);
-}
 
 /**
  * Compose one daemon metadata path.
@@ -1512,7 +1504,7 @@ int kc_dmn_create(
             !kc_dmn_cmd_valid(options->cmd))
         return KC_DMN_ERROR;
 
-    if (kc_dmn_resolve_dir(options->dir, dir, sizeof(dir)) != 0)
+    if (kc_dmn_runtime_dir(dir, sizeof(dir)) != 0)
         return KC_DMN_ERROR;
 
     if (options->eot || options->eot_size > 0) {
@@ -1574,14 +1566,12 @@ int kc_dmn_open(
 }
 
 /**
- * List daemons in one runtime directory.
- * @param dir Runtime directory, or NULL.
+ * List daemons in the active runtime directory.
  * @param out_entries Output entry array.
  * @param out_count Output entry count.
  * @return dmn status code.
  */
 int kc_dmn_list(
-    const char *dir,
     kc_dmn_entry_t **out_entries,
     size_t *out_count
 ) {
@@ -1592,7 +1582,7 @@ int kc_dmn_list(
     if (out_entries) *out_entries = NULL;
     if (out_count) *out_count = 0;
     if (!out_entries || !out_count) return KC_DMN_ERROR;
-    if (kc_dmn_resolve_dir(dir, resolved, sizeof(resolved)) != 0)
+    if (kc_dmn_runtime_dir(resolved, sizeof(resolved)) != 0)
         return KC_DMN_ERROR;
 
     memset(&collect, 0, sizeof(collect));
@@ -1610,17 +1600,15 @@ int kc_dmn_list(
 /**
  * Delete one named daemon.
  * @param name Daemon name.
- * @param dir Runtime directory, or NULL.
  * @return dmn status code.
  */
 int kc_dmn_delete(
-    const char *name,
-    const char *dir
+    const char *name
 ) {
     char resolved[KC_DMN_PATH];
 
     if (!kc_dmn_name_valid(name)) return KC_DMN_ERROR;
-    if (kc_dmn_resolve_dir(dir, resolved, sizeof(resolved)) != 0)
+    if (kc_dmn_runtime_dir(resolved, sizeof(resolved)) != 0)
         return KC_DMN_ERROR;
 
     (void)kc_dmn_run_delete(resolved, name);
@@ -1681,42 +1669,6 @@ const char *kc_dmn_get_cmd(
     return dmn ? dmn->cmd : NULL;
 }
 
-/**
- * Change the runtime directory targeted by a handle.
- * @param dmn Daemon handle.
- * @param dir Runtime directory, or NULL.
- * @return dmn status code.
- */
-int kc_dmn_set_dir(
-    kc_dmn_t *dmn,
-    const char *dir
-) {
-    char resolved[KC_DMN_PATH];
-
-    if (!dmn) return KC_DMN_ERROR;
-    if (kc_dmn_resolve_dir(dir, resolved, sizeof(resolved)) != 0)
-        return KC_DMN_ERROR;
-    if ((size_t)snprintf(
-            dmn->dir,
-            sizeof(dmn->dir),
-            "%s",
-            resolved
-        ) >= sizeof(dmn->dir))
-        return KC_DMN_ERROR;
-    if (kc_dmn_load_config(dmn) != 0) return KC_DMN_ERROR;
-    return KC_DMN_OK;
-}
-
-/**
- * Return the runtime directory targeted by a handle.
- * @param dmn Daemon handle.
- * @return Borrowed directory string, or NULL.
- */
-const char *kc_dmn_get_dir(
-    const kc_dmn_t *dmn
-) {
-    return dmn ? dmn->dir : NULL;
-}
 
 /**
  * Replace the daemon EOT marker.
