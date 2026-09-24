@@ -3308,6 +3308,7 @@ void kc_http_free(void *ptr) {
 
 /**
  * Return a static message for a public status code.
+ * @return Static error string.
  */
 const char *kc_http_strerror(int status) {
     switch (status) {
