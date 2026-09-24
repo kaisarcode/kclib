@@ -19,6 +19,7 @@
 #include <string.h>
 
 static int hnsw_read_stdin(char **out_text);
+static int hnsw_metric_from_string(const char *name);
 
 /**
  * Reads text from standard input into a dynamically allocated buffer.
@@ -171,6 +172,24 @@ static int hnsw_parse_float(const char *text, float *out) {
 
     *out = value;
     return 1;
+}
+
+/**
+ * Resolve one CLI metric name.
+ * @param name Metric text.
+ * @return Metric constant, or zero when invalid.
+ */
+static int hnsw_metric_from_string(const char *name) {
+    if (name == NULL) return 0;
+    if (strcmp(name, "cosine") == 0) return KC_HNSW_METRIC_COSINE;
+    if (strcmp(name, "inner") == 0 ||
+            strcmp(name, "inner_product") == 0) {
+        return KC_HNSW_METRIC_INNER_PRODUCT;
+    }
+    if (strcmp(name, "l2") == 0 || strcmp(name, "euclidean") == 0) {
+        return KC_HNSW_METRIC_L2;
+    }
+    return 0;
 }
 
 /**
@@ -406,7 +425,7 @@ int main(int argc, char **argv) {
     }
 
     if (metric_name != NULL) {
-        metric = kc_hnsw_metric_from_string(metric_name);
+        metric = hnsw_metric_from_string(metric_name);
     }
     if (metric == 0) {
         status = hnsw_fail_usage(argv[0], "Unknown metric name.");
@@ -431,9 +450,9 @@ int main(int argc, char **argv) {
         kc_hnsw_options_t opts = kc_hnsw_options_default();
         opts.dimension = (size_t)dimension;
         opts.metric = metric;
-        opts.m = m;
-        opts.ef_construction = ef_construction;
-        opts.ef_search = ef_search;
+        opts.max_connections = m;
+        opts.build_effort = ef_construction;
+        opts.search_effort = ef_search;
 
         int rc = kc_hnsw_open(&hnsw, &opts);
         if (rc != KC_HNSW_OK) {
