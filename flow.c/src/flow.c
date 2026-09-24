@@ -161,6 +161,7 @@ int main(int argc, char **argv) {
     void *output = NULL;
     size_t output_size = 0;
     kc_flow_t *ctx = NULL;
+    kc_flow_run_t *run = NULL;
     int i;
     int rc = 0;
 
@@ -274,11 +275,16 @@ int main(int argc, char **argv) {
         }
     }
 
-    rc = kc_flow_exec(ctx, link, input, input_size, &output, &output_size);
-
+    rc = kc_flow_run(ctx, &run, link, input, input_size);
     if (rc != KC_FLOW_OK) {
-        const char *err = kc_flow_error(ctx);
-        fprintf(stderr, "flow: %s\n", err ? err : "execution failed");
+        rc = kc_flow_cli_fail("unable to start flow");
+        goto cleanup;
+    }
+
+    rc = kc_flow_run_wait(run, &output, &output_size);
+    if (rc != KC_FLOW_OK) {
+        const char *err = kc_flow_run_error(run);
+        fprintf(stderr, "flow: %s\n", err && *err ? err : "run failed");
         rc = 1;
         goto cleanup;
     }
@@ -299,6 +305,7 @@ cleanup:
     }
     if (input) free(input);
     if (output) kc_flow_free(output);
+    kc_flow_run_close(run);
     kc_flow_close(ctx);
     return rc;
 }
