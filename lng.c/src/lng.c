@@ -258,14 +258,14 @@ int main(int argc, char **argv) {
 
     {
         kc_lng_options_t options = {0};
+        size_t limit_value = 0;
 
         if (threshold_set) {
-            options.has_threshold = 1;
-            options.threshold = threshold;
+            options.threshold = &threshold;
         }
         if (limit_set) {
-            options.has_limit = 1;
-            options.limit = (size_t)limit;
+            limit_value = (size_t)limit;
+            options.limit = &limit_value;
         }
 
         if (text) {
