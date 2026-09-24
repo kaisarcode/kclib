@@ -9,6 +9,7 @@
 
 #include "libwch.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +55,27 @@ static void kc_wch_help(void) {
  */
 static void kc_wch_print_version(void) {
     printf("wch build %llu\n", (unsigned long long)kc_wch_version());
+}
+
+/**
+ * Validate one CLI watcher name.
+ * @param name Watcher name.
+ * @return Nonzero when valid.
+ */
+static int kc_wch_valid_name(const char *name) {
+    size_t i;
+
+    if (name == NULL || name[0] == '\0' || strlen(name) >= 128U) {
+        return 0;
+    }
+    for (i = 0U; name[i] != '\0'; i++) {
+        unsigned char ch = (unsigned char)name[i];
+
+        if (!isalnum(ch) && ch != '-' && ch != '_' && ch != '.') {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /**
@@ -195,7 +217,7 @@ int main(int argc, char **argv) {
     }
 
     if (strcmp(argv[1], "--_serve") == 0) {
-        if (argc != 4) return 1;
+        if (argc != 4 || !kc_wch_valid_name(argv[2])) return 1;
         return kc_wch_internal_serve(argv[3], argv[2]);
     }
 
@@ -212,13 +234,20 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "-l") == 0 ||
             strcmp(argv[1], "--list") == 0) {
         if (argc == 2) return kc_wch_print_list(dir, NULL);
-        if (argc == 3) return kc_wch_print_list(dir, argv[2]);
+        if (argc == 3 && kc_wch_valid_name(argv[2])) {
+            return kc_wch_print_list(dir, argv[2]);
+        }
         return 1;
     }
     if (strcmp(argv[1], "-d") == 0 ||
             strcmp(argv[1], "--delete") == 0) {
-        if (argc != 3) return 1;
+        if (argc != 3 || !kc_wch_valid_name(argv[2])) return 1;
         return kc_wch_delete(argv[2], dir) == KC_WCH_OK ? 0 : 1;
+    }
+
+    if (!kc_wch_valid_name(argv[1])) {
+        fprintf(stderr, "wch: invalid watcher name\n");
+        return 1;
     }
 
     if (argc == 3 &&
