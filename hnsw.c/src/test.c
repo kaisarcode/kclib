@@ -37,20 +37,43 @@ typedef int (*case_fn)(void);
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+/**
+ * Print one grouped test result.
+ * @param fail Non-zero when the case failed.
+ * @param name Test case name.
+ * @param detail Behavior covered by the case.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, detail);
 }
 
+/**
+ * Convert one boolean expectation into a failure count.
+ * @param condition Non-zero when the expectation passed.
+ * @return Zero on success, or one on failure.
+ */
 static int expect(int condition) {
     return condition ? 0 : 1;
 }
 
+/**
+ * Run one grouped test case.
+ * @param fn Test case function.
+ * @return Test failure count.
+ */
 static int run_case(case_fn fn) {
     test_case_current++;
     return fn();
 }
 
+/**
+ * Open one index for a test using sparse public options.
+ * @param dimension Vector dimension.
+ * @param metric Metric constant, or zero for the default.
+ * @return Open index, or NULL on failure.
+ */
 static kc_hnsw_t *open_index(size_t dimension, int metric) {
     kc_hnsw_options_t options;
     kc_hnsw_t *hnsw = NULL;
@@ -62,6 +85,10 @@ static kc_hnsw_t *open_index(size_t dimension, int metric) {
     return hnsw;
 }
 
+/**
+ * Test index opening, defaults, and required options.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_open(void) {
     const char *name = "kc_hnsw_open";
     const char *detail = "applies library defaults and validates required options";
@@ -101,6 +128,10 @@ static int case_kc_hnsw_open(void) {
     return fail;
 }
 
+/**
+ * Test vector ownership and explicit build lifecycle.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_add_build(void) {
     const char *name = "kc_hnsw_add_build";
     const char *detail = "owns vectors and requires rebuild after mutation";
@@ -149,6 +180,10 @@ static int case_kc_hnsw_add_build(void) {
     return fail;
 }
 
+/**
+ * Test metrics, thresholds, and ranked search results.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_search(void) {
     const char *name = "kc_hnsw_search";
     const char *detail = "supports cosine, inner product, L2, top-K, and thresholds";
@@ -218,6 +253,10 @@ static int case_kc_hnsw_search(void) {
     return fail;
 }
 
+/**
+ * Test invalid arguments, output clearing, and empty indexes.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_contract(void) {
     const char *name = "kc_hnsw_contract";
     const char *detail = "clears outputs and handles empty indexes and invalid arguments";
@@ -278,8 +317,18 @@ typedef struct {
 } search_worker_t;
 
 #ifdef _WIN32
+/**
+ * Execute one concurrent search worker.
+ * @param arg Worker state.
+ * @return Windows thread exit code.
+ */
 static DWORD WINAPI search_worker_main(void *arg) {
 #else
+/**
+ * Execute one concurrent search worker.
+ * @param arg Worker state.
+ * @return NULL when the worker finishes.
+ */
 static void *search_worker_main(void *arg) {
 #endif
     search_worker_t *worker = (search_worker_t *)arg;
@@ -292,6 +341,10 @@ static void *search_worker_main(void *arg) {
 #endif
 }
 
+/**
+ * Test concurrent searches on one built index.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_concurrency(void) {
     const char *name = "kc_hnsw_concurrency";
     const char *detail = "supports concurrent searches after build";
@@ -353,10 +406,24 @@ static int case_kc_hnsw_concurrency(void) {
 
 #ifndef __EMSCRIPTEN__
 #ifdef _WIN32
+/**
+ * Convert one UTF-8 CLI string into a Windows wide string.
+ * @param in Input UTF-8 text.
+ * @param out Destination wide buffer.
+ * @param cap Destination capacity in wide characters.
+ * @return Zero on success, or one on failure.
+ */
 static int cli_to_wide(const char *in, wchar_t *out, size_t cap) {
     return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
 }
 
+/**
+ * Append one quoted argument to a Windows command line.
+ * @param cmd Command buffer.
+ * @param cap Command buffer capacity.
+ * @param arg Argument text.
+ * @return Zero on success, or one on failure.
+ */
 static int cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     size_t used = wcslen(cmd);
     size_t len = wcslen(arg);
@@ -376,6 +443,13 @@ static int cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     return 0;
 }
 
+/**
+ * Read one Windows pipe into a text buffer.
+ * @param pipe Pipe handle.
+ * @param buf Destination buffer.
+ * @param size Destination buffer size.
+ * @return None.
+ */
 static void cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
     DWORD got;
     size_t used = 0;
@@ -388,6 +462,17 @@ static void cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
     buf[used] = '\0';
 }
 
+/**
+ * Run the Windows CLI with captured standard streams.
+ * @param argv Argument vector.
+ * @param input Optional stdin text.
+ * @param out Stdout buffer.
+ * @param out_size Stdout buffer size.
+ * @param err Stderr buffer.
+ * @param err_size Stderr buffer size.
+ * @param status Destination process status.
+ * @return Zero on success, or one on launch failure.
+ */
 static int cli_run(char *const argv[], const char *input,
         char *out, size_t out_size, char *err, size_t err_size, int *status) {
     SECURITY_ATTRIBUTES sa;
@@ -446,6 +531,12 @@ static int cli_run(char *const argv[], const char *input,
     return 0;
 }
 
+/**
+ * Create one temporary CLI dataset.
+ * @param path Destination path buffer.
+ * @param size Destination path buffer size.
+ * @return Zero on success, or one on failure.
+ */
 static int make_dataset(char *path, size_t size) {
     char dir[MAX_PATH];
     char tmp[MAX_PATH];
@@ -462,6 +553,17 @@ static int make_dataset(char *path, size_t size) {
     return 0;
 }
 #else
+/**
+ * Run the POSIX CLI with captured standard streams.
+ * @param argv Argument vector.
+ * @param input Optional stdin text.
+ * @param out Stdout buffer.
+ * @param out_size Stdout buffer size.
+ * @param err Stderr buffer.
+ * @param err_size Stderr buffer size.
+ * @param status Destination process status.
+ * @return Zero on success, or one on launch failure.
+ */
 static int cli_run(char *const argv[], const char *input,
         char *out, size_t out_size, char *err, size_t err_size, int *status) {
     int in_pipe[2], out_pipe[2], err_pipe[2];
@@ -521,6 +623,12 @@ static int cli_run(char *const argv[], const char *input,
     return 0;
 }
 
+/**
+ * Create one temporary CLI dataset.
+ * @param path Destination path buffer.
+ * @param size Destination path buffer size.
+ * @return Zero on success, or one on failure.
+ */
 static int make_dataset(char *path, size_t size) {
     char tmp[] = "/tmp/hnsw-test-XXXXXX";
     int fd;
@@ -542,6 +650,10 @@ static int make_dataset(char *path, size_t size) {
 }
 #endif
 
+/**
+ * Test the stable external CLI contract.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_cli(void) {
     const char *name = "kc_hnsw_cli";
     const char *detail = "preserves dataset, query, tuning, help, and version CLI behavior";
@@ -639,6 +751,10 @@ static int case_kc_hnsw_cli(void) {
 }
 #endif
 
+/**
+ * Test the generated build version.
+ * @return Test failure count.
+ */
 static int case_kc_hnsw_version(void) {
     const char *name = "kc_hnsw_version";
     const char *detail = "returns the generated build version";
@@ -648,6 +764,10 @@ static int case_kc_hnsw_version(void) {
     return fail;
 }
 
+/**
+ * Run all grouped HNSW contract tests.
+ * @return Total failed case count.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -670,6 +790,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Dispatch one grouped HNSW test case.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process exit status.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
