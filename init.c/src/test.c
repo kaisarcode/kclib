@@ -616,15 +616,44 @@ static int case_kc_init_cli(void) {
     fail += fixture_create(dir, sizeof(dir));
     if (!fail) {
 #ifdef _WIN32
-        rc = (int)_spawnl(
-            _P_WAIT,
-            INIT_TEST_CLI,
-            INIT_TEST_CLI,
-            "--dir",
-            dir,
-            "--list",
-            NULL
-        );
+        {
+            HANDLE null_handle;
+            HANDLE stdout_handle;
+            HANDLE stderr_handle;
+
+            null_handle = CreateFileA(
+                "NUL",
+                GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                NULL,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                NULL
+            );
+            stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+            stderr_handle = GetStdHandle(STD_ERROR_HANDLE);
+            if (null_handle == INVALID_HANDLE_VALUE ||
+                    !SetStdHandle(STD_OUTPUT_HANDLE, null_handle) ||
+                    !SetStdHandle(STD_ERROR_HANDLE, null_handle)) {
+                if (null_handle != INVALID_HANDLE_VALUE) {
+                    CloseHandle(null_handle);
+                }
+                rc = -1;
+            } else {
+                rc = (int)_spawnl(
+                    _P_WAIT,
+                    INIT_TEST_CLI,
+                    INIT_TEST_CLI,
+                    "--dir",
+                    dir,
+                    "--list",
+                    NULL
+                );
+                (void)SetStdHandle(STD_OUTPUT_HANDLE, stdout_handle);
+                (void)SetStdHandle(STD_ERROR_HANDLE, stderr_handle);
+                CloseHandle(null_handle);
+            }
+        }
 #else
         snprintf(
             command,
