@@ -2837,7 +2837,6 @@ static int kc_flow_run_builtin(
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
 static int kc_flow_run_command(
-    kc_flow_t *ctx,
     const char *command,
     const char *flow_path,
     const void *input,
