@@ -411,18 +411,17 @@ test:
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
-			cmake -S . -B $(BUILD_DIR)/test-wine \
-				-DCMAKE_BUILD_TYPE=Release \
-				-DCMAKE_SYSTEM_NAME=Windows \
-				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
-				-DFLOW_BUILD_TESTS=ON \
-				-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
-				-DFLOW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libflow.dll \
-				-DFLOW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libflow.dll.a \
-				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
-				-G Ninja -Wno-dev > /dev/null; \
-		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
+			-DFLOW_BUILD_TESTS=ON \
+			-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
+			-DFLOW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libflow.dll \
+			-DFLOW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libflow.dll.a \
+			-DFLOW_TEST_CLI=Z:$(CURDIR)/$(BIN_DIR)/x86_64/windows/flow.exe \
+			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target flow_contract_test; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/flow_contract_test.exe all; \
 	else \
@@ -434,15 +433,14 @@ test:
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
-			cmake -S . -B $(BUILD_DIR)/test \
-				-DCMAKE_BUILD_TYPE=Release \
-				-DFLOW_BUILD_TESTS=ON \
-				-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
-				-DFLOW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				$(NATIVE_IMPORT_LIBRARY) \
-				-G Ninja -Wno-dev > /dev/null; \
-		fi; \
+		cmake -S . -B $(BUILD_DIR)/test \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DFLOW_BUILD_TESTS=ON \
+			-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
+			-DFLOW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+			-DFLOW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/flow$(NATIVE_EXE_EXT) \
+			$(NATIVE_IMPORT_LIBRARY) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target flow_contract_test; \
 		$(BUILD_DIR)/test/flow_contract_test all; \
 	fi
