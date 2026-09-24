@@ -774,48 +774,7 @@ static int http1_parse(http_src_t *src, http_msg_t *msg) {
     return 0;
 }
 
-/**
- * Emit the parsed message metadata and body to a buffer.
- * @param b Output buffer.
- * @param msg Source message.
- * @return 0 on success, -1 on write error.
- */
-static int http1_emit_msg(http_buf_t *b, const http_msg_t *msg) {
-    int i;
 
-    if (msg->type == HTTP_TYPE_REQUEST) {
-        if (http_buf_printf(b, "http.type=request\n") != 0) return -1;
-        if (msg->ver_minor == 0 && msg->ver_major > 1) { if (http_buf_printf(b, "http.version=%d\n", msg->ver_major) != 0) return -1; }
-        else { if (http_buf_printf(b, "http.version=%d.%d\n", msg->ver_major, msg->ver_minor) != 0) return -1; }
-        if (http_buf_printf(b, "request.method=%s\n", msg->method ? msg->method : "") != 0) return -1;
-        if (http_buf_printf(b, "request.target=%s\n", msg->target  ? msg->target  : "") != 0) return -1;
-        if (http_buf_printf(b, "request.path=%s\n",   msg->path    ? msg->path    : "") != 0) return -1;
-        if (msg->query) { if (http_buf_printf(b, "request.query=%s\n", msg->query) != 0) return -1; }
-    } else {
-        if (http_buf_printf(b, "http.type=response\n") != 0) return -1;
-        if (msg->ver_minor == 0 && msg->ver_major > 1) { if (http_buf_printf(b, "http.version=%d\n", msg->ver_major) != 0) return -1; }
-        else { if (http_buf_printf(b, "http.version=%d.%d\n", msg->ver_major, msg->ver_minor) != 0) return -1; }
-        if (http_buf_printf(b, "response.status=%d\n", msg->status) != 0) return -1;
-        if (http_buf_printf(b, "response.reason=%s\n", msg->reason ? msg->reason : "") != 0) return -1;
-    }
-
-    for (i = 0; i < msg->nhdr; i++) {
-        if (http_buf_printf(b, "header.%s=%s\n", msg->hdrs[i].name, msg->hdrs[i].value) != 0) return -1;
-    }
-
-    for (i = 0; i < msg->ntrailer; i++) {
-        if (http_buf_printf(b, "trailer.%s=%s\n", msg->trailers[i].name, msg->trailers[i].value) != 0) return -1;
-    }
-
-    if (http_buf_printf(b, "body.length=%zu\n", msg->body_len) != 0) return -1;
-    if (http_buf_printf(b, "\n") != 0) return -1;
-
-    if (msg->body_len > 0) {
-        if (http_buf_write(b, msg->body, msg->body_len) != 0) return -1;
-    }
-
-    return 0;
-}
 
 /**
  * Emit context headers plus auto Content-Length or Transfer-Encoding.
