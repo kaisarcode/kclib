@@ -131,7 +131,7 @@ int main(int argc, char **argv) {
     const char *source;
     kc_tpl_t *tpl = NULL;
     char *output = NULL;
-    const char *root = ".";
+    const char *root = NULL;
     int i;
 
     if (argc > 1) {
