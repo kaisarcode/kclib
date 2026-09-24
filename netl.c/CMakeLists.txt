@@ -9,6 +9,7 @@ endif()
 
 option(NETL_NATIVE "Enable native hardware optimizations" OFF)
 option(NETL_BUILD_TESTS "Build netl tests" OFF)
+set(NETL_TEST_CLI_EXECUTABLE "" CACHE FILEPATH "Prebuilt netl CLI for contract tests")
 
 set(NETL_TEST_EXTERNAL_ARTIFACTS OFF)
 if(NETL_BUILD_TESTS AND NETL_TEST_SHARED_LIBRARY)
@@ -45,6 +46,7 @@ if(NOT NETL_TEST_EXTERNAL_ARTIFACTS)
     )
 
     target_include_directories(netl PRIVATE src)
+    target_compile_definitions(netl PRIVATE KC_NETL_CLI=1)
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(netl pthread m)
@@ -110,4 +112,18 @@ if(NETL_BUILD_TESTS)
             $<TARGET_FILE:${NETL_TEST_SHARED_TARGET}>
             $<TARGET_FILE_DIR:netl_contract_test>
     )
+
+    if(NETL_TEST_CLI_EXECUTABLE)
+        add_custom_command(TARGET netl_contract_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${NETL_TEST_CLI_EXECUTABLE}"
+                "$<TARGET_FILE_DIR:netl_contract_test>/netl${CMAKE_EXECUTABLE_SUFFIX}"
+        )
+    elseif(TARGET netl)
+        add_custom_command(TARGET netl_contract_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:netl>
+                "$<TARGET_FILE_DIR:netl_contract_test>/netl${CMAKE_EXECUTABLE_SUFFIX}"
+        )
+    endif()
 endif()
