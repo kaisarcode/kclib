@@ -318,8 +318,8 @@ static int kc_netl_bind(
         }
         if (
             options->protocol == KC_NETL_TCP &&
-            listen(fd, options->backlog > 0
-                ? options->backlog
+            listen(fd, options->backlog != NULL
+                ? *options->backlog
                 : KC_NETL_DEFAULT_BACKLOG) != 0
         ) {
             KC_NETL_CLOSE(fd);
@@ -382,7 +382,7 @@ int kc_netl_open(
             options->protocol != KC_NETL_TCP &&
             options->protocol != KC_NETL_UDP
         ) ||
-        options->backlog < 0
+        (options->backlog != NULL && *options->backlog < 0)
     ) {
         return KC_NETL_EINVAL;
     }
@@ -391,7 +391,9 @@ int kc_netl_open(
     if (listener == NULL) return KC_NETL_ENOMEM;
     listener->fd = KC_NETL_FD_INVALID;
     listener->protocol = options->protocol;
-    listener->backlog = options->backlog;
+    listener->backlog = options->backlog != NULL
+        ? *options->backlog
+        : KC_NETL_DEFAULT_BACKLOG;
 
     rc = kc_netl_platform_open();
     if (rc != KC_NETL_OK) {
