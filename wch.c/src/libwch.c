@@ -1040,6 +1040,9 @@ static void kc_wch_release(kc_wch_native_t *w) {
  * @return Platform thread result.
  */
 #ifdef _WIN32
+#if defined(__GNUC__)
+__attribute__((noipa))
+#endif
 static DWORD WINAPI kc_wch_worker(void *arg) {
 #else
 /**
@@ -1047,6 +1050,9 @@ static DWORD WINAPI kc_wch_worker(void *arg) {
  * @param arg Watcher instance.
  * @return Thread result pointer.
  */
+#if defined(__GNUC__)
+__attribute__((noipa))
+#endif
 static void *kc_wch_worker(void *arg) {
 #endif
     kc_wch_native_t *w = (kc_wch_native_t *)arg;
