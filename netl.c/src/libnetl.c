@@ -780,6 +780,27 @@ void kc_netl_connection_close(kc_netl_connection_t *connection) {
     kc_netl_connection_shutdown(connection);
 }
 
+#ifdef KC_NETL_CLI
+/**
+ * Transfer one TCP socket to the command-line process dispatcher.
+ * This helper is compiled only into the netl executable and is not public ABI.
+ * @param connection Connection handle.
+ * @return Native socket value, or -1 for an invalid connection.
+ */
+intptr_t kc_netl_cli_take_connection(kc_netl_connection_t *connection) {
+    kc_netl_fd_t fd;
+
+    if (connection == NULL || connection->closed) return (intptr_t)-1;
+    fd = connection->fd;
+    connection->fd = KC_NETL_FD_INVALID;
+    connection->closed = 1;
+    kc_netl_unlink(connection);
+    connection->next = connection->listener->retired;
+    connection->listener->retired = connection;
+    return (intptr_t)fd;
+}
+#endif
+
 /**
  * Return the bound listener port.
  * @param listener Listener handle.
