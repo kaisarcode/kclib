@@ -1222,7 +1222,7 @@ static int kc_tpl_render_internal(kc_tpl_t *ctx, kc_tpl_scope_t *scope, char *tp
  * Creates a reusable template instance and copies the template source.
  * @param out Pointer to receive the template instance.
  * @param source Borrowed null-terminated template source.
- * @param options Optional template options. NULL uses defaults.
+ * @param options Optional template options. NULL root uses the default ".".
  * @return KC_TPL_OK on success, or KC_TPL_ERROR on failure.
  */
 int kc_tpl_open(
@@ -1242,8 +1242,8 @@ int kc_tpl_open(
         return KC_TPL_ERROR;
     }
 
-    if (options != NULL) {
-        if (options->root == NULL || options->root[0] == '\0') {
+    if (options != NULL && options->root != NULL) {
+        if (options->root[0] == '\0') {
             return KC_TPL_ERROR;
         }
         root = options->root;
