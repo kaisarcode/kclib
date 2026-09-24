@@ -31,7 +31,7 @@ dmn worker -s 10
 dmn worker --delete
 ```
 
-`KC_DMN_DIR` selects the runtime directory for CLI operations. Without it, the platform runtime directory is resolved automatically.
+`KC_DMN_DIR` is an advanced process-level override for the runtime directory. Normal API and CLI callers do not need to select a directory; the platform runtime location is resolved automatically.
 
 ## Public API
 
@@ -41,7 +41,6 @@ typedef struct kc_dmn_stream kc_dmn_stream_t;
 
 typedef struct {
     const char *cmd;
-    const char *dir;
     const void *eot;
     size_t eot_size;
 } kc_dmn_options_t;
@@ -79,18 +78,17 @@ int kc_dmn_open(
 void kc_dmn_close(kc_dmn_t *dmn);
 
 int kc_dmn_delete(
-    const char *name,
-    const char *dir
+    const char *name
 );
 ```
 
-`kc_dmn_create()` creates or replaces a named daemon. `options->cmd` is required. `options->dir == NULL` uses automatic runtime-directory resolution. `options->eot == NULL` with `eot_size == 0` uses the default EOT byte `0x04`.
+`kc_dmn_create()` creates or replaces a named daemon. `options->cmd` is required. The runtime directory is resolved automatically. `options->eot == NULL` with `eot_size == 0` uses the default EOT byte `0x04`.
 
-`kc_dmn_open()` creates a local handle bound to a daemon name. The handle initially uses the automatic runtime directory. Use `kc_dmn_set_dir()` before daemon operations when the registration lives elsewhere.
+`kc_dmn_open()` creates a local handle bound to a daemon name and uses the automatically resolved runtime directory.
 
 `kc_dmn_close()` releases only the local handle. It does not delete the daemon.
 
-`kc_dmn_delete()` stops and removes the named daemon from the selected runtime directory. A `NULL` directory uses automatic resolution.
+`kc_dmn_delete()` stops and removes the named daemon from the active runtime directory.
 
 ### Configuration
 
@@ -98,8 +96,6 @@ int kc_dmn_delete(
 int kc_dmn_set_cmd(kc_dmn_t *dmn, const char *cmd);
 const char *kc_dmn_get_cmd(const kc_dmn_t *dmn);
 
-int kc_dmn_set_dir(kc_dmn_t *dmn, const char *dir);
-const char *kc_dmn_get_dir(const kc_dmn_t *dmn);
 
 int kc_dmn_set_eot(
     kc_dmn_t *dmn,
@@ -116,8 +112,6 @@ const void *kc_dmn_get_eot(
 Each mutable public property has a matching getter.
 
 `set_cmd` replaces the running daemon command.
-
-`set_dir` changes which runtime directory the handle targets. Passing `NULL` restores automatic resolution.
 
 `set_eot` changes the response-cycle marker. Passing `NULL, 0` restores the default single byte `0x04`. EOT values are binary and may contain any byte sequence.
 
@@ -199,15 +193,12 @@ On POSIX, the numeric signal is sent to the managed backend process. Windows use
 
 ```c
 int kc_dmn_list(
-    const char *dir,
     kc_dmn_entry_t **out_entries,
     size_t *out_count
 );
 
 void kc_dmn_free(void *ptr);
 ```
-
-`dir == NULL` uses automatic runtime-directory resolution.
 
 The returned entries and their strings live in one allocation and are released with one `kc_dmn_free()`.
 
@@ -224,17 +215,13 @@ Lua:
 ```lua
 dmn.create("my_daemon", {
     cmd = "/usr/bin/my_app -p 1",
-    dir = "/tmp/dmn",
     eot = "\4"
 })
 
 local daemons = dmn.list()
 
 local daemon = dmn.open("my_daemon")
-daemon:set_dir("/tmp/dmn")
-
 print(daemon:get_cmd())
-print(daemon:get_dir())
 print(daemon:get_eot())
 
 daemon:set_cmd("/usr/bin/my_app -p 2")
@@ -253,14 +240,14 @@ local chunk = stream:read()
 stream:close()
 
 daemon:close()
-dmn.delete("my_daemon", "/tmp/dmn")
+dmn.delete("my_daemon")
 ```
 
 The binding should remain mechanical: daemon methods map directly to the public C functions, while raw streams map to `kc_dmn_stream_*`.
 
 ## Runtime model
 
-Runtime state is local and temporary.
+Runtime state is local and temporary. On POSIX, dmn prefers `XDG_RUNTIME_DIR`, then `/run/user/<uid>`, with `/tmp` only as a fallback. Windows uses the system temporary directory. These locations are runtime state, not persistent registration storage.
 
 POSIX uses Unix Domain Sockets plus manager/backend PID files. The backend can remain resident across response cycles. The configured EOT marks the end of one cycle while preserving the resident backend.
 
