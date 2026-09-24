@@ -1814,6 +1814,7 @@ static int kc_wch_reset_events(
     return 0;
 }
 
+#if !defined(_WIN32) || defined(KC_WCH_CLI)
 /**
  * Append one normalized event to the private event stream.
  * @param dir Runtime directory.
@@ -1920,7 +1921,6 @@ static int kc_wch_append_event(
     return rc;
 }
 
-#if !defined(_WIN32) || defined(KC_WCH_CLI)
 /**
  * Map one native event type to the resident event index.
  * @param type Native event type.
