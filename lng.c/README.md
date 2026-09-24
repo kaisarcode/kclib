@@ -112,6 +112,15 @@ if (kc_lng_detect(
 kc_lng_free(results);
 ```
 
+A natural scripting binding can expose the same stateless capability directly:
+
+```js
+const results = lng.detect(text, 0.001, 3);
+```
+
+The binding only adapts C array ownership and strings mechanically. It does not
+need a context, lifecycle object, setters, callbacks, or semantic wrapper.
+
 ## Lifecycle
 
 No explicit initialization required. Internal profiles are initialized automatically on first detection, exactly once, in a thread-safe manner. Once initialized, profile state remains read-only and safe for concurrent detection without additional synchronization. Results are sorted by descending heuristic score. Scores remain heuristic ranking values, not probabilities or confidence percentages.
@@ -126,11 +135,16 @@ Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host arc
 make clean && make
 ```
 
-Run the portable C contract tests after building:
+Run the portable contract tests after building:
 
 ```bash
 make test
 ```
+
+Native tests execute five reusable public-API cases plus one grouped
+`kc_lng_cli` case covering the shipped CLI contract: argument and stdin input,
+default and ranked output, threshold and limit handling, diagnostics, help,
+version, and exit status.
 
 When Windows artifacts are available and Wine is installed:
 
@@ -152,7 +166,11 @@ make wasm32/wasm
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
 - The module exports the public `kc_lng_*` API with its existing signatures, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `lng` CLI: `src/lng.c` is not compiled into the module.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the same public-contract tests under Node.js. It requires `bin/wasm32/wasm/lng.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles `src/test.c` with Emscripten and runs the five reusable
+public-API contract cases under Node.js. Native and Wine runs additionally execute
+the grouped `kc_lng_cli` case; host process-spawning code is excluded from the
+WASM test build. It requires `bin/wasm32/wasm/lng.wasm` and reports how to build
+it when it is absent.
 
 `wasm32/wasm` is included in `make all`.
 
