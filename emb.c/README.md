@@ -23,12 +23,19 @@ echo "The quick brown fox" | ./bin/x86_64/linux/emb
 cat sentences.txt | ./bin/x86_64/linux/emb
 ```
 
+Read the fixed model dimension:
+
+```bash
+./bin/x86_64/linux/emb --dim
+```
+
 ---
 
 ### Parameters
 
 | Flag | Description |
 | :--- | :--- |
+| `-d`, `--dim` | Print the embedded model vector dimension |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
@@ -126,7 +133,8 @@ make clean && make
 
 ### Tests
 
-The portable test entry point is `make test`. Native and Wine runs execute five reusable public-API cases plus one grouped `kc_emb_cli` case covering argument input, stdin input, vector output, help, version, stdout/stderr, and exit status.
+The portable test entry point is `make test`. Native and Wine runs execute five reusable public-API cases plus one grouped `kc_emb_cli` case covering argument input, stdin input, vector output, dimension, help,
+version, stdout/stderr, and exit status.
 
 ```bash
 make
