@@ -30,6 +30,12 @@
 #define LNG_TEST_CLI ""
 #endif
 
+#ifdef _WIN32
+#define LNG_TEST_EOL "\r\n"
+#else
+#define LNG_TEST_EOL "\n"
+#endif
+
 static int test_case_total = 0;
 static int test_case_current = 0;
 
@@ -664,7 +670,7 @@ static int case_kc_lng_cli(void) {
         char *args[] = { (char *)LNG_TEST_CLI, (char *)TEXT_EN, NULL };
         fail += expect_int("CLI argument exits 0", 0,
             test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
-        fail += expect_string("CLI argument output", "en\n", out);
+        fail += expect_string("CLI argument output", "en" LNG_TEST_EOL, out);
         fail += expect_string("CLI argument stderr", "", err);
     }
     {
@@ -672,7 +678,7 @@ static int case_kc_lng_cli(void) {
         const char *input = TEXT_ES;
         fail += expect_int("CLI stdin exits 0", 0,
             test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
-        fail += expect_string("CLI stdin output", "es\n", out);
+        fail += expect_string("CLI stdin output", "es" LNG_TEST_EOL, out);
         fail += expect_string("CLI stdin stderr", "", err);
     }
     {
@@ -699,7 +705,7 @@ static int case_kc_lng_cli(void) {
         char *args[] = { (char *)LNG_TEST_CLI, "-l", "0", (char *)TEXT_EN, NULL };
         fail += expect_int("CLI limit zero clamps and exits 0", 0,
             test_cli_run_input(args, NULL, 0, out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
-        fail += expect_string("CLI limit zero clamps to one", "en\n", out);
+        fail += expect_string("CLI limit zero clamps to one", "en" LNG_TEST_EOL, out);
     }
     {
         char *args[] = { (char *)LNG_TEST_CLI, "-l", "100", (char *)TEXT_EN, NULL };
