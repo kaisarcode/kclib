@@ -107,6 +107,7 @@ A single line with the score formatted to six decimal places:
 typedef struct kc_tpm kc_tpm_t;
 
 typedef struct {
+    int has_ngram_size;
     int ngram_size;
 } kc_tpm_options_t;
 ```
@@ -122,7 +123,7 @@ typedef struct {
 
 | Function | Returns | Description |
 | :------- | :------ | :---------- |
-| `kc_tpm_open(out, map_text, options)` | `int` | Create a ready-to-score profile. `NULL` options use n-gram size 3. |
+| `kc_tpm_open(out, map_text, options)` | `int` | Create a ready-to-score profile. An omitted n-gram option uses size 3. |
 | `kc_tpm_score(tpm, input_text, out_score)` | `int` | Score input text against the profile and write a 0.0-1.0 result to `out_score`. |
 | `kc_tpm_close(tpm)` | `void` | Release the profile. |
 | `kc_tpm_version(void)` | `uint64_t` | Return the build version timestamp. |
@@ -148,8 +149,10 @@ scored immediately and repeatedly. There is no separate build phase.
 `input_text` is borrowed only for the duration of `kc_tpm_score()`.
 The profile owns all derived n-gram storage until `kc_tpm_close()`.
 
-Pass `NULL` for `options` to use the default n-gram size of 3. When options
-are supplied, `ngram_size` must be from 1 through 8.
+The n-gram size defaults internally to 3 when it is omitted. This applies both
+when `options` is `NULL` and when `has_ngram_size` is zero. When
+`has_ngram_size` is nonzero, `ngram_size` is interpreted literally and must
+be from 1 through 8. In particular, an explicit value of 0 is invalid.
 
 `kc_tpm_score()` returns `KC_TPM_ERROR` for invalid arguments, allocation
 failure, or input-profile capacity overflow. A valid empty input or a
