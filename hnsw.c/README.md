@@ -62,7 +62,7 @@ echo "1 0 0" | ./bin/x86_64/linux/hnsw --dim 3 --input vectors.txt
 | `--metric`, `-m` | Metric (`l2`, `cosine`, `inner`, `inner_product`) |
 | `--top`, `-k` | Number of results |
 | `--threshold`, `-t` | Threshold filter |
-| `--max-conn` | Maximum graph connections per level (HNSW M) |
+| `--max-conn` | Maximum graph connections per level |
 | `--build-effort` | Index quality vs. build speed (higher improves recall but slows index construction) |
 | `--search-effort` | Search accuracy vs. query speed (higher improves recall but slows queries) |
 | `--help`, `-h` | Show help |
@@ -100,41 +100,73 @@ Note: no square root is applied. Rankings are identical to Euclidean distance.
 
 ## Public API
 
+The index is a persistent in-memory object. The only required configuration is the vector dimension. Metric and tuning values have library defaults.
+
 ```c
 #include "libhnsw.h"
 
-kc_hnsw_options_t opts = kc_hnsw_options_default();
-kc_hnsw_t *hnsw = NULL;
+kc_hnsw_options_t options = {0};
+kc_hnsw_t *index = NULL;
 kc_hnsw_result_t *results = NULL;
 size_t result_count = 0;
 
-opts.dimension = dimension;
-opts.metric = KC_HNSW_METRIC_COSINE;
+options.dimension = 384;
 
-if (kc_hnsw_open(&hnsw, &opts) == KC_HNSW_OK) {
-    kc_hnsw_reserve(hnsw, vector_count);
-    kc_hnsw_add(hnsw, "id_1", values);
-    kc_hnsw_build(hnsw);
-    kc_hnsw_search(hnsw, query, limit, threshold, &results, &result_count);
+if (kc_hnsw_open(&index, &options) == KC_HNSW_OK) {
+    kc_hnsw_add(index, "id_1", values);
+    kc_hnsw_build(index);
+    kc_hnsw_search(
+        index,
+        query,
+        5,
+        -1.0,
+        &results,
+        &result_count
+    );
+
     kc_hnsw_free(results);
-    kc_hnsw_close(hnsw);
+    kc_hnsw_close(index);
 }
 ```
 
-## Lifecycle
+### Options and defaults
 
-- `kc_hnsw_options_t` is a plain caller-owned value; initialize it with `kc_hnsw_options_default()` and do not free it.
-- `kc_hnsw_open(&index, &options)` returns a status code and stores the new index in `index` on success. Release an index with `kc_hnsw_close()`.
-- `kc_hnsw_reserve()` optionally reserves vector capacity before insertion.
-- `kc_hnsw_add()` copies both the identifier and vector values into the index. Adding a vector invalidates the built graph; call `kc_hnsw_build()` again before searching.
-- `kc_hnsw_build()` explicitly constructs the graph. `kc_hnsw_search()` explicitly queries a built graph and returns a status code plus an allocated result array and result count.
-- Search results are caller-owned and must be released with `kc_hnsw_free()`. Their IDs borrow index storage and remain valid only until the index is closed or mutated.
-- `kc_hnsw_stop()` can cancel an in-progress build or search, causing it to return `KC_HNSW_ESTOP`.
-- After a graph is built, concurrent searches are supported. Do not mutate or close the index while searches are in progress.
+`kc_hnsw_options_t` uses descriptive public names:
 
-Cosine and inner-product scores are similarities: their thresholds are minimum accepted scores. L2 scores are squared distances: their threshold is the maximum accepted distance.
+| Field | Meaning | Default |
+| :--- | :--- | :--- |
+| `dimension` | Number of values in every vector | Required |
+| `metric` | How vectors are compared | `KC_HNSW_METRIC_COSINE` |
+| `max_connections` | Maximum graph connections per level | `16` |
+| `build_effort` | Work spent building a higher-quality search graph | `64` |
+| `search_effort` | Work spent finding better matches during a search | `64` |
 
-The library is in-memory only; it provides no persistence, network, or database integration.
+A zero value means "use the library default" for every optional field. This makes partial configuration safe for C, LuaJIT FFI, JavaScript bindings, and other consumers without duplicating defaults outside the library.
+
+`kc_hnsw_options_default()` is available when a caller wants an explicit options value with the current defaults already filled in:
+
+```c
+kc_hnsw_options_t options = kc_hnsw_options_default();
+options.dimension = 384;
+```
+
+Both forms are equivalent for the optional fields.
+
+### Lifecycle and ownership
+
+- `kc_hnsw_open()` creates one reusable in-memory index. `dimension` must be greater than zero.
+- `kc_hnsw_add()` copies both the identifier and vector values into the index.
+- Adding a vector after a build invalidates the graph; call `kc_hnsw_build()` again before searching.
+- `kc_hnsw_build()` explicitly constructs the approximate-neighbor graph.
+- `kc_hnsw_search()` queries a built graph. Searches may run concurrently after build.
+- Search result arrays are caller-owned and must be released with `kc_hnsw_free()`.
+- Each result `id` borrows index storage and remains valid only while the index remains alive and unmodified.
+- `kc_hnsw_dimension()`, `kc_hnsw_metric()`, and `kc_hnsw_count()` expose stable index properties.
+- `kc_hnsw_close()` releases the index. Do not mutate or close it while searches are running.
+
+Cosine and inner-product scores are similarities, so thresholds are minimum accepted scores. L2 scores are squared distances, so thresholds are maximum accepted distances.
+
+The library performs approximate nearest-neighbor search. It is in-memory only and provides no persistence, embedding generation, network service, or database layer.
 
 ---
 
@@ -181,9 +213,9 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/hnsw.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_hnsw_*` API with its existing signatures, ownership, lifecycle, and status codes. It contains the reusable index capability, not the `hnsw` CLI: `src/hnsw.c` is not compiled into the module.
+- The module exports the normalized reusable index API: `kc_hnsw_options_default`, `kc_hnsw_open`, `kc_hnsw_add`, `kc_hnsw_build`, `kc_hnsw_search`, `kc_hnsw_free`, `kc_hnsw_dimension`, `kc_hnsw_metric`, `kc_hnsw_count`, `kc_hnsw_close`, `kc_hnsw_strerror`, and `kc_hnsw_version`. The CLI is not compiled into the module.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the same public-contract tests under Node.js. It requires `bin/wasm32/wasm/hnsw.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles `src/test.c` with Emscripten and runs the reusable public-API contract tests under Node.js. Native and Wine tests additionally run the grouped `kc_hnsw_cli` case against the shipped executable.
 
 ---
 
