@@ -454,6 +454,23 @@ static int case_kc_emb_version(void) {
 }
 
 /**
+ * Tests the fixed embedding dimension exposed by the model.
+ * @return 0 when the case passes, 1 otherwise.
+ */
+static int case_kc_emb_dimension(void) {
+    size_t dimension = kc_emb_dimension();
+    int fail = 0;
+
+    fail += expect_true("dimension available", dimension != 0U);
+    fail += expect_true("dimension matches embedded model",
+        dimension == EMB_EXPECTED_DIM);
+
+    case_result(fail, "kc_emb_dimension",
+        "returns the embedded model vector dimension");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Tests direct fixed-model embedding.
  * @return 0 when the case passes, 1 otherwise.
  */
@@ -467,10 +484,14 @@ static int case_kc_emb_embed(void) {
     fail += expect_int("embed text returns OK", KC_EMB_OK,
         kc_emb_embed("The quick brown fox", &vec, &count));
     fail += expect_vector_valid("text vector valid", vec, count);
+    fail += expect_true("text count matches model dimension",
+        count == kc_emb_dimension());
 
     fail += expect_int("embed empty returns OK", KC_EMB_OK,
         kc_emb_embed("", &empty, &empty_count));
     fail += expect_vector_valid("empty vector valid", empty, empty_count);
+    fail += expect_true("empty count matches model dimension",
+        empty_count == kc_emb_dimension());
 
     kc_emb_free(vec);
     kc_emb_free(empty);
@@ -680,12 +701,13 @@ static int case_all(void) {
     int rc = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 4;
-#else
     test_case_total = 5;
+#else
+    test_case_total = 6;
 #endif
     test_case_current = 0;
     run_case(&rc, case_kc_emb_version);
+    run_case(&rc, case_kc_emb_dimension);
     run_case(&rc, case_kc_emb_embed);
     run_case(&rc, case_kc_emb_contract);
     run_case(&rc, case_kc_emb_determinism);
@@ -712,6 +734,11 @@ int main(int argc, char **argv) {
         test_case_total = 1;
         test_case_current = 1;
         return case_kc_emb_version();
+    }
+    if (strcmp(argv[1], "kc_emb_dimension") == 0) {
+        test_case_total = 1;
+        test_case_current = 1;
+        return case_kc_emb_dimension();
     }
     if (strcmp(argv[1], "kc_emb_embed") == 0) {
         test_case_total = 1;
