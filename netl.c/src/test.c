@@ -349,7 +349,7 @@ static int case_kc_netl_open(void) {
 
     options.protocol = KC_NETL_TCP;
     fail += expect_int(
-        "TCP open with default backlog",
+        "TCP open with default max_pending_connections",
         KC_NETL_OK,
         kc_netl_open(&listener, &options)
     );
@@ -358,24 +358,24 @@ static int case_kc_netl_open(void) {
     listener = NULL;
 
     {
-        int backlog = 0;
-        options.backlog = &backlog;
+        int max_pending_connections = 0;
+        options.max_pending_connections = &max_pending_connections;
         fail += expect_int(
-            "explicit zero backlog",
+            "explicit zero max_pending_connections",
             KC_NETL_OK,
             kc_netl_open(&listener, &options)
         );
-        fail += expect_true("zero backlog listener allocated", listener != NULL);
+        fail += expect_true("zero max_pending_connections listener allocated", listener != NULL);
         kc_netl_close(listener);
         listener = NULL;
 
-        backlog = -1;
+        max_pending_connections = -1;
         fail += expect_int(
-            "negative backlog",
+            "negative max_pending_connections",
             KC_NETL_EINVAL,
             kc_netl_open(&listener, &options)
         );
-        fail += expect_true("negative backlog clears output", listener == NULL);
+        fail += expect_true("negative max_pending_connections clears output", listener == NULL);
     }
 
     case_result(fail, "kc_netl_open", "binds one incoming listener");
