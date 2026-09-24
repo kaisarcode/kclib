@@ -1398,7 +1398,7 @@ static int kc_wch_default_dir(char *out, size_t cap) {
     DWORD size = GetTempPathA((DWORD)sizeof(temp), temp);
 
     if (size == 0 || size >= (DWORD)sizeof(temp)) return 1;
-    return (size_t)snprintf(out, cap, "%swch.c", temp) < cap ? 0 : 1;
+    return (size_t)snprintf(out, cap, "%skaisarcode\\wch.c", temp) < cap ? 0 : 1;
 #else
     const char *xdg = getenv("XDG_RUNTIME_DIR");
     char path[KC_WCH_PATH_MAX];
