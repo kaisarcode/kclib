@@ -69,16 +69,31 @@ static int run_case(case_fn fn) {
 }
 
 /**
+ * Open one index for a test using the library defaults.
+ * @param dimension Vector dimension.
+ * @return Open index, or NULL on failure.
+ */
+static kc_hnsw_t *open_index(size_t dimension) {
+    kc_hnsw_options_t options = {0};
+    kc_hnsw_t *hnsw = NULL;
+
+    options.dimension = dimension;
+    if (kc_hnsw_open(&hnsw, &options) != KC_HNSW_OK) return NULL;
+    return hnsw;
+}
+
+/**
  * Open one index for a test with one explicit metric.
  * @param dimension Vector dimension.
  * @param metric Metric constant.
  * @return Open index, or NULL on failure.
  */
-static kc_hnsw_t *open_index(size_t dimension, int metric) {
-    kc_hnsw_options_t options = kc_hnsw_options_default();
+static kc_hnsw_t *open_index_metric(size_t dimension, int metric) {
+    kc_hnsw_options_t options = {0};
     kc_hnsw_t *hnsw = NULL;
 
     options.dimension = dimension;
+    options.has_metric = 1;
     options.metric = metric;
     if (kc_hnsw_open(&hnsw, &options) != KC_HNSW_OK) return NULL;
     return hnsw;
@@ -90,19 +105,11 @@ static kc_hnsw_t *open_index(size_t dimension, int metric) {
  */
 static int case_kc_hnsw_open(void) {
     const char *name = "kc_hnsw_open";
-    const char *detail = "applies library defaults and validates required options";
-    kc_hnsw_options_t defaults = kc_hnsw_options_default();
-    kc_hnsw_options_t options;
+    const char *detail = "applies per-option defaults and validates explicit values";
+    kc_hnsw_options_t options = {0};
     kc_hnsw_t *hnsw = (kc_hnsw_t *)1;
     int fail = 0;
 
-    fail |= expect(defaults.dimension == 0);
-    fail |= expect(defaults.metric == KC_HNSW_METRIC_COSINE);
-    fail |= expect(defaults.max_connections == 16);
-    fail |= expect(defaults.build_effort == 64);
-    fail |= expect(defaults.search_effort == 64);
-
-    options = defaults;
     options.dimension = 2;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_OK);
     fail |= expect(hnsw != NULL);
@@ -111,42 +118,61 @@ static int case_kc_hnsw_open(void) {
     kc_hnsw_close(hnsw);
 
     hnsw = (kc_hnsw_t *)1;
-    options = defaults;
+    memset(&options, 0, sizeof(options));
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
-    options = defaults;
+    memset(&options, 0, sizeof(options));
     options.dimension = 2;
+    options.has_metric = 1;
     options.metric = 0;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
-    options = defaults;
-    options.dimension = 2;
     options.metric = 99;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
-    options = defaults;
+    memset(&options, 0, sizeof(options));
     options.dimension = 2;
+    options.has_max_connections = 1;
     options.max_connections = 0;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
-    options = defaults;
+    memset(&options, 0, sizeof(options));
     options.dimension = 2;
+    options.has_build_effort = 1;
     options.build_effort = 0;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
-    options = defaults;
+    memset(&options, 0, sizeof(options));
     options.dimension = 2;
+    options.has_search_effort = 1;
     options.search_effort = 0;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
+    memset(&options, 0, sizeof(options));
+    options.dimension = 2;
+    options.has_metric = 1;
+    options.metric = KC_HNSW_METRIC_L2;
+    options.has_max_connections = 1;
+    options.max_connections = 8;
+    options.has_build_effort = 1;
+    options.build_effort = 32;
+    options.has_search_effort = 1;
+    options.search_effort = 32;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_OK);
+    fail |= expect(hnsw != NULL);
+    fail |= expect(kc_hnsw_metric(hnsw) == KC_HNSW_METRIC_L2);
+    kc_hnsw_close(hnsw);
+
     fail |= expect(kc_hnsw_open(NULL, &options) == KC_HNSW_EINVAL);
+    hnsw = (kc_hnsw_t *)1;
     fail |= expect(kc_hnsw_open(&hnsw, NULL) == KC_HNSW_EINVAL);
+    fail |= expect(hnsw == NULL);
     kc_hnsw_close(NULL);
 
     case_result(fail, name, detail);
@@ -164,7 +190,7 @@ static int case_kc_hnsw_add_build(void) {
     const float b[] = {0.0f, 1.0f};
     const float c[] = {1.0f, 1.0f};
     kc_hnsw_result_t *results = (kc_hnsw_result_t *)1;
-    kc_hnsw_t *hnsw = open_index(2, KC_HNSW_METRIC_COSINE);
+    kc_hnsw_t *hnsw = open_index(2);
     size_t count = 99;
     int fail = 0;
 
@@ -223,7 +249,7 @@ static int case_kc_hnsw_search(void) {
     size_t count = 0;
     int fail = 0;
 
-    hnsw = open_index(2, KC_HNSW_METRIC_COSINE);
+    hnsw = open_index(2);
     if (hnsw == NULL) return 1;
     fail |= expect(kc_hnsw_add(hnsw, "x", x) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_add(hnsw, "y", y) == KC_HNSW_OK);
@@ -239,7 +265,7 @@ static int case_kc_hnsw_search(void) {
     kc_hnsw_free(results);
     kc_hnsw_close(hnsw);
 
-    hnsw = open_index(2, KC_HNSW_METRIC_INNER_PRODUCT);
+    hnsw = open_index_metric(2, KC_HNSW_METRIC_INNER_PRODUCT);
     if (hnsw == NULL) return 1;
     fail |= expect(kc_hnsw_add(hnsw, "x", x) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_add(hnsw, "far", distant) == KC_HNSW_OK);
@@ -256,7 +282,7 @@ static int case_kc_hnsw_search(void) {
     kc_hnsw_free(results);
     kc_hnsw_close(hnsw);
 
-    hnsw = open_index(2, KC_HNSW_METRIC_L2);
+    hnsw = open_index_metric(2, KC_HNSW_METRIC_L2);
     if (hnsw == NULL) return 1;
     fail |= expect(kc_hnsw_add(hnsw, "origin", origin) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_add(hnsw, "unit", unit) == KC_HNSW_OK);
@@ -287,7 +313,7 @@ static int case_kc_hnsw_contract(void) {
     const char *detail = "clears outputs and handles empty indexes and invalid arguments";
     const float q[] = {1.0f, 0.0f};
     kc_hnsw_result_t *results = (kc_hnsw_result_t *)1;
-    kc_hnsw_t *hnsw = open_index(2, KC_HNSW_METRIC_COSINE);
+    kc_hnsw_t *hnsw = open_index(2);
     size_t count = 99;
     int fail = 0;
 
@@ -376,7 +402,7 @@ static int case_kc_hnsw_concurrency(void) {
     const float x[] = {1.0f, 0.0f};
     const float y[] = {0.0f, 1.0f};
     search_worker_t workers[2];
-    kc_hnsw_t *hnsw = open_index(2, KC_HNSW_METRIC_COSINE);
+    kc_hnsw_t *hnsw = open_index(2);
     int fail = 0;
 
 #ifdef _WIN32
