@@ -107,8 +107,7 @@ A single line with the score formatted to six decimal places:
 typedef struct kc_tpm kc_tpm_t;
 
 typedef struct {
-    int has_ngram_size;
-    int ngram_size;
+    const int *ngram_size;
 } kc_tpm_options_t;
 ```
 
@@ -150,9 +149,9 @@ scored immediately and repeatedly. There is no separate build phase.
 The profile owns all derived n-gram storage until `kc_tpm_close()`.
 
 The n-gram size defaults internally to 3 when it is omitted. This applies both
-when `options` is `NULL` and when `has_ngram_size` is zero. When
-`has_ngram_size` is nonzero, `ngram_size` is interpreted literally and must
-be from 1 through 8. In particular, an explicit value of 0 is invalid.
+when `options` is `NULL` and when `options->ngram_size` is `NULL`. A
+non-NULL pointer is explicit: the pointed value must be from 1 through 8. In
+particular, a pointer to 0 is invalid.
 
 `kc_tpm_score()` returns `KC_TPM_ERROR` for invalid arguments, allocation
 failure, or input-profile capacity overflow. A valid empty input or a
