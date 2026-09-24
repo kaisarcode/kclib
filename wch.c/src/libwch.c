@@ -1401,14 +1401,33 @@ static int kc_wch_default_dir(char *out, size_t cap) {
     return (size_t)snprintf(out, cap, "%swch.c", temp) < cap ? 0 : 1;
 #else
     const char *xdg = getenv("XDG_RUNTIME_DIR");
+    char path[KC_WCH_PATH_MAX];
+    struct stat st;
 
     if (xdg != NULL && xdg[0] != '\0') {
-        return (size_t)snprintf(out, cap, "%s/wch.c", xdg) < cap ? 0 : 1;
+        return (size_t)snprintf(out, cap, "%s/kaisarcode/wch.c", xdg) < cap
+            ? 0
+            : 1;
+    }
+    if ((size_t)snprintf(
+            path,
+            sizeof(path),
+            "/run/user/%lu",
+            (unsigned long)getuid()
+        ) < sizeof(path) &&
+            stat(path, &st) == 0 &&
+            S_ISDIR(st.st_mode)) {
+        return (size_t)snprintf(
+            out,
+            cap,
+            "%s/kaisarcode/wch.c",
+            path
+        ) < cap ? 0 : 1;
     }
     return (size_t)snprintf(
         out,
         cap,
-        "/tmp/wch.c-%lu",
+        "/tmp/kaisarcode/wch.c-%lu",
         (unsigned long)getuid()
     ) < cap ? 0 : 1;
 #endif
