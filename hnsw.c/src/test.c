@@ -69,18 +69,19 @@ static int run_case(case_fn fn) {
 }
 
 /**
- * Open one index for a test using sparse public options.
+ * Open one index for a test using library defaults.
  * @param dimension Vector dimension.
- * @param metric Metric constant, or zero for the default.
+ * @param metric Metric constant, or zero to keep the default.
  * @return Open index, or NULL on failure.
  */
 static kc_hnsw_t *open_index(size_t dimension, int metric) {
-    kc_hnsw_options_t options;
+    kc_hnsw_options_t options = kc_hnsw_options_default();
     kc_hnsw_t *hnsw = NULL;
 
-    memset(&options, 0, sizeof(options));
     options.dimension = dimension;
-    options.metric = metric;
+    if (metric != 0) {
+        options.metric = metric;
+    }
     if (kc_hnsw_open(&hnsw, &options) != KC_HNSW_OK) return NULL;
     return hnsw;
 }
@@ -93,7 +94,7 @@ static int case_kc_hnsw_open(void) {
     const char *name = "kc_hnsw_open";
     const char *detail = "applies library defaults and validates required options";
     kc_hnsw_options_t defaults = kc_hnsw_options_default();
-    kc_hnsw_options_t sparse;
+    kc_hnsw_options_t options;
     kc_hnsw_t *hnsw = (kc_hnsw_t *)1;
     int fail = 0;
 
@@ -103,24 +104,50 @@ static int case_kc_hnsw_open(void) {
     fail |= expect(defaults.build_effort == 64);
     fail |= expect(defaults.search_effort == 64);
 
-    memset(&sparse, 0, sizeof(sparse));
-    sparse.dimension = 2;
-    fail |= expect(kc_hnsw_open(&hnsw, &sparse) == KC_HNSW_OK);
+    options = defaults;
+    options.dimension = 2;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_OK);
     fail |= expect(hnsw != NULL);
     fail |= expect(kc_hnsw_dimension(hnsw) == 2);
     fail |= expect(kc_hnsw_metric(hnsw) == KC_HNSW_METRIC_COSINE);
     kc_hnsw_close(hnsw);
 
     hnsw = (kc_hnsw_t *)1;
-    memset(&sparse, 0, sizeof(sparse));
-    fail |= expect(kc_hnsw_open(&hnsw, &sparse) == KC_HNSW_EINVAL);
+    options = defaults;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
-    sparse.dimension = 2;
-    sparse.metric = 99;
-    fail |= expect(kc_hnsw_open(&hnsw, &sparse) == KC_HNSW_EINVAL);
+    options = defaults;
+    options.dimension = 2;
+    options.metric = 0;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
-    fail |= expect(kc_hnsw_open(NULL, &sparse) == KC_HNSW_EINVAL);
+
+    options = defaults;
+    options.dimension = 2;
+    options.metric = 99;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
+    fail |= expect(hnsw == NULL);
+
+    options = defaults;
+    options.dimension = 2;
+    options.max_connections = 0;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
+    fail |= expect(hnsw == NULL);
+
+    options = defaults;
+    options.dimension = 2;
+    options.build_effort = 0;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
+    fail |= expect(hnsw == NULL);
+
+    options = defaults;
+    options.dimension = 2;
+    options.search_effort = 0;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
+    fail |= expect(hnsw == NULL);
+
+    fail |= expect(kc_hnsw_open(NULL, &options) == KC_HNSW_EINVAL);
     fail |= expect(kc_hnsw_open(&hnsw, NULL) == KC_HNSW_EINVAL);
     kc_hnsw_close(NULL);
 
