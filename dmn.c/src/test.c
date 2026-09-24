@@ -133,6 +133,19 @@ static void short_sleep(void) {
 }
 
 /**
+ * Select the runtime directory used by public dmn operations.
+ * @param dir Runtime directory path.
+ * @return Zero on success, non-zero on failure.
+ */
+static int use_runtime_dir(const char *dir) {
+#ifdef _WIN32
+    return _putenv_s("KC_DMN_DIR", dir) == 0 ? 0 : 1;
+#else
+    return setenv("KC_DMN_DIR", dir, 1) == 0 ? 0 : 1;
+#endif
+}
+
+/**
  * Create one isolated runtime directory.
  * @param out Output path buffer.
  * @param cap Output buffer capacity.
@@ -174,7 +187,7 @@ static int make_runtime_dir(
 #endif
 
     base_len = strlen(out);
-    if (mkdir_one(out) == 0) return 0;
+    if (mkdir_one(out) == 0) return use_runtime_dir(out);
     if (errno != EEXIST) return 1;
 
     for (;;) {
@@ -185,7 +198,7 @@ static int make_runtime_dir(
                 suffix
             ) >= cap - base_len)
             return 1;
-        if (mkdir_one(out) == 0) return 0;
+        if (mkdir_one(out) == 0) return use_runtime_dir(out);
         if (errno != EEXIST) return 1;
         suffix++;
     }
@@ -229,8 +242,8 @@ static int create_daemon(
     const char *cmd
 ) {
     kc_dmn_options_t options = {0};
+    (void)dir;
     options.cmd = cmd;
-    options.dir = dir;
     return kc_dmn_create(name, &options);
 }
 
@@ -246,14 +259,8 @@ static int open_daemon(
     const char *name,
     const char *dir
 ) {
-    int rc = kc_dmn_open(out, name);
-    if (rc != KC_DMN_OK) return rc;
-    rc = kc_dmn_set_dir(*out, dir);
-    if (rc != KC_DMN_OK) {
-        kc_dmn_close(*out);
-        *out = NULL;
-    }
-    return rc;
+    (void)dir;
+    return kc_dmn_open(out, name);
 }
 
 #ifdef _WIN32
@@ -460,7 +467,6 @@ static int case_kc_dmn_create(void) {
 
     if (make_runtime_dir(dir, sizeof(dir), "create") != 0) return 1;
     options.cmd = response_command();
-    options.dir = dir;
 
     fail += expect_int(
         "invalid name rejected",
@@ -478,7 +484,7 @@ static int case_kc_dmn_create(void) {
         kc_dmn_create("created", &options)
     );
     short_sleep();
-    (void)kc_dmn_delete("created", dir);
+    (void)kc_dmn_delete("created");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_create", "creates or replaces a named daemon");
     return fail != 0;
@@ -536,7 +542,7 @@ static int case_kc_dmn_list(void) {
     fail += expect_int(
         "list succeeds",
         KC_DMN_OK,
-        kc_dmn_list(dir, &entries, &count)
+        kc_dmn_list(&entries, &count)
     );
     for (i = 0; i < count; i++) {
         if (strcmp(entries[i].name, "listed") == 0) {
@@ -546,7 +552,7 @@ static int case_kc_dmn_list(void) {
     }
     fail += expect_true("list includes daemon and endpoint", found);
     kc_dmn_free(entries);
-    (void)kc_dmn_delete("listed", dir);
+    (void)kc_dmn_delete("listed");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_list", "returns owned daemon entries");
     return fail != 0;
@@ -564,7 +570,7 @@ static int case_kc_dmn_delete(void) {
     fail += expect_int(
         "missing delete is no-op",
         KC_DMN_OK,
-        kc_dmn_delete("missing", dir)
+        kc_dmn_delete("missing")
     );
     fail += expect_int(
         "create delete daemon",
@@ -575,7 +581,7 @@ static int case_kc_dmn_delete(void) {
     fail += expect_int(
         "delete succeeds",
         KC_DMN_OK,
-        kc_dmn_delete("deleted", dir)
+        kc_dmn_delete("deleted")
     );
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_delete", "deletes a named daemon");
@@ -611,7 +617,7 @@ static int case_kc_dmn_set_cmd(void) {
         );
     }
     kc_dmn_close(daemon);
-    (void)kc_dmn_delete("setcmd", dir);
+    (void)kc_dmn_delete("setcmd");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_set_cmd", "updates the daemon command");
     return fail != 0;
@@ -644,57 +650,9 @@ static int case_kc_dmn_get_cmd(void) {
             kc_dmn_get_cmd(daemon)
         );
     kc_dmn_close(daemon);
-    (void)kc_dmn_delete("getcmd", dir);
+    (void)kc_dmn_delete("getcmd");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_get_cmd", "returns the configured command");
-    return fail != 0;
-}
-
-/**
- * Test kc_dmn_set_dir.
- * @return Zero on success, non-zero on failure.
- */
-static int case_kc_dmn_set_dir(void) {
-    char dir[512];
-    kc_dmn_t *daemon = NULL;
-    int fail = 0;
-
-    if (make_runtime_dir(dir, sizeof(dir), "set-dir") != 0) return 1;
-    fail += expect_int("open handle", KC_DMN_OK, kc_dmn_open(&daemon, "dir"));
-    if (daemon)
-        fail += expect_int(
-            "set directory",
-            KC_DMN_OK,
-            kc_dmn_set_dir(daemon, dir)
-        );
-    kc_dmn_close(daemon);
-    remove_runtime_dir(dir);
-    case_result(fail, "kc_dmn_set_dir", "changes the handle runtime directory");
-    return fail != 0;
-}
-
-/**
- * Test kc_dmn_get_dir.
- * @return Zero on success, non-zero on failure.
- */
-static int case_kc_dmn_get_dir(void) {
-    char dir[512];
-    kc_dmn_t *daemon = NULL;
-    int fail = 0;
-
-    if (make_runtime_dir(dir, sizeof(dir), "get-dir") != 0) return 1;
-    fail += expect_int("open handle", KC_DMN_OK, kc_dmn_open(&daemon, "dir"));
-    if (daemon) {
-        fail += expect_int(
-            "set directory",
-            KC_DMN_OK,
-            kc_dmn_set_dir(daemon, dir)
-        );
-        fail += expect_string("get directory", dir, kc_dmn_get_dir(daemon));
-    }
-    kc_dmn_close(daemon);
-    remove_runtime_dir(dir);
-    case_result(fail, "kc_dmn_get_dir", "returns the handle runtime directory");
     return fail != 0;
 }
 
@@ -733,7 +691,7 @@ static int case_kc_dmn_set_eot(void) {
         );
     }
     kc_dmn_close(daemon);
-    (void)kc_dmn_delete("seteot", dir);
+    (void)kc_dmn_delete("seteot");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_set_eot", "updates and resets the cycle marker");
     return fail != 0;
@@ -769,7 +727,7 @@ static int case_kc_dmn_get_eot(void) {
         );
     }
     kc_dmn_close(daemon);
-    (void)kc_dmn_delete("geteot", dir);
+    (void)kc_dmn_delete("geteot");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_get_eot", "returns the configured cycle marker");
     return fail != 0;
@@ -867,7 +825,7 @@ static int case_kc_dmn_send_data(void) {
     }
     kc_dmn_free(response);
     kc_dmn_close(daemon);
-    (void)kc_dmn_delete("senddata", dir);
+    (void)kc_dmn_delete("senddata");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_send_data", "returns a complete response and emits chunks");
     return fail != 0;
@@ -931,7 +889,7 @@ static int case_kc_dmn_stream(void) {
     fail += expect_true("stream returned", stream != NULL);
     kc_dmn_stream_close(stream);
     kc_dmn_close(daemon);
-    (void)kc_dmn_delete("stream", dir);
+    (void)kc_dmn_delete("stream");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_stream", "opens a raw daemon stream");
     return fail != 0;
@@ -973,7 +931,7 @@ static int case_kc_dmn_stream_write(void) {
         );
     kc_dmn_stream_close(stream);
     kc_dmn_close(daemon);
-    (void)kc_dmn_delete("streamwrite", dir);
+    (void)kc_dmn_delete("streamwrite");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_stream_write", "writes raw stream bytes");
     return fail != 0;
@@ -1024,7 +982,7 @@ static int case_kc_dmn_stream_read(void) {
     }
     kc_dmn_stream_close(stream);
     kc_dmn_close(daemon);
-    (void)kc_dmn_delete("streamread", dir);
+    (void)kc_dmn_delete("streamread");
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_stream_read", "reads raw stream bytes");
     return fail != 0;
@@ -1134,7 +1092,7 @@ static int case_kc_dmn_cli(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 21;
+    test_case_total = 19;
     test_case_current = 0;
     run_case(&rc, case_kc_dmn_create);
     run_case(&rc, case_kc_dmn_open);
@@ -1142,8 +1100,6 @@ static int case_all(void) {
     run_case(&rc, case_kc_dmn_delete);
     run_case(&rc, case_kc_dmn_set_cmd);
     run_case(&rc, case_kc_dmn_get_cmd);
-    run_case(&rc, case_kc_dmn_set_dir);
-    run_case(&rc, case_kc_dmn_get_dir);
     run_case(&rc, case_kc_dmn_set_eot);
     run_case(&rc, case_kc_dmn_get_eot);
     run_case(&rc, case_kc_dmn_on);
@@ -1190,8 +1146,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_dmn_delete") == 0) return case_kc_dmn_delete();
     if (strcmp(argv[1], "kc_dmn_set_cmd") == 0) return case_kc_dmn_set_cmd();
     if (strcmp(argv[1], "kc_dmn_get_cmd") == 0) return case_kc_dmn_get_cmd();
-    if (strcmp(argv[1], "kc_dmn_set_dir") == 0) return case_kc_dmn_set_dir();
-    if (strcmp(argv[1], "kc_dmn_get_dir") == 0) return case_kc_dmn_get_dir();
     if (strcmp(argv[1], "kc_dmn_set_eot") == 0) return case_kc_dmn_set_eot();
     if (strcmp(argv[1], "kc_dmn_get_eot") == 0) return case_kc_dmn_get_eot();
     if (strcmp(argv[1], "kc_dmn_on") == 0) return case_kc_dmn_on();
