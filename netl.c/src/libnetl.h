@@ -73,7 +73,8 @@ int kc_netl_open(
  * A connection delivered with CLOSE remains valid only until the next poll.
  * @param listener Listener handle.
  * @param event Receives one event.
- * @param timeout_ms Timeout in milliseconds. Zero is immediate; negative waits forever.
+ * @param timeout_ms Timeout in milliseconds. Zero returns immediately;
+ *                    negative waits forever.
  * @return KC_NETL_OK for an event, KC_NETL_EAGAIN on timeout, or an error.
  */
 int kc_netl_poll(
