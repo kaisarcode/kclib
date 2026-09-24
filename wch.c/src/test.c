@@ -476,9 +476,25 @@ static int case_wch_path(const char *case_name) {
     if (make_test_dir(dir, sizeof(dir), "path") != 0) return 1;
     if (make_watched_dir(watched, sizeof(watched), dir) != 0) return 1;
 #ifdef _WIN32
-    snprintf(watched_two, sizeof(watched_two), "%s\\watched-two", dir);
+    if (strlen(dir) + sizeof("\\watched-two") > sizeof(watched_two)) {
+        return 1;
+    }
+    memcpy(watched_two, dir, strlen(dir));
+    memcpy(
+        watched_two + strlen(dir),
+        "\\watched-two",
+        sizeof("\\watched-two")
+    );
 #else
-    snprintf(watched_two, sizeof(watched_two), "%s/watched-two", dir);
+    if (strlen(dir) + sizeof("/watched-two") > sizeof(watched_two)) {
+        return 1;
+    }
+    memcpy(watched_two, dir, strlen(dir));
+    memcpy(
+        watched_two + strlen(dir),
+        "/watched-two",
+        sizeof("/watched-two")
+    );
 #endif
     if (mkdir_one(watched_two) != 0) return 1;
 
