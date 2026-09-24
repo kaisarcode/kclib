@@ -647,6 +647,7 @@ int kc_netl_poll(
         : 0U;
     rc = kc_netl_poll_reserve(listener, count + 1U);
     if (rc != KC_NETL_OK) return rc;
+    rc = KC_NETL_EAGAIN;
 
     fds = listener->pollfds;
     map = listener->pollmap;
