@@ -669,7 +669,7 @@ static int case_kc_lng_cli(void) {
     }
     {
         char *args[] = { (char *)LNG_TEST_CLI, NULL };
-        const char *input = "hola mundo este proyecto compara texto corto";
+        const char *input = TEXT_ES;
         fail += expect_int("CLI stdin exits 0", 0,
             test_cli_run_input(args, input, strlen(input), out, sizeof(out), err, sizeof(err), &status) ? 1 : status);
         fail += expect_string("CLI stdin output", "es\n", out);
