@@ -19,8 +19,7 @@ extern "C" {
 typedef struct kc_tpm kc_tpm_t;
 
 typedef struct {
-    int has_ngram_size;
-    int ngram_size;
+    const int *ngram_size;
 } kc_tpm_options_t;
 
 #define KC_TPM_OK      0
@@ -31,7 +30,7 @@ typedef struct {
  * A successful call always returns a profile ready for kc_tpm_score().
  * @param out Pointer to receive the profile.
  * @param map_text Representative text used to build the profile.
- * @param options Optional configuration. Omitted ngram_size uses 3.
+ * @param options Optional configuration. NULL ngram_size uses 3.
  * @return KC_TPM_OK on success, KC_TPM_ERROR on failure.
  */
 int kc_tpm_open(
