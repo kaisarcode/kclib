@@ -466,14 +466,20 @@ static int kc_lng_ensure_initialized(void) {
  * Summary: Detect languages for input text.
  *
  * @param text Input text.
- * @param threshold Minimum score threshold.
- * @param limit Maximum number of results.
+ * @param options Optional detection configuration.
  * @param out_results Output array (caller-owned).
  * @param out_count Output count.
  * @return KC_LNG_OK on success, KC_LNG_ERROR on failure.
  */
-int kc_lng_detect(const char *text, double threshold, size_t limit, kc_lng_result_t **out_results, size_t *out_count) {
+int kc_lng_detect(
+    const char *text,
+    const kc_lng_options_t *options,
+    kc_lng_result_t **out_results,
+    size_t *out_count
+) {
     kc_lng_rank_t ranks[KC_LNG_MAX_LANGS];
+    double threshold;
+    size_t limit;
     size_t lang_count;
     size_t filtered_count;
     size_t i;
@@ -486,7 +492,23 @@ int kc_lng_detect(const char *text, double threshold, size_t limit, kc_lng_resul
         *out_count = 0;
     }
 
-    if (text == NULL || out_results == NULL || out_count == NULL || limit == 0 || !isfinite(threshold) || threshold < 0.0 || threshold > 1.0) {
+    if (text == NULL || out_results == NULL || out_count == NULL) {
+        return KC_LNG_ERROR;
+    }
+
+    threshold = 0.001;
+    limit = 1;
+    if (options != NULL) {
+        if (options->has_threshold) {
+            threshold = options->threshold;
+        }
+        if (options->has_limit) {
+            limit = options->limit;
+        }
+    }
+
+    if (limit == 0 || !isfinite(threshold) ||
+        threshold < 0.0 || threshold > 1.0) {
         return KC_LNG_ERROR;
     }
 
