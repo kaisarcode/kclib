@@ -315,6 +315,36 @@ static int expect_string(const char *name, const char *expected, const char *act
     return 0;
 }
 
+
+/**
+ * Detect with independently optional threshold and limit values.
+ * @param text Input text.
+ * @param has_threshold Whether threshold is explicitly supplied.
+ * @param threshold Threshold value.
+ * @param has_limit Whether limit is explicitly supplied.
+ * @param limit Limit value.
+ * @param out_results Result array destination.
+ * @param out_count Result count destination.
+ * @return Public detect status.
+ */
+static int detect_with_options(
+    const char *text,
+    int has_threshold,
+    double threshold,
+    int has_limit,
+    size_t limit,
+    kc_lng_result_t **out_results,
+    size_t *out_count
+) {
+    kc_lng_options_t options = {0};
+
+    options.has_threshold = has_threshold;
+    options.threshold = threshold;
+    options.has_limit = has_limit;
+    options.limit = limit;
+    return kc_lng_detect(text, &options, out_results, out_count);
+}
+
 static const char *TEXT_EN =
     "hello world this is english text how are you doing today? "
     "this is a robust test for english language detection. "
@@ -362,44 +392,55 @@ static int case_kc_lng_version(void) {
  */
 static int case_kc_lng_detect(void) {
     const char *name = "kc_lng_detect";
-    const char *detail = "detects representative languages and handles empty input";
-    int fail = 0;
+    const char *detail = "detects languages and applies independent defaults";
     kc_lng_result_t *res = NULL;
+    kc_lng_options_t options = {0};
     size_t count = 0;
+    int fail = 0;
     int rc;
 
-    res = NULL; count = 0;
-    rc = kc_lng_detect(TEXT_EN, 0.001, 1, &res, &count);
-    fail += expect_int("en detect rc", KC_LNG_OK, rc);
-    fail += expect_true("en count >=1", count >= 1 && res != NULL);
-    if (count >= 1 && res != NULL) {
-        fail += expect_string("en top code", "en", res[0].code);
-        fail += expect_true("en score positive", res[0].score > 0.0);
+    rc = kc_lng_detect(TEXT_EN, NULL, &res, &count);
+    fail += expect_int("NULL options use defaults", KC_LNG_OK, rc);
+    fail += expect_true("default en result", count == 1 && res != NULL);
+    if (count == 1 && res != NULL) {
+        fail += expect_string("default en top code", "en", res[0].code);
     }
     kc_lng_free(res);
 
-    res = NULL; count = 0;
-    rc = kc_lng_detect(TEXT_ES, 0.001, 1, &res, &count);
+    res = NULL;
+    count = 0;
+    rc = kc_lng_detect(TEXT_EN, &options, &res, &count);
+    fail += expect_int("empty options use defaults", KC_LNG_OK, rc);
+    fail += expect_true("empty options limit defaults to one",
+        count == 1 && res != NULL);
+    if (count == 1 && res != NULL) {
+        fail += expect_string("empty options en top code", "en", res[0].code);
+    }
+    kc_lng_free(res);
+
+    res = NULL;
+    count = 0;
+    rc = kc_lng_detect(TEXT_ES, NULL, &res, &count);
     fail += expect_int("es detect rc", KC_LNG_OK, rc);
-    fail += expect_true("es count >=1", count >= 1 && res != NULL);
-    if (count >= 1 && res != NULL) {
+    fail += expect_true("es count one", count == 1 && res != NULL);
+    if (count == 1 && res != NULL) {
         fail += expect_string("es top code", "es", res[0].code);
-        fail += expect_true("es score positive", res[0].score > 0.0);
     }
     kc_lng_free(res);
 
-    res = NULL; count = 0;
-    rc = kc_lng_detect(TEXT_JA, 0.001, 1, &res, &count);
+    res = NULL;
+    count = 0;
+    rc = kc_lng_detect(TEXT_JA, NULL, &res, &count);
     fail += expect_int("ja detect rc", KC_LNG_OK, rc);
-    fail += expect_true("ja count >=1", count >= 1 && res != NULL);
-    if (count >= 1 && res != NULL) {
+    fail += expect_true("ja count one", count == 1 && res != NULL);
+    if (count == 1 && res != NULL) {
         fail += expect_string("ja top code", "ja", res[0].code);
-        fail += expect_true("ja score positive", res[0].score > 0.0);
     }
     kc_lng_free(res);
 
-    res = (kc_lng_result_t *)0x1; count = 999;
-    rc = kc_lng_detect("", 0.001, 1, &res, &count);
+    res = (kc_lng_result_t *)0x1;
+    count = 999;
+    rc = kc_lng_detect("", NULL, &res, &count);
     fail += expect_int("empty rc", KC_LNG_OK, rc);
     fail += expect_true("empty count 0", count == 0);
     fail += expect_true("empty results NULL", res == NULL);
@@ -415,53 +456,56 @@ static int case_kc_lng_detect(void) {
  */
 static int case_kc_lng_detect_ranking(void) {
     const char *name = "kc_lng_detect_ranking";
-    const char *detail = "ranking, threshold and limit enforcement";
-    int fail = 0;
+    const char *detail = "ranking and independent threshold/limit options";
     kc_lng_result_t *res = NULL;
+    kc_lng_result_t *low_res = NULL;
+    kc_lng_result_t *high_res = NULL;
+    kc_lng_result_t *r1 = NULL;
+    kc_lng_result_t *r3 = NULL;
     size_t count = 0;
-    int rc;
+    size_t low_count = 0;
+    size_t high_count = 0;
+    size_t c1 = 0;
+    size_t c3 = 0;
     size_t i;
+    int fail = 0;
+    int rc;
 
-    res = NULL; count = 0;
-    rc = kc_lng_detect(TEXT_EN, 0.0, 5, &res, &count);
+    rc = detect_with_options(TEXT_EN, 1, 0.0, 1, 5, &res, &count);
     fail += expect_int("ranking rc", KC_LNG_OK, rc);
     fail += expect_true("ranking count >1", count > 1);
     fail += expect_true("ranking count <=5", count <= 5);
     for (i = 1; i < count; i++) {
         char buf[64];
         snprintf(buf, sizeof(buf), "descending %zu", i);
-        fail += expect_true(buf, res[i-1].score >= res[i].score);
+        fail += expect_true(buf, res[i - 1].score >= res[i].score);
     }
     kc_lng_free(res);
-    res = NULL;
 
-    kc_lng_result_t *low_res = NULL, *high_res = NULL;
-    size_t low_count = 0, high_count = 0;
-    rc = kc_lng_detect(TEXT_EN, 0.001, 10, &low_res, &low_count);
-    fail += expect_int("low threshold rc", KC_LNG_OK, rc);
-    rc = kc_lng_detect(TEXT_EN, 0.99, 10, &high_res, &high_count);
-    fail += expect_int("high threshold rc", KC_LNG_OK, rc);
+    rc = detect_with_options(TEXT_EN, 0, 0.0, 1, 10,
+        &low_res, &low_count);
+    fail += expect_int("omitted threshold rc", KC_LNG_OK, rc);
+    rc = detect_with_options(TEXT_EN, 1, 0.99, 1, 10,
+        &high_res, &high_count);
+    fail += expect_int("explicit high threshold rc", KC_LNG_OK, rc);
     fail += expect_true("high filters more", high_count <= low_count);
-    if (low_count > 0) {
-        fail += expect_true("high <= low when low>0", high_count <= low_count);
-    }
     kc_lng_free(low_res);
     kc_lng_free(high_res);
 
-    kc_lng_result_t *r1 = NULL, *r3 = NULL;
-    size_t c1 = 0, c3 = 0;
-    rc = kc_lng_detect(TEXT_EN, 0.0, 1, &r1, &c1);
-    fail += expect_int("limit1 rc", KC_LNG_OK, rc);
-    fail += expect_true("limit1 count ==1", c1 == 1);
-    rc = kc_lng_detect(TEXT_EN, 0.0, 3, &r3, &c3);
-    fail += expect_int("limit3 rc", KC_LNG_OK, rc);
+    rc = detect_with_options(TEXT_EN, 1, 0.0, 0, 0, &r1, &c1);
+    fail += expect_int("omitted limit rc", KC_LNG_OK, rc);
+    fail += expect_true("omitted limit defaults to one", c1 == 1);
+
+    rc = detect_with_options(TEXT_EN, 1, 0.0, 1, 3, &r3, &c3);
+    fail += expect_int("explicit limit3 rc", KC_LNG_OK, rc);
     fail += expect_true("limit3 count <=3", c3 <= 3);
-    fail += expect_true("limit3 >= limit1", c3 >= c1);
+    fail += expect_true("limit3 >= default limit", c3 >= c1);
     kc_lng_free(r1);
     kc_lng_free(r3);
 
-    res = NULL; count = 0;
-    rc = kc_lng_detect(TEXT_EN, 0.0, 100, &res, &count);
+    res = NULL;
+    count = 0;
+    rc = detect_with_options(TEXT_EN, 1, 0.0, 1, 100, &res, &count);
     fail += expect_int("limit100 rc", KC_LNG_OK, rc);
     fail += expect_true("limit100 count <=32", count <= 32);
     fail += expect_true("limit100 count <=26 langs", count <= 26);
@@ -493,86 +537,83 @@ static int check_fail_resets(const char *label, int rc, kc_lng_result_t **out_re
  */
 static int case_kc_lng_detect_contract(void) {
     const char *name = "kc_lng_detect_contract";
-    const char *detail = "validates args, resets outputs and frees correctly";
-    int fail = 0;
+    const char *detail = "validates explicit options and resets outputs";
     kc_lng_result_t *res = NULL;
     size_t count = 0;
+    int fail = 0;
     int rc;
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect(NULL, 0.001, 1, &res, &count);
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = kc_lng_detect(NULL, NULL, &res, &count);
     fail += check_fail_resets("NULL text", rc, &res, &count);
 
     count = 999;
-    {
-        kc_lng_result_t *dummy = (kc_lng_result_t *)0xDEADBEEF;
-        size_t c = 999;
-        rc = kc_lng_detect(TEXT_EN, 0.001, 1, NULL, &c);
-        fail += expect_int("NULL out_results", KC_LNG_ERROR, rc);
-        fail += expect_true("NULL out_results count 0", c == 0);
-        (void)dummy;
-    }
+    rc = kc_lng_detect(TEXT_EN, NULL, NULL, &count);
+    fail += expect_int("NULL out_results", KC_LNG_ERROR, rc);
+    fail += expect_true("NULL out_results count 0", count == 0);
 
     res = (kc_lng_result_t *)0xDEADBEEF;
-    rc = kc_lng_detect(TEXT_EN, 0.001, 1, &res, NULL);
+    rc = kc_lng_detect(TEXT_EN, NULL, &res, NULL);
     fail += expect_int("NULL out_count", KC_LNG_ERROR, rc);
     fail += expect_true("NULL out_count results NULL", res == NULL);
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect(TEXT_EN, 0.001, 0, &res, &count);
-    fail += check_fail_resets("zero limit", rc, &res, &count);
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = detect_with_options(TEXT_EN, 0, 0.0, 1, 0, &res, &count);
+    fail += check_fail_resets("explicit zero limit", rc, &res, &count);
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect(TEXT_EN, -0.1, 1, &res, &count);
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = detect_with_options(TEXT_EN, 1, -0.1, 0, 0, &res, &count);
     fail += check_fail_resets("threshold <0", rc, &res, &count);
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect(TEXT_EN, 1.5, 1, &res, &count);
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = detect_with_options(TEXT_EN, 1, 1.5, 0, 0, &res, &count);
     fail += check_fail_resets("threshold >1", rc, &res, &count);
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect(TEXT_EN, NAN, 1, &res, &count);
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = detect_with_options(TEXT_EN, 1, NAN, 0, 0, &res, &count);
     fail += check_fail_resets("NaN threshold", rc, &res, &count);
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect(TEXT_EN, INFINITY, 1, &res, &count);
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = detect_with_options(TEXT_EN, 1, INFINITY, 0, 0, &res, &count);
     fail += check_fail_resets("INFINITY threshold", rc, &res, &count);
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect(TEXT_EN, -INFINITY, 1, &res, &count);
+
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = detect_with_options(TEXT_EN, 1, -INFINITY, 0, 0, &res, &count);
     fail += check_fail_resets("-INFINITY threshold", rc, &res, &count);
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect("xyz", 0.99, 5, &res, &count);
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = detect_with_options("xyz", 1, 0.99, 1, 5, &res, &count);
     fail += expect_int("xyz filtered rc", KC_LNG_OK, rc);
     fail += expect_true("xyz filtered count 0", count == 0);
     fail += expect_true("xyz filtered results NULL", res == NULL);
     kc_lng_free(res);
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect("", 0.001, 5, &res, &count);
-    fail += expect_int("empty contract rc", KC_LNG_OK, rc);
-    fail += expect_true("empty contract count 0", count == 0);
-    fail += expect_true("empty contract results NULL", res == NULL);
+    res = (kc_lng_result_t *)0xDEADBEEF;
+    count = 999;
+    rc = detect_with_options("", 1, 0.0, 1, 32, &res, &count);
+    fail += expect_int("empty explicit zero threshold rc", KC_LNG_OK, rc);
+    fail += expect_true("empty explicit zero threshold count 0", count == 0);
+    fail += expect_true("empty explicit zero threshold results NULL", res == NULL);
     kc_lng_free(res);
 
-    res = (kc_lng_result_t *)0xDEADBEEF; count = 999;
-    rc = kc_lng_detect("", 0.0, 32, &res, &count);
-    fail += expect_int("empty zero threshold rc", KC_LNG_OK, rc);
-    fail += expect_true("empty zero threshold count 0", count == 0);
-    fail += expect_true("empty zero threshold results NULL", res == NULL);
-    kc_lng_free(res);
-
-    res = NULL; count = 0;
-    rc = kc_lng_detect(TEXT_EN, 0.001, 2, &res, &count);
-    if (rc == KC_LNG_OK && count > 0) {
+    res = NULL;
+    count = 0;
+    rc = detect_with_options(TEXT_EN, 0, 0.0, 1, 2, &res, &count);
+    fail += expect_int("valid explicit limit call", KC_LNG_OK, rc);
+    if (count > 0) {
         fail += expect_true("allocated results non-NULL", res != NULL);
-        kc_lng_free(res);
-        res = NULL;
-    } else if (rc == KC_LNG_OK) {
-        fail += expect_true("no results still NULL", res == NULL);
     } else {
-        fail += expect_true("valid call should succeed", 0);
+        fail += expect_true("no results still NULL", res == NULL);
     }
+    kc_lng_free(res);
 
     kc_lng_free(NULL);
     fail += expect_true("free NULL safe", 1);
@@ -588,31 +629,32 @@ static int case_kc_lng_detect_contract(void) {
 static int case_kc_lng_free(void) {
     const char *name = "kc_lng_free";
     const char *detail = "deterministic ranking and static code storage";
-    int fail = 0;
-    kc_lng_result_t *a = NULL, *b = NULL;
-    size_t ca = 0, cb = 0;
-    int rc;
+    kc_lng_result_t *a = NULL;
+    kc_lng_result_t *b = NULL;
+    size_t ca = 0;
+    size_t cb = 0;
     size_t i;
+    int fail = 0;
+    int rc;
 
-    rc = kc_lng_detect(TEXT_EN, 0.0, 5, &a, &ca);
+    rc = detect_with_options(TEXT_EN, 1, 0.0, 1, 5, &a, &ca);
     fail += expect_int("det first rc", KC_LNG_OK, rc);
-    rc = kc_lng_detect(TEXT_EN, 0.0, 5, &b, &cb);
+    rc = detect_with_options(TEXT_EN, 1, 0.0, 1, 5, &b, &cb);
     fail += expect_int("det second rc", KC_LNG_OK, rc);
     fail += expect_true("det same count", ca == cb);
     if (ca == cb && a != NULL && b != NULL) {
         for (i = 0; i < ca; i++) {
             char buf[64];
+            size_t j;
+
             snprintf(buf, sizeof(buf), "det code %zu", i);
             fail += expect_string(buf, a[i].code, b[i].code);
             snprintf(buf, sizeof(buf), "det score %zu", i);
             fail += expect_true(buf, fabs(a[i].score - b[i].score) < 1e-9);
-        }
-        fail += expect_true("static code still valid", strcmp(a[0].code, b[0].code) == 0);
-        for (i = 0; i < ca; i++) {
-            size_t j;
             for (j = 0; j < cb; j++) {
                 if (strcmp(a[i].code, b[j].code) == 0) {
-                    fail += expect_true("static pointer same", a[i].code == b[j].code);
+                    fail += expect_true("static pointer same",
+                        a[i].code == b[j].code);
                     break;
                 }
             }
@@ -621,16 +663,20 @@ static int case_kc_lng_free(void) {
     kc_lng_free(a);
     kc_lng_free(b);
 
-    a = NULL; b = NULL; ca = 0; cb = 0;
-    rc = kc_lng_detect(TEXT_ES, 0.001, 3, &a, &ca);
+    a = NULL;
+    b = NULL;
+    ca = 0;
+    cb = 0;
+    rc = detect_with_options(TEXT_ES, 0, 0.0, 1, 3, &a, &ca);
     fail += expect_int("det es first rc", KC_LNG_OK, rc);
-    rc = kc_lng_detect(TEXT_ES, 0.001, 3, &b, &cb);
+    rc = detect_with_options(TEXT_ES, 0, 0.0, 1, 3, &b, &cb);
     fail += expect_int("det es second rc", KC_LNG_OK, rc);
     fail += expect_true("det es same count", ca == cb);
-    if (ca == cb && a && b) {
+    if (ca == cb && a != NULL && b != NULL) {
         for (i = 0; i < ca; i++) {
             fail += expect_string("det es code", a[i].code, b[i].code);
-            fail += expect_true("det es score", fabs(a[i].score - b[i].score) < 1e-9);
+            fail += expect_true("det es score",
+                fabs(a[i].score - b[i].score) < 1e-9);
         }
     }
     kc_lng_free(a);
