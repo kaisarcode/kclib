@@ -155,6 +155,8 @@ static int case_kc_hnsw_search(void) {
     const float x[] = {1.0f, 0.0f};
     const float y[] = {0.0f, 1.0f};
     const float xy[] = {1.0f, 1.0f};
+    const float origin[] = {0.0f, 0.0f};
+    const float unit[] = {1.0f, 0.0f};
     const float far[] = {4.0f, 0.0f};
     kc_hnsw_result_t *results = NULL;
     kc_hnsw_t *hnsw;
@@ -196,18 +198,18 @@ static int case_kc_hnsw_search(void) {
 
     hnsw = open_index(2, KC_HNSW_METRIC_L2);
     if (hnsw == NULL) return 1;
-    fail |= expect(kc_hnsw_add(hnsw, "x", x) == KC_HNSW_OK);
-    fail |= expect(kc_hnsw_add(hnsw, "xy", xy) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(hnsw, "origin", origin) == KC_HNSW_OK);
+    fail |= expect(kc_hnsw_add(hnsw, "unit", unit) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_add(hnsw, "far", far) == KC_HNSW_OK);
     fail |= expect(kc_hnsw_build(hnsw) == KC_HNSW_OK);
     results = NULL;
     count = 0;
     fail |= expect(kc_hnsw_search(
-        hnsw, x, 3, 1.0, &results, &count) == KC_HNSW_OK);
+        hnsw, origin, 3, 1.0, &results, &count) == KC_HNSW_OK);
     fail |= expect(results != NULL && count == 2);
     if (results != NULL && count == 2) {
-        fail |= expect(strcmp(results[0].id, "x") == 0);
-        fail |= expect(strcmp(results[1].id, "xy") == 0);
+        fail |= expect(strcmp(results[0].id, "origin") == 0);
+        fail |= expect(strcmp(results[1].id, "unit") == 0);
     }
     kc_hnsw_free(results);
     kc_hnsw_close(hnsw);
