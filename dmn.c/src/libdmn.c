@@ -227,7 +227,6 @@ static int kc_dmn_cmd_valid(const char *cmd) {
     return strchr(cmd, '\n') == NULL && strchr(cmd, '\r') == NULL;
 }
 
-
 /**
  * Compose one daemon metadata path.
  * @param dir Runtime directory.
@@ -1668,7 +1667,6 @@ const char *kc_dmn_get_cmd(
 ) {
     return dmn ? dmn->cmd : NULL;
 }
-
 
 /**
  * Replace the daemon EOT marker.
