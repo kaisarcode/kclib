@@ -451,20 +451,16 @@ int main(int argc, char **argv) {
         opts.dimension = (size_t)dimension;
 
         if (metric_set) {
-            opts.has_metric = 1;
-            opts.metric = metric;
+            opts.metric = &metric;
         }
         if (m_set) {
-            opts.has_max_connections = 1;
-            opts.max_connections = m;
+            opts.max_connections = &m;
         }
         if (ef_construction_set) {
-            opts.has_build_effort = 1;
-            opts.build_effort = ef_construction;
+            opts.build_effort = &ef_construction;
         }
         if (ef_search_set) {
-            opts.has_search_effort = 1;
-            opts.search_effort = ef_search;
+            opts.search_effort = &ef_search;
         }
 
         int rc = kc_hnsw_open(&hnsw, &opts);
