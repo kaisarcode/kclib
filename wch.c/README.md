@@ -223,7 +223,7 @@ The native filesystem backends remain private implementation details:
 - Apple platforms use kqueue.
 - Windows uses ReadDirectoryChangesW.
 
-The resident watcher persists registration metadata and process state in its runtime directory. On POSIX, wch prefers `XDG_RUNTIME_DIR`, with `/tmp` as a fallback; Windows uses the system temporary directory. This is runtime state rather than persistent configuration.
+The resident watcher persists registration metadata and process state in its runtime directory. On POSIX, wch prefers `XDG_RUNTIME_DIR`, then `/run/user/<uid>`, with `/tmp` only as a fallback; Windows uses the system temporary directory. This is runtime state rather than persistent configuration.
 
 The persistent command continues running on events even when no client has the
 watcher open.
