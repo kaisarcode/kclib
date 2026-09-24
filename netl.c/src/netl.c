@@ -658,7 +658,7 @@ int main(int argc, char **argv) {
     char command[NETL_CLI_COMMAND_SIZE];
     unsigned short port;
     int protocol = KC_NETL_TCP;
-    int command_start = 2;
+    int command_start;
     int i;
 
     if (argc == 2 &&
