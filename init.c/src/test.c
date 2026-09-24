@@ -108,6 +108,27 @@ static int fixture_set_dir(const char *dir) {
 }
 
 /**
+ * Build one fixture child path.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @param dir Fixture directory.
+ * @param name Child file name.
+ * @return Zero on success, nonzero on overflow.
+ */
+static int fixture_path(
+    char *out,
+    size_t cap,
+    const char *dir,
+    const char *name
+) {
+#ifdef _WIN32
+    return (size_t)snprintf(out, cap, "%s\\%s", dir, name) < cap ? 0 : 1;
+#else
+    return (size_t)snprintf(out, cap, "%s/%s", dir, name) < cap ? 0 : 1;
+#endif
+}
+
+/**
  * Remove one temporary fixture directory.
  * @param dir Fixture path.
  * @return None.
@@ -123,11 +144,17 @@ static void fixture_remove(const char *dir) {
 
     if (!dir || !dir[0]) return;
     for (i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+        if (fixture_path(
+                path,
+                sizeof(path),
+                dir,
+                files[i]
+            ) != 0) {
+            continue;
+        }
 #ifdef _WIN32
-        snprintf(path, sizeof(path), "%s\\%s", dir, files[i]);
         (void)DeleteFileA(path);
 #else
-        snprintf(path, sizeof(path), "%s/%s", dir, files[i]);
         (void)remove(path);
 #endif
     }
@@ -164,7 +191,14 @@ static int fixture_create(char *out, size_t cap) {
     }
     fixture_remove(out);
     if (!CreateDirectoryA(out, NULL)) return 1;
-    snprintf(path, sizeof(path), "%s\\test-entry", out);
+    if (fixture_path(
+            path,
+            sizeof(path),
+            out,
+            "test-entry"
+        ) != 0) {
+        return 1;
+    }
 #else
     if ((size_t)snprintf(
             out,
@@ -176,7 +210,14 @@ static int fixture_create(char *out, size_t cap) {
     }
     fixture_remove(out);
     if (mkdir(out, 0700) != 0) return 1;
-    snprintf(path, sizeof(path), "%s/test-entry", out);
+    if (fixture_path(
+            path,
+            sizeof(path),
+            out,
+            "test-entry"
+        ) != 0) {
+        return 1;
+    }
 #endif
 
     file = fopen(path, "w");
@@ -184,21 +225,27 @@ static int fixture_create(char *out, size_t cap) {
     fputs("echo init-test", file);
     fclose(file);
 
-#ifdef _WIN32
-    snprintf(path, sizeof(path), "%s\\test-entry.user", out);
-#else
-    snprintf(path, sizeof(path), "%s/test-entry.user", out);
-#endif
+    if (fixture_path(
+            path,
+            sizeof(path),
+            out,
+            "test-entry.user"
+        ) != 0) {
+        return 1;
+    }
     file = fopen(path, "w");
     if (!file) return 1;
     fputs("tester", file);
     fclose(file);
 
-#ifdef _WIN32
-    snprintf(path, sizeof(path), "%s\\test-entry.backend", out);
-#else
-    snprintf(path, sizeof(path), "%s/test-entry.backend", out);
-#endif
+    if (fixture_path(
+            path,
+            sizeof(path),
+            out,
+            "test-entry.backend"
+        ) != 0) {
+        return 1;
+    }
     file = fopen(path, "w");
     if (!file) return 1;
     fputs("1", file);
