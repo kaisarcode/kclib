@@ -805,7 +805,7 @@ static int case_kc_http_cli(void) {
     err = NULL;
 
     rc = test_cli_run(
-        "build request --method POST --target /submit --header \"X-Test: yes\"",
+        "build request --method POST --target /submit --header X-Test:yes",
         "hi",
         2U,
         &out,
@@ -824,7 +824,7 @@ static int case_kc_http_cli(void) {
     err = NULL;
 
     rc = test_cli_run(
-        "build response --status 201 --header \"Content-Type: text/plain\"",
+        "build response --status 201 --header Content-Type:text/plain",
         "hello",
         5U,
         &out,
