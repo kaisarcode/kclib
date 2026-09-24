@@ -44,6 +44,12 @@ typedef struct pollfd kc_netl_pollfd_t;
 #define KC_NETL_POLL(fds, count, timeout) poll((fds), (nfds_t)(count), (timeout))
 #endif
 
+#ifdef MSG_NOSIGNAL
+#define KC_NETL_SEND_FLAGS MSG_NOSIGNAL
+#else
+#define KC_NETL_SEND_FLAGS 0
+#endif
+
 #define KC_NETL_BUFFER_SIZE 65536U
 #define KC_NETL_DEFAULT_BACKLOG 128
 #define KC_NETL_HOST_SIZE 128
@@ -132,6 +138,27 @@ static int kc_netl_nonblocking(kc_netl_fd_t fd) {
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0
         ? KC_NETL_OK
         : KC_NETL_ENET;
+#endif
+}
+
+/**
+ * Disable SIGPIPE for socket writes where the platform exposes the option.
+ * @param fd Socket descriptor.
+ * @return None.
+ */
+static void kc_netl_disable_sigpipe(kc_netl_fd_t fd) {
+#if !defined(_WIN32) && defined(SO_NOSIGPIPE)
+    int one = 1;
+
+    (void)setsockopt(
+        fd,
+        SOL_SOCKET,
+        SO_NOSIGPIPE,
+        &one,
+        (socklen_t)sizeof(one)
+    );
+#else
+    (void)fd;
 #endif
 }
 
@@ -299,6 +326,7 @@ static int kc_netl_bind(
             fd = KC_NETL_FD_INVALID;
             continue;
         }
+        kc_netl_disable_sigpipe(fd);
         if (kc_netl_nonblocking(fd) != KC_NETL_OK) {
             KC_NETL_CLOSE(fd);
             fd = KC_NETL_FD_INVALID;
@@ -457,6 +485,7 @@ static int kc_netl_accept(
     if (fd == KC_NETL_FD_INVALID) {
         return kc_netl_would_block() ? KC_NETL_EAGAIN : KC_NETL_ENET;
     }
+    kc_netl_disable_sigpipe(fd);
     if (kc_netl_nonblocking(fd) != KC_NETL_OK) {
         KC_NETL_CLOSE(fd);
         return KC_NETL_ENET;
@@ -754,7 +783,7 @@ int kc_netl_send(
         connection->fd,
         (const char *)data,
         (int)data_size,
-        0
+        KC_NETL_SEND_FLAGS
     );
     if (sent < 0) {
         if (kc_netl_would_block()) {
