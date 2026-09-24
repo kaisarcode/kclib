@@ -91,7 +91,6 @@ static int expect_int(const char *name, int expected, int actual) {
     return 0;
 }
 
-
 #ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 /**
@@ -643,7 +642,6 @@ static int case_kc_lng_free(void) {
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
-
 
 #ifndef __EMSCRIPTEN__
 /**
