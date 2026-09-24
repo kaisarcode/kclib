@@ -158,7 +158,7 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sINITIAL_MEMORY=268435456
         -sSTACK_SIZE=1048576
-        -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_embed,_kc_emb_free
+        -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_dimension,_kc_emb_embed,_kc_emb_free
     )
 endif()
 
