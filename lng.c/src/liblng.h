@@ -22,19 +22,25 @@ extern "C" {
 
 typedef struct { const char *code; double score; } kc_lng_result_t;
 
+typedef struct {
+    int has_threshold;
+    double threshold;
+    int has_limit;
+    size_t limit;
+} kc_lng_options_t;
+
 /**
  * Detect languages for input text.
  * Summary: Detect languages for input text.
  *
- * Sanitizes/normalizes text internally; filters results below
- * threshold and bounds output count by limit. text must be
- * non-NULL; an empty string is valid and produces zero results
+ * Sanitizes/normalizes text internally. Omitted threshold uses 0.001 and
+ * omitted limit uses 1. text must be non-NULL; an empty string is valid and
+ * produces zero results
  * (KC_LNG_OK with *out_count == 0, *out_results == NULL).
  *
  * @param text Input text (must be non-NULL; empty string yields no results).
- * @param threshold Minimum score in [0,1] to include;
- * results below are filtered.
- * @param limit Maximum number of results to return.
+ * @param options Optional detection configuration. Explicit threshold must
+ * be finite and in [0,1]; explicit limit must be greater than zero.
  * @param out_results Out: allocated array owned by caller,
  * released with kc_lng_free(). NULL on zero results or error.
  * @param out_count Out: number of results in *out_results.
@@ -47,7 +53,12 @@ typedef struct { const char *code; double score; } kc_lng_result_t;
  * caller must not free or modify it. score is a heuristic
  * ranking value, not a calibrated probability.
  */
-int kc_lng_detect(const char *text, double threshold, size_t limit, kc_lng_result_t **out_results, size_t *out_count);
+int kc_lng_detect(
+    const char *text,
+    const kc_lng_options_t *options,
+    kc_lng_result_t **out_results,
+    size_t *out_count
+);
 
 /**
  * Release memory allocated by kc_lng_detect.
