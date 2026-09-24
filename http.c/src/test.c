@@ -29,7 +29,9 @@
 
 static int test_case_total;
 static int test_case_current;
+#ifndef __EMSCRIPTEN__
 static const char *test_program_path;
+#endif
 
 static int expect_true(const char *label, int condition) {
     if (condition) return 0;
@@ -74,6 +76,7 @@ static int expect_contains(
     return 1;
 }
 
+#ifndef __EMSCRIPTEN__
 static int expect_absent(
     const char *label,
     const void *data,
@@ -91,6 +94,7 @@ static int expect_absent(
     }
     return 0;
 }
+#endif
 
 static void test_result(int fail, const char *name, const char *detail) {
     test_case_current++;
@@ -921,7 +925,9 @@ static int test_named(const char *name) {
 int main(int argc, char **argv) {
     int rc = 0;
 
+#ifndef __EMSCRIPTEN__
     test_program_path = argv[0];
+#endif
 
     if (argc != 2) {
         fprintf(stderr, "usage: %s <case>\n", argv[0]);
