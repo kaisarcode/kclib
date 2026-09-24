@@ -160,7 +160,7 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sINITIAL_MEMORY=268435456
         -sSTACK_SIZE=1048576
-        -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_open,_kc_emb_close,_kc_emb_dim,_kc_emb_exec,_kc_emb_free,_kc_emb_get_error
+        -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_embed,_kc_emb_free
     )
 endif()
 
@@ -262,5 +262,15 @@ if(EMB_BUILD_TESTS)
                 $<TARGET_FILE_DIR:emb_contract_test>
         )
     endif()
+endif()
 
+if(EMB_BUILD_TESTS)
+    if(EMB_TEST_CLI)
+        set(EMB_TEST_CLI_TARGET_PATH "${EMB_TEST_CLI}")
+    else()
+        set(EMB_TEST_CLI_TARGET_PATH "")
+    endif()
+    target_compile_definitions(emb_contract_test PRIVATE
+        EMB_TEST_CLI="${EMB_TEST_CLI_TARGET_PATH}"
+    )
 endif()
