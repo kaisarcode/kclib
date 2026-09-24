@@ -315,7 +315,6 @@ static int expect_string(const char *name, const char *expected, const char *act
     return 0;
 }
 
-
 /**
  * Detect with independently optional threshold and limit values.
  * @param text Input text.
