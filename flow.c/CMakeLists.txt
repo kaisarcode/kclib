@@ -28,8 +28,6 @@ else()
     add_compile_options(/O2 /W3 /WX)
 endif()
 
-
-
 set_source_files_properties(src/libflow.c PROPERTIES
     COMPILE_DEFINITIONS KC_FLOW_BUILD_VERSION=${FLOW_BUILD_VERSION}
 )
