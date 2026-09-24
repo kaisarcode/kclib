@@ -1298,7 +1298,6 @@ static void kc_flow_shell_quote_step(kc_flow_quote_state_t *quote, int *escaped,
 }
 
 static int kc_flow_run_command(
-    kc_flow_t *ctx,
     const char *command,
     const char *flow_path,
     const void *input,
@@ -1434,7 +1433,6 @@ static char *kc_flow_resolve_record(
         return NULL;
     }
     if (kc_flow_run_command(
-        ctx,
         command,
         flow_path,
         input,
@@ -1960,7 +1958,6 @@ static char *kc_flow_expand_call(
         size_t output_size = 0;
 
         if (kc_flow_run_command(
-            ctx,
             expanded,
             flow_path,
             NULL,
@@ -3383,7 +3380,7 @@ static int kc_flow_run_node(
                 rc = kc_flow_fail_stop(ctx);
                 break;
             }
-            if (kc_flow_run_command(ctx, command, flow_path, active.items[i].data, active.items[i].size, model, flow_data, node, &node_data, &out, &out_size, ignore_val) != KC_FLOW_OK) {
+            if (kc_flow_run_command(command, flow_path, active.items[i].data, active.items[i].size, model, flow_data, node, &node_data, &out, &out_size, ignore_val) != KC_FLOW_OK) {
                 free(command);
                 rc = kc_flow_fail(ctx, "node command failed");
                 break;
