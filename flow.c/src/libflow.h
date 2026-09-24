@@ -21,43 +21,37 @@ typedef struct kc_flow kc_flow_t;
 
 #define KC_FLOW_OK 0
 #define KC_FLOW_ERROR -1
-#define KC_FLOW_ESTOP -2
 
 /**
- * Allocate one flow runtime context.
- * @param out Pointer to receive context pointer.
+ * Open one flow runtime from an existing flow file.
+ * The path is copied by the runtime. Ordered set/unset overrides remain local
+ * to this runtime and do not modify the file.
+ * @param out Pointer to receive runtime pointer.
+ * @param path Existing flow file path.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-int kc_flow_open(kc_flow_t **out);
+int kc_flow_open(kc_flow_t **out, const char *path);
 
 /**
- * Release one flow runtime context.
- * @param ctx Context pointer.
- * @return None.
- */
-void kc_flow_close(kc_flow_t *ctx);
-
-/**
- * Append one ordered key-value overlay operation.
- * @param ctx Context pointer.
+ * Append one ordered key-value override.
+ * @param flow Runtime pointer.
  * @param key Flow document key.
- * @param value Overlay value.
+ * @param value Override value.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
  */
-int kc_flow_set(kc_flow_t *ctx, const char *key, const char *value);
+int kc_flow_set(kc_flow_t *flow, const char *key, const char *value);
 
 /**
- * Append one ordered key removal overlay operation.
- * @param ctx Context pointer.
+ * Append one ordered key removal override.
+ * @param flow Runtime pointer.
  * @param key Flow document key.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
  */
-int kc_flow_unset(kc_flow_t *ctx, const char *key);
+int kc_flow_unset(kc_flow_t *flow, const char *key);
 
 /**
- * Execute one flow file, optionally from one explicit entry node.
- * @param ctx Context pointer.
- * @param path Flow file path.
+ * Execute the opened flow, optionally from one explicit entry node.
+ * @param flow Runtime pointer.
  * @param entry Optional entry node reference, or NULL for declared entries.
  * @param input Optional input buffer.
  * @param input_size Input buffer size.
@@ -66,8 +60,7 @@ int kc_flow_unset(kc_flow_t *ctx, const char *key);
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
  */
 int kc_flow_exec(
-    kc_flow_t *ctx,
-    const char *path,
+    kc_flow_t *flow,
     const char *entry,
     const void *input,
     size_t input_size,
@@ -76,25 +69,28 @@ int kc_flow_exec(
 );
 
 /**
+ * Return the last contextual error.
+ * The string is borrowed from the runtime and remains valid until the next
+ * operation that changes the error or until kc_flow_close().
+ * @param flow Runtime pointer.
+ * @return Borrowed error string, or NULL for NULL.
+ */
+const char *kc_flow_error(const kc_flow_t *flow);
+
+/**
  * Release one output buffer produced by the runtime.
+ * NULL is safe.
  * @param ptr Owned output buffer.
  * @return None.
  */
 void kc_flow_free(void *ptr);
 
 /**
- * Request stop for a specific flow context.
- * @param ctx Context pointer.
- * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ * Release one flow runtime. NULL is safe.
+ * @param flow Runtime pointer.
+ * @return None.
  */
-int kc_flow_stop(kc_flow_t *ctx);
-
-/**
- * Returns the last error message from a flow context.
- * @param ctx Context pointer.
- * @return Borrowed error string, or NULL.
- */
-const char *kc_flow_get_error(const kc_flow_t *ctx);
+void kc_flow_close(kc_flow_t *flow);
 
 /**
  * Returns the build version generated at compile time.
