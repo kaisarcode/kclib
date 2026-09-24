@@ -93,8 +93,7 @@ static kc_hnsw_t *open_index_metric(size_t dimension, int metric) {
     kc_hnsw_t *hnsw = NULL;
 
     options.dimension = dimension;
-    options.has_metric = 1;
-    options.metric = metric;
+    options.metric = &metric;
     if (kc_hnsw_open(&hnsw, &options) != KC_HNSW_OK) return NULL;
     return hnsw;
 }
@@ -105,9 +104,13 @@ static kc_hnsw_t *open_index_metric(size_t dimension, int metric) {
  */
 static int case_kc_hnsw_open(void) {
     const char *name = "kc_hnsw_open";
-    const char *detail = "applies per-option defaults and validates explicit values";
+    const char *detail = "applies defaults and validates explicit values";
     kc_hnsw_options_t options = {0};
     kc_hnsw_t *hnsw = (kc_hnsw_t *)1;
+    int metric;
+    int max_connections;
+    int build_effort;
+    int search_effort;
     int fail = 0;
 
     options.dimension = 2;
@@ -124,46 +127,46 @@ static int case_kc_hnsw_open(void) {
 
     memset(&options, 0, sizeof(options));
     options.dimension = 2;
-    options.has_metric = 1;
-    options.metric = 0;
+    metric = 0;
+    options.metric = &metric;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
-    options.metric = 99;
-    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
-    fail |= expect(hnsw == NULL);
-
-    memset(&options, 0, sizeof(options));
-    options.dimension = 2;
-    options.has_max_connections = 1;
-    options.max_connections = 0;
+    metric = 99;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
     memset(&options, 0, sizeof(options));
     options.dimension = 2;
-    options.has_build_effort = 1;
-    options.build_effort = 0;
+    max_connections = 0;
+    options.max_connections = &max_connections;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
     memset(&options, 0, sizeof(options));
     options.dimension = 2;
-    options.has_search_effort = 1;
-    options.search_effort = 0;
+    build_effort = 0;
+    options.build_effort = &build_effort;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
     fail |= expect(hnsw == NULL);
 
     memset(&options, 0, sizeof(options));
     options.dimension = 2;
-    options.has_metric = 1;
-    options.metric = KC_HNSW_METRIC_L2;
-    options.has_max_connections = 1;
-    options.max_connections = 8;
-    options.has_build_effort = 1;
-    options.build_effort = 32;
-    options.has_search_effort = 1;
-    options.search_effort = 32;
+    search_effort = 0;
+    options.search_effort = &search_effort;
+    fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_EINVAL);
+    fail |= expect(hnsw == NULL);
+
+    memset(&options, 0, sizeof(options));
+    options.dimension = 2;
+    metric = KC_HNSW_METRIC_L2;
+    max_connections = 8;
+    build_effort = 32;
+    search_effort = 32;
+    options.metric = &metric;
+    options.max_connections = &max_connections;
+    options.build_effort = &build_effort;
+    options.search_effort = &search_effort;
     fail |= expect(kc_hnsw_open(&hnsw, &options) == KC_HNSW_OK);
     fail |= expect(hnsw != NULL);
     fail |= expect(kc_hnsw_metric(hnsw) == KC_HNSW_METRIC_L2);
