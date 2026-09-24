@@ -27,6 +27,10 @@ typedef struct {
     int failed;
 } cli_parse_state_t;
 
+/**
+ * cli stream read.
+ * @return Function result.
+ */
 static int cli_stream_read(void *data, size_t size) {
 #ifdef _WIN32
     return _read(_fileno(stdin), data, (unsigned int)size);
@@ -36,6 +40,10 @@ static int cli_stream_read(void *data, size_t size) {
 #endif
 }
 
+/**
+ * cli help.
+ * @return None.
+ */
 static void cli_help(const char *name) {
     printf("Usage: %s <command> [options]\n\n", name);
     printf("Commands:\n");
@@ -64,6 +72,10 @@ static void cli_help(const char *name) {
     printf("  -v, --version                   Show version\n");
 }
 
+/**
+ * cli split field.
+ * @return Function result.
+ */
 static int cli_split_field(const char *text, kc_http_field_t *field) {
     const char *colon;
     char *name;
@@ -91,6 +103,10 @@ static int cli_split_field(const char *text, kc_http_field_t *field) {
     return 0;
 }
 
+/**
+ * cli free fields.
+ * @return None.
+ */
 static void cli_free_fields(kc_http_field_t *fields, size_t count) {
     size_t i;
     for (i = 0; i < count; i++) {
@@ -99,6 +115,10 @@ static void cli_free_fields(kc_http_field_t *fields, size_t count) {
     }
 }
 
+/**
+ * cli print fields.
+ * @return None.
+ */
 static void cli_print_fields(const kc_http_field_t *fields, size_t count, const char *prefix) {
     size_t i;
     for (i = 0; i < count; i++) {
@@ -106,6 +126,10 @@ static void cli_print_fields(const kc_http_field_t *fields, size_t count, const 
     }
 }
 
+/**
+ * cli request cb.
+ * @return None.
+ */
 static void cli_request_cb(const kc_http_request_t *request, void *userdata) {
     cli_parse_state_t *state = (cli_parse_state_t *)userdata;
     if (state->emitted) return;
@@ -130,6 +154,10 @@ static void cli_request_cb(const kc_http_request_t *request, void *userdata) {
     state->emitted = 1;
 }
 
+/**
+ * cli response cb.
+ * @return None.
+ */
 static void cli_response_cb(const kc_http_response_t *response, void *userdata) {
     cli_parse_state_t *state = (cli_parse_state_t *)userdata;
     if (state->emitted) return;
@@ -152,11 +180,19 @@ static void cli_response_cb(const kc_http_response_t *response, void *userdata) 
     state->emitted = 1;
 }
 
+/**
+ * cli error cb.
+ * @return None.
+ */
 static void cli_error_cb(int status, void *userdata) {
     cli_parse_state_t *state = (cli_parse_state_t *)userdata;
     state->failed = status;
 }
 
+/**
+ * cli parse.
+ * @return Function result.
+ */
 static int cli_parse(int all) {
     unsigned char buf[8192];
     kc_http_parser_t *parser = NULL;
@@ -192,6 +228,10 @@ static int cli_parse(int all) {
     return 0;
 }
 
+/**
+ * cli build.
+ * @return Function result.
+ */
 static int cli_build(int response_mode, int argc, char **argv, int start) {
     kc_http_field_t headers[HTTP_CLI_FIELD_MAX];
     kc_http_field_t trailers[HTTP_CLI_FIELD_MAX];
@@ -216,30 +256,55 @@ static int cli_build(int response_mode, int argc, char **argv, int start) {
     memset(trailers, 0, sizeof(trailers));
 
     for (i = start; i < argc; i++) {
-        if (!response_mode &&
-            strcmp(argv[i], "--method") == 0 && i + 1 < argc) {
+        if (
+            !response_mode &&
+            strcmp(argv[i], "--method") == 0 &&
+            i + 1 < argc
+        ) {
             method = argv[++i];
-        } else if (!response_mode &&
-                   strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
+        } else if (
+            !response_mode &&
+            strcmp(argv[i], "--target") == 0 &&
+            i + 1 < argc
+        ) {
             target = argv[++i];
-        } else if (strcmp(argv[i], "--version") == 0 && i + 1 < argc) {
+        } else if (
+            strcmp(argv[i], "--version") == 0 &&
+            i + 1 < argc
+        ) {
             version = argv[++i];
-        } else if (response_mode &&
-                   strcmp(argv[i], "--status") == 0 && i + 1 < argc) {
+        } else if (
+            response_mode &&
+            strcmp(argv[i], "--status") == 0 &&
+            i + 1 < argc
+        ) {
             status = atoi(argv[++i]);
-        } else if (response_mode &&
-                   strcmp(argv[i], "--reason") == 0 && i + 1 < argc) {
+        } else if (
+            response_mode &&
+            strcmp(argv[i], "--reason") == 0 &&
+            i + 1 < argc
+        ) {
             reason = argv[++i];
-        }
-        else if (strcmp(argv[i], "--chunked") == 0) chunked = 1;
-        else if (strcmp(argv[i], "--chunk-size") == 0 && i + 1 < argc) chunk_size = (size_t)strtoull(argv[++i], NULL, 10);
-        else if (strcmp(argv[i], "--header") == 0 && i + 1 < argc && header_count < HTTP_CLI_FIELD_MAX) {
+        } else if (strcmp(argv[i], "--chunked") == 0) {
+            chunked = 1;
+        } else if (
+            strcmp(argv[i], "--chunk-size") == 0 &&
+            i + 1 < argc
+        ) {
+            chunk_size = (size_t)strtoull(argv[++i], NULL, 10);
+        } else if (
+            strcmp(argv[i], "--header") == 0 &&
+            i + 1 < argc &&
+            header_count < HTTP_CLI_FIELD_MAX
+        ) {
             if (cli_split_field(argv[++i], &headers[header_count]) != 0) goto done;
             header_count++;
-        } else if (response_mode &&
-                   strcmp(argv[i], "--trailer") == 0 &&
-                   i + 1 < argc &&
-                   trailer_count < HTTP_CLI_FIELD_MAX) {
+        } else if (
+            response_mode &&
+            strcmp(argv[i], "--trailer") == 0 &&
+            i + 1 < argc &&
+            trailer_count < HTTP_CLI_FIELD_MAX
+        ) {
             if (cli_split_field(argv[++i], &trailers[trailer_count]) != 0) goto done;
             trailer_count++;
         } else {
@@ -320,6 +385,10 @@ done:
     return rc;
 }
 
+/**
+ * main.
+ * @return Process exit code.
+ */
 int main(int argc, char **argv) {
     int i = 1;
 
