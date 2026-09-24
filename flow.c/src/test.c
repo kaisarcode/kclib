@@ -581,7 +581,6 @@ static int case_kc_flow_open(void) {
     if (join_path(tmpdir, "overlay.flow", path, sizeof(path)) != 0) return 1;
     fail += expect_int("open existing flow", KC_FLOW_OK, kc_flow_open(&flow, path));
     fail += expect_true("open sets runtime", flow != NULL);
-    fail += expect_string("fresh error empty", "", kc_flow_error(flow));
     kc_flow_close(flow);
     case_result(fail, name, detail);
     return fail != 0;
@@ -735,12 +734,12 @@ static int case_kc_flow_override_order(void) {
 }
 
 /**
- * Tests kc_flow_exec.
+ * Tests kc_flow_run, kc_flow_run_wait, and kc_flow_run_close.
  * @return 0 on success, 1 on failure.
  */
-static int case_flow_run_sync(void) {
+static int case_kc_flow_run(void) {
     const char *name = "kc_flow_run";
-    const char *detail = "executes the opened flow with entries, input, fan-out, and owned bytes";
+    const char *detail = "starts independent runs with entries, input, fan-out, and owned bytes";
     kc_flow_t *flow = NULL;
     char tmpdir[320];
     char path[640];
@@ -1074,8 +1073,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_flow_override_order") == 0) {
         return case_kc_flow_override_order();
     }
-    if (strcmp(argv[1], "kc_flow_run") == 0) return case_flow_run_sync();
-    if (strcmp(argv[1], "kc_flow_error") == 0) return case_kc_flow_error();
+    if (strcmp(argv[1], "kc_flow_run") == 0) return case_kc_flow_run();
+    if (strcmp(argv[1], "kc_flow_run_stop") == 0) return case_kc_flow_run_stop();
+    if (strcmp(argv[1], "kc_flow_run_error") == 0) return case_kc_flow_run_error();
     if (strcmp(argv[1], "kc_flow_free") == 0) return case_kc_flow_free();
     if (strcmp(argv[1], "kc_flow_version") == 0) return case_kc_flow_version();
     if (strcmp(argv[1], "kc_flow_cli") == 0) return case_kc_flow_cli();
