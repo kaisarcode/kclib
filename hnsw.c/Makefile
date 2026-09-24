@@ -303,7 +303,7 @@ test:
 				-DHNSW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/hnsw.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test-wine --target hnsw_contract_test; \
+		cmake --build $(BUILD_DIR)/test-wine --target hnsw_contract_test || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/hnsw_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
 		if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1 || ! command -v $(WASM_EMCC) >/dev/null 2>&1; then \
@@ -350,7 +350,7 @@ test:
 				-DHNSW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/hnsw \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test --target hnsw_contract_test; \
+		cmake --build $(BUILD_DIR)/test --target hnsw_contract_test || exit 1; \
 		$(BUILD_DIR)/test/hnsw_contract_test all; \
 	fi
 
