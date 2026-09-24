@@ -1433,7 +1433,6 @@ static int kc_wch_default_dir(char *out, size_t cap) {
 #endif
 }
 
-
 /**
  * Ensure one resident runtime directory exists.
  * @param dir Runtime directory.
