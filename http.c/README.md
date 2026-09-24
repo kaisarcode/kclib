@@ -93,10 +93,9 @@ Request and response builders support:
 - repeatable `--header <name: value>`
 - `--chunked`
 - `--chunk-size <n>`
-- repeatable `--trailer <name: value>`
 
 Requests additionally support `--method` and `--target`. Responses support
-`--status` and `--reason`.
+`--status`, `--reason`, and repeatable `--trailer <name: value>`.
 
 
 Common options:
