@@ -141,19 +141,19 @@ if (kc_hnsw_open(&index, &options) == KC_HNSW_OK) {
 | `build_effort` | Work spent building a higher-quality search graph | `64` |
 | `search_effort` | Work spent finding better matches during a search | `64` |
 
-Each optional value has a matching `has_*` field. When the flag is zero, that option is omitted and the library applies its internal default. When the flag is nonzero, the supplied value is interpreted literally.
+Optional scalar fields are nullable pointers. A NULL pointer means the option is omitted and the library applies its internal default. A non-NULL pointer means the pointed value is explicit and is interpreted literally.
 
 For example, to override only search effort:
 
 ```c
 kc_hnsw_options_t options = {0};
+int search_effort = 128;
 
 options.dimension = 384;
-options.has_search_effort = 1;
-options.search_effort = 128;
+options.search_effort = &search_effort;
 ```
 
-There is no public default-initialization helper. Bindings can map property presence in a Lua table or JavaScript object mechanically to the corresponding `has_*` fields without duplicating default values outside the library.
+There is no public default-initialization helper. Bindings can map property presence mechanically: an absent property becomes NULL, while a present property points to its value. Default values remain owned by the library.
 
 ### Lifecycle and ownership
 
