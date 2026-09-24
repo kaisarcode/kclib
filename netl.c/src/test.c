@@ -923,7 +923,7 @@ static int test_cli_run(
         _dup2(err_fd, 2);
         _close(out_fd);
         _close(err_fd);
-        rc = (int)_spawnv(_P_WAIT, cli, argv);
+        rc = (int)_spawnv(_P_WAIT, cli, (const char * const *)argv);
         fflush(stdout);
         fflush(stderr);
         _dup2(save_out, 1);
