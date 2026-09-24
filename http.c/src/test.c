@@ -444,6 +444,15 @@ static int case_kc_http_request(void) {
     fail += expect_int("invalid body", KC_HTTP_EINVAL,
         kc_http_request(&request, &data, &size));
 
+    memset(&request, 0, sizeof(request));
+    {
+        static const size_t chunk_size_zero = 0U;
+        request.chunked = 1;
+        request.chunk_size = &chunk_size_zero;
+    }
+    fail += expect_int("explicit zero request chunk size", KC_HTTP_EINVAL,
+        kc_http_request(&request, &data, &size));
+
     test_result(fail, "kc_http_request", "builds request wire bytes without persistent builder state");
     return fail != 0;
 }
@@ -540,6 +549,15 @@ static int case_kc_http_response(void) {
         response.status = &status_zero;
     }
     fail += expect_int("explicit zero status", KC_HTTP_EINVAL,
+        kc_http_response(&response, &data, &size));
+
+    memset(&response, 0, sizeof(response));
+    {
+        static const size_t chunk_size_zero = 0U;
+        response.chunked = 1;
+        response.chunk_size = &chunk_size_zero;
+    }
+    fail += expect_int("explicit zero response chunk size", KC_HTTP_EINVAL,
         kc_http_response(&response, &data, &size));
 
     test_result(fail, "kc_http_response", "builds response wire bytes symmetrically");
