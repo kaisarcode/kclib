@@ -51,7 +51,7 @@ typedef struct pollfd kc_netl_pollfd_t;
 #endif
 
 #define KC_NETL_BUFFER_SIZE 65536U
-#define KC_NETL_DEFAULT_BACKLOG 128
+#define KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS 128
 #define KC_NETL_HOST_SIZE 128
 
 struct kc_netl_connection {
@@ -68,7 +68,7 @@ struct kc_netl {
     kc_netl_fd_t fd;
     int protocol;
     int platform_ready;
-    int backlog;
+    int max_pending_connections;
     unsigned short port;
     kc_netl_connection_t *connections;
     kc_netl_connection_t *retired;
@@ -318,9 +318,9 @@ static int kc_netl_bind(
         }
         if (
             options->protocol == KC_NETL_TCP &&
-            listen(fd, options->backlog != NULL
-                ? *options->backlog
-                : KC_NETL_DEFAULT_BACKLOG) != 0
+            listen(fd, options->max_pending_connections != NULL
+                ? *options->max_pending_connections
+                : KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS) != 0
         ) {
             KC_NETL_CLOSE(fd);
             fd = KC_NETL_FD_INVALID;
@@ -382,7 +382,7 @@ int kc_netl_open(
             options->protocol != KC_NETL_TCP &&
             options->protocol != KC_NETL_UDP
         ) ||
-        (options->backlog != NULL && *options->backlog < 0)
+        (options->max_pending_connections != NULL && *options->max_pending_connections < 0)
     ) {
         return KC_NETL_EINVAL;
     }
@@ -391,9 +391,9 @@ int kc_netl_open(
     if (listener == NULL) return KC_NETL_ENOMEM;
     listener->fd = KC_NETL_FD_INVALID;
     listener->protocol = options->protocol;
-    listener->backlog = options->backlog != NULL
-        ? *options->backlog
-        : KC_NETL_DEFAULT_BACKLOG;
+    listener->max_pending_connections = options->max_pending_connections != NULL
+        ? *options->max_pending_connections
+        : KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS;
 
     rc = kc_netl_platform_open();
     if (rc != KC_NETL_OK) {
