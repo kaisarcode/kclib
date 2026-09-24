@@ -28,6 +28,7 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdatomic.h>
+#include <time.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -1288,6 +1289,1996 @@ static void kc_wch_native_close(kc_wch_native_t *w) {
 #endif
 
     kc_wch_release(w);
+}
+
+
+struct kc_wch {
+    char name[KC_WCH_NAME_MAX];
+    char dir[KC_WCH_PATH_MAX];
+    char *path;
+    char *cmd;
+    int recursive;
+    kc_wch_handler_t handlers[3];
+    void *userdata[3];
+    atomic_int stop;
+    int thread_started;
+    uint64_t event_offset;
+#ifdef _WIN32
+    HANDLE thread;
+#elif !defined(__EMSCRIPTEN__)
+    pthread_t thread;
+#endif
+};
+
+typedef struct {
+    char **names;
+    size_t count;
+    size_t capacity;
+    int failed;
+} kc_wch_name_list_t;
+
+/**
+ * Duplicate one string.
+ * @param text Source string.
+ * @return Owned copy, or NULL on failure.
+ */
+static char *kc_wch_strdup(const char *text) {
+    size_t size;
+    char *copy;
+
+    if (text == NULL) return NULL;
+    size = strlen(text) + 1U;
+    copy = (char *)malloc(size);
+    if (copy == NULL) return NULL;
+    memcpy(copy, text, size);
+    return copy;
+}
+
+/**
+ * Validate one resident watcher name.
+ * @param name Watcher name.
+ * @return Nonzero when valid.
+ */
+static int kc_wch_name_valid(const char *name) {
+    const unsigned char *p;
+
+    if (name == NULL || name[0] == '\0' ||
+            strlen(name) >= KC_WCH_NAME_MAX) {
+        return 0;
+    }
+    for (p = (const unsigned char *)name; *p != '\0'; p++) {
+        if (isalnum(*p) || *p == '-' || *p == '_' || *p == '.') {
+            continue;
+        }
+        return 0;
+    }
+    return 1;
+}
+
+/**
+ * Validate one metadata line value.
+ * @param value Value to validate.
+ * @return Nonzero when valid.
+ */
+static int kc_wch_line_valid(const char *value) {
+    return value != NULL &&
+        value[0] != '\0' &&
+        strchr(value, '\n') == NULL &&
+        strchr(value, '\r') == NULL;
+}
+
+/**
+ * Resolve the default resident runtime directory.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_default_dir(char *out, size_t cap) {
+#ifdef _WIN32
+    char temp[MAX_PATH];
+    DWORD size = GetTempPathA((DWORD)sizeof(temp), temp);
+
+    if (size == 0 || size >= (DWORD)sizeof(temp)) return 1;
+    return (size_t)snprintf(out, cap, "%swch.c", temp) < cap ? 0 : 1;
+#else
+    const char *xdg = getenv("XDG_RUNTIME_DIR");
+
+    if (xdg != NULL && xdg[0] != '\0') {
+        return (size_t)snprintf(out, cap, "%s/wch.c", xdg) < cap ? 0 : 1;
+    }
+    return (size_t)snprintf(
+        out,
+        cap,
+        "/tmp/wch.c-%lu",
+        (unsigned long)getuid()
+    ) < cap ? 0 : 1;
+#endif
+}
+
+/**
+ * Resolve a configured or default resident runtime directory.
+ * @param dir Configured directory, or NULL.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_resolve_dir(
+    const char *dir,
+    char *out,
+    size_t cap
+) {
+    if (dir != NULL && dir[0] != '\0') {
+        return (size_t)snprintf(out, cap, "%s", dir) < cap ? 0 : 1;
+    }
+    return kc_wch_default_dir(out, cap);
+}
+
+/**
+ * Ensure one resident runtime directory exists.
+ * @param dir Runtime directory.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_ensure_dir(const char *dir) {
+#ifdef _WIN32
+    char buffer[KC_WCH_PATH_MAX];
+    char *p;
+
+    if ((size_t)snprintf(buffer, sizeof(buffer), "%s", dir) >=
+            sizeof(buffer)) {
+        return 1;
+    }
+    for (p = buffer + 1; *p != '\0'; p++) {
+        if (*p == '\\' || *p == '/') {
+            char saved = *p;
+
+            *p = '\0';
+            if (!CreateDirectoryA(buffer, NULL) &&
+                    GetLastError() != ERROR_ALREADY_EXISTS) {
+                return 1;
+            }
+            *p = saved;
+        }
+    }
+    if (!CreateDirectoryA(buffer, NULL) &&
+            GetLastError() != ERROR_ALREADY_EXISTS) {
+        return 1;
+    }
+    return 0;
+#else
+    char buffer[KC_WCH_PATH_MAX];
+    char *p;
+
+    if ((size_t)snprintf(buffer, sizeof(buffer), "%s", dir) >=
+            sizeof(buffer)) {
+        return 1;
+    }
+    for (p = buffer + 1; *p != '\0'; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(buffer, 0700) != 0 && errno != EEXIST) return 1;
+            *p = '/';
+        }
+    }
+    return mkdir(buffer, 0700) == 0 || errno == EEXIST ? 0 : 1;
+#endif
+}
+
+/**
+ * Compose one resident state path.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @param suffix State file suffix.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_state_path(
+    char *out,
+    size_t cap,
+    const char *dir,
+    const char *name,
+    const char *suffix
+) {
+#ifdef _WIN32
+    return (size_t)snprintf(
+        out,
+        cap,
+        "%s\\%s%s",
+        dir,
+        name,
+        suffix
+    ) < cap ? 0 : 1;
+#else
+    return (size_t)snprintf(
+        out,
+        cap,
+        "%s/%s%s",
+        dir,
+        name,
+        suffix
+    ) < cap ? 0 : 1;
+#endif
+}
+
+/**
+ * Remove trailing newline bytes from one mutable string.
+ * @param text Mutable string.
+ * @return None.
+ */
+static void kc_wch_chomp(char *text) {
+    size_t length;
+
+    if (text == NULL) return;
+    length = strlen(text);
+    while (length > 0U &&
+            (text[length - 1U] == '\n' ||
+             text[length - 1U] == '\r')) {
+        text[--length] = '\0';
+    }
+}
+
+/**
+ * Persist one resident watcher registration.
+ * @param dir Runtime directory.
+ * @param registration Registration data.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_write_registration(
+    const char *dir,
+    const kc_wch_registration_t *registration
+) {
+    char path[KC_WCH_PATH_MAX];
+    FILE *file;
+
+    if (kc_wch_state_path(
+            path,
+            sizeof(path),
+            dir,
+            registration->name,
+            ".meta"
+        ) != 0) {
+        return 1;
+    }
+    file = fopen(path, "wb");
+    if (file == NULL) return 1;
+    if (fprintf(
+            file,
+            "%d\n%s\n%s\n",
+            registration->recursive,
+            registration->path,
+            registration->command
+        ) < 0) {
+        fclose(file);
+        return 1;
+    }
+    return fclose(file) == 0 ? 0 : 1;
+}
+
+/**
+ * Read one resident watcher registration.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @param registration Output registration.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_read_registration(
+    const char *dir,
+    const char *name,
+    kc_wch_registration_t *registration
+) {
+    char path[KC_WCH_PATH_MAX];
+    char recursive[32];
+    FILE *file;
+
+    if (kc_wch_state_path(
+            path,
+            sizeof(path),
+            dir,
+            name,
+            ".meta"
+        ) != 0) {
+        return 1;
+    }
+    file = fopen(path, "rb");
+    if (file == NULL) return 1;
+
+    memset(registration, 0, sizeof(*registration));
+    snprintf(
+        registration->name,
+        sizeof(registration->name),
+        "%s",
+        name
+    );
+    if (fgets(recursive, sizeof(recursive), file) == NULL ||
+            fgets(
+                registration->path,
+                sizeof(registration->path),
+                file
+            ) == NULL ||
+            fgets(
+                registration->command,
+                sizeof(registration->command),
+                file
+            ) == NULL) {
+        fclose(file);
+        return 1;
+    }
+    fclose(file);
+
+    kc_wch_chomp(recursive);
+    kc_wch_chomp(registration->path);
+    kc_wch_chomp(registration->command);
+    registration->recursive = atoi(recursive) != 0;
+    return 0;
+}
+
+/**
+ * Write one resident watcher process identifier.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @param pid Process identifier.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_write_pid(
+    const char *dir,
+    const char *name,
+    long pid
+) {
+    char path[KC_WCH_PATH_MAX];
+    FILE *file;
+
+    if (kc_wch_state_path(
+            path,
+            sizeof(path),
+            dir,
+            name,
+            ".pid"
+        ) != 0) {
+        return 1;
+    }
+    file = fopen(path, "wb");
+    if (file == NULL) return 1;
+    if (fprintf(file, "%ld\n", pid) < 0) {
+        fclose(file);
+        return 1;
+    }
+    return fclose(file) == 0 ? 0 : 1;
+}
+
+/**
+ * Read one resident watcher process identifier.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @param out_pid Output process identifier.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_read_pid(
+    const char *dir,
+    const char *name,
+    long *out_pid
+) {
+    char path[KC_WCH_PATH_MAX];
+    FILE *file;
+
+    if (kc_wch_state_path(
+            path,
+            sizeof(path),
+            dir,
+            name,
+            ".pid"
+        ) != 0) {
+        return 1;
+    }
+    file = fopen(path, "rb");
+    if (file == NULL) return 1;
+    if (fscanf(file, "%ld", out_pid) != 1) {
+        fclose(file);
+        return 1;
+    }
+    fclose(file);
+    return 0;
+}
+
+/**
+ * Test whether one resident watcher process is alive.
+ * @param pid Process identifier.
+ * @return Nonzero when alive.
+ */
+static int kc_wch_pid_alive(long pid) {
+#ifdef _WIN32
+    HANDLE process;
+    DWORD code;
+
+    if (pid <= 0) return 0;
+    process = OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION,
+        FALSE,
+        (DWORD)pid
+    );
+    if (process == NULL) return 0;
+    if (!GetExitCodeProcess(process, &code)) {
+        CloseHandle(process);
+        return 0;
+    }
+    CloseHandle(process);
+    return code == STILL_ACTIVE;
+#else
+    if (pid <= 0) return 0;
+    return kill((pid_t)pid, 0) == 0 || errno == EPERM;
+#endif
+}
+
+/**
+ * Stop one resident watcher process.
+ * @param pid Process identifier.
+ * @return None.
+ */
+static void kc_wch_stop_pid(long pid) {
+#ifdef _WIN32
+    HANDLE process;
+
+    if (pid <= 0) return;
+    process = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid);
+    if (process != NULL) {
+        TerminateProcess(process, 0);
+        CloseHandle(process);
+    }
+#else
+    if (pid > 0) (void)kill((pid_t)pid, SIGTERM);
+#endif
+}
+
+/**
+ * Remove resident watcher state files.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @return None.
+ */
+static void kc_wch_remove_state(
+    const char *dir,
+    const char *name
+) {
+    static const char *suffixes[] = {
+        ".meta",
+        ".pid",
+        ".events"
+    };
+    char path[KC_WCH_PATH_MAX];
+    size_t i;
+
+    for (i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+        if (kc_wch_state_path(
+                path,
+                sizeof(path),
+                dir,
+                name,
+                suffixes[i]
+            ) == 0) {
+            (void)remove(path);
+        }
+    }
+}
+
+/**
+ * Reset the private resident event stream.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_reset_events(
+    const char *dir,
+    const char *name
+) {
+    char path[KC_WCH_PATH_MAX];
+#ifdef _WIN32
+    HANDLE file;
+#else
+    int fd;
+#endif
+
+    if (kc_wch_state_path(
+            path,
+            sizeof(path),
+            dir,
+            name,
+            ".events"
+        ) != 0) {
+        return 1;
+    }
+#ifdef _WIN32
+    file = CreateFileA(
+        path,
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (file == INVALID_HANDLE_VALUE) return 1;
+    CloseHandle(file);
+#else
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return 1;
+    close(fd);
+#endif
+    return 0;
+}
+
+/**
+ * Append one normalized event to the private event stream.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @param type Normalized event type.
+ * @param path Event path.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_append_event(
+    const char *dir,
+    const char *name,
+    unsigned char type,
+    const char *path
+) {
+    char event_path[KC_WCH_PATH_MAX];
+    unsigned char *record;
+    uint32_t path_size;
+    size_t record_size;
+    int rc = 1;
+
+    if (path == NULL) return 1;
+    if (strlen(path) > UINT32_MAX) return 1;
+    path_size = (uint32_t)strlen(path);
+    record_size = 1U + sizeof(path_size) + (size_t)path_size;
+    record = (unsigned char *)malloc(record_size);
+    if (record == NULL) return 1;
+
+    record[0] = type;
+    memcpy(record + 1U, &path_size, sizeof(path_size));
+    if (path_size > 0U) {
+        memcpy(
+            record + 1U + sizeof(path_size),
+            path,
+            path_size
+        );
+    }
+
+    if (kc_wch_state_path(
+            event_path,
+            sizeof(event_path),
+            dir,
+            name,
+            ".events"
+        ) != 0) {
+        free(record);
+        return 1;
+    }
+
+#ifdef _WIN32
+    {
+        HANDLE file = CreateFileA(
+            event_path,
+            FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+        DWORD written = 0;
+
+        if (file != INVALID_HANDLE_VALUE) {
+            if (record_size <= (size_t)DWORD_MAX &&
+                    WriteFile(
+                        file,
+                        record,
+                        (DWORD)record_size,
+                        &written,
+                        NULL
+                    ) &&
+                    written == (DWORD)record_size) {
+                rc = 0;
+            }
+            CloseHandle(file);
+        }
+    }
+#else
+    {
+        int fd = open(
+            event_path,
+            O_WRONLY | O_CREAT | O_APPEND,
+            0600
+        );
+
+        if (fd >= 0) {
+            size_t offset = 0U;
+
+            while (offset < record_size) {
+                ssize_t written = write(
+                    fd,
+                    record + offset,
+                    record_size - offset
+                );
+                if (written < 0 && errno == EINTR) continue;
+                if (written <= 0) break;
+                offset += (size_t)written;
+            }
+            rc = offset == record_size ? 0 : 1;
+            close(fd);
+        }
+    }
+#endif
+    free(record);
+    return rc;
+}
+
+/**
+ * Map one native event type to the resident event index.
+ * @param type Native event type.
+ * @return Event index, or negative one when invalid.
+ */
+static int kc_wch_event_index(int type) {
+    if (type == KC_WCH_NATIVE_ADD) return 0;
+    if (type == KC_WCH_NATIVE_UPD) return 1;
+    if (type == KC_WCH_NATIVE_DEL) return 2;
+    return -1;
+}
+
+/**
+ * Map one resident event index to its command label.
+ * @param index Event index.
+ * @return Borrowed event label.
+ */
+static const char *kc_wch_event_label(int index) {
+    if (index == 1) return "upd";
+    if (index == 2) return "del";
+    return "add";
+}
+
+#ifndef _WIN32
+/**
+ * Append one POSIX shell-quoted argument.
+ * @param out Output command buffer.
+ * @param cap Output buffer capacity.
+ * @param pos Current output position.
+ * @param value Argument value.
+ * @return Zero on success, nonzero on overflow.
+ */
+static int kc_wch_shell_arg(
+    char *out,
+    size_t cap,
+    size_t *pos,
+    const char *value
+) {
+    size_t i;
+
+    if (*pos + 1U >= cap) return 1;
+    out[(*pos)++] = '\'';
+
+    for (i = 0U; value[i] != '\0'; i++) {
+        if (value[i] == '\'') {
+            static const char escape[] = "'\\''";
+            size_t size = sizeof(escape) - 1U;
+
+            if (*pos + size >= cap) return 1;
+            memcpy(out + *pos, escape, size);
+            *pos += size;
+        } else {
+            if (*pos + 1U >= cap) return 1;
+            out[(*pos)++] = value[i];
+        }
+    }
+
+    if (*pos + 2U > cap) return 1;
+    out[(*pos)++] = '\'';
+    out[*pos] = '\0';
+    return 0;
+}
+#endif
+
+/**
+ * Dispatch one native event from the resident watcher.
+ * @param event Native watcher event.
+ * @param userdata Resident dispatch configuration.
+ * @return None.
+ */
+static void kc_wch_dispatch_event(
+    const kc_wch_native_event_t *event,
+    void *userdata
+) {
+    kc_wch_dispatch_t *dispatch = (kc_wch_dispatch_t *)userdata;
+    int index;
+    const char *label;
+
+    if (event == NULL || event->path == NULL || dispatch == NULL) return;
+    index = kc_wch_event_index(event->type);
+    if (index < 0) return;
+    label = kc_wch_event_label(index);
+
+    (void)kc_wch_append_event(
+        dispatch->dir,
+        dispatch->name,
+        (unsigned char)index,
+        event->path
+    );
+
+    if (dispatch->command == NULL || dispatch->command[0] == '\0') return;
+
+#ifdef _WIN32
+    {
+        char command[
+            KC_WCH_CMD_MAX + KC_WCH_PATH_MAX + 128
+        ];
+        STARTUPINFOA startup;
+        PROCESS_INFORMATION process;
+
+        if ((size_t)snprintf(
+                command,
+                sizeof(command),
+                "cmd.exe /c %s %s \"%s\"",
+                dispatch->command,
+                label,
+                event->path
+            ) >= sizeof(command)) {
+            return;
+        }
+        memset(&startup, 0, sizeof(startup));
+        memset(&process, 0, sizeof(process));
+        startup.cb = sizeof(startup);
+        if (CreateProcessA(
+                NULL,
+                command,
+                NULL,
+                NULL,
+                FALSE,
+                CREATE_NO_WINDOW,
+                NULL,
+                NULL,
+                &startup,
+                &process
+            )) {
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+        }
+    }
+#else
+    {
+        pid_t pid = fork();
+
+        if (pid == 0) {
+            char command[
+                KC_WCH_CMD_MAX + KC_WCH_PATH_MAX + 128
+            ];
+            size_t pos;
+            size_t base = strlen(dispatch->command);
+
+            if (base + 2U >= sizeof(command)) _exit(127);
+            memcpy(command, dispatch->command, base);
+            pos = base;
+            command[pos++] = ' ';
+            command[pos] = '\0';
+
+            if (kc_wch_shell_arg(
+                    command,
+                    sizeof(command),
+                    &pos,
+                    label
+                ) != 0) {
+                _exit(127);
+            }
+            if (pos + 1U >= sizeof(command)) _exit(127);
+            command[pos++] = ' ';
+            command[pos] = '\0';
+            if (kc_wch_shell_arg(
+                    command,
+                    sizeof(command),
+                    &pos,
+                    event->path
+                ) != 0) {
+                _exit(127);
+            }
+            execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+            _exit(127);
+        }
+    }
+#endif
+}
+
+/**
+ * Run one resident watcher from persisted registration data.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @return Process exit status.
+ */
+int kc_wch_internal_serve(
+    const char *dir,
+    const char *name
+) {
+#ifdef __EMSCRIPTEN__
+    (void)dir;
+    (void)name;
+    return 1;
+#else
+    kc_wch_registration_t registration;
+    kc_wch_options_t options;
+    kc_wch_dispatch_t dispatch;
+    kc_wch_native_t *native = NULL;
+
+    if (kc_wch_read_registration(
+            dir,
+            name,
+            &registration
+        ) != 0) {
+        return 1;
+    }
+
+#ifndef _WIN32
+    signal(SIGCHLD, SIG_IGN);
+#endif
+
+    memset(&options, 0, sizeof(options));
+    options.recursive = registration.recursive;
+    if (kc_wch_native_open(
+            &native,
+            registration.path,
+            &options
+        ) != KC_WCH_OK) {
+        return 1;
+    }
+
+    dispatch.command = registration.command;
+    dispatch.dir = dir;
+    dispatch.name = name;
+    if (kc_wch_native_on(
+            native,
+            kc_wch_dispatch_event,
+            &dispatch
+        ) != KC_WCH_OK) {
+        kc_wch_native_close(native);
+        return 1;
+    }
+
+#ifdef _WIN32
+    Sleep(INFINITE);
+#else
+    for (;;) pause();
+#endif
+
+    kc_wch_native_close(native);
+    return 0;
+#endif
+}
+
+/**
+ * Locate the companion Windows wch executable.
+ * @param out Output executable path.
+ * @param cap Output buffer capacity.
+ * @return Zero on success, nonzero on failure.
+ */
+#ifdef _WIN32
+static int kc_wch_companion_exe(char *out, size_t cap) {
+    HMODULE module;
+    char module_path[KC_WCH_PATH_MAX];
+    char *slash;
+    char *backslash;
+    DWORD size;
+
+    if (!GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)(uintptr_t)&kc_wch_create,
+            &module
+        )) {
+        return 1;
+    }
+    size = GetModuleFileNameA(
+        module,
+        module_path,
+        (DWORD)sizeof(module_path)
+    );
+    if (size == 0 || size >= (DWORD)sizeof(module_path)) return 1;
+
+    slash = strrchr(module_path, '/');
+    backslash = strrchr(module_path, '\\');
+    if (backslash != NULL && (slash == NULL || backslash > slash)) {
+        slash = backslash;
+    }
+    if (slash != NULL) {
+        slash[1] = '\0';
+    } else {
+        module_path[0] = '\0';
+    }
+
+    return (size_t)snprintf(
+        out,
+        cap,
+        "%swch.exe",
+        module_path
+    ) < cap ? 0 : 1;
+}
+#endif
+
+/**
+ * Start or replace one resident watcher process.
+ * @param dir Runtime directory.
+ * @param registration Registration data.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_run_update(
+    const char *dir,
+    const kc_wch_registration_t *registration
+) {
+    long old_pid;
+
+#ifdef __EMSCRIPTEN__
+    (void)dir;
+    (void)registration;
+    return 1;
+#else
+    if (kc_wch_ensure_dir(dir) != 0) return 1;
+    if (kc_wch_read_pid(
+            dir,
+            registration->name,
+            &old_pid
+        ) == 0) {
+        kc_wch_stop_pid(old_pid);
+    }
+    if (kc_wch_write_registration(dir, registration) != 0 ||
+            kc_wch_reset_events(dir, registration->name) != 0) {
+        return 1;
+    }
+
+#ifdef _WIN32
+    {
+        char exe[KC_WCH_PATH_MAX];
+        char command[
+            KC_WCH_PATH_MAX * 2 + KC_WCH_NAME_MAX + 64
+        ];
+        STARTUPINFOA startup;
+        PROCESS_INFORMATION process;
+
+        if (kc_wch_companion_exe(exe, sizeof(exe)) != 0) {
+            kc_wch_remove_state(dir, registration->name);
+            return 1;
+        }
+        if ((size_t)snprintf(
+                command,
+                sizeof(command),
+                "\"%s\" --_serve \"%s\" \"%s\"",
+                exe,
+                registration->name,
+                dir
+            ) >= sizeof(command)) {
+            kc_wch_remove_state(dir, registration->name);
+            return 1;
+        }
+
+        memset(&startup, 0, sizeof(startup));
+        memset(&process, 0, sizeof(process));
+        startup.cb = sizeof(startup);
+
+        if (!CreateProcessA(
+                NULL,
+                command,
+                NULL,
+                NULL,
+                FALSE,
+                DETACHED_PROCESS | CREATE_NO_WINDOW,
+                NULL,
+                NULL,
+                &startup,
+                &process
+            )) {
+            kc_wch_remove_state(dir, registration->name);
+            return 1;
+        }
+
+        CloseHandle(process.hThread);
+        if (kc_wch_write_pid(
+                dir,
+                registration->name,
+                (long)process.dwProcessId
+            ) != 0) {
+            TerminateProcess(process.hProcess, 0);
+            CloseHandle(process.hProcess);
+            kc_wch_remove_state(dir, registration->name);
+            return 1;
+        }
+        CloseHandle(process.hProcess);
+    }
+#else
+    {
+        pid_t pid = fork();
+
+        if (pid < 0) {
+            kc_wch_remove_state(dir, registration->name);
+            return 1;
+        }
+        if (pid == 0) {
+            if (setsid() < 0) _exit(1);
+            _exit(kc_wch_internal_serve(
+                dir,
+                registration->name
+            ));
+        }
+        if (kc_wch_write_pid(
+                dir,
+                registration->name,
+                (long)pid
+            ) != 0) {
+            (void)kill(pid, SIGTERM);
+            kc_wch_remove_state(dir, registration->name);
+            return 1;
+        }
+    }
+#endif
+    return 0;
+#endif
+}
+
+/**
+ * Delete one resident watcher process and its state.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @return Zero on success.
+ */
+static int kc_wch_run_delete(
+    const char *dir,
+    const char *name
+) {
+    long pid;
+
+    if (kc_wch_read_pid(dir, name, &pid) == 0) {
+        kc_wch_stop_pid(pid);
+    }
+    kc_wch_remove_state(dir, name);
+    return 0;
+}
+
+/**
+ * Load persisted configuration into one local handle.
+ * @param w Watcher handle.
+ * @return Zero on success, nonzero when the registration is absent.
+ */
+static int kc_wch_load_handle(kc_wch_t *w) {
+    kc_wch_registration_t registration;
+    char *path;
+    char *cmd;
+
+    if (w == NULL) return 1;
+    if (kc_wch_read_registration(
+            w->dir,
+            w->name,
+            &registration
+        ) != 0) {
+        free(w->path);
+        free(w->cmd);
+        w->path = NULL;
+        w->cmd = NULL;
+        w->recursive = 0;
+        return 1;
+    }
+
+    path = kc_wch_strdup(registration.path);
+    cmd = kc_wch_strdup(registration.command);
+    if (path == NULL || cmd == NULL) {
+        free(path);
+        free(cmd);
+        return 1;
+    }
+    free(w->path);
+    free(w->cmd);
+    w->path = path;
+    w->cmd = cmd;
+    w->recursive = registration.recursive;
+    return 0;
+}
+
+/**
+ * Return the current size of one private event stream.
+ * @param dir Runtime directory.
+ * @param name Watcher name.
+ * @return Current stream size.
+ */
+static uint64_t kc_wch_event_size(
+    const char *dir,
+    const char *name
+) {
+    char path[KC_WCH_PATH_MAX];
+
+    if (kc_wch_state_path(
+            path,
+            sizeof(path),
+            dir,
+            name,
+            ".events"
+        ) != 0) {
+        return 0U;
+    }
+#ifdef _WIN32
+    {
+        WIN32_FILE_ATTRIBUTE_DATA data;
+        ULARGE_INTEGER size;
+
+        if (!GetFileAttributesExA(
+                path,
+                GetFileExInfoStandard,
+                &data
+            )) {
+            return 0U;
+        }
+        size.LowPart = data.nFileSizeLow;
+        size.HighPart = data.nFileSizeHigh;
+        return (uint64_t)size.QuadPart;
+    }
+#else
+    {
+        struct stat st;
+
+        if (stat(path, &st) != 0 || st.st_size < 0) return 0U;
+        return (uint64_t)st.st_size;
+    }
+#endif
+}
+
+/**
+ * Read one event record after the handle event offset.
+ * @param w Watcher handle.
+ * @param out_type Output event index.
+ * @param out_path Output event path buffer.
+ * @param cap Output path capacity.
+ * @return One on event, zero when none, or negative one on error.
+ */
+static int kc_wch_read_event(
+    kc_wch_t *w,
+    int *out_type,
+    char *out_path,
+    size_t cap
+) {
+    char path[KC_WCH_PATH_MAX];
+    unsigned char header[1U + sizeof(uint32_t)];
+    uint32_t path_size;
+    uint64_t file_size;
+
+    if (w == NULL || out_type == NULL ||
+            out_path == NULL || cap == 0U) {
+        return -1;
+    }
+    if (kc_wch_state_path(
+            path,
+            sizeof(path),
+            w->dir,
+            w->name,
+            ".events"
+        ) != 0) {
+        return -1;
+    }
+
+    file_size = kc_wch_event_size(w->dir, w->name);
+    if (file_size < w->event_offset) {
+        w->event_offset = 0U;
+    }
+    if (file_size - w->event_offset < sizeof(header)) return 0;
+
+#ifdef _WIN32
+    {
+        HANDLE file = CreateFileA(
+            path,
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+        LARGE_INTEGER offset;
+        DWORD read_size;
+
+        if (file == INVALID_HANDLE_VALUE) return 0;
+        offset.QuadPart = (LONGLONG)w->event_offset;
+        if (!SetFilePointerEx(
+                file,
+                offset,
+                NULL,
+                FILE_BEGIN
+            ) ||
+                !ReadFile(
+                    file,
+                    header,
+                    (DWORD)sizeof(header),
+                    &read_size,
+                    NULL
+                ) ||
+                read_size != (DWORD)sizeof(header)) {
+            CloseHandle(file);
+            return 0;
+        }
+        memcpy(&path_size, header + 1U, sizeof(path_size));
+        if ((uint64_t)path_size >
+                file_size - w->event_offset - sizeof(header)) {
+            CloseHandle(file);
+            return 0;
+        }
+        if ((size_t)path_size + 1U > cap) {
+            CloseHandle(file);
+            return -1;
+        }
+        if (path_size > 0U &&
+                (!ReadFile(
+                    file,
+                    out_path,
+                    path_size,
+                    &read_size,
+                    NULL
+                ) ||
+                read_size != path_size)) {
+            CloseHandle(file);
+            return 0;
+        }
+        CloseHandle(file);
+    }
+#else
+    {
+        int fd = open(path, O_RDONLY);
+        ssize_t got;
+        size_t offset;
+
+        if (fd < 0) return 0;
+        if (lseek(
+                fd,
+                (off_t)w->event_offset,
+                SEEK_SET
+            ) < 0) {
+            close(fd);
+            return -1;
+        }
+        offset = 0U;
+        while (offset < sizeof(header)) {
+            got = read(
+                fd,
+                header + offset,
+                sizeof(header) - offset
+            );
+            if (got < 0 && errno == EINTR) continue;
+            if (got <= 0) {
+                close(fd);
+                return 0;
+            }
+            offset += (size_t)got;
+        }
+        memcpy(&path_size, header + 1U, sizeof(path_size));
+        if ((uint64_t)path_size >
+                file_size - w->event_offset - sizeof(header)) {
+            close(fd);
+            return 0;
+        }
+        if ((size_t)path_size + 1U > cap) {
+            close(fd);
+            return -1;
+        }
+        offset = 0U;
+        while (offset < (size_t)path_size) {
+            got = read(
+                fd,
+                out_path + offset,
+                (size_t)path_size - offset
+            );
+            if (got < 0 && errno == EINTR) continue;
+            if (got <= 0) {
+                close(fd);
+                return 0;
+            }
+            offset += (size_t)got;
+        }
+        close(fd);
+    }
+#endif
+
+    out_path[path_size] = '\0';
+    *out_type = (int)header[0];
+    w->event_offset += sizeof(header) + (uint64_t)path_size;
+    return 1;
+}
+
+/**
+ * Sleep briefly between resident event stream checks.
+ * @return None.
+ */
+static void kc_wch_subscription_sleep(void) {
+#ifdef _WIN32
+    Sleep(25);
+#else
+    struct timespec delay;
+
+    delay.tv_sec = 0;
+    delay.tv_nsec = 25000000L;
+    nanosleep(&delay, NULL);
+#endif
+}
+
+#ifndef __EMSCRIPTEN__
+/**
+ * Run one local temporary subscription receiver.
+ * @param arg Watcher handle.
+ * @return Platform thread result.
+ */
+#ifdef _WIN32
+static DWORD WINAPI kc_wch_subscription_worker(void *arg) {
+#else
+static void *kc_wch_subscription_worker(void *arg) {
+#endif
+    kc_wch_t *w = (kc_wch_t *)arg;
+
+    while (!atomic_load(&w->stop)) {
+        char path[KC_WCH_PATH_MAX];
+        int type;
+        int rc = kc_wch_read_event(
+            w,
+            &type,
+            path,
+            sizeof(path)
+        );
+
+        if (rc < 0) break;
+        if (rc == 0) {
+            kc_wch_subscription_sleep();
+            continue;
+        }
+        if (type >= 0 && type < 3 &&
+                w->handlers[type] != NULL) {
+            w->handlers[type](
+                path,
+                w->userdata[type]
+            );
+        }
+    }
+
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+#endif
+
+/**
+ * Start the temporary subscription worker when required.
+ * @param w Watcher handle.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+static int kc_wch_start_subscription(kc_wch_t *w) {
+    if (w == NULL) return KC_WCH_ERROR;
+    if (w->thread_started) return KC_WCH_OK;
+#ifdef __EMSCRIPTEN__
+    return KC_WCH_ERROR;
+#elif defined(_WIN32)
+    w->event_offset = kc_wch_event_size(w->dir, w->name);
+    w->thread = CreateThread(
+        NULL,
+        0,
+        kc_wch_subscription_worker,
+        w,
+        0,
+        NULL
+    );
+    if (w->thread == NULL) return KC_WCH_ERROR;
+#else
+    w->event_offset = kc_wch_event_size(w->dir, w->name);
+    if (pthread_create(
+            &w->thread,
+            NULL,
+            kc_wch_subscription_worker,
+            w
+        ) != 0) {
+        return KC_WCH_ERROR;
+    }
+#endif
+    w->thread_started = 1;
+    return KC_WCH_OK;
+}
+
+/**
+ * Collect one watcher name for listing.
+ * @param list Name collection.
+ * @param name Watcher name.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_name_list_add(
+    kc_wch_name_list_t *list,
+    const char *name
+) {
+    char **names;
+    char *copy;
+    size_t capacity;
+
+    if (list->count == list->capacity) {
+        capacity = list->capacity == 0U
+            ? 8U
+            : list->capacity * 2U;
+        names = (char **)realloc(
+            list->names,
+            capacity * sizeof(*names)
+        );
+        if (names == NULL) return 1;
+        list->names = names;
+        list->capacity = capacity;
+    }
+    copy = kc_wch_strdup(name);
+    if (copy == NULL) return 1;
+    list->names[list->count++] = copy;
+    return 0;
+}
+
+/**
+ * Release one watcher name collection.
+ * @param list Name collection.
+ * @return None.
+ */
+static void kc_wch_name_list_clear(kc_wch_name_list_t *list) {
+    size_t i;
+
+    if (list == NULL) return;
+    for (i = 0U; i < list->count; i++) free(list->names[i]);
+    free(list->names);
+    memset(list, 0, sizeof(*list));
+}
+
+/**
+ * Collect watcher registration names from one runtime directory.
+ * @param dir Runtime directory.
+ * @param list Output name collection.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_wch_collect_names(
+    const char *dir,
+    kc_wch_name_list_t *list
+) {
+#ifdef _WIN32
+    WIN32_FIND_DATAA data;
+    HANDLE find;
+    char pattern[KC_WCH_PATH_MAX];
+
+    if ((size_t)snprintf(
+            pattern,
+            sizeof(pattern),
+            "%s\\*.meta",
+            dir
+        ) >= sizeof(pattern)) {
+        return 1;
+    }
+    find = FindFirstFileA(pattern, &data);
+    if (find == INVALID_HANDLE_VALUE) return 0;
+    do {
+        size_t length = strlen(data.cFileName);
+
+        if (length > 5U &&
+                strcmp(
+                    data.cFileName + length - 5U,
+                    ".meta"
+                ) == 0) {
+            data.cFileName[length - 5U] = '\0';
+            if (kc_wch_name_list_add(
+                    list,
+                    data.cFileName
+                ) != 0) {
+                FindClose(find);
+                return 1;
+            }
+        }
+    } while (FindNextFileA(find, &data));
+    FindClose(find);
+#else
+    DIR *directory = opendir(dir);
+    struct dirent *entry;
+
+    if (directory == NULL) return 0;
+    while ((entry = readdir(directory)) != NULL) {
+        size_t length = strlen(entry->d_name);
+
+        if (length > 5U &&
+                strcmp(
+                    entry->d_name + length - 5U,
+                    ".meta"
+                ) == 0) {
+            char name[KC_WCH_NAME_MAX];
+
+            if (length - 5U >= sizeof(name)) continue;
+            memcpy(name, entry->d_name, length - 5U);
+            name[length - 5U] = '\0';
+            if (kc_wch_name_list_add(list, name) != 0) {
+                closedir(directory);
+                return 1;
+            }
+        }
+    }
+    closedir(directory);
+#endif
+    return 0;
+}
+
+/**
+ * Create or replace one named resident watcher.
+ * @param name Watcher name.
+ * @param options Creation options.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_create(
+    const char *name,
+    const kc_wch_options_t *options
+) {
+    char dir[KC_WCH_PATH_MAX];
+    kc_wch_registration_t registration;
+
+    if (!kc_wch_name_valid(name) ||
+            options == NULL ||
+            !kc_wch_line_valid(options->path) ||
+            !kc_wch_line_valid(options->cmd)) {
+        return KC_WCH_ERROR;
+    }
+    if (kc_wch_resolve_dir(
+            options->dir,
+            dir,
+            sizeof(dir)
+        ) != 0) {
+        return KC_WCH_ERROR;
+    }
+
+    memset(&registration, 0, sizeof(registration));
+    if ((size_t)snprintf(
+            registration.name,
+            sizeof(registration.name),
+            "%s",
+            name
+        ) >= sizeof(registration.name) ||
+            (size_t)snprintf(
+                registration.path,
+                sizeof(registration.path),
+                "%s",
+                options->path
+            ) >= sizeof(registration.path) ||
+            (size_t)snprintf(
+                registration.command,
+                sizeof(registration.command),
+                "%s",
+                options->cmd
+            ) >= sizeof(registration.command)) {
+        return KC_WCH_ERROR;
+    }
+    registration.recursive = options->recursive != 0;
+    return kc_wch_run_update(
+        dir,
+        &registration
+    ) == 0 ? KC_WCH_OK : KC_WCH_ERROR;
+}
+
+/**
+ * Open one local handle bound to a watcher name.
+ * @param out Output watcher handle.
+ * @param name Watcher name.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_open(
+    kc_wch_t **out,
+    const char *name
+) {
+    kc_wch_t *w;
+
+    if (out == NULL) return KC_WCH_ERROR;
+    *out = NULL;
+    if (!kc_wch_name_valid(name)) return KC_WCH_ERROR;
+
+    w = (kc_wch_t *)calloc(1, sizeof(*w));
+    if (w == NULL) return KC_WCH_ERROR;
+    if ((size_t)snprintf(
+            w->name,
+            sizeof(w->name),
+            "%s",
+            name
+        ) >= sizeof(w->name) ||
+            kc_wch_default_dir(
+                w->dir,
+                sizeof(w->dir)
+            ) != 0) {
+        free(w);
+        return KC_WCH_ERROR;
+    }
+    atomic_init(&w->stop, 0);
+    (void)kc_wch_load_handle(w);
+    *out = w;
+    return KC_WCH_OK;
+}
+
+/**
+ * List registered resident watchers.
+ * @param dir Runtime directory, or NULL.
+ * @param out_entries Output entry array.
+ * @param out_count Output entry count.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_list(
+    const char *dir,
+    kc_wch_entry_t **out_entries,
+    size_t *out_count
+) {
+    char resolved[KC_WCH_PATH_MAX];
+    kc_wch_name_list_t names;
+    kc_wch_registration_t *registrations = NULL;
+    int *running = NULL;
+    kc_wch_entry_t *entries;
+    char *cursor;
+    size_t bytes;
+    size_t valid;
+    size_t i;
+
+    if (out_entries != NULL) *out_entries = NULL;
+    if (out_count != NULL) *out_count = 0U;
+    if (out_entries == NULL || out_count == NULL)
+        return KC_WCH_ERROR;
+    if (kc_wch_resolve_dir(
+            dir,
+            resolved,
+            sizeof(resolved)
+        ) != 0) {
+        return KC_WCH_ERROR;
+    }
+
+    memset(&names, 0, sizeof(names));
+    if (kc_wch_collect_names(resolved, &names) != 0) {
+        kc_wch_name_list_clear(&names);
+        return KC_WCH_ERROR;
+    }
+    if (names.count == 0U) return KC_WCH_OK;
+
+    registrations = (kc_wch_registration_t *)calloc(
+        names.count,
+        sizeof(*registrations)
+    );
+    running = (int *)calloc(names.count, sizeof(*running));
+    if (registrations == NULL || running == NULL) {
+        free(registrations);
+        free(running);
+        kc_wch_name_list_clear(&names);
+        return KC_WCH_ERROR;
+    }
+
+    bytes = 0U;
+    valid = 0U;
+    for (i = 0U; i < names.count; i++) {
+        long pid = 0;
+
+        if (kc_wch_read_registration(
+                resolved,
+                names.names[i],
+                &registrations[valid]
+            ) != 0) {
+            continue;
+        }
+        if (kc_wch_read_pid(
+                resolved,
+                names.names[i],
+                &pid
+            ) == 0) {
+            running[valid] = kc_wch_pid_alive(pid);
+        }
+        bytes += strlen(registrations[valid].name) + 1U;
+        bytes += strlen(registrations[valid].path) + 1U;
+        bytes += strlen(registrations[valid].command) + 1U;
+        valid++;
+    }
+
+    if (valid == 0U) {
+        free(registrations);
+        free(running);
+        kc_wch_name_list_clear(&names);
+        return KC_WCH_OK;
+    }
+
+    if (valid > ((size_t)-1) / sizeof(*entries) ||
+            bytes > (size_t)-1 - valid * sizeof(*entries)) {
+        free(registrations);
+        free(running);
+        kc_wch_name_list_clear(&names);
+        return KC_WCH_ERROR;
+    }
+    entries = (kc_wch_entry_t *)malloc(
+        valid * sizeof(*entries) + bytes
+    );
+    if (entries == NULL) {
+        free(registrations);
+        free(running);
+        kc_wch_name_list_clear(&names);
+        return KC_WCH_ERROR;
+    }
+    cursor = (char *)(entries + valid);
+
+    for (i = 0U; i < valid; i++) {
+        size_t size = strlen(registrations[i].name) + 1U;
+
+        memcpy(cursor, registrations[i].name, size);
+        entries[i].name = cursor;
+        cursor += size;
+
+        size = strlen(registrations[i].path) + 1U;
+        memcpy(cursor, registrations[i].path, size);
+        entries[i].path = cursor;
+        cursor += size;
+
+        size = strlen(registrations[i].command) + 1U;
+        memcpy(cursor, registrations[i].command, size);
+        entries[i].cmd = cursor;
+        cursor += size;
+
+        entries[i].recursive = registrations[i].recursive;
+        entries[i].running = running[i];
+    }
+
+    free(registrations);
+    free(running);
+    kc_wch_name_list_clear(&names);
+    *out_entries = entries;
+    *out_count = valid;
+    return KC_WCH_OK;
+}
+
+/**
+ * Delete one named resident watcher.
+ * @param name Watcher name.
+ * @param dir Runtime directory, or NULL.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_delete(
+    const char *name,
+    const char *dir
+) {
+    char resolved[KC_WCH_PATH_MAX];
+
+    if (!kc_wch_name_valid(name)) return KC_WCH_ERROR;
+    if (kc_wch_resolve_dir(
+            dir,
+            resolved,
+            sizeof(resolved)
+        ) != 0) {
+        return KC_WCH_ERROR;
+    }
+    (void)kc_wch_run_delete(resolved, name);
+    return KC_WCH_OK;
+}
+
+/**
+ * Replace the watched path.
+ * @param w Watcher handle.
+ * @param path Watched path.
+ * @return KC_WCH_OK, KC_WCH_NOT_FOUND, or KC_WCH_ERROR.
+ */
+int kc_wch_set_path(
+    kc_wch_t *w,
+    const char *path
+) {
+    kc_wch_registration_t registration;
+
+    if (w == NULL || !kc_wch_line_valid(path))
+        return KC_WCH_ERROR;
+    if (kc_wch_read_registration(
+            w->dir,
+            w->name,
+            &registration
+        ) != 0) {
+        return KC_WCH_NOT_FOUND;
+    }
+    if ((size_t)snprintf(
+            registration.path,
+            sizeof(registration.path),
+            "%s",
+            path
+        ) >= sizeof(registration.path)) {
+        return KC_WCH_ERROR;
+    }
+    if (kc_wch_run_update(w->dir, &registration) != 0)
+        return KC_WCH_ERROR;
+    return kc_wch_load_handle(w) == 0
+        ? KC_WCH_OK
+        : KC_WCH_ERROR;
+}
+
+/**
+ * Return the configured watched path.
+ * @param w Watcher handle.
+ * @return Borrowed path string, or NULL.
+ */
+const char *kc_wch_get_path(const kc_wch_t *w) {
+    return w != NULL ? w->path : NULL;
+}
+
+/**
+ * Replace the persistent event command.
+ * @param w Watcher handle.
+ * @param cmd Event command.
+ * @return KC_WCH_OK, KC_WCH_NOT_FOUND, or KC_WCH_ERROR.
+ */
+int kc_wch_set_cmd(
+    kc_wch_t *w,
+    const char *cmd
+) {
+    kc_wch_registration_t registration;
+
+    if (w == NULL || !kc_wch_line_valid(cmd))
+        return KC_WCH_ERROR;
+    if (kc_wch_read_registration(
+            w->dir,
+            w->name,
+            &registration
+        ) != 0) {
+        return KC_WCH_NOT_FOUND;
+    }
+    if ((size_t)snprintf(
+            registration.command,
+            sizeof(registration.command),
+            "%s",
+            cmd
+        ) >= sizeof(registration.command)) {
+        return KC_WCH_ERROR;
+    }
+    if (kc_wch_run_update(w->dir, &registration) != 0)
+        return KC_WCH_ERROR;
+    return kc_wch_load_handle(w) == 0
+        ? KC_WCH_OK
+        : KC_WCH_ERROR;
+}
+
+/**
+ * Return the configured event command.
+ * @param w Watcher handle.
+ * @return Borrowed command string, or NULL.
+ */
+const char *kc_wch_get_cmd(const kc_wch_t *w) {
+    return w != NULL ? w->cmd : NULL;
+}
+
+/**
+ * Change the runtime directory targeted by a watcher handle.
+ * @param w Watcher handle.
+ * @param dir Runtime directory, or NULL.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_set_dir(
+    kc_wch_t *w,
+    const char *dir
+) {
+    char resolved[KC_WCH_PATH_MAX];
+
+    if (w == NULL) return KC_WCH_ERROR;
+    if (kc_wch_resolve_dir(
+            dir,
+            resolved,
+            sizeof(resolved)
+        ) != 0) {
+        return KC_WCH_ERROR;
+    }
+    if ((size_t)snprintf(
+            w->dir,
+            sizeof(w->dir),
+            "%s",
+            resolved
+        ) >= sizeof(w->dir)) {
+        return KC_WCH_ERROR;
+    }
+    (void)kc_wch_load_handle(w);
+    return KC_WCH_OK;
+}
+
+/**
+ * Return the runtime directory targeted by a watcher handle.
+ * @param w Watcher handle.
+ * @return Borrowed runtime directory, or NULL.
+ */
+const char *kc_wch_get_dir(const kc_wch_t *w) {
+    return w != NULL ? w->dir : NULL;
+}
+
+/**
+ * Replace recursive observation mode.
+ * @param w Watcher handle.
+ * @param recursive Nonzero enables recursive mode.
+ * @return KC_WCH_OK, KC_WCH_NOT_FOUND, or KC_WCH_ERROR.
+ */
+int kc_wch_set_recursive(
+    kc_wch_t *w,
+    int recursive
+) {
+    kc_wch_registration_t registration;
+
+    if (w == NULL) return KC_WCH_ERROR;
+    if (kc_wch_read_registration(
+            w->dir,
+            w->name,
+            &registration
+        ) != 0) {
+        return KC_WCH_NOT_FOUND;
+    }
+    registration.recursive = recursive != 0;
+    if (kc_wch_run_update(w->dir, &registration) != 0)
+        return KC_WCH_ERROR;
+    return kc_wch_load_handle(w) == 0
+        ? KC_WCH_OK
+        : KC_WCH_ERROR;
+}
+
+/**
+ * Return recursive observation mode.
+ * @param w Watcher handle.
+ * @return Nonzero when recursive, otherwise zero.
+ */
+int kc_wch_get_recursive(const kc_wch_t *w) {
+    return w != NULL && w->recursive != 0;
+}
+
+/**
+ * Register or clear one temporary event subscription.
+ * @param w Watcher handle.
+ * @param event Event name.
+ * @param handler Event handler, or NULL.
+ * @param userdata Opaque handler data.
+ * @return KC_WCH_OK on success, or KC_WCH_ERROR on failure.
+ */
+int kc_wch_on(
+    kc_wch_t *w,
+    const char *event,
+    kc_wch_handler_t handler,
+    void *userdata
+) {
+    int index;
+
+    if (w == NULL || event == NULL) return KC_WCH_ERROR;
+    if (strcmp(event, "add") == 0) index = 0;
+    else if (strcmp(event, "upd") == 0) index = 1;
+    else if (strcmp(event, "del") == 0) index = 2;
+    else return KC_WCH_ERROR;
+
+    w->handlers[index] = handler;
+    w->userdata[index] = userdata;
+    if (handler == NULL) return KC_WCH_OK;
+    if (kc_wch_read_registration(
+            w->dir,
+            w->name,
+            &(kc_wch_registration_t){0}
+        ) != 0) {
+        w->handlers[index] = NULL;
+        w->userdata[index] = NULL;
+        return KC_WCH_NOT_FOUND;
+    }
+    return kc_wch_start_subscription(w);
+}
+
+/**
+ * Release memory returned by wch.
+ * @param ptr Owned allocation, or NULL.
+ * @return None.
+ */
+void kc_wch_free(void *ptr) {
+    free(ptr);
+}
+
+/**
+ * Close and release one local watcher handle.
+ * @param w Watcher handle, or NULL.
+ * @return None.
+ */
+void kc_wch_close(kc_wch_t *w) {
+    if (w == NULL) return;
+
+    atomic_store(&w->stop, 1);
+#ifndef __EMSCRIPTEN__
+    if (w->thread_started) {
+#ifdef _WIN32
+        WaitForSingleObject(w->thread, INFINITE);
+        CloseHandle(w->thread);
+#else
+        pthread_join(w->thread, NULL);
+#endif
+    }
+#endif
+    free(w->path);
+    free(w->cmd);
+    free(w);
 }
 
 /**
