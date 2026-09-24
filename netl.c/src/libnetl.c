@@ -52,6 +52,7 @@ struct kc_netl_connection {
     kc_netl_t *listener;
     kc_netl_fd_t fd;
     int closed;
+    int want_write;
     char host[KC_NETL_HOST_SIZE];
     unsigned short port;
     struct kc_netl_connection *next;
@@ -631,6 +632,7 @@ int kc_netl_poll(
          connection = connection->next) {
         fds[index].fd = connection->fd;
         fds[index].events = POLLIN;
+        if (connection->want_write) fds[index].events |= POLLOUT;
         map[index] = connection;
         index++;
     }
@@ -648,10 +650,13 @@ int kc_netl_poll(
     }
 
     if (listener->protocol == KC_NETL_UDP) {
-        rc = (fds[0].revents & POLLIN) != 0
-            ? kc_netl_receive_datagram(listener, event)
-            : KC_NETL_EAGAIN;
-        return rc;
+        if ((fds[0].revents & POLLIN) != 0) {
+            return kc_netl_receive_datagram(listener, event);
+        }
+        if ((fds[0].revents & (POLLERR | POLLNVAL)) != 0) {
+            return KC_NETL_ENET;
+        }
+        return KC_NETL_EAGAIN;
     }
 
     if ((fds[0].revents & POLLIN) != 0 && listener->prefer_accept) {
@@ -676,6 +681,16 @@ int kc_netl_poll(
                     event
                 );
             } else if (
+                connection->want_write &&
+                (fds[index].revents & POLLOUT) != 0
+            ) {
+                connection->want_write = 0;
+                event->type = KC_NETL_EVENT_WRITABLE;
+                event->connection = connection;
+                event->host = connection->host;
+                event->port = connection->port;
+                rc = KC_NETL_OK;
+            } else if (
                 (fds[index].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0
             ) {
                 kc_netl_connection_shutdown(connection);
@@ -697,6 +712,12 @@ int kc_netl_poll(
     if (rc != KC_NETL_OK && (fds[0].revents & POLLIN) != 0) {
         rc = kc_netl_accept(listener, event);
         if (rc == KC_NETL_OK) listener->prefer_accept = 0;
+    }
+    if (
+        rc != KC_NETL_OK &&
+        (fds[0].revents & (POLLERR | POLLNVAL)) != 0
+    ) {
+        return KC_NETL_ENET;
     }
     return rc;
 }
@@ -736,11 +757,15 @@ int kc_netl_send(
         0
     );
     if (sent < 0) {
-        if (kc_netl_would_block()) return KC_NETL_EAGAIN;
+        if (kc_netl_would_block()) {
+            connection->want_write = 1;
+            return KC_NETL_EAGAIN;
+        }
         kc_netl_connection_shutdown(connection);
         return KC_NETL_ENET;
     }
     *out_sent = (size_t)sent;
+    connection->want_write = (size_t)sent < data_size;
     return KC_NETL_OK;
 }
 
