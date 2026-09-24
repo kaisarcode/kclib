@@ -1034,25 +1034,25 @@ static void kc_wch_release(kc_wch_native_t *w) {
 }
 
 #ifndef __EMSCRIPTEN__
+#ifdef _WIN32
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((noipa))
+#endif
 /**
  * Runs the asynchronous watcher loop.
  * @param arg Watcher instance.
  * @return Platform thread result.
  */
-#ifdef _WIN32
+static DWORD WINAPI kc_wch_worker(void *arg) {
+#else
 #if defined(__GNUC__) && !defined(__clang__)
 __attribute__((noipa))
 #endif
-static DWORD WINAPI kc_wch_worker(void *arg) {
-#else
 /**
  * Runs the asynchronous watcher loop on POSIX platforms.
  * @param arg Watcher instance.
  * @return Thread result pointer.
  */
-#if defined(__GNUC__) && !defined(__clang__)
-__attribute__((noipa))
-#endif
 static void *kc_wch_worker(void *arg) {
 #endif
     kc_wch_native_t *w = (kc_wch_native_t *)arg;
@@ -1306,7 +1306,6 @@ static void kc_wch_native_close(kc_wch_native_t *w) {
 }
 #endif
 
-
 struct kc_wch {
     char name[KC_WCH_NAME_MAX];
     char dir[KC_WCH_PATH_MAX];
@@ -1526,8 +1525,8 @@ static void kc_wch_chomp(char *text) {
     if (text == NULL) return;
     length = strlen(text);
     while (length > 0U &&
-            (text[length - 1U] == '\n' ||
-             text[length - 1U] == '\r')) {
+        (text[length - 1U] == '\n' ||
+        text[length - 1U] == '\r')) {
         text[--length] = '\0';
     }
 }
@@ -2102,15 +2101,15 @@ static void kc_wch_dispatch_event(
 #endif
 
 #if !defined(_WIN32) || defined(KC_WCH_CLI)
+#if defined(_WIN32) && defined(__GNUC__)
+__attribute__((noinline))
+#endif
 /**
  * Run one resident watcher from persisted registration data.
  * @param dir Runtime directory.
  * @param name Watcher name.
  * @return Process exit status.
  */
-#if defined(_WIN32) && defined(__GNUC__)
-__attribute__((noinline))
-#endif
 static int kc_wch_serve_resident(
     const char *dir,
     const char *name
@@ -2639,14 +2638,19 @@ static void kc_wch_subscription_sleep(void) {
 }
 
 #ifndef __EMSCRIPTEN__
+#ifdef _WIN32
 /**
  * Run one local temporary subscription receiver.
  * @param arg Watcher handle.
  * @return Platform thread result.
  */
-#ifdef _WIN32
 static DWORD WINAPI kc_wch_subscription_worker(void *arg) {
 #else
+/**
+ * Run one local temporary subscription receiver.
+ * @param arg Watcher handle.
+ * @return Platform thread result pointer.
+ */
 static void *kc_wch_subscription_worker(void *arg) {
 #endif
     kc_wch_t *w = (kc_wch_t *)arg;
