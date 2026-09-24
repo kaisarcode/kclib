@@ -125,7 +125,6 @@ const char *kc_wch_get_cmd(
     const kc_wch_t *w
 );
 
-
 /**
  * Replace recursive observation mode.
  * @param w Watcher handle.
