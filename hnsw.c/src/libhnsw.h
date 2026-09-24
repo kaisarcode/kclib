@@ -35,21 +35,16 @@ typedef struct {
 
 typedef struct {
     size_t dimension;
-    int has_metric;
-    int metric;
-    int has_max_connections;
-    int max_connections;
-    int has_build_effort;
-    int build_effort;
-    int has_search_effort;
-    int search_effort;
+    const int *metric;
+    const int *max_connections;
+    const int *build_effort;
+    const int *search_effort;
 } kc_hnsw_options_t;
 
 /**
  * Create one in-memory index.
- * dimension is required. Optional fields are applied only when their matching
- * has_* field is nonzero; otherwise the library uses its internal default.
- * Explicit option values are interpreted literally.
+ * dimension is required. NULL optional pointers use library defaults.
+ * Non-NULL optional pointers are interpreted literally.
  * @param out Receives the new index.
  * @param options Index configuration.
  * @return KC_HNSW_OK on success, or a negative status code.
