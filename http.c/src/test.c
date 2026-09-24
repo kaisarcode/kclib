@@ -91,11 +91,11 @@ static int expect_absent(
 
 static void test_result(int fail, const char *name, const char *detail) {
     test_case_current++;
-    printf("[%d/%d] %s: %s%s\n",
+    printf("[%d/%d] [%s] %s: %s\n",
         test_case_current,
         test_case_total,
+        fail ? "FAIL" : "PASS",
         name,
-        fail ? "FAIL - " : "PASS - ",
         detail);
 }
 
@@ -692,12 +692,6 @@ static int case_kc_http_cli(void) {
     test_result(fail, "kc_http_cli", "covers shipped parse/build/help/error contract");
     return fail != 0;
 }
-#else
-static int case_kc_http_cli(void) {
-    int fail = 0;
-    test_result(fail, "kc_http_cli", "not applicable to the reusable wasm module");
-    return 0;
-}
 #endif
 
 static int test_named(const char *name) {
@@ -709,7 +703,9 @@ static int test_named(const char *name) {
     if (strcmp(name, "kc_http_free") == 0) return case_kc_http_free();
     if (strcmp(name, "kc_http_strerror") == 0) return case_kc_http_strerror();
     if (strcmp(name, "kc_http_version") == 0) return case_kc_http_version();
+#ifndef __EMSCRIPTEN__
     if (strcmp(name, "kc_http_cli") == 0) return case_kc_http_cli();
+#endif
     fprintf(stderr, "unknown case: %s\n", name);
     return 2;
 }
@@ -725,7 +721,11 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") != 0) return test_named(argv[1]);
 
+#ifdef __EMSCRIPTEN__
+    test_case_total = 8;
+#else
     test_case_total = 9;
+#endif
     test_case_current = 0;
     test_run(&rc, case_kc_http_parser_open);
     test_run(&rc, case_kc_http_parser_write);
@@ -735,7 +735,9 @@ int main(int argc, char **argv) {
     test_run(&rc, case_kc_http_free);
     test_run(&rc, case_kc_http_strerror);
     test_run(&rc, case_kc_http_version);
+#ifndef __EMSCRIPTEN__
     test_run(&rc, case_kc_http_cli);
+#endif
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
