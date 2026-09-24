@@ -616,12 +616,14 @@ static int case_kc_init_cli(void) {
     fail += fixture_create(dir, sizeof(dir));
     if (!fail) {
 #ifdef _WIN32
-        snprintf(
-            command,
-            sizeof(command),
-            "\"%s\" --dir \"%s\" --list > NUL 2>&1",
+        rc = (int)_spawnl(
+            _P_WAIT,
             INIT_TEST_CLI,
-            dir
+            INIT_TEST_CLI,
+            "--dir",
+            dir,
+            "--list",
+            NULL
         );
 #else
         snprintf(
@@ -631,8 +633,8 @@ static int case_kc_init_cli(void) {
             INIT_TEST_CLI,
             dir
         );
-#endif
         rc = system(command);
+#endif
         fail += expect_true("local list succeeds", rc == 0);
     }
 
