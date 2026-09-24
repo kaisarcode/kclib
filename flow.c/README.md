@@ -14,8 +14,9 @@ independent and do not merge.
 
 The `flow` command executes one workflow file, accepts optional input from
 standard input, and prints the produced branch output to standard output.
-Runtime overlays can replace entries, parameters, child imports, and commands
-without editing the source file.
+Runtime overrides can replace entries, parameters, child imports, and commands
+without editing the source file. The library opens one flow file per runtime;
+overrides remain local to that runtime and are never written back to disk.
 
 ### Examples
 
@@ -230,34 +231,49 @@ printf "Hello" | ./bin/x86_64/linux/flow file.flow --link page
 ```c
 #include "libflow.h"
 
-kc_flow_t *ctx = NULL;
+kc_flow_t *flow = NULL;
 void *output = NULL;
 size_t output_size = 0;
 
-kc_flow_open(&ctx);
-kc_flow_set(ctx, "flow.hello", "Hello");
-kc_flow_exec(ctx, "file.flow", NULL, NULL, 0, &output, &output_size);
+if (kc_flow_open(&flow, "file.flow") != KC_FLOW_OK) {
+    return 1;
+}
 
-/* output is released with kc_flow_free(); a successful empty output is NULL with size 0 */
+kc_flow_set(flow, "flow.hello", "Hello");
+kc_flow_exec(flow, NULL, NULL, 0, &output, &output_size);
+
+/* output is caller-owned; successful empty output is NULL with size 0 */
 kc_flow_free(output);
-kc_flow_close(ctx);
+kc_flow_close(flow);
 ```
+
+The runtime copies the opened path. `kc_flow_set()` and `kc_flow_unset()`
+append ordered temporary overrides. Each `kc_flow_exec()` reads the opened
+flow file, applies those overrides in order, validates the effective document,
+and executes it. Overrides never modify the source file.
+
+The natural scripting projection is namespaced rather than class-based. A
+binding may expose the same capability as `flow.open`, `flow.set`,
+`flow.unset`, and `flow.exec`; the native `close` operation is lifecycle
+plumbing that a binding may handle through its normal finalizer.
 
 ---
 
 ## Lifecycle
 
-- `kc_flow_open()` - allocates and returns a new context owned by the caller.
-- `kc_flow_set()` - appends one ordered set overlay.
-- `kc_flow_unset()` - appends one ordered unset overlay.
-- `kc_flow_exec()` - executes a flow file from its declared entries, or from one explicit entry node when the `entry` argument is non-empty; an empty-string entry is rejected as an argument error. Output is caller-owned and released with `kc_flow_free()`; empty success yields NULL output with size 0.
-- `kc_flow_free()` - releases output data owned by the library.
-- `kc_flow_get_error()` - returns the borrowed last contextual error string; a fresh context returns an empty string; successful set, unset, and exec operations clear stale contextual errors; a NULL context returns NULL.
-- `kc_flow_stop()` - requests a cooperative stop; idempotent; makes subsequent execution fail with `KC_FLOW_ESTOP` until the context is closed; there is no public stop-introspection API and no reset.
+- `kc_flow_open()` - opens one existing flow file and returns a runtime associated with its copied path.
+- `kc_flow_set()` - appends one ordered temporary value override.
+- `kc_flow_unset()` - appends one ordered temporary exact-key removal.
+- `kc_flow_exec()` - executes the opened flow from declared entries, or from one explicit entry when `entry` is non-NULL. Input may contain arbitrary bytes. Output is caller-owned and released with `kc_flow_free()`; empty success yields NULL with size 0.
+- `kc_flow_error()` - returns the borrowed last contextual error string. A fresh runtime returns an empty string; successful set, unset, and exec operations clear stale contextual errors.
+- `kc_flow_free()` - releases output data owned by the caller.
+- `kc_flow_close()` - releases the runtime, its copied path, and its temporary overrides.
 - `kc_flow_version()` - returns the build version.
-- `kc_flow_close()` - releases the context and all associated resources.
 
----
+Different runtimes are independent. Concurrent mutation or execution through
+the same runtime is not a supported contract. Execution is synchronous; there
+is no public cancellation API.
+
 
 ## Build
 
