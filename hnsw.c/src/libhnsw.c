@@ -193,7 +193,7 @@ int kc_hnsw_open(kc_hnsw_t **out, const kc_hnsw_options_t *options) {
     if (out == NULL ||
         options == NULL ||
         options->dimension == 0 ||
-        !kc_hnsw_metric_valid(options->max_connectionsetric) ||
+        !kc_hnsw_metric_valid(options->metric) ||
         options->max_connections <= 0 ||
         options->build_effort <= 0 ||
         options->search_effort <= 0) {
@@ -206,7 +206,7 @@ int kc_hnsw_open(kc_hnsw_t **out, const kc_hnsw_options_t *options) {
     }
 
     hnsw->dimension = options->dimension;
-    hnsw->metric = options->max_connectionsetric;
+    hnsw->metric = options->metric;
     hnsw->max_level = -1;
     hnsw->entry_point_set = 0;
     hnsw->M = options->max_connections;
@@ -544,10 +544,10 @@ int kc_hnsw_search(const kc_hnsw_t *ctx, const float *query, size_t limit,
     }
 
     int ef = hnsw->ef_search;
-    if ((size_t)effort < limit) ef = (int)limit;
+    if ((size_t)ef < limit) ef = (int)limit;
     if (ef < 64) ef = 64;
 
-    int use_brute_force = (hnsw->count <= (size_t)effort || hnsw->count <= 1024);
+    int use_brute_force = (hnsw->count <= (size_t)ef || hnsw->count <= 1024);
     double q_norm = kc_hnsw_vector_norm(query, hnsw->dimension);
     size_t candidates_count = 0;
     kc_hnsw_node_score_t *results = NULL;
