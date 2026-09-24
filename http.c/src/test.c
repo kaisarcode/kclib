@@ -14,7 +14,10 @@
 
 #ifndef __EMSCRIPTEN__
 #ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
 #include <process.h>
+#include <sys/stat.h>
 #define TEST_GETPID _getpid
 #define TEST_CLI_NAME "http.exe"
 #else
@@ -584,7 +587,9 @@ static int test_cli_run(
     char in_path[128];
     char out_path[128];
     char err_path[128];
+#ifndef _WIN32
     char command[4096];
+#endif
     long pid = (long)TEST_GETPID();
     int rc;
 
@@ -600,16 +605,98 @@ static int test_cli_run(
 
     if (test_write_file(in_path, input, input_size) != 0) return -1;
 #ifdef _WIN32
-    snprintf(
-        command,
-        sizeof(command),
-        "\"\"%s\" %s < \"%s\" > \"%s\" 2> \"%s\"\"",
-        cli,
-        args,
-        in_path,
-        out_path,
-        err_path
-    );
+    {
+        char argbuf[2048];
+        char *argv[64];
+        char *src;
+        char *dst;
+        int argc = 1;
+        int in_fd;
+        int out_fd;
+        int err_fd;
+        int save_in;
+        int save_out;
+        int save_err;
+
+        if (strlen(args) >= sizeof(argbuf)) return -1;
+        strcpy(argbuf, args);
+        argv[0] = cli;
+
+        src = argbuf;
+        dst = argbuf;
+        while (*src != '\0') {
+            int quoted = 0;
+
+            while (*src == ' ' || *src == '\t') src++;
+            if (*src == '\0') break;
+            if (argc >= (int)(sizeof(argv) / sizeof(argv[0])) - 1) return -1;
+
+            argv[argc++] = dst;
+            while (*src != '\0') {
+                if (*src == '"') {
+                    quoted = !quoted;
+                    src++;
+                    continue;
+                }
+                if (!quoted && (*src == ' ' || *src == '\t')) break;
+                *dst++ = *src++;
+            }
+            *dst++ = '\0';
+            while (*src == ' ' || *src == '\t') src++;
+        }
+        argv[argc] = NULL;
+
+        in_fd = _open(in_path, _O_RDONLY | _O_BINARY);
+        out_fd = _open(
+            out_path,
+            _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+            _S_IREAD | _S_IWRITE
+        );
+        err_fd = _open(
+            err_path,
+            _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+            _S_IREAD | _S_IWRITE
+        );
+        if (in_fd < 0 || out_fd < 0 || err_fd < 0) {
+            if (in_fd >= 0) _close(in_fd);
+            if (out_fd >= 0) _close(out_fd);
+            if (err_fd >= 0) _close(err_fd);
+            return -1;
+        }
+
+        save_in = _dup(0);
+        save_out = _dup(1);
+        save_err = _dup(2);
+        if (save_in < 0 || save_out < 0 || save_err < 0) {
+            if (save_in >= 0) _close(save_in);
+            if (save_out >= 0) _close(save_out);
+            if (save_err >= 0) _close(save_err);
+            _close(in_fd);
+            _close(out_fd);
+            _close(err_fd);
+            return -1;
+        }
+
+        fflush(stdout);
+        fflush(stderr);
+        _dup2(in_fd, 0);
+        _dup2(out_fd, 1);
+        _dup2(err_fd, 2);
+        _close(in_fd);
+        _close(out_fd);
+        _close(err_fd);
+
+        rc = (int)_spawnv(_P_WAIT, cli, (const char * const *)argv);
+
+        fflush(stdout);
+        fflush(stderr);
+        _dup2(save_in, 0);
+        _dup2(save_out, 1);
+        _dup2(save_err, 2);
+        _close(save_in);
+        _close(save_out);
+        _close(save_err);
+    }
 #else
     snprintf(
         command,
@@ -621,8 +708,8 @@ static int test_cli_run(
         out_path,
         err_path
     );
-#endif
     rc = system(command);
+#endif
 
     if (test_read_file(out_path, out, out_size) != 0 ||
         test_read_file(err_path, err, err_size) != 0) {
