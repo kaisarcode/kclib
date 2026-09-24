@@ -181,12 +181,14 @@ int main(int argc, char **argv) {
     char *map_text;
     char *stdin_text;
     int ngram_size;
+    int ngram_size_set;
     int i;
 
     map_path = NULL;
     map_text = NULL;
     stdin_text = NULL;
-    ngram_size = 3;
+    ngram_size = 0;
+    ngram_size_set = 0;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -213,6 +215,7 @@ int main(int argc, char **argv) {
             }
 
             ngram_size = (int)val;
+            ngram_size_set = 1;
             continue;
         }
         if (argv[i][0] == '-') {
@@ -251,8 +254,13 @@ int main(int argc, char **argv) {
 
     {
         kc_tpm_t *tpm = NULL;
-        kc_tpm_options_t options = { .ngram_size = ngram_size };
+        kc_tpm_options_t options = {0};
         double score = 0.0;
+
+        if (ngram_size_set) {
+            options.has_ngram_size = 1;
+            options.ngram_size = ngram_size;
+        }
 
         if (kc_tpm_open(&tpm, map_text, &options) != KC_TPM_OK) {
             fprintf(stderr, "tpm: profile creation failed\n");
