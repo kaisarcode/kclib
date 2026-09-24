@@ -28,6 +28,7 @@
 #endif
 #ifndef _WIN32
 #  include <dirent.h>
+#  include <pwd.h>
 #  include <sys/stat.h>
 #  include <sys/types.h>
 #  include <unistd.h>
@@ -35,14 +36,6 @@
 
 #define KC_INIT_BUF   4096
 #define KC_INIT_PATH  512
-
-#ifndef KC_INIT_SYS_DIR
-#ifdef _WIN32
-#define KC_INIT_SYS_DIR "C:\\ProgramData\\kaisarcode\\init.c"
-#else
-#define KC_INIT_SYS_DIR "/etc/kaisarcode/init.c"
-#endif
-#endif
 
 typedef enum {
     KC_INIT_BACKEND_NONE = 0,
@@ -61,7 +54,10 @@ typedef void (*kc_init_row_handler_t)(
 
 struct kc_init {
     char error[256];
+    char name[128];
     char dir[KC_INIT_PATH];
+    char cmd[KC_INIT_BUF];
+    char user[256];
 #ifndef _WIN32
     kc_init_backend_t backend;
 #endif
@@ -102,6 +98,68 @@ static char *kc_init_strdup(const char *text) {
     }
     memcpy(copy, text, size);
     return copy;
+}
+
+/**
+ * Resolve the active per-user metadata directory.
+ * KC_INIT_DIR is an advanced process-level override. Otherwise the directory
+ * follows the platform user-data convention under kaisarcode/init.c.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_init_resolve_dir(char *out, size_t cap) {
+    const char *override;
+
+    if (!out || cap == 0U) return 1;
+    override = getenv("KC_INIT_DIR");
+    if (override && override[0]) {
+        return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : 1;
+    }
+
+#ifdef _WIN32
+    {
+        const char *base = getenv("LOCALAPPDATA");
+
+        if (!base || !base[0]) base = getenv("APPDATA");
+        if (!base || !base[0]) return 1;
+        return (size_t)snprintf(
+            out,
+            cap,
+            "%s\\kaisarcode\\init.c",
+            base
+        ) < cap ? 0 : 1;
+    }
+#else
+    {
+        const char *xdg = getenv("XDG_DATA_HOME");
+        const char *home = NULL;
+        const char *sudo_user = getenv("SUDO_USER");
+
+        if (xdg && xdg[0]) {
+            return (size_t)snprintf(
+                out,
+                cap,
+                "%s/kaisarcode/init.c",
+                xdg
+            ) < cap ? 0 : 1;
+        }
+
+        if (sudo_user && sudo_user[0]) {
+            struct passwd *pw = getpwnam(sudo_user);
+            if (pw && pw->pw_dir && pw->pw_dir[0]) home = pw->pw_dir;
+        }
+        if (!home) home = getenv("HOME");
+        if (!home || !home[0]) return 1;
+
+        return (size_t)snprintf(
+            out,
+            cap,
+            "%s/.local/share/kaisarcode/init.c",
+            home
+        ) < cap ? 0 : 1;
+    }
+#endif
 }
 
 /**
@@ -153,22 +211,6 @@ static int kc_init_has_suffix(const char *text, const char *suffix) {
     if (suffix_size > text_size) return 0;
     return strcmp(text + text_size - suffix_size, suffix) == 0;
 }
-
-/**
- * Resolves one backend name into a backend value.
- * @param name Backend name.
- * @return Backend value.
- */
-#ifndef _WIN32
-static kc_init_backend_t kc_init_backend_from_string(const char *name) {
-    if (!name || !name[0]) return KC_INIT_BACKEND_NONE;
-    if (strcmp(name, "systemd") == 0) return KC_INIT_BACKEND_SYSTEMD;
-    if (strcmp(name, "runit") == 0) return KC_INIT_BACKEND_RUNIT;
-    if (strcmp(name, "openrc") == 0) return KC_INIT_BACKEND_OPENRC;
-    if (strcmp(name, "sysv") == 0) return KC_INIT_BACKEND_SYSV;
-    return KC_INIT_BACKEND_NONE;
-}
-#endif
 
 /**
  * Checks if the current process has administrative/root privileges.
@@ -306,9 +348,8 @@ static int kc_init_meta_path(
 }
 
 /**
- * Check whether registration metadata exists in the configured or fallback
- * metadata directory.
- * @param init Startup registry context.
+ * Check whether registration metadata exists in the active metadata directory.
+ * @param init Startup entry handle.
  * @param key Registration key.
  * @return 1 when metadata exists, otherwise 0.
  */
@@ -316,25 +357,15 @@ static int kc_init_entry_exists(const kc_init_t *init, const char *key) {
     char path[KC_INIT_PATH];
 
     if (!init || !key) return 0;
-    if (kc_init_meta_path(init->dir, key, path, sizeof(path)) == 0) {
+    if (kc_init_meta_path(init->dir, key, path, sizeof(path)) != 0) return 0;
 #ifdef _WIN32
-        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 1;
+    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
 #else
+    {
         struct stat st;
-        if (stat(path, &st) == 0) return 1;
-#endif
+        return stat(path, &st) == 0;
     }
-
-    if (strcmp(init->dir, KC_INIT_SYS_DIR) != 0 &&
-            kc_init_meta_path(KC_INIT_SYS_DIR, key, path, sizeof(path)) == 0) {
-#ifdef _WIN32
-        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) return 1;
-#else
-        struct stat st;
-        if (stat(path, &st) == 0) return 1;
 #endif
-    }
-    return 0;
 }
 
 /**
@@ -714,13 +745,6 @@ static int kc_init_run_delete_sysv(
         return 0;
     (void)remove(meta);
 
-    if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
-        if (kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
-                sizeof(meta)) == 0) {
-            (void)remove(meta);
-        }
-    }
-
     if (kc_init_initd_dir(initd, sizeof(initd)) == 0 &&
             kc_init_script_path(initd, key, script,
                 sizeof(script)) == 0) {
@@ -730,34 +754,6 @@ static int kc_init_run_delete_sysv(
         kc_init_remove_links(rcd, key);
 
     return 0;
-}
-
-/**
- * Executes the registered command for a key on SysV.
- * @param dir  Metadata directory.
- * @param key  Registration key name.
- * @return 0 on success, 1 on failure.
- */
-static int kc_init_run_exec_sysv(
-    const char *dir, const char *key
-) {
-    char meta[KC_INIT_PATH];
-    char cmd[KC_INIT_BUF];
-
-    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0)
-        return 1;
-    if (kc_init_read_meta(meta, cmd, sizeof(cmd)) != 0) {
-        if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
-            if (kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
-                    sizeof(meta)) == 0 &&
-                    kc_init_read_meta(meta, cmd, sizeof(cmd)) == 0) {
-                goto found;
-            }
-        }
-        return 1;
-    }
-found:
-    return system(cmd) == 0 ? 0 : 1;
 }
 
 /**
@@ -833,12 +829,6 @@ static int kc_init_run_list_one_sysv(
     if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0 &&
             stat(meta, &st) == 0) {
         return kc_init_ls_row_sysv(dir, key, cb, userdata);
-    }
-    if (strcmp(dir, KC_INIT_SYS_DIR) != 0 &&
-            kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
-                sizeof(meta)) == 0 &&
-            stat(meta, &st) == 0) {
-        return kc_init_ls_row_sysv(KC_INIT_SYS_DIR, key, cb, userdata);
     }
     return 1;
 }
@@ -1285,13 +1275,6 @@ static int kc_init_run_delete_win32(
         return 0;
     (void)DeleteFileA(meta);
 
-    if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
-        if (kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
-                sizeof(meta)) == 0) {
-            (void)DeleteFileA(meta);
-        }
-    }
-
     if (kc_init_startup_dir(startup, sizeof(startup)) == 0 &&
             kc_init_launcher_path(startup, key, launcher,
                 sizeof(launcher)) == 0) {
@@ -1300,34 +1283,6 @@ static int kc_init_run_delete_win32(
     kc_init_reg_delete(key);
 
     return 0;
-}
-
-/**
- * Executes the registered command for a key on Windows.
- * @param dir  Metadata directory.
- * @param key  Registration key name.
- * @return 0 on success, 1 on failure.
- */
-static int kc_init_run_exec_win32(
-    const char *dir, const char *key
-) {
-    char meta[KC_INIT_PATH];
-    char cmd[KC_INIT_BUF];
-
-    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0)
-        return 1;
-    if (kc_init_read_meta(meta, cmd, sizeof(cmd)) != 0) {
-        if (strcmp(dir, KC_INIT_SYS_DIR) != 0) {
-            if (kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
-                    sizeof(meta)) == 0 &&
-                    kc_init_read_meta(meta, cmd, sizeof(cmd)) == 0) {
-                goto found;
-            }
-        }
-        return 1;
-    }
-found:
-    return system(cmd) == 0 ? 0 : 1;
 }
 
 /**
@@ -1409,13 +1364,6 @@ static int kc_init_run_list_one_win32(
         if (attr != INVALID_FILE_ATTRIBUTES)
             return kc_init_ls_row_win32(dir, key, cb, userdata);
     }
-    if (strcmp(dir, KC_INIT_SYS_DIR) != 0 &&
-            kc_init_meta_path(KC_INIT_SYS_DIR, key, meta,
-                sizeof(meta)) == 0) {
-        attr = GetFileAttributesA(meta);
-        if (attr != INVALID_FILE_ATTRIBUTES)
-            return kc_init_ls_row_win32(KC_INIT_SYS_DIR, key, cb, userdata);
-    }
     return 1;
 }
 
@@ -1489,20 +1437,6 @@ static int kc_init_run_delete(kc_init_t *ctx, const char *key) {
         default:
             return kc_init_run_delete_sysv(ctx->dir, key);
     }
-#endif
-}
-
-/**
- * Dispatches exec to the platform backend.
- * @param ctx  Context pointer.
- * @param key  Registration key name.
- * @return 0 on success, 1 on failure.
- */
-static int kc_init_run_exec(kc_init_t *ctx, const char *key) {
-#ifdef _WIN32
-    return kc_init_run_exec_win32(ctx->dir, key);
-#else
-    return kc_init_run_exec_sysv(ctx->dir, key);
 #endif
 }
 
@@ -1668,7 +1602,7 @@ static int kc_init_collect_finish(
 
         size = strlen(collect->entries[i].key) + 1U;
         memcpy(cursor, collect->entries[i].key, size);
-        entries[i].key = cursor;
+        entries[i].name = cursor;
         cursor += size;
 
         size = strlen(collect->entries[i].user) + 1U;
@@ -1688,67 +1622,235 @@ static int kc_init_collect_finish(
 }
 
 /**
- * Initialize a startup registry context.
- * @param out Output context pointer.
- * @param options Startup registry options, or NULL for defaults.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ * Load one persistent startup entry into a local handle.
+ * @param init Entry handle with name and directory already set.
+ * @return KC_INIT_OK on success, KC_INIT_NOT_FOUND when absent,
+ *         or KC_INIT_ERROR on failure.
  */
-int kc_init_open(kc_init_t **out, const kc_init_options_t *options) {
-    kc_init_t *init;
-    const char *dir;
+static int kc_init_load(kc_init_t *init) {
+    kc_init_collect_t collect;
+    int rc;
 
-    if (!out) return KC_INIT_ERROR;
-    *out = NULL;
-
-    dir = options && options->dir ? options->dir : KC_INIT_SYS_DIR;
-    if (!dir[0]) return KC_INIT_ERROR;
-
-    init = (kc_init_t *)calloc(1, sizeof(*init));
-    if (!init) return KC_INIT_ERROR;
-
-    if ((size_t)snprintf(init->dir, sizeof(init->dir), "%s", dir)
-            >= sizeof(init->dir)) {
-        free(init);
+    memset(&collect, 0, sizeof(collect));
+    rc = kc_init_run_list_one(
+        init,
+        init->name,
+        kc_init_collect_row,
+        &collect
+    );
+    if (rc != 0 || collect.count == 0U) {
+        kc_init_collect_clear(&collect);
+        return KC_INIT_NOT_FOUND;
+    }
+    if (collect.failed || collect.count != 1U) {
+        kc_init_collect_clear(&collect);
         return KC_INIT_ERROR;
     }
 
-#ifndef _WIN32
-    if (options && options->backend) {
-        init->backend = kc_init_backend_from_string(options->backend);
-        if (init->backend == KC_INIT_BACKEND_NONE) {
-            free(init);
-            return KC_INIT_ERROR;
-        }
-    } else {
-        init->backend = kc_init_detect_backend();
+    if ((size_t)snprintf(
+            init->cmd,
+            sizeof(init->cmd),
+            "%s",
+            collect.entries[0].cmd
+        ) >= sizeof(init->cmd) ||
+        (size_t)snprintf(
+            init->user,
+            sizeof(init->user),
+            "%s",
+            collect.entries[0].user
+        ) >= sizeof(init->user)) {
+        kc_init_collect_clear(&collect);
+        return KC_INIT_ERROR;
     }
+
+    kc_init_collect_clear(&collect);
+    return KC_INIT_OK;
+}
+
+/**
+ * Create or replace one persistent startup registration.
+ * The active init backend is detected internally.
+ * @param name Registration name.
+ * @param options Startup registration options.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ */
+int kc_init_create(
+    const char *name,
+    const kc_init_options_t *options
+) {
+    kc_init_t init;
+
+    if (!kc_init_key_valid(name) || !options ||
+            !kc_init_cmd_valid(options->cmd)) {
+        return KC_INIT_ERROR;
+    }
+
+    memset(&init, 0, sizeof(init));
+    if (kc_init_resolve_dir(init.dir, sizeof(init.dir)) != 0) {
+        return KC_INIT_ERROR;
+    }
+#ifndef _WIN32
+    init.backend = kc_init_detect_backend();
+    if (init.backend == KC_INIT_BACKEND_NONE) return KC_INIT_ERROR;
 #endif
+
+    if (kc_init_run_update(&init, name, options->cmd) != 0) {
+        return KC_INIT_ERROR;
+    }
+    return KC_INIT_OK;
+}
+
+/**
+ * Open one persistent startup registration.
+ * @param out Output location for the caller-owned handle.
+ * @param name Registration name.
+ * @return KC_INIT_OK on success, KC_INIT_NOT_FOUND when absent,
+ *         or KC_INIT_ERROR on failure.
+ */
+int kc_init_open(kc_init_t **out, const char *name) {
+    kc_init_t *init;
+    int rc;
+
+    if (!out || !kc_init_key_valid(name)) return KC_INIT_ERROR;
+    *out = NULL;
+
+    init = (kc_init_t *)calloc(1, sizeof(*init));
+    if (!init) return KC_INIT_ERROR;
+    if ((size_t)snprintf(
+            init->name,
+            sizeof(init->name),
+            "%s",
+            name
+        ) >= sizeof(init->name) ||
+        kc_init_resolve_dir(init->dir, sizeof(init->dir)) != 0) {
+        free(init);
+        return KC_INIT_ERROR;
+    }
+#ifndef _WIN32
+    init->backend = kc_init_detect_backend();
+#endif
+
+    rc = kc_init_load(init);
+    if (rc != KC_INIT_OK) {
+        free(init);
+        return rc;
+    }
 
     *out = init;
     return KC_INIT_OK;
 }
 
 /**
- * Release a startup registry context.
- * @param init Startup registry context, or NULL.
- * @return None.
+ * List persistent startup registrations in the active user namespace.
+ * The returned array and its strings share one allocation released with
+ * kc_init_free().
+ * @param out_entries Receives the allocated entry array, or NULL when empty.
+ * @param out_count Receives the number of entries.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-void kc_init_close(kc_init_t *init) {
-    free(init);
+int kc_init_list(
+    kc_init_entry_t **out_entries,
+    size_t *out_count
+) {
+    kc_init_t init;
+    kc_init_collect_t collect;
+    int rc;
+
+    if (out_entries) *out_entries = NULL;
+    if (out_count) *out_count = 0U;
+    if (!out_entries || !out_count) return KC_INIT_ERROR;
+
+    memset(&init, 0, sizeof(init));
+    memset(&collect, 0, sizeof(collect));
+    if (kc_init_resolve_dir(init.dir, sizeof(init.dir)) != 0) {
+        return KC_INIT_ERROR;
+    }
+
+    rc = kc_init_run_list(&init, kc_init_collect_row, &collect);
+    if (rc != 0 || collect.failed) {
+        kc_init_collect_clear(&collect);
+        return KC_INIT_ERROR;
+    }
+
+    rc = kc_init_collect_finish(&collect, out_entries, out_count);
+    kc_init_collect_clear(&collect);
+    return rc;
 }
 
 /**
- * Return the resolved metadata directory.
- * @param init Startup registry context.
- * @return Borrowed metadata directory path, or NULL on invalid input.
+ * Remove one persistent startup registration.
+ * Missing registrations are a successful no-op.
+ * @param name Registration name.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-const char *kc_init_path(const kc_init_t *init) {
-    return init ? init->dir : NULL;
+int kc_init_delete(const char *name) {
+    kc_init_t init;
+
+    if (!kc_init_key_valid(name)) return KC_INIT_ERROR;
+    memset(&init, 0, sizeof(init));
+    if (kc_init_resolve_dir(init.dir, sizeof(init.dir)) != 0) {
+        return KC_INIT_ERROR;
+    }
+#ifndef _WIN32
+    init.backend = kc_init_detect_backend();
+#endif
+
+    if (!kc_init_entry_exists(&init, name)) return KC_INIT_OK;
+    return kc_init_run_delete(&init, name) == 0
+        ? KC_INIT_OK
+        : KC_INIT_ERROR;
 }
 
 /**
- * Return the last context error message.
- * @param init Startup registry context.
+ * Replace the command of one persistent startup registration.
+ * @param init Startup entry handle.
+ * @param cmd New one-line startup command.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ */
+int kc_init_set_cmd(kc_init_t *init, const char *cmd) {
+    if (!init || !kc_init_cmd_valid(cmd)) return KC_INIT_ERROR;
+#ifndef _WIN32
+    if (init->backend == KC_INIT_BACKEND_NONE) {
+        init->backend = kc_init_detect_backend();
+    }
+#endif
+    if (kc_init_run_update(init, init->name, cmd) != 0) {
+        kc_init_set_error(init, "set command failed");
+        return KC_INIT_ERROR;
+    }
+    if ((size_t)snprintf(
+            init->cmd,
+            sizeof(init->cmd),
+            "%s",
+            cmd
+        ) >= sizeof(init->cmd)) {
+        return KC_INIT_ERROR;
+    }
+    init->error[0] = '\0';
+    return KC_INIT_OK;
+}
+
+/**
+ * Return the command of one opened startup registration.
+ * @param init Startup entry handle.
+ * @return Borrowed command string, or NULL on invalid input.
+ */
+const char *kc_init_get_cmd(const kc_init_t *init) {
+    return init ? init->cmd : NULL;
+}
+
+/**
+ * Return the recorded user of one opened startup registration.
+ * @param init Startup entry handle.
+ * @return Borrowed user string, or NULL on invalid input.
+ */
+const char *kc_init_get_user(const kc_init_t *init) {
+    return init ? init->user : NULL;
+}
+
+/**
+ * Return the last handle error message.
+ * @param init Startup entry handle.
  * @return Borrowed error text, or NULL when unset.
  */
 const char *kc_init_error(const kc_init_t *init) {
@@ -1757,107 +1859,12 @@ const char *kc_init_error(const kc_init_t *init) {
 }
 
 /**
- * Register or replace a named startup command.
- * @param init Startup registry context.
- * @param key Registration key.
- * @param cmd One-line shell command.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ * Release one local startup entry handle.
+ * @param init Startup entry handle, or NULL.
+ * @return None.
  */
-int kc_init_set(kc_init_t *init, const char *key, const char *cmd) {
-    if (!init || !kc_init_key_valid(key) || !kc_init_cmd_valid(cmd)) {
-        return KC_INIT_ERROR;
-    }
-
-    if (kc_init_run_update(init, key, cmd) != 0) {
-        kc_init_set_error(init, "set failed");
-        return KC_INIT_ERROR;
-    }
-    return KC_INIT_OK;
-}
-
-/**
- * Execute one registered command immediately.
- * @param init Startup registry context.
- * @param key Registration key.
- * @return KC_INIT_OK on success, KC_INIT_NOT_FOUND when absent,
- *         or KC_INIT_ERROR on failure.
- */
-int kc_init_exec(kc_init_t *init, const char *key) {
-    if (!init || !kc_init_key_valid(key)) return KC_INIT_ERROR;
-
-    if (!kc_init_entry_exists(init, key)) {
-        kc_init_set_error(init, "not found");
-        return KC_INIT_NOT_FOUND;
-    }
-
-    if (kc_init_run_exec(init, key) != 0) {
-        kc_init_set_error(init, "exec failed");
-        return KC_INIT_ERROR;
-    }
-    return KC_INIT_OK;
-}
-
-/**
- * List startup registrations.
- * @param init Startup registry context.
- * @param key Optional registration key, or NULL for all.
- * @param out_entries Receives the allocated entry array.
- * @param out_count Receives the entry count.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
- */
-int kc_init_list(
-    kc_init_t *init,
-    const char *key,
-    kc_init_entry_t **out_entries,
-    size_t *out_count
-) {
-    kc_init_collect_t collect;
-    int rc;
-
-    if (out_entries) *out_entries = NULL;
-    if (out_count) *out_count = 0U;
-    if (!init || !out_entries || !out_count) return KC_INIT_ERROR;
-    if (key && !kc_init_key_valid(key)) return KC_INIT_ERROR;
-
-    memset(&collect, 0, sizeof(collect));
-    if (key) {
-        rc = kc_init_run_list_one(init, key, kc_init_collect_row, &collect);
-        if (rc != 0 && !kc_init_entry_exists(init, key)) rc = 0;
-    } else {
-        rc = kc_init_run_list(init, kc_init_collect_row, &collect);
-    }
-
-    if (rc != 0 || collect.failed) {
-        kc_init_collect_clear(&collect);
-        kc_init_set_error(init, "list failed");
-        return KC_INIT_ERROR;
-    }
-
-    rc = kc_init_collect_finish(&collect, out_entries, out_count);
-    kc_init_collect_clear(&collect);
-    if (rc != KC_INIT_OK) {
-        kc_init_set_error(init, "list failed");
-        return KC_INIT_ERROR;
-    }
-    return KC_INIT_OK;
-}
-
-/**
- * Remove one named startup registration.
- * @param init Startup registry context.
- * @param key Registration key.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
- */
-int kc_init_delete(kc_init_t *init, const char *key) {
-    if (!init || !kc_init_key_valid(key)) return KC_INIT_ERROR;
-
-    if (!kc_init_entry_exists(init, key)) return KC_INIT_OK;
-
-    if (kc_init_run_delete(init, key) != 0) {
-        kc_init_set_error(init, "delete failed");
-        return KC_INIT_ERROR;
-    }
-    return KC_INIT_OK;
+void kc_init_close(kc_init_t *init) {
+    free(init);
 }
 
 /**
