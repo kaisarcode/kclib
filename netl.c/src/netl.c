@@ -1,416 +1,666 @@
 /**
- * netl.c - Network listener.
- * Summary: Command line interface for registering and running named network listeners.
+ * netl.c - Incoming network listener CLI.
+ * Summary: Dispatches TCP connections or UDP datagrams to local commands.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "libnetl.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef _WIN32
-#  define _POSIX_C_SOURCE 200809L
-#  include <fcntl.h>
-#  include <unistd.h>
-#  include <sys/types.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <windows.h>
 #else
-#  ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#  endif
-#  include <windows.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
+#define NETL_CLI_COMMAND_SIZE 4096
+
+intptr_t kc_netl_cli_take_connection(kc_netl_connection_t *connection);
+
 /**
- * Prints command usage information.
+ * Print command usage.
  * @param name Program executable name.
  * @return None.
  */
-static void kc_netl_help(const char *name) {
-    printf("Usage: %s <name> <addr>[:port] [--udp] <cmd>\n", name);
-    printf("       %s <name> [-d|--delete]\n", name);
-    printf("       %s <name> [-s|--stop]\n", name);
-    printf("       %s <name> [-l|--list]\n", name);
-    printf("       %s [-l|--list]\n", name);
-    printf("       %s <name>\n", name);
-    printf("\n");
-    printf("Options:\n");
-    printf("  --tcp          Use TCP (default)\n");
-    printf("  --udp          Use UDP\n");
-    printf("  -d, --delete   Remove a registration\n");
-    printf("  -s, --stop     Stop a running listener\n");
-    printf("  -l, --list     List registrations\n");
-    printf("  -h, --help     Show this help\n");
-    printf("  -v, --version  Show version\n");
+static void cli_help(const char *name) {
+    printf("Usage: %s <addr>[:port] [--tcp|--udp] <command>\n", name);
+    printf("       %s --help\n", name);
+    printf("       %s --version\n", name);
 }
 
 /**
- * Prints one registration entry as key followed by address.
- * @param key Registration name.
- * @param addrport Address and port string.
- * @param userdata Unused.
- * @return None.
+ * Parse host and optional port.
+ * @param text Input address text.
+ * @param host Destination host buffer.
+ * @param host_cap Host buffer capacity.
+ * @param port Destination port.
+ * @return Zero on success, otherwise nonzero.
  */
-static void kc_netl_cli_list_cb(
-const char *key,
-const char *addrport,
-void *userdata
-) {
-    (void)userdata;
-    printf("%s\t%s\n", key, addrport);
-}
-
-/**
- * Lists all registrations.
- * @param opts Options.
- * @return 0 on success, 1 on failure.
- */
-static int kc_netl_cli_list_all(const kc_netl_options_t *opts) {
-    kc_netl_t *ctx = NULL;
-    int rc;
-
-    if (kc_netl_open(&ctx, opts) != KC_NETL_OK) {
-        fprintf(stderr, "netl: unknown command or invalid arguments\n");
-        return 1;
-    }
-    rc = kc_netl_list(ctx, NULL, kc_netl_cli_list_cb, NULL);
-    kc_netl_close(ctx);
-    if (rc != KC_NETL_OK) {
-        fprintf(stderr, "netl: unknown command or invalid arguments\n");
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Lists one named registration.
- * @param opts Options.
- * @param name Registration name.
- * @return 0 on success, 1 on failure.
- */
-static int kc_netl_cli_list_one(const kc_netl_options_t *opts, const char *name) {
-    kc_netl_t *ctx = NULL;
-    int rc;
-
-    if (kc_netl_open(&ctx, opts) != KC_NETL_OK) {
-        fprintf(stderr, "netl: %s: not found\n", name);
-        return 1;
-    }
-    rc = kc_netl_list(ctx, name, kc_netl_cli_list_cb, NULL);
-    kc_netl_close(ctx);
-    if (rc != KC_NETL_OK) {
-        fprintf(stderr, "netl: %s: not found\n", name);
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Removes a named registration.
- * @param opts Options.
- * @param name Registration name.
- * @return 0 on success, 1 on failure.
- */
-static int kc_netl_cli_delete(const kc_netl_options_t *opts, const char *name) {
-    kc_netl_t *ctx = NULL;
-    int rc;
-
-    if (kc_netl_open(&ctx, opts) != KC_NETL_OK) {
-        fprintf(stderr, "netl: unknown command or invalid arguments\n");
-        return 1;
-    }
-    rc = kc_netl_delete(ctx, name);
-    kc_netl_close(ctx);
-    if (rc != KC_NETL_OK) {
-        fprintf(stderr, "netl: unknown command or invalid arguments\n");
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Stops a named registration's recorded listener.
- * @param opts Options.
- * @param name Registration name.
- * @return 0 on success, 1 on failure.
- */
-static int kc_netl_cli_stop(const kc_netl_options_t *opts, const char *name) {
-    kc_netl_t *ctx = NULL;
-    int rc;
-
-    if (kc_netl_open(&ctx, opts) != KC_NETL_OK) {
-        fprintf(stderr, "netl: unknown command or invalid arguments\n");
-        return 1;
-    }
-    rc = kc_netl_stop(ctx, name);
-    kc_netl_close(ctx);
-    if (rc != KC_NETL_OK) {
-        fprintf(stderr, "netl: unknown command or invalid arguments\n");
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Registers or replaces a named listener.
- * @param opts  Options.
- * @param name  Registration name.
- * @param host  Bind host.
- * @param port  Bind port.
- * @param proto KC_NETL_TCP or KC_NETL_UDP.
- * @param cmd   Shell command to dispatch.
- * @return 0 on success, 1 on failure.
- */
-static int kc_netl_cli_update(
-const kc_netl_options_t *opts,
-const char *name,
-const char *host,
-unsigned short port,
-int proto,
-const char *cmd
-) {
-    kc_netl_t *ctx = NULL;
-    int rc;
-
-    if (kc_netl_open(&ctx, opts) != KC_NETL_OK) {
-        fprintf(stderr, "netl: unknown command or invalid arguments\n");
-        return 1;
-    }
-    rc = kc_netl_update(ctx, name, host, port, proto, cmd);
-    kc_netl_close(ctx);
-    if (rc != KC_NETL_OK) {
-        fprintf(stderr, "netl: unknown command or invalid arguments\n");
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Parses address and optional port from host[:port] text.
- * @param text     Input address text.
- * @param host     Output host buffer.
- * @param host_cap Output host capacity.
- * @param port     Output port pointer.
- * @return 0 on success, or 1 on failure.
- */
-static int kc_netl_parse_addr(
-const char *text,
-char *host,
-size_t host_cap,
-unsigned short *port
+static int cli_parse_address(
+    const char *text,
+    char *host,
+    size_t host_cap,
+    unsigned short *port
 ) {
     const char *colon;
     char *end;
     unsigned long value;
-    size_t n;
+    size_t host_len;
 
-    if (!text || !text[0] || !host || host_cap == 0 || !port) return 1;
+    if (
+        text == NULL ||
+        text[0] == '\0' ||
+        host == NULL ||
+        host_cap == 0U ||
+        port == NULL
+    ) {
+        return 1;
+    }
+
     colon = strrchr(text, ':');
-    *port = 80;
-    if (!colon) {
-        n = strlen(text);
-        if (n == 0 || n >= host_cap) return 1;
-        memcpy(host, text, n + 1);
+    if (colon == NULL) {
+        host_len = strlen(text);
+        if (host_len >= host_cap) return 1;
+        memcpy(host, text, host_len + 1U);
+        *port = 80U;
         return 0;
     }
+
     if (colon == text || colon[1] == '\0') return 1;
-    n = (size_t)(colon - text);
-    if (n == 0 || n >= host_cap) return 1;
-    memcpy(host, text, n);
-    host[n] = '\0';
+    host_len = (size_t)(colon - text);
+    if (host_len >= host_cap) return 1;
+    memcpy(host, text, host_len);
+    host[host_len] = '\0';
+
     value = strtoul(colon + 1, &end, 10);
-    if (*end != '\0' || value == 0 || value > 65535) return 1;
+    if (*end != '\0' || value == 0UL || value > 65535UL) return 1;
     *port = (unsigned short)value;
     return 0;
+}
+
+/**
+ * Join command-line command arguments.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @param start First command argument.
+ * @param out Destination command buffer.
+ * @param out_cap Destination capacity.
+ * @return Zero on success, otherwise nonzero.
+ */
+static int cli_join_command(
+    int argc,
+    char **argv,
+    int start,
+    char *out,
+    size_t out_cap
+) {
+    size_t used = 0U;
+    int i;
+
+    if (start >= argc || out_cap == 0U) return 1;
+    out[0] = '\0';
+
+    for (i = start; i < argc; i++) {
+        size_t len = strlen(argv[i]);
+
+        if (used != 0U) {
+            if (used + 1U >= out_cap) return 1;
+            out[used++] = ' ';
+        }
+        if (len >= out_cap - used) return 1;
+        memcpy(out + used, argv[i], len);
+        used += len;
+        out[used] = '\0';
+    }
+
+    return used == 0U ? 1 : 0;
+}
+
+#ifndef _WIN32
+/**
+ * Reap completed command processes.
+ * @param signal_number Signal number.
+ * @return None.
+ */
+static void cli_reap(int signal_number) {
+    (void)signal_number;
+    while (waitpid(-1, NULL, WNOHANG) > 0) {
+    }
+}
+
+/**
+ * Dispatch one accepted TCP socket to a shell command.
+ * @param native_socket Native accepted socket.
+ * @param command Shell command.
+ * @return Zero when launched, otherwise nonzero.
+ */
+static int cli_dispatch_tcp(
+    intptr_t native_socket,
+    const char *command
+) {
+    int fd = (int)native_socket;
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        close(fd);
+        return 1;
+    }
+    if (pid == 0) {
+        if (dup2(fd, STDIN_FILENO) < 0 ||
+            dup2(fd, STDOUT_FILENO) < 0) {
+            _exit(1);
+        }
+        if (fd > STDERR_FILENO) close(fd);
+        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+        _exit(1);
+    }
+
+    close(fd);
+    return 0;
+}
+
+/**
+ * Dispatch one UDP datagram to a shell command.
+ * @param command Shell command.
+ * @param data Datagram bytes.
+ * @param data_size Datagram size.
+ * @return Zero when launched, otherwise nonzero.
+ */
+static int cli_dispatch_udp(
+    const char *command,
+    const void *data,
+    size_t data_size
+) {
+    int pipefd[2];
+    pid_t pid;
+    size_t offset = 0U;
+
+    if (pipe(pipefd) != 0) return 1;
+    pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return 1;
+    }
+    if (pid == 0) {
+        close(pipefd[1]);
+        if (dup2(pipefd[0], STDIN_FILENO) < 0) _exit(1);
+        if (pipefd[0] > STDERR_FILENO) close(pipefd[0]);
+        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+        _exit(1);
+    }
+
+    close(pipefd[0]);
+    while (offset < data_size) {
+        ssize_t written = write(
+            pipefd[1],
+            (const unsigned char *)data + offset,
+            data_size - offset
+        );
+        if (written <= 0) break;
+        offset += (size_t)written;
+    }
+    close(pipefd[1]);
+    return offset == data_size ? 0 : 1;
+}
+#else
+typedef struct {
+    SOCKET socket;
+    char command[NETL_CLI_COMMAND_SIZE];
+} cli_tcp_worker_t;
+
+typedef struct {
+    SOCKET socket;
+    HANDLE pipe;
+} cli_socket_pipe_t;
+
+/**
+ * Relay socket bytes into child stdin.
+ * @param arg Relay state.
+ * @return Thread result.
+ */
+static DWORD WINAPI cli_socket_to_pipe(LPVOID arg) {
+    cli_socket_pipe_t *relay = (cli_socket_pipe_t *)arg;
+    char buffer[8192];
+    int received;
+    DWORD written;
+
+    while ((received = recv(
+        relay->socket,
+        buffer,
+        (int)sizeof(buffer),
+        0
+    )) > 0) {
+        if (!WriteFile(
+                relay->pipe,
+                buffer,
+                (DWORD)received,
+                &written,
+                NULL
+            )) {
+            break;
+        }
+    }
+
+    CloseHandle(relay->pipe);
+    return 0;
+}
+
+/**
+ * Relay child stdout bytes into the socket.
+ * @param arg Relay state.
+ * @return Thread result.
+ */
+static DWORD WINAPI cli_pipe_to_socket(LPVOID arg) {
+    cli_socket_pipe_t *relay = (cli_socket_pipe_t *)arg;
+    char buffer[8192];
+    DWORD received;
+
+    while (ReadFile(
+        relay->pipe,
+        buffer,
+        (DWORD)sizeof(buffer),
+        &received,
+        NULL
+    ) && received != 0U) {
+        size_t offset = 0U;
+
+        while (offset < (size_t)received) {
+            int sent = send(
+                relay->socket,
+                buffer + offset,
+                (int)((size_t)received - offset),
+                0
+            );
+            if (sent <= 0) {
+                CloseHandle(relay->pipe);
+                return 0;
+            }
+            offset += (size_t)sent;
+        }
+    }
+
+    CloseHandle(relay->pipe);
+    return 0;
+}
+
+/**
+ * Run one command for one accepted TCP socket.
+ * @param arg Worker state.
+ * @return Thread result.
+ */
+static DWORD WINAPI cli_tcp_worker(LPVOID arg) {
+    cli_tcp_worker_t *worker = (cli_tcp_worker_t *)arg;
+    SECURITY_ATTRIBUTES attributes = {
+        sizeof(SECURITY_ATTRIBUTES),
+        NULL,
+        TRUE
+    };
+    STARTUPINFOA startup;
+    PROCESS_INFORMATION process;
+    HANDLE input_read = NULL;
+    HANDLE input_write = NULL;
+    HANDLE output_read = NULL;
+    HANDLE output_write = NULL;
+    HANDLE input_thread = NULL;
+    HANDLE output_thread = NULL;
+    cli_socket_pipe_t input_relay;
+    cli_socket_pipe_t output_relay;
+    char command[NETL_CLI_COMMAND_SIZE];
+
+    memset(&startup, 0, sizeof(startup));
+    memset(&process, 0, sizeof(process));
+    startup.cb = sizeof(startup);
+
+    if (!CreatePipe(
+            &input_read,
+            &input_write,
+            &attributes,
+            0
+        )) {
+        goto done;
+    }
+    if (!CreatePipe(
+            &output_read,
+            &output_write,
+            &attributes,
+            0
+        )) {
+        goto done;
+    }
+
+    SetHandleInformation(input_write, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(output_read, HANDLE_FLAG_INHERIT, 0);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = input_read;
+    startup.hStdOutput = output_write;
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+
+    snprintf(command, sizeof(command), "%s", worker->command);
+    if (!CreateProcessA(
+            NULL,
+            command,
+            NULL,
+            NULL,
+            TRUE,
+            CREATE_NO_WINDOW,
+            NULL,
+            NULL,
+            &startup,
+            &process
+        )) {
+        goto done;
+    }
+
+    CloseHandle(input_read);
+    input_read = NULL;
+    CloseHandle(output_write);
+    output_write = NULL;
+
+    input_relay.socket = worker->socket;
+    input_relay.pipe = input_write;
+    output_relay.socket = worker->socket;
+    output_relay.pipe = output_read;
+
+    input_thread = CreateThread(
+        NULL,
+        0,
+        cli_socket_to_pipe,
+        &input_relay,
+        0,
+        NULL
+    );
+    output_thread = CreateThread(
+        NULL,
+        0,
+        cli_pipe_to_socket,
+        &output_relay,
+        0,
+        NULL
+    );
+
+    WaitForSingleObject(process.hProcess, INFINITE);
+    if (input_thread != NULL) {
+        WaitForSingleObject(input_thread, INFINITE);
+        CloseHandle(input_thread);
+        input_write = NULL;
+    }
+    if (output_thread != NULL) {
+        WaitForSingleObject(output_thread, INFINITE);
+        CloseHandle(output_thread);
+        output_read = NULL;
+    }
+
+done:
+    if (process.hProcess != NULL) CloseHandle(process.hProcess);
+    if (process.hThread != NULL) CloseHandle(process.hThread);
+    if (input_read != NULL) CloseHandle(input_read);
+    if (input_write != NULL) CloseHandle(input_write);
+    if (output_read != NULL) CloseHandle(output_read);
+    if (output_write != NULL) CloseHandle(output_write);
+    closesocket(worker->socket);
+    free(worker);
+    return 0;
+}
+
+/**
+ * Dispatch one accepted TCP socket to a command worker.
+ * @param native_socket Native accepted socket.
+ * @param command Command line.
+ * @return Zero when launched, otherwise nonzero.
+ */
+static int cli_dispatch_tcp(
+    intptr_t native_socket,
+    const char *command
+) {
+    cli_tcp_worker_t *worker;
+    HANDLE thread;
+
+    worker = (cli_tcp_worker_t *)calloc(1, sizeof(*worker));
+    if (worker == NULL) {
+        closesocket((SOCKET)native_socket);
+        return 1;
+    }
+
+    worker->socket = (SOCKET)native_socket;
+    snprintf(worker->command, sizeof(worker->command), "%s", command);
+    thread = CreateThread(NULL, 0, cli_tcp_worker, worker, 0, NULL);
+    if (thread == NULL) {
+        closesocket(worker->socket);
+        free(worker);
+        return 1;
+    }
+
+    CloseHandle(thread);
+    return 0;
+}
+
+/**
+ * Dispatch one UDP datagram to a child command.
+ * @param command Command line.
+ * @param data Datagram bytes.
+ * @param data_size Datagram size.
+ * @return Zero when launched, otherwise nonzero.
+ */
+static int cli_dispatch_udp(
+    const char *command,
+    const void *data,
+    size_t data_size
+) {
+    SECURITY_ATTRIBUTES attributes = {
+        sizeof(SECURITY_ATTRIBUTES),
+        NULL,
+        TRUE
+    };
+    STARTUPINFOA startup;
+    PROCESS_INFORMATION process;
+    HANDLE input_read;
+    HANDLE input_write;
+    char command_line[NETL_CLI_COMMAND_SIZE];
+    DWORD written = 0U;
+
+    memset(&startup, 0, sizeof(startup));
+    memset(&process, 0, sizeof(process));
+
+    if (!CreatePipe(
+            &input_read,
+            &input_write,
+            &attributes,
+            0
+        )) {
+        return 1;
+    }
+
+    SetHandleInformation(input_write, HANDLE_FLAG_INHERIT, 0);
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = input_read;
+    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    snprintf(command_line, sizeof(command_line), "%s", command);
+
+    if (!CreateProcessA(
+            NULL,
+            command_line,
+            NULL,
+            NULL,
+            TRUE,
+            CREATE_NO_WINDOW,
+            NULL,
+            NULL,
+            &startup,
+            &process
+        )) {
+        CloseHandle(input_read);
+        CloseHandle(input_write);
+        return 1;
+    }
+
+    CloseHandle(input_read);
+    if (data_size != 0U) {
+        (void)WriteFile(
+            input_write,
+            data,
+            (DWORD)data_size,
+            &written,
+            NULL
+        );
+    }
+    CloseHandle(input_write);
+    CloseHandle(process.hProcess);
+    CloseHandle(process.hThread);
+    return written == (DWORD)data_size ? 0 : 1;
+}
+#endif
+
+/**
+ * Run the foreground command-dispatch listener.
+ * @param host Bind host.
+ * @param port Bind port.
+ * @param protocol KC_NETL_TCP or KC_NETL_UDP.
+ * @param command Command to dispatch.
+ * @return Process status.
+ */
+static int cli_run(
+    const char *host,
+    unsigned short port,
+    int protocol,
+    const char *command
+) {
+    kc_netl_options_t options;
+    kc_netl_t *listener = NULL;
+    kc_netl_event_t event;
+    int rc;
+
+    memset(&options, 0, sizeof(options));
+    options.host = host;
+    options.port = port;
+    options.protocol = protocol;
+
+    rc = kc_netl_open(&listener, &options);
+    if (rc != KC_NETL_OK) {
+        fprintf(stderr, "netl: %s\n", kc_netl_strerror(rc));
+        return 1;
+    }
+
+#ifndef _WIN32
+    signal(SIGCHLD, cli_reap);
+#endif
+
+    for (;;) {
+        rc = kc_netl_poll(listener, &event, -1);
+        if (rc != KC_NETL_OK) {
+            fprintf(stderr, "netl: %s\n", kc_netl_strerror(rc));
+            kc_netl_close(listener);
+            return 1;
+        }
+
+        if (event.type == KC_NETL_EVENT_CONNECTION) {
+            intptr_t native_socket = kc_netl_cli_take_connection(
+                event.connection
+            );
+            if (
+                native_socket == (intptr_t)-1 ||
+                cli_dispatch_tcp(native_socket, command) != 0
+            ) {
+                fprintf(stderr, "netl: failed to dispatch connection\n");
+            }
+        } else if (event.type == KC_NETL_EVENT_DATAGRAM) {
+            if (cli_dispatch_udp(
+                    command,
+                    event.data,
+                    event.data_size
+                ) != 0) {
+                fprintf(stderr, "netl: failed to dispatch datagram\n");
+            }
+        }
+    }
 }
 
 /**
  * Main application entry point.
  * @param argc Argument count.
  * @param argv Argument vector.
- * @return Process status code.
+ * @return Process status.
  */
 int main(int argc, char **argv) {
-    kc_netl_options_t opts = kc_netl_options_default();
-    kc_netl_t *ctx = NULL;
-    const char *name;
-    int rc = 1;
+    char host[256];
+    char command[NETL_CLI_COMMAND_SIZE];
+    unsigned short port;
+    int protocol = KC_NETL_TCP;
+    int command_start = 2;
+    int i;
 
-    kc_netl_options_load_env(&opts);
+    if (argc == 2 &&
+        (strcmp(argv[1], "-h") == 0 ||
+         strcmp(argv[1], "--help") == 0)) {
+        cli_help(argv[0]);
+        return 0;
+    }
+    if (argc == 2 &&
+        (strcmp(argv[1], "-v") == 0 ||
+         strcmp(argv[1], "--version") == 0)) {
+        printf(
+            "netl build %llu\n",
+            (unsigned long long)kc_netl_version()
+        );
+        return 0;
+    }
+    if (argc < 3) {
+        cli_help(argv[0]);
+        return 1;
+    }
+    if (cli_parse_address(
+            argv[1],
+            host,
+            sizeof(host),
+            &port
+        ) != 0) {
+        fprintf(stderr, "netl: invalid address '%s'\n", argv[1]);
+        return 1;
+    }
 
-#ifdef _WIN32
-    if (argc >= 3 && strcmp(argv[1], "--_exec") == 0) {
-        if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) goto cleanup;
-        kc_netl_exec(ctx, argv[2]);
-        kc_netl_close(ctx);
-        goto cleanup;
-    }
-#endif
-
-    if (argc < 2) {
-        kc_netl_help(argv[0]);
-        goto cleanup;
-    }
-
-    if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-        kc_netl_help(argv[0]);
-        rc = 0;
-        goto cleanup;
-    }
-    if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
-        printf("netl build %llu\n", (unsigned long long)kc_netl_version());
-        rc = 0;
-        goto cleanup;
-    }
-    if (strcmp(argv[1], "-l") == 0 || strcmp(argv[1], "--list") == 0) {
-        if (argc > 2) {
-            fprintf(stderr, "netl: --list takes no arguments\n");
-            goto cleanup;
+    for (i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--tcp") == 0) {
+            protocol = KC_NETL_TCP;
+            command_start++;
+        } else if (strcmp(argv[i], "--udp") == 0) {
+            protocol = KC_NETL_UDP;
+            command_start++;
+        } else {
+            break;
         }
-        rc = kc_netl_cli_list_all(&opts);
-        goto cleanup;
     }
-    if (argv[1][0] == '-') {
-        fprintf(stderr, "netl: unknown option '%s'\n", argv[1]);
-        goto cleanup;
-    }
+    command_start = i;
 
-    name = argv[1];
-
-    if (argc == 2) {
-        if (kc_netl_open(&ctx, &opts) != KC_NETL_OK) goto cleanup;
-#ifndef _WIN32
-        {
-            pid_t pid;
-            int nfd;
-            pid = fork();
-            if (pid < 0) {
-                fprintf(stderr, "netl: fork failed\n");
-                goto cleanup;
-            }
-            if (pid == 0) {
-                setsid();
-                nfd = open("/dev/null", O_RDWR);
-                if (nfd >= 0) {
-                    dup2(nfd, 0);
-                    dup2(nfd, 1);
-                    dup2(nfd, 2);
-                    if (nfd > 2) close(nfd);
-                }
-                _exit(kc_netl_exec(ctx, name) == KC_NETL_OK ? 0 : 1);
-            }
-            (void)pid;
-        }
-#else
-        {
-            char exe[MAX_PATH];
-            char cmdline[1024];
-            STARTUPINFOA si = {0};
-            PROCESS_INFORMATION pi = {0};
-            if (!GetModuleFileNameA(NULL, exe, sizeof(exe))) {
-                fprintf(stderr, "netl: failed to get executable path\n");
-                goto cleanup;
-            }
-            if ((size_t)snprintf(cmdline, sizeof(cmdline),
-                    "\"%s\" --_exec \"%s\"", exe, name) >= sizeof(cmdline)) {
-                fprintf(stderr, "netl: name too long\n");
-                goto cleanup;
-            }
-            si.cb = sizeof(si);
-            if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE,
-                    DETACHED_PROCESS | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-                fprintf(stderr, "netl: failed to start listener\n");
-                goto cleanup;
-            }
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-        }
-#endif
-        rc = 0;
-        goto cleanup;
+    if (cli_join_command(
+            argc,
+            argv,
+            command_start,
+            command,
+            sizeof(command)
+        ) != 0) {
+        fprintf(stderr, "netl: missing or oversized command\n");
+        return 1;
     }
 
-    if (strcmp(argv[2], "-d") == 0 || strcmp(argv[2], "--delete") == 0) {
-        if (argc > 3) {
-            fprintf(stderr, "netl: --delete takes no arguments\n");
-            goto cleanup;
-        }
-        rc = kc_netl_cli_delete(&opts, name);
-        goto cleanup;
-    }
-    if (strcmp(argv[2], "-s") == 0 || strcmp(argv[2], "--stop") == 0) {
-        if (argc > 3) {
-            fprintf(stderr, "netl: --stop takes no arguments\n");
-            goto cleanup;
-        }
-        rc = kc_netl_cli_stop(&opts, name);
-        goto cleanup;
-    }
-    if (strcmp(argv[2], "-l") == 0 || strcmp(argv[2], "--list") == 0) {
-        if (argc > 3) {
-            fprintf(stderr, "netl: --list takes no arguments\n");
-            goto cleanup;
-        }
-        rc = kc_netl_cli_list_one(&opts, name);
-        goto cleanup;
-    }
-
-    if (argc < 4) {
-        kc_netl_help(argv[0]);
-        goto cleanup;
-    }
-
-    {
-        char host[256];
-        unsigned short port = 80;
-        int proto = KC_NETL_TCP;
-        char cmd[4096];
-        int cmd_len = 0;
-        int i;
-
-        if (kc_netl_parse_addr(argv[2], host, sizeof(host), &port) != 0) {
-            fprintf(stderr, "netl: invalid address '%s'\n", argv[2]);
-            goto cleanup;
-        }
-
-        for (i = 3; i < argc; i++) {
-            if (strcmp(argv[i], "--tcp") == 0) {
-                proto = KC_NETL_TCP;
-            } else if (strcmp(argv[i], "--udp") == 0) {
-                proto = KC_NETL_UDP;
-            } else {
-                int slen = (int)strlen(argv[i]);
-                if (cmd_len > 0) {
-                    if (cmd_len >= (int)sizeof(cmd) - 1) {
-                        fprintf(stderr, "netl: command too long\n");
-                        goto cleanup;
-                    }
-                    cmd[cmd_len++] = ' ';
-                }
-                if (cmd_len + slen >= (int)sizeof(cmd)) {
-                    fprintf(stderr, "netl: command too long\n");
-                    goto cleanup;
-                }
-                memcpy(cmd + cmd_len, argv[i], (size_t)slen + 1);
-                cmd_len += slen;
-            }
-        }
-
-        if (cmd_len == 0) {
-            kc_netl_help(argv[0]);
-            goto cleanup;
-        }
-
-        rc = kc_netl_cli_update(&opts, name, host, port, proto, cmd);
-        goto cleanup;
-    }
-
-cleanup:
-    if (ctx) kc_netl_close(ctx);
-    kc_netl_options_free(&opts);
-    return rc;
+    return cli_run(host, port, protocol, command);
 }
