@@ -158,7 +158,7 @@ const kc_http_field_t headers[] = {
     { "Host", "example.com" }
 };
 
-kc_http_request_t request = {0};
+kc_http_request_build_t request = {0};
 request.method = "GET";
 request.target = "/";
 request.headers = headers;
@@ -176,8 +176,9 @@ if (kc_http_request(&request, &wire, &wire_size) == KC_HTTP_OK) {
 ### Build a response
 
 ```c
-kc_http_response_t response = {0};
-response.status = 200;
+int status = 200;
+kc_http_response_build_t response = {0};
+response.status = &status;
 response.body = "hello";
 response.body_size = 5;
 
@@ -190,6 +191,11 @@ if (kc_http_response(&response, &wire, &wire_size) == KC_HTTP_OK) {
 }
 ```
 
+`kc_http_request_t` and `kc_http_response_t` are parser output types.
+Builders use the separate `kc_http_request_build_t` and
+`kc_http_response_build_t` input types so parsed scalar fields remain direct
+values while optional builder scalars can represent absence with NULL.
+
 Builder inputs are borrowed for the duration of the call. Returned wire bytes
 are caller-owned and released with `kc_http_free()`.
 
@@ -198,9 +204,13 @@ Defaults:
 - request method: `GET`
 - request target: `/`
 - request/response version: `1.1`
-- response status: `200`
-- response reason: derived from status
-- chunk size when chunked: `8192`
+- response status: `200` when `status == NULL`
+- response reason: derived from status when `reason == NULL`
+- chunk size when chunked: `8192` when `chunk_size == NULL`
+
+Non-NULL scalar pointers are explicit. An explicit response status outside
+`100..599` is invalid, including `0`. An explicit chunk size of `0` is
+invalid.
 
 ## Transport composition
 
