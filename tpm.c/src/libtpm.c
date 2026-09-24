@@ -204,7 +204,7 @@ static int kc_tpm_grams(
  * A successful call always returns a profile ready for kc_tpm_score().
  * @param out Pointer to receive the profile.
  * @param map_text Representative text used to build the profile.
- * @param options Optional configuration. Omitted ngram_size uses 3.
+ * @param options Optional configuration. NULL ngram_size uses 3.
  * @return KC_TPM_OK on success, or KC_TPM_ERROR on failure.
  */
 int kc_tpm_open(
@@ -223,8 +223,8 @@ int kc_tpm_open(
     if (!map_text) return KC_TPM_ERROR;
 
     ngram_size = 3;
-    if (options != NULL && options->has_ngram_size) {
-        ngram_size = options->ngram_size;
+    if (options != NULL && options->ngram_size != NULL) {
+        ngram_size = *options->ngram_size;
     }
     if (ngram_size < 1 || ngram_size > KC_TPM_NG_MAX) {
         return KC_TPM_ERROR;
