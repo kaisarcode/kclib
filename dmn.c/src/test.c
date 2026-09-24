@@ -1008,7 +1008,7 @@ static int case_kc_dmn_free(void) {
     int fail = expect_int(
         "empty default list succeeds",
         KC_DMN_OK,
-        kc_dmn_list(NULL, &entries, &count)
+        kc_dmn_list(&entries, &count)
     );
     kc_dmn_free(entries);
     kc_dmn_free(NULL);
