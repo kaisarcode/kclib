@@ -54,6 +54,8 @@ Results are printed as space-separated floats, one line per input text:
 #define KC_EMB_OK 0
 #define KC_EMB_ERROR -1
 
+size_t kc_emb_dimension(void);
+
 int kc_emb_embed(
     const char *input,
     float **out_data,
@@ -64,6 +66,7 @@ void kc_emb_free(void *ptr);
 uint64_t kc_emb_version(void);
 ```
 
+- `kc_emb_dimension` returns the fixed vector dimension declared by the embedded model. It is a model property, not a caller option.
 - `kc_emb_embed` generates an embedding for one null-terminated input string. Empty input is valid.
 - `input` is borrowed only for the duration of the call and is never retained.
 - On success, `*out_data` is a caller-owned float array and `*out_count` is its element count. The embedded BGE small v1.5 model currently returns 384 floats.
@@ -79,6 +82,7 @@ uint64_t kc_emb_version(void);
 
 float *vec = NULL;
 size_t count = 0;
+size_t dimension = kc_emb_dimension();
 
 if (kc_emb_embed("The quick brown fox", &vec, &count) == KC_EMB_OK) {
     /* use vec[0..count-1] */
@@ -90,8 +94,13 @@ kc_emb_free(vec);
 A natural scripting binding is therefore mechanical:
 
 ```js
+const dimension = emb.dimension();
 const vector = emb.embed("The quick brown fox");
 ```
+
+The dimension is fixed by the embedded model. Callers do not choose it. This lets
+a vector index such as `hnsw.c` use `emb.dimension()` directly when creating
+an index, without hardcoding the model's current 384-element output.
 
 No lifecycle object or semantic wrapper is required.
 
@@ -117,7 +126,7 @@ make clean && make
 
 ### Tests
 
-The portable test entry point is `make test`. Native and Wine runs execute four reusable public-API cases plus one grouped `kc_emb_cli` case covering argument input, stdin input, vector output, help, version, stdout/stderr, and exit status.
+The portable test entry point is `make test`. Native and Wine runs execute five reusable public-API cases plus one grouped `kc_emb_cli` case covering argument input, stdin input, vector output, help, version, stdout/stderr, and exit status.
 
 ```bash
 make
@@ -131,7 +140,7 @@ make x86_64/windows
 make test wine
 ```
 
-The portable C test source is `src/test.c`. WASM runs the four reusable API cases and excludes the host CLI process harness. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+The portable C test source is `src/test.c`. WASM runs the five reusable API cases and excludes the host CLI process harness. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
 
 Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
 
@@ -146,10 +155,10 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/emb.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports `kc_emb_embed`, `kc_emb_free`, and `kc_emb_version`. It contains the reusable embedding capability, not the `emb` CLI: `src/emb.c` is not compiled into the module.
+- The module exports `kc_emb_dimension`, `kc_emb_embed`, `kc_emb_free`, and `kc_emb_version`. It contains the reusable embedding capability, not the `emb` CLI: `src/emb.c` is not compiled into the module.
 - The module embeds `lib/model.gguf` and the vendored GGML runtime (with the generic WebAssembly CPU kernels). Calls remain blocking and reuse the same fixed-model inference capability.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the four reusable public-API contract cases under Node.js. It requires `bin/wasm32/wasm/emb.wasm` and reports how to build it when it is absent.
+`make test wasm` compiles `src/test.c` with Emscripten and runs the five reusable public-API contract cases under Node.js. It requires `bin/wasm32/wasm/emb.wasm` and reports how to build it when it is absent.
 
 ### Multiarch Builds
 
