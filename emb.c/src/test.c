@@ -649,15 +649,32 @@ static int case_kc_emb_cli(void) {
         fail += expect_true("CLI empty stdin stderr empty", err[0] == '\0');
     }
     {
+        char *short_dim[] = { (char *)EMB_TEST_CLI, "-d", NULL };
+        char *long_dim[] = { (char *)EMB_TEST_CLI, "--dim", NULL };
         char *short_help[] = { (char *)EMB_TEST_CLI, "-h", NULL };
         char *long_help[] = { (char *)EMB_TEST_CLI, "--help", NULL };
         char *short_version[] = { (char *)EMB_TEST_CLI, "-v", NULL };
         char *long_version[] = { (char *)EMB_TEST_CLI, "--version", NULL };
 
+        fail += expect_int("CLI -d exits 0", 0,
+            test_cli_run_input(short_dim, NULL, 0, out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI -d dimension", strcmp(out, "384\n") == 0 ||
+            strcmp(out, "384\r\n") == 0);
+        fail += expect_true("CLI -d stderr empty", err[0] == '\0');
+
+        fail += expect_int("CLI --dim exits 0", 0,
+            test_cli_run_input(long_dim, NULL, 0, out, sizeof(out),
+                err, sizeof(err), &status) ? 1 : status);
+        fail += expect_true("CLI --dim dimension",
+            strcmp(out, "384\n") == 0 || strcmp(out, "384\r\n") == 0);
+        fail += expect_true("CLI --dim stderr empty", err[0] == '\0');
+
         fail += expect_int("CLI -h exits 0", 0,
             test_cli_run_input(short_help, NULL, 0, out, sizeof(out),
                 err, sizeof(err), &status) ? 1 : status);
         fail += expect_true("CLI -h usage", strstr(out, "Usage:") != NULL);
+        fail += expect_true("CLI -h dimension", strstr(out, "--dim") != NULL);
         fail += expect_true("CLI -h no options section",
             strstr(out, "Options:") == NULL);
 
@@ -688,7 +705,7 @@ static int case_kc_emb_cli(void) {
     }
 
     case_result(fail, "kc_emb_cli",
-        "preserves argument/stdin input, vectors, help, and version");
+        "preserves input, vectors, dimension, help, and version");
     return fail == 0 ? 0 : 1;
 }
 #endif
