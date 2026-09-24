@@ -169,7 +169,9 @@ static int kc_lng_fail_usage(const char *message) {
 int main(int argc, char **argv) {
     const char *text;
     double threshold;
+    int threshold_set;
     int limit;
+    int limit_set;
     int i;
     int exit_code;
     char *input;
@@ -179,8 +181,10 @@ int main(int argc, char **argv) {
     int rc;
 
     text = NULL;
-    threshold = 0.001;
-    limit = 1;
+    threshold = 0.0;
+    threshold_set = 0;
+    limit = 0;
+    limit_set = 0;
     exit_code = 0;
     input = NULL;
     results = NULL;
@@ -208,6 +212,7 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
 
+            threshold_set = 1;
             i++;
             continue;
         }
@@ -223,6 +228,7 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
 
+            limit_set = 1;
             i++;
             continue;
         }
@@ -240,18 +246,30 @@ int main(int argc, char **argv) {
         text = argv[i];
     }
 
-    if (limit < 1) {
+    if (limit_set && limit < 1) {
         limit = 1;
     }
 
-    if (limit > 32) {
+    if (limit_set && limit > 32) {
         limit = 32;
     }
 
     input = NULL;
 
+    {
+        kc_lng_options_t options = {0};
+
+        if (threshold_set) {
+            options.has_threshold = 1;
+            options.threshold = threshold;
+        }
+        if (limit_set) {
+            options.has_limit = 1;
+            options.limit = (size_t)limit;
+        }
+
     if (text) {
-        rc = kc_lng_detect(text, threshold, (size_t)limit, &results, &count);
+        rc = kc_lng_detect(text, &options, &results, &count);
         if (rc != KC_LNG_OK) {
             fprintf(stderr, "lng: detection failed\n");
             kc_lng_free(results);
@@ -278,7 +296,7 @@ int main(int argc, char **argv) {
             goto cleanup;
         }
 
-        rc = kc_lng_detect(input, threshold, (size_t)limit, &results, &count);
+        rc = kc_lng_detect(input, &options, &results, &count);
         free(input);
         input = NULL;
         if (rc != KC_LNG_OK) {
@@ -291,7 +309,7 @@ int main(int argc, char **argv) {
     }
 
     for (j = 0; j < count; j++) {
-        if (limit == 1) {
+        if ((!limit_set ? 1 : limit) == 1) {
             printf("%s\n", results[j].code);
         } else {
             printf("%s: %.4f\n", results[j].code, results[j].score);
@@ -300,6 +318,7 @@ int main(int argc, char **argv) {
 
     kc_lng_free(results);
     results = NULL;
+    }
 
 cleanup:
     free(input);
