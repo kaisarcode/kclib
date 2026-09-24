@@ -452,9 +452,20 @@ test:
 				-DHTTP_BUILD_TESTS=ON \
 				-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll \
 				-DHTTP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll.a \
+				-DHTTP_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/x86_64/windows/http.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
+			-DHTTP_BUILD_TESTS=ON \
+			-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll \
+			-DHTTP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll.a \
+			-DHTTP_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/x86_64/windows/http.exe \
+			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target http_contract_test || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/http_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
@@ -495,9 +506,17 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DHTTP_BUILD_TESTS=ON \
 				-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DHTTP_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/http$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DHTTP_BUILD_TESTS=ON \
+			-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+			-DHTTP_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/http$(NATIVE_EXE_EXT) \
+			$(NATIVE_IMPORT_LIBRARY) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target http_contract_test || exit 1; \
 		$(BUILD_DIR)/test/http_contract_test all; \
 	fi
