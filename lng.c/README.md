@@ -77,16 +77,24 @@ typedef struct {
     double score;      // heuristic ranking value, not a probability
 } kc_lng_result_t;
 
-int kc_lng_detect(const char *text, double threshold, size_t limit,
+typedef struct {
+    int has_threshold;
+    double threshold;
+    int has_limit;
+    size_t limit;
+} kc_lng_options_t;
+
+int kc_lng_detect(const char *text, const kc_lng_options_t *options,
                   kc_lng_result_t **out_results, size_t *out_count);
 void kc_lng_free(void *ptr);
 uint64_t kc_lng_version(void);
 ```
 
-- `kc_lng_detect` - stateless detection. Sanitizes/normalizes text internally, scores against all compiled profiles, sorts descending, filters below `threshold` (`[0, 1]`), bounds output by `limit`. `text == NULL` yields `KC_LNG_ERROR`; `text[0] == '\0'` yields zero results (`KC_LNG_OK` with `*out_count == 0`, `*out_results == NULL`, even at threshold `0.0`). On success `*out_results` points to a heap-allocated array owned by the caller; on zero results or error `*out_results` is set to `NULL`. Returns `KC_LNG_OK` on success (including zero matches), `KC_LNG_ERROR` on invalid arguments or allocation failure.
+- `kc_lng_detect` - stateless detection. Sanitizes/normalizes text internally, scores against all compiled profiles, sorts descending, filters below the threshold, and bounds output by the limit. Threshold defaults internally to `0.001` when omitted; limit defaults internally to `1` when omitted. `text == NULL` yields `KC_LNG_ERROR`; `text[0] == '\0'` yields zero results (`KC_LNG_OK` with `*out_count == 0`, `*out_results == NULL`). On success `*out_results` points to a heap-allocated array owned by the caller; on zero results or error `*out_results` is set to `NULL`. Returns `KC_LNG_OK` on success (including zero matches), `KC_LNG_ERROR` on invalid arguments or allocation failure.
 - Ownership - array returned via `out_results` is heap-allocated and caller-owned; release with `kc_lng_free()`. Each `code` string points to static library-owned storage; caller must not free or modify it. Detection does not retain input.
 - `kc_lng_free` - release memory allocated by `kc_lng_detect`. `NULL` safe (no-op).
 - `kc_lng_version` - returns build version as Unix timestamp.
+- `kc_lng_options_t` represents independently optional configuration. `has_threshold == 0` omits threshold and uses `0.001`; `has_limit == 0` omits limit and uses `1`. When a matching `has_*` field is nonzero, the supplied value is interpreted literally. Explicit threshold `0.0` is valid; explicit limit `0` is invalid. Limits above 32 are clamped to 32.
 - Threshold filters results; limit bounds output count. Zero matches is a successful result with count zero, not an error. No network, external model, or persistent state is required.
 
 ### Example
@@ -97,10 +105,14 @@ uint64_t kc_lng_version(void);
 kc_lng_result_t *results = NULL;
 size_t count = 0;
 
+kc_lng_options_t options = {
+    .has_limit = 1,
+    .limit = 3
+};
+
 if (kc_lng_detect(
     "Hello world",
-    0.001,
-    3,
+    &options,
     &results,
     &count
 ) == KC_LNG_OK) {
@@ -115,11 +127,14 @@ kc_lng_free(results);
 A natural scripting binding can expose the same stateless capability directly:
 
 ```js
-const results = lng.detect(text, 0.001, 3);
+const results = lng.detect(text, { limit: 3 });
 ```
 
-The binding only adapts C array ownership and strings mechanically. It does not
-need a context, lifecycle object, setters, callbacks, or semantic wrapper.
+The binding maps JavaScript property presence mechanically to the matching
+`has_*` fields. Omitted properties use library-owned defaults, so bindings do
+not duplicate default values. The bridge otherwise only adapts C array ownership
+and strings mechanically; it does not need a context, lifecycle object, setters,
+callbacks, or semantic wrapper.
 
 ## Lifecycle
 
@@ -164,7 +179,7 @@ make wasm32/wasm
 - Artifact: `bin/wasm32/wasm/lng.wasm`
 - Test: `make test wasm`
 - Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_lng_*` API with its existing signatures, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `lng` CLI: `src/lng.c` is not compiled into the module.
+- The module exports the public `kc_lng_*` API with the normalized options-based detect signature, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `lng` CLI: `src/lng.c` is not compiled into the module.
 
 `make test wasm` compiles `src/test.c` with Emscripten and runs the five reusable
 public-API contract cases under Node.js. Native and Wine runs additionally execute
