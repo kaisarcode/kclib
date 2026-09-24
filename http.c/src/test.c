@@ -243,7 +243,7 @@ static int case_kc_http_parser_close(void) {
     fail += expect_int("open", KC_HTTP_OK,
         kc_http_parser_open(&parser, on_request, NULL, on_error, &state));
     fail += expect_int("partial write", KC_HTTP_OK,
-        kc_http_parser_write(parser, "GET / HTTP/1.1\r\nHost:", 22U));
+        kc_http_parser_write(parser, "GET / HTTP/1.1\r\nHost:", strlen("GET / HTTP/1.1\r\nHost:")));
     kc_http_parser_close(parser);
     fail += expect_int("close reports incomplete stream", 1, state.errors);
     fail += expect_int("close parse status", KC_HTTP_EPARSE, state.last_error);
