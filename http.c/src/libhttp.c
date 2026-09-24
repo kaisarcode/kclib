@@ -2892,8 +2892,10 @@ static int http1_message_size(
         if (colon == content_end) return -1;
 
         value_start = colon + 1U;
-        while (value_start < content_end &&
-               (data[value_start] == ' ' || data[value_start] == '\t')) {
+        while (
+            value_start < content_end &&
+            (data[value_start] == ' ' || data[value_start] == '\t')
+        ) {
             value_start++;
         }
 
