@@ -2089,12 +2089,16 @@ static void kc_wch_dispatch_event(
 #endif
 }
 
+#if !defined(_WIN32) || defined(KC_WCH_CLI)
 /**
  * Run one resident watcher from persisted registration data.
  * @param dir Runtime directory.
  * @param name Watcher name.
  * @return Process exit status.
  */
+#if defined(_WIN32) && defined(__GNUC__)
+__attribute__((noinline))
+#endif
 static int kc_wch_serve_resident(
     const char *dir,
     const char *name
@@ -2153,6 +2157,7 @@ static int kc_wch_serve_resident(
     return 0;
 #endif
 }
+#endif
 
 #ifdef KC_WCH_CLI
 /**
