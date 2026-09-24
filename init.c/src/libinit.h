@@ -20,12 +20,11 @@ extern "C" {
 typedef struct kc_init kc_init_t;
 
 typedef struct {
-    const char *dir;
-    const char *backend;
+    const char *cmd;
 } kc_init_options_t;
 
 typedef struct {
-    const char *key;
+    const char *name;
     const char *user;
     const char *cmd;
 } kc_init_entry_t;
@@ -35,90 +34,81 @@ typedef struct {
 #define KC_INIT_ERROR      -1
 
 /**
- * Initialize a startup registry context.
- * NULL options use the default metadata directory and automatic backend
- * detection. NULL option fields select their individual defaults.
- * @param out Output location for the caller-owned context.
- * @param options Startup registry options, or NULL.
+ * Create or replace one persistent startup registration.
+ * The operating-system startup backend is selected internally.
+ * @param name Registration name.
+ * @param options Startup registration options.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-int kc_init_open(
-    kc_init_t **out,
+int kc_init_create(
+    const char *name,
     const kc_init_options_t *options
 );
 
 /**
- * Register or replace a named startup command.
- * @param init Startup registry context.
- * @param key Registration key name.
- * @param cmd One-line shell command to run at startup.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
- */
-int kc_init_set(
-    kc_init_t *init,
-    const char *key,
-    const char *cmd
-);
-
-/**
- * Execute a registered command immediately.
- * @param init Startup registry context.
- * @param key Registration key name.
+ * Open one persistent startup registration.
+ * @param out Output location for the caller-owned handle.
+ * @param name Registration name.
  * @return KC_INIT_OK on success, KC_INIT_NOT_FOUND when absent,
  *         or KC_INIT_ERROR on failure.
  */
-int kc_init_exec(
-    kc_init_t *init,
-    const char *key
+int kc_init_open(
+    kc_init_t **out,
+    const char *name
 );
 
 /**
- * List startup registrations.
- * A NULL key returns all entries. A missing specific key succeeds with an
- * empty result. The returned array and all strings inside it share one
- * allocation released with kc_init_free().
- * @param init Startup registry context.
- * @param key Optional registration key name, or NULL for all.
+ * List startup registrations in the active user namespace.
+ * The returned array and all strings inside it share one allocation released
+ * with kc_init_free().
  * @param out_entries Receives the allocated entry array, or NULL when empty.
  * @param out_count Receives the number of entries.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
 int kc_init_list(
-    kc_init_t *init,
-    const char *key,
     kc_init_entry_t **out_entries,
     size_t *out_count
 );
 
 /**
- * Remove a named startup registration.
- * Missing registrations remain a successful no-op.
- * @param init Startup registry context.
- * @param key Registration key name.
+ * Remove one persistent startup registration.
+ * Missing registrations are a successful no-op.
+ * @param name Registration name.
  * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
  */
-int kc_init_delete(
+int kc_init_delete(const char *name);
+
+/**
+ * Replace the command of one persistent startup registration.
+ * @param init Startup entry handle.
+ * @param cmd New one-line startup command.
+ * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
+ */
+int kc_init_set_cmd(
     kc_init_t *init,
-    const char *key
+    const char *cmd
 );
 
 /**
- * Return the resolved metadata directory.
- * @param init Startup registry context.
- * @return Borrowed metadata directory path, or NULL on invalid input.
+ * Return the command of one opened startup registration.
+ * @param init Startup entry handle.
+ * @return Borrowed command string, or NULL on invalid input.
  */
-const char *kc_init_path(
-    const kc_init_t *init
-);
+const char *kc_init_get_cmd(const kc_init_t *init);
 
 /**
- * Return the last context error message.
- * @param init Startup registry context.
- * @return Borrowed error text, or NULL when no error text is set.
+ * Return the recorded user of one opened startup registration.
+ * @param init Startup entry handle.
+ * @return Borrowed user string, or NULL on invalid input.
  */
-const char *kc_init_error(
-    const kc_init_t *init
-);
+const char *kc_init_get_user(const kc_init_t *init);
+
+/**
+ * Return the last handle error message.
+ * @param init Startup entry handle.
+ * @return Borrowed error text, or NULL when unset.
+ */
+const char *kc_init_error(const kc_init_t *init);
 
 /**
  * Release memory returned by the init library.
@@ -128,8 +118,8 @@ const char *kc_init_error(
 void kc_init_free(void *ptr);
 
 /**
- * Release a startup registry context.
- * @param init Startup registry context, or NULL.
+ * Release one local startup entry handle.
+ * @param init Startup entry handle, or NULL.
  * @return None.
  */
 void kc_init_close(kc_init_t *init);
