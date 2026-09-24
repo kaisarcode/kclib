@@ -48,10 +48,6 @@ if(NOT NETL_TEST_EXTERNAL_ARTIFACTS)
     target_include_directories(netl PRIVATE src)
     target_compile_definitions(netl PRIVATE KC_NETL_CLI=1)
 
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(netl pthread m)
-    endif()
-
     if(WIN32)
         target_link_libraries(netl ws2_32)
     endif()
@@ -64,10 +60,6 @@ if(NOT NETL_TEST_EXTERNAL_ARTIFACTS)
     set_target_properties(netl_shared PROPERTIES OUTPUT_NAME "netl")
     set_target_properties(netl_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_include_directories(netl_shared PRIVATE src)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(netl_shared pthread m)
-    endif()
 
     if(WIN32)
         target_link_libraries(netl_shared ws2_32)
@@ -98,10 +90,6 @@ if(NETL_BUILD_TESTS)
     add_executable(netl_contract_test src/test.c)
     target_include_directories(netl_contract_test PRIVATE src)
     target_link_libraries(netl_contract_test PRIVATE ${NETL_TEST_SHARED_TARGET})
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(netl_contract_test PRIVATE pthread m)
-    endif()
 
     if(WIN32)
         target_link_libraries(netl_contract_test PRIVATE ws2_32)
