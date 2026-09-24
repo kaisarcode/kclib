@@ -258,8 +258,7 @@ int main(int argc, char **argv) {
         double score = 0.0;
 
         if (ngram_size_set) {
-            options.has_ngram_size = 1;
-            options.ngram_size = ngram_size;
+            options.ngram_size = &ngram_size;
         }
 
         if (kc_tpm_open(&tpm, map_text, &options) != KC_TPM_OK) {
