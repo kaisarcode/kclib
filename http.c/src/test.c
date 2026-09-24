@@ -12,8 +12,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef __EMSCRIPTEN__
+#ifdef _WIN32
+#include <process.h>
+#define TEST_GETPID _getpid
+#define TEST_CLI_NAME "http.exe"
+#else
+#include <unistd.h>
+#define TEST_GETPID getpid
+#define TEST_CLI_NAME "http"
+#endif
+#endif
+
 static int test_case_total;
 static int test_case_current;
+static const char *test_program_path;
 
 static int expect_true(const char *label, int condition) {
     if (condition) return 0;
@@ -56,6 +69,24 @@ static int expect_contains(
     }
     fprintf(stderr, "FAIL: %s\n", label);
     return 1;
+}
+
+static int expect_absent(
+    const char *label,
+    const void *data,
+    size_t size,
+    const char *needle
+) {
+    size_t n = strlen(needle);
+    size_t i;
+    if (n == 0U) return 0;
+    for (i = 0; i + n <= size; i++) {
+        if (memcmp((const unsigned char *)data + i, needle, n) == 0) {
+            fprintf(stderr, "FAIL: %s\n", label);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void test_result(int fail, const char *name, const char *detail) {
@@ -454,6 +485,221 @@ static int case_kc_http_version(void) {
     return fail != 0;
 }
 
+
+#ifndef __EMSCRIPTEN__
+static int test_cli_path(char *out, size_t cap) {
+    const char *slash;
+    const char *backslash;
+    const char *sep;
+    size_t dir_len;
+    int n;
+
+    if (test_program_path == NULL) return -1;
+    slash = strrchr(test_program_path, '/');
+    backslash = strrchr(test_program_path, '\\');
+    sep = slash;
+    if (backslash != NULL && (sep == NULL || backslash > sep)) sep = backslash;
+
+    if (sep == NULL) {
+#ifdef _WIN32
+        n = snprintf(out, cap, ".\\%s", TEST_CLI_NAME);
+#else
+        n = snprintf(out, cap, "./%s", TEST_CLI_NAME);
+#endif
+        return n > 0 && (size_t)n < cap ? 0 : -1;
+    }
+
+    dir_len = (size_t)(sep - test_program_path + 1);
+    if (dir_len + strlen(TEST_CLI_NAME) + 1U > cap) return -1;
+    memcpy(out, test_program_path, dir_len);
+    memcpy(out + dir_len, TEST_CLI_NAME, strlen(TEST_CLI_NAME) + 1U);
+    return 0;
+}
+
+static int test_write_file(const char *path, const void *data, size_t size) {
+    FILE *file = fopen(path, "wb");
+    if (file == NULL) return -1;
+    if (size != 0U && fwrite(data, 1, size, file) != size) {
+        fclose(file);
+        return -1;
+    }
+    if (fclose(file) != 0) return -1;
+    return 0;
+}
+
+static int test_read_file(
+    const char *path,
+    unsigned char **out,
+    size_t *out_size
+) {
+    FILE *file;
+    long end;
+    unsigned char *data;
+    size_t size;
+
+    *out = NULL;
+    *out_size = 0U;
+    file = fopen(path, "rb");
+    if (file == NULL) return -1;
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return -1;
+    }
+    end = ftell(file);
+    if (end < 0 || fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return -1;
+    }
+    size = (size_t)end;
+    data = (unsigned char *)malloc(size != 0U ? size : 1U);
+    if (data == NULL) {
+        fclose(file);
+        return -1;
+    }
+    if (size != 0U && fread(data, 1, size, file) != size) {
+        free(data);
+        fclose(file);
+        return -1;
+    }
+    fclose(file);
+    *out = data;
+    *out_size = size;
+    return 0;
+}
+
+static int test_cli_run(
+    const char *args,
+    const void *input,
+    size_t input_size,
+    unsigned char **out,
+    size_t *out_size
+) {
+    char cli[1024];
+    char in_path[128];
+    char out_path[128];
+    char err_path[128];
+    char command[4096];
+    long pid = (long)TEST_GETPID();
+    int rc;
+
+    *out = NULL;
+    *out_size = 0U;
+    if (test_cli_path(cli, sizeof(cli)) != 0) return -1;
+
+    snprintf(in_path, sizeof(in_path), "http-cli-%ld-in.tmp", pid);
+    snprintf(out_path, sizeof(out_path), "http-cli-%ld-out.tmp", pid);
+    snprintf(err_path, sizeof(err_path), "http-cli-%ld-err.tmp", pid);
+
+    if (test_write_file(in_path, input, input_size) != 0) return -1;
+    snprintf(
+        command,
+        sizeof(command),
+        "\"%s\" %s < \"%s\" > \"%s\" 2> \"%s\"",
+        cli,
+        args,
+        in_path,
+        out_path,
+        err_path
+    );
+    rc = system(command);
+
+    if (test_read_file(out_path, out, out_size) != 0) {
+        free(*out);
+        *out = NULL;
+        *out_size = 0U;
+        rc = -1;
+    }
+
+    remove(in_path);
+    remove(out_path);
+    remove(err_path);
+    return rc;
+}
+
+static int case_kc_http_cli(void) {
+    static const char request[] =
+        "GET /x?q=1 HTTP/1.1\r\n"
+        "Host: example.com\r\n\r\n";
+    unsigned char *out = NULL;
+    size_t out_size = 0U;
+    int rc;
+    int fail = 0;
+
+    rc = test_cli_run(
+        "parse",
+        request,
+        sizeof(request) - 1U,
+        &out,
+        &out_size
+    );
+    fail += expect_int("cli parse exit", 0, rc);
+    fail += expect_contains("cli method", out, out_size, "request.method=GET\n");
+    fail += expect_contains("cli target", out, out_size, "request.target=/x?q=1\n");
+    fail += expect_contains("cli path", out, out_size, "request.path=/x\n");
+    fail += expect_contains("cli query", out, out_size, "request.query=q=1\n");
+    fail += expect_contains("cli header", out, out_size, "header.host=example.com\n");
+    fail += expect_absent("cli default omits type", out, out_size, "http.type=");
+    free(out);
+
+    rc = test_cli_run(
+        "parse --all",
+        request,
+        sizeof(request) - 1U,
+        &out,
+        &out_size
+    );
+    fail += expect_int("cli parse all exit", 0, rc);
+    fail += expect_contains("cli all type", out, out_size, "http.type=request\n");
+    fail += expect_contains("cli all version", out, out_size, "http.version=1.1\n");
+    fail += expect_contains("cli all body length", out, out_size, "body.length=0\n");
+    free(out);
+
+    rc = test_cli_run(
+        "build request --method POST --target /submit --header \"X-Test: yes\"",
+        "hi",
+        2U,
+        &out,
+        &out_size
+    );
+    fail += expect_int("cli build request exit", 0, rc);
+    fail += expect_contains("cli request line", out, out_size, "POST /submit HTTP/1.1\r\n");
+    fail += expect_contains("cli request header", out, out_size, "X-Test: yes\r\n");
+    fail += expect_contains("cli request body", out, out_size, "\r\n\r\nhi");
+    free(out);
+
+    rc = test_cli_run(
+        "build response --status 201 --header \"Content-Type: text/plain\"",
+        "hello",
+        5U,
+        &out,
+        &out_size
+    );
+    fail += expect_int("cli build response exit", 0, rc);
+    fail += expect_contains("cli response line", out, out_size, "HTTP/1.1 201 Created\r\n");
+    fail += expect_contains("cli response header", out, out_size, "Content-Type: text/plain\r\n");
+    fail += expect_contains("cli response body", out, out_size, "\r\n\r\nhello");
+    free(out);
+
+    rc = test_cli_run("--help", "", 0U, &out, &out_size);
+    fail += expect_int("cli help exit", 0, rc);
+    fail += expect_contains("cli help", out, out_size, "Usage:");
+    free(out);
+
+    rc = test_cli_run("unknown", "", 0U, &out, &out_size);
+    fail += expect_true("cli invalid fails", rc != 0);
+    free(out);
+
+    test_result(fail, "kc_http_cli", "covers shipped parse/build/help/error contract");
+    return fail != 0;
+}
+#else
+static int case_kc_http_cli(void) {
+    int fail = 0;
+    test_result(fail, "kc_http_cli", "not applicable to the reusable wasm module");
+    return 0;
+}
+#endif
+
 static int test_named(const char *name) {
     if (strcmp(name, "kc_http_parser_open") == 0) return case_kc_http_parser_open();
     if (strcmp(name, "kc_http_parser_write") == 0) return case_kc_http_parser_write();
@@ -463,6 +709,7 @@ static int test_named(const char *name) {
     if (strcmp(name, "kc_http_free") == 0) return case_kc_http_free();
     if (strcmp(name, "kc_http_strerror") == 0) return case_kc_http_strerror();
     if (strcmp(name, "kc_http_version") == 0) return case_kc_http_version();
+    if (strcmp(name, "kc_http_cli") == 0) return case_kc_http_cli();
     fprintf(stderr, "unknown case: %s\n", name);
     return 2;
 }
@@ -470,13 +717,15 @@ static int test_named(const char *name) {
 int main(int argc, char **argv) {
     int rc = 0;
 
+    test_program_path = argv[0];
+
     if (argc != 2) {
         fprintf(stderr, "usage: %s <case>\n", argv[0]);
         return 2;
     }
     if (strcmp(argv[1], "all") != 0) return test_named(argv[1]);
 
-    test_case_total = 8;
+    test_case_total = 9;
     test_case_current = 0;
     test_run(&rc, case_kc_http_parser_open);
     test_run(&rc, case_kc_http_parser_write);
@@ -486,6 +735,7 @@ int main(int argc, char **argv) {
     test_run(&rc, case_kc_http_free);
     test_run(&rc, case_kc_http_strerror);
     test_run(&rc, case_kc_http_version);
+    test_run(&rc, case_kc_http_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
