@@ -146,31 +146,45 @@ static int case_kc_tpm_open(void) {
     kc_tpm_close(explicit_tpm);
 
     memset(&options, 0, sizeof(options));
-    options.has_ngram_size = 1;
-    options.ngram_size = 0;
+    {
+        static const int ngram_zero = 0;
+        options.ngram_size = &ngram_zero;
+    }
     tpm = (kc_tpm_t *)(uintptr_t)1;
     fail += expect_int("open rejects explicit n below range", KC_TPM_ERROR,
         kc_tpm_open(&tpm, "abc", &options));
     fail += expect_true("invalid option clears output", tpm == NULL);
 
-    options.ngram_size = 9;
+    {
+        static const int ngram_nine = 9;
+        options.ngram_size = &ngram_nine;
+    }
     tpm = (kc_tpm_t *)(uintptr_t)1;
     fail += expect_int("open rejects n above range", KC_TPM_ERROR,
         kc_tpm_open(&tpm, "abc", &options));
     fail += expect_true("invalid high option clears output", tpm == NULL);
 
-    options.ngram_size = 1;
+    {
+        static const int ngram_one = 1;
+        options.ngram_size = &ngram_one;
+    }
     fail += expect_int("open accepts n=1", KC_TPM_OK,
         kc_tpm_open(&tpm, "abc abc", &options));
     kc_tpm_close(tpm);
 
-    options.ngram_size = 8;
+    {
+        static const int ngram_eight = 8;
+        options.ngram_size = &ngram_eight;
+    }
     tpm = NULL;
     fail += expect_int("open accepts n=8", KC_TPM_OK,
         kc_tpm_open(&tpm, "abcdefgh abcdefgh", &options));
     kc_tpm_close(tpm);
 
-    options.ngram_size = 2;
+    {
+        static const int ngram_two = 2;
+        options.ngram_size = &ngram_two;
+    }
     tpm = NULL;
     fail += expect_int("open accepts empty profile", KC_TPM_OK,
         kc_tpm_open(&tpm, "", &options));
@@ -184,7 +198,10 @@ static int case_kc_tpm_open(void) {
     large_text = repeat_byte('a', 16385);
     fail += expect_true("allocate overflow text", large_text != NULL);
     if (large_text != NULL) {
-        options.ngram_size = 1;
+        {
+        static const int ngram_one = 1;
+        options.ngram_size = &ngram_one;
+    }
         tpm = (kc_tpm_t *)(uintptr_t)1;
         fail += expect_int("open reports raw gram overflow", KC_TPM_ERROR,
             kc_tpm_open(&tpm, large_text, &options));
@@ -205,10 +222,8 @@ static int case_kc_tpm_score(void) {
     const char *detail = "reuses one profile for bounded similarity scoring";
     kc_tpm_t *tpm = NULL;
     kc_tpm_t *normalized_tpm = NULL;
-    kc_tpm_options_t options = {
-        .has_ngram_size = 1,
-        .ngram_size = 3
-    };
+    static const int ngram_three = 3;
+    kc_tpm_options_t options = { .ngram_size = &ngram_three };
     char *large_text = NULL;
     double matching_score = -1.0;
     double mismatching_score = -1.0;
@@ -265,7 +280,10 @@ static int case_kc_tpm_score(void) {
             plain_score == normalized_score);
     }
 
-    options.ngram_size = 1;
+    {
+        static const int ngram_one = 1;
+        options.ngram_size = &ngram_one;
+    }
     kc_tpm_close(tpm);
     tpm = NULL;
     fail += expect_int("open n=1 overflow profile", KC_TPM_OK,
