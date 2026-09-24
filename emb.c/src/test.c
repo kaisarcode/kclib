@@ -674,9 +674,13 @@ static int case_kc_emb_cli(void) {
             test_cli_run_input(short_help, NULL, 0, out, sizeof(out),
                 err, sizeof(err), &status) ? 1 : status);
         fail += expect_true("CLI -h usage", strstr(out, "Usage:") != NULL);
-        fail += expect_true("CLI -h dimension", strstr(out, "--dim") != NULL);
-        fail += expect_true("CLI -h no options section",
-            strstr(out, "Options:") == NULL);
+        fail += expect_true("CLI -h options", strstr(out, "Options:") != NULL);
+        fail += expect_true("CLI -h dimension", strstr(out,
+            "-d, --dim       Show embedded model vector dimension") != NULL);
+        fail += expect_true("CLI -h help", strstr(out,
+            "-h, --help      Show this help") != NULL);
+        fail += expect_true("CLI -h version", strstr(out,
+            "-v, --version   Show version") != NULL);
 
         fail += expect_int("CLI --help exits 0", 0,
             test_cli_run_input(long_help, NULL, 0, out, sizeof(out),
