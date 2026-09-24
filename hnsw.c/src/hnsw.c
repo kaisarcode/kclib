@@ -266,11 +266,15 @@ int main(int argc, char **argv) {
     const char *dataset_path = NULL;
     const char *query_text = NULL;
     const char *metric_name = NULL;
-    int metric = KC_HNSW_METRIC_COSINE;
+    int metric = 0;
+    int metric_set = 0;
     int dimension = 0;
-    int m = 16;
-    int ef_construction = 64;
-    int ef_search = 64;
+    int m = 0;
+    int m_set = 0;
+    int ef_construction = 0;
+    int ef_construction_set = 0;
+    int ef_search = 0;
+    int ef_search_set = 0;
     int limit = 5;
     int i;
     int status = 0;
@@ -334,6 +338,7 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
             metric_name = argv[i + 1];
+            metric_set = 1;
             i++;
             continue;
         }
@@ -357,6 +362,7 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
             m = v;
+            m_set = 1;
             i++;
             continue;
         }
@@ -368,6 +374,7 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
             ef_construction = v;
+            ef_construction_set = 1;
             i++;
             continue;
         }
@@ -379,6 +386,7 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
             ef_search = v;
+            ef_search_set = 1;
             i++;
             continue;
         }
@@ -426,10 +434,10 @@ int main(int argc, char **argv) {
 
     if (metric_name != NULL) {
         metric = hnsw_metric_from_string(metric_name);
-    }
-    if (metric == 0) {
-        status = hnsw_fail_usage(argv[0], "Unknown metric name.");
-        goto cleanup;
+        if (metric == 0) {
+            status = hnsw_fail_usage(argv[0], "Unknown metric name.");
+            goto cleanup;
+        }
     }
 
     float query[HNSW_QUERY_CAP];
@@ -438,21 +446,26 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    if (!threshold_set) {
-        if (metric == KC_HNSW_METRIC_L2) {
-            threshold = 1e18;
-        } else {
-            threshold = -1e18;
-        }
-    }
-
     {
-        kc_hnsw_options_t opts = kc_hnsw_options_default();
+        kc_hnsw_options_t opts = {0};
         opts.dimension = (size_t)dimension;
-        opts.metric = metric;
-        opts.max_connections = m;
-        opts.build_effort = ef_construction;
-        opts.search_effort = ef_search;
+
+        if (metric_set) {
+            opts.has_metric = 1;
+            opts.metric = metric;
+        }
+        if (m_set) {
+            opts.has_max_connections = 1;
+            opts.max_connections = m;
+        }
+        if (ef_construction_set) {
+            opts.has_build_effort = 1;
+            opts.build_effort = ef_construction;
+        }
+        if (ef_search_set) {
+            opts.has_search_effort = 1;
+            opts.search_effort = ef_search;
+        }
 
         int rc = kc_hnsw_open(&hnsw, &opts);
         if (rc != KC_HNSW_OK) {
@@ -460,6 +473,11 @@ int main(int argc, char **argv) {
             status = 1;
             goto cleanup;
         }
+    }
+
+    metric = kc_hnsw_metric(hnsw);
+    if (!threshold_set) {
+        threshold = metric == KC_HNSW_METRIC_L2 ? 1e18 : -1e18;
     }
 
     {
