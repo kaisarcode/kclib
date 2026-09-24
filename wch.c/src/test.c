@@ -801,7 +801,7 @@ static int case_kc_wch_free(void) {
     int fail = expect_int(
         "empty default list succeeds",
         KC_WCH_OK,
-        kc_wch_list(NULL, &entries, &count)
+        kc_wch_list(&entries, &count)
     );
 
     kc_wch_free(entries);
