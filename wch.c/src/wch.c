@@ -79,53 +79,6 @@ static int kc_wch_valid_name(const char *name) {
 }
 
 /**
- * Resolve the CLI runtime directory.
- * @param out Output path buffer.
- * @param cap Output buffer capacity.
- * @return Zero on success, nonzero on failure.
- */
-static int kc_wch_runtime_dir(char *out, size_t cap) {
-    const char *override = getenv("KC_WCH_DIR");
-
-    if (override != NULL && override[0] != '\0') {
-        return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : 1;
-    }
-#ifdef _WIN32
-    {
-        char temp[MAX_PATH];
-        DWORD size = GetTempPathA((DWORD)sizeof(temp), temp);
-
-        if (size == 0 || size >= (DWORD)sizeof(temp)) return 1;
-        return (size_t)snprintf(
-            out,
-            cap,
-            "%swch.c",
-            temp
-        ) < cap ? 0 : 1;
-    }
-#else
-    {
-        const char *xdg = getenv("XDG_RUNTIME_DIR");
-
-        if (xdg != NULL && xdg[0] != '\0') {
-            return (size_t)snprintf(
-                out,
-                cap,
-                "%s/wch.c",
-                xdg
-            ) < cap ? 0 : 1;
-        }
-        return (size_t)snprintf(
-            out,
-            cap,
-            "/tmp/wch.c-%lu",
-            (unsigned long)getuid()
-        ) < cap ? 0 : 1;
-    }
-#endif
-}
-
-/**
  * Join command arguments with spaces.
  * @param out Output command buffer.
  * @param cap Output buffer capacity.
@@ -172,14 +125,13 @@ static int kc_wch_join_args(
  * @return Process status.
  */
 static int kc_wch_print_list(
-    const char *dir,
     const char *filter
 ) {
     kc_wch_entry_t *entries = NULL;
     size_t count = 0U;
     size_t i;
 
-    if (kc_wch_list(dir, &entries, &count) != KC_WCH_OK) return 1;
+    if (kc_wch_list(&entries, &count) != KC_WCH_OK) return 1;
     for (i = 0U; i < count; i++) {
         if (filter != NULL &&
                 strcmp(filter, entries[i].name) != 0) {
@@ -205,12 +157,6 @@ static int kc_wch_print_list(
  * @return Process exit status.
  */
 int main(int argc, char **argv) {
-    char dir[KC_WCH_PATH_MAX];
-
-    if (kc_wch_runtime_dir(dir, sizeof(dir)) != 0) {
-        fprintf(stderr, "wch: cannot resolve runtime directory\n");
-        return 1;
-    }
     if (argc < 2) {
         kc_wch_help();
         return 1;
@@ -233,16 +179,16 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "-l") == 0 ||
             strcmp(argv[1], "--list") == 0) {
-        if (argc == 2) return kc_wch_print_list(dir, NULL);
+        if (argc == 2) return kc_wch_print_list(NULL);
         if (argc == 3 && kc_wch_valid_name(argv[2])) {
-            return kc_wch_print_list(dir, argv[2]);
+            return kc_wch_print_list(argv[2]);
         }
         return 1;
     }
     if (strcmp(argv[1], "-d") == 0 ||
             strcmp(argv[1], "--delete") == 0) {
         if (argc != 3 || !kc_wch_valid_name(argv[2])) return 1;
-        return kc_wch_delete(argv[2], dir) == KC_WCH_OK ? 0 : 1;
+        return kc_wch_delete(argv[2]) == KC_WCH_OK ? 0 : 1;
     }
 
     if (!kc_wch_valid_name(argv[1])) {
@@ -253,12 +199,12 @@ int main(int argc, char **argv) {
     if (argc == 3 &&
         (strcmp(argv[2], "-l") == 0 ||
         strcmp(argv[2], "--list") == 0)) {
-        return kc_wch_print_list(dir, argv[1]);
+        return kc_wch_print_list(argv[1]);
     }
     if (argc == 3 &&
         (strcmp(argv[2], "-d") == 0 ||
         strcmp(argv[2], "--delete") == 0)) {
-        return kc_wch_delete(argv[1], dir) == KC_WCH_OK ? 0 : 1;
+        return kc_wch_delete(argv[1]) == KC_WCH_OK ? 0 : 1;
     }
 
     {
@@ -295,7 +241,6 @@ int main(int argc, char **argv) {
 
         options.path = argv[index];
         options.cmd = command;
-        options.dir = dir;
         options.recursive = recursive;
         if (kc_wch_create(argv[1], &options) != KC_WCH_OK) {
             fprintf(stderr, "wch: failed to register watcher\n");
