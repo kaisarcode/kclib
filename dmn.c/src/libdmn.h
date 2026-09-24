@@ -105,7 +105,6 @@ const char *kc_dmn_get_cmd(
     const kc_dmn_t *dmn
 );
 
-
 /**
  * Replace the daemon EOT marker.
  * Passing NULL with an empty size restores the default EOT marker.
