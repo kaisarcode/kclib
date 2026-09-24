@@ -1867,7 +1867,7 @@ static int kc_wch_append_event(
         DWORD written = 0;
 
         if (file != INVALID_HANDLE_VALUE) {
-            if (record_size <= (size_t)DWORD_MAX &&
+            if (record_size <= (size_t)UINT32_MAX &&
                     WriteFile(
                         file,
                         record,
@@ -2156,11 +2156,16 @@ int kc_wch_internal_serve(
  */
 #ifdef _WIN32
 static int kc_wch_companion_exe(char *out, size_t cap) {
+    const char *override = getenv("KC_WCH_EXE");
     HMODULE module;
     char module_path[KC_WCH_PATH_MAX];
     char *slash;
     char *backslash;
     DWORD size;
+
+    if (override != NULL && override[0] != '\0') {
+        return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : 1;
+    }
 
     if (!GetModuleHandleExA(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
