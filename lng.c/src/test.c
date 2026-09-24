@@ -1,6 +1,6 @@
 /**
- * test.c - liblng behavioral tests.
- * Summary: Behavioral tests for lng stateless language detection.
+ * test.c - liblng public API and CLI tests.
+ * Summary: Contract tests for lng stateless language detection and shipped CLI.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -781,7 +781,7 @@ static int case_kc_lng_cli(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    #ifdef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
     test_case_total = 5;
 #else
     test_case_total = 6;
