@@ -90,7 +90,7 @@ static void hnsw_help(const char *name) {
     printf("  --top, -k <n>        Maximum number of results\n");
     printf("  --threshold, -t <n>  Minimum score or maximum distance\n");
     printf("  --metric, -m <name>  cosine | inner | l2\n");
-    printf("  --max-conn <n>       Maximum graph connections per level (HNSW M)\n");
+    printf("  --max-conn <n>       Maximum graph connections per level\n");
     printf("  --build-effort <n>    Index quality vs speed (higher = better recall, slower build)\n");
     printf("  --search-effort <n>  Search accuracy vs speed (higher = better recall, slower query)\n");
     printf("  -h, --help           Show help\n");
