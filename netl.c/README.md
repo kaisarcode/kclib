@@ -40,8 +40,10 @@ progress.
 
 Sockets are non-blocking. `kc_netl_send()` may send fewer bytes than requested,
 and returns `KC_NETL_EAGAIN` when the socket cannot currently accept more data.
-The caller decides when to retry; the library does not hide unbounded output
-queues.
+When a send is partial or returns `KC_NETL_EAGAIN`, that connection is watched
+for write readiness and later produces `KC_NETL_EVENT_WRITABLE`. The caller
+decides what unsent bytes to retain and when to retry; the library does not hide
+unbounded output queues.
 
 ## Public API
 
@@ -91,7 +93,7 @@ kc_netl_close(server);
 The public lifecycle is:
 
 - `kc_netl_open()` binds one TCP or UDP listener.
-- `kc_netl_poll()` returns one ready connection, data, close, or datagram event.
+- `kc_netl_poll()` returns one connection, data, writable, close, or datagram event.
 - `kc_netl_send()` attempts a non-blocking TCP write to one exact connection.
 - `kc_netl_sendto()` sends one UDP datagram to one peer.
 - `kc_netl_connection_close()` closes one TCP connection independently.
