@@ -572,7 +572,9 @@ static int test_cli_run(
     const void *input,
     size_t input_size,
     unsigned char **out,
-    size_t *out_size
+    size_t *out_size,
+    unsigned char **err,
+    size_t *err_size
 ) {
     char cli[1024];
     char in_path[128];
@@ -584,6 +586,8 @@ static int test_cli_run(
 
     *out = NULL;
     *out_size = 0U;
+    *err = NULL;
+    *err_size = 0U;
     if (test_cli_path(cli, sizeof(cli)) != 0) return -1;
 
     snprintf(in_path, sizeof(in_path), "http-cli-%ld-in.tmp", pid);
@@ -603,10 +607,14 @@ static int test_cli_run(
     );
     rc = system(command);
 
-    if (test_read_file(out_path, out, out_size) != 0) {
+    if (test_read_file(out_path, out, out_size) != 0 ||
+        test_read_file(err_path, err, err_size) != 0) {
         free(*out);
+        free(*err);
         *out = NULL;
+        *err = NULL;
         *out_size = 0U;
+        *err_size = 0U;
         rc = -1;
     }
 
@@ -621,7 +629,9 @@ static int case_kc_http_cli(void) {
         "GET /x?q=1 HTTP/1.1\r\n"
         "Host: example.com\r\n\r\n";
     unsigned char *out = NULL;
+    unsigned char *err = NULL;
     size_t out_size = 0U;
+    size_t err_size = 0U;
     int rc;
     int fail = 0;
 
@@ -630,7 +640,9 @@ static int case_kc_http_cli(void) {
         request,
         sizeof(request) - 1U,
         &out,
-        &out_size
+        &out_size,
+        &err,
+        &err_size
     );
     fail += expect_int("cli parse exit", 0, rc);
     fail += expect_contains("cli method", out, out_size, "request.method=GET\n");
@@ -640,54 +652,118 @@ static int case_kc_http_cli(void) {
     fail += expect_contains("cli header", out, out_size, "header.host=example.com\n");
     fail += expect_absent("cli default omits type", out, out_size, "http.type=");
     free(out);
+    free(err);
+    out = NULL;
+    err = NULL;
 
     rc = test_cli_run(
         "parse --all",
         request,
         sizeof(request) - 1U,
         &out,
-        &out_size
+        &out_size,
+        &err,
+        &err_size
     );
     fail += expect_int("cli parse all exit", 0, rc);
     fail += expect_contains("cli all type", out, out_size, "http.type=request\n");
     fail += expect_contains("cli all version", out, out_size, "http.version=1.1\n");
     fail += expect_contains("cli all body length", out, out_size, "body.length=0\n");
     free(out);
+    free(err);
+    out = NULL;
+    err = NULL;
 
     rc = test_cli_run(
         "build request --method POST --target /submit --header \"X-Test: yes\"",
         "hi",
         2U,
         &out,
-        &out_size
+        &out_size,
+        &err,
+        &err_size
     );
     fail += expect_int("cli build request exit", 0, rc);
     fail += expect_contains("cli request line", out, out_size, "POST /submit HTTP/1.1\r\n");
     fail += expect_contains("cli request header", out, out_size, "X-Test: yes\r\n");
     fail += expect_contains("cli request body", out, out_size, "\r\n\r\nhi");
     free(out);
+    free(err);
+    out = NULL;
+    err = NULL;
 
     rc = test_cli_run(
         "build response --status 201 --header \"Content-Type: text/plain\"",
         "hello",
         5U,
         &out,
-        &out_size
+        &out_size,
+        &err,
+        &err_size
     );
     fail += expect_int("cli build response exit", 0, rc);
     fail += expect_contains("cli response line", out, out_size, "HTTP/1.1 201 Created\r\n");
     fail += expect_contains("cli response header", out, out_size, "Content-Type: text/plain\r\n");
     fail += expect_contains("cli response body", out, out_size, "\r\n\r\nhello");
     free(out);
+    free(err);
+    out = NULL;
+    err = NULL;
 
-    rc = test_cli_run("--help", "", 0U, &out, &out_size);
+    rc = test_cli_run(
+        "--version",
+        "",
+        0U,
+        &out,
+        &out_size,
+        &err,
+        &err_size
+    );
+    fail += expect_int("cli version exit", 0, rc);
+    fail += expect_contains("cli version", out, out_size, "http build ");
+    fail += expect_true("cli version stderr empty", err_size == 0U);
+    free(out);
+    free(err);
+    out = NULL;
+    err = NULL;
+
+    rc = test_cli_run(
+        "--help",
+        "",
+        0U,
+        &out,
+        &out_size,
+        &err,
+        &err_size
+    );
     fail += expect_int("cli help exit", 0, rc);
     fail += expect_contains("cli help", out, out_size, "Usage:");
+    fail += expect_true("cli help stderr empty", err_size == 0U);
     free(out);
+    free(err);
+    out = NULL;
+    err = NULL;
 
-    rc = test_cli_run("unknown", "", 0U, &out, &out_size);
+    rc = test_cli_run(
+        "unknown",
+        "",
+        0U,
+        &out,
+        &out_size,
+        &err,
+        &err_size
+    );
     fail += expect_true("cli invalid fails", rc != 0);
+    fail += expect_contains(
+        "cli invalid stderr",
+        err,
+        err_size,
+        "http: unknown command"
+    );
     free(out);
+    free(err);
+    out = NULL;
+    err = NULL;
 
     test_result(fail, "kc_http_cli", "covers shipped parse/build/help/error contract");
     return fail != 0;
