@@ -667,15 +667,23 @@ int main(int argc, char **argv) {
     int command_start;
     int i;
 
-    if (argc == 2 &&
-        (strcmp(argv[1], "-h") == 0 ||
-         strcmp(argv[1], "--help") == 0)) {
+    if (
+        argc == 2 &&
+        (
+            strcmp(argv[1], "-h") == 0 ||
+            strcmp(argv[1], "--help") == 0
+        )
+    ) {
         cli_help(argv[0]);
         return 0;
     }
-    if (argc == 2 &&
-        (strcmp(argv[1], "-v") == 0 ||
-         strcmp(argv[1], "--version") == 0)) {
+    if (
+        argc == 2 &&
+        (
+            strcmp(argv[1], "-v") == 0 ||
+            strcmp(argv[1], "--version") == 0
+        )
+    ) {
         printf(
             "netl build %llu\n",
             (unsigned long long)kc_netl_version()
