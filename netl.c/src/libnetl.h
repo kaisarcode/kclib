@@ -40,7 +40,7 @@ typedef struct {
     const char *host;
     unsigned short port;
     int protocol;
-    int backlog;
+    const int *backlog;
 } kc_netl_options_t;
 
 typedef struct {
@@ -55,7 +55,7 @@ typedef struct {
 /**
  * Open one incoming TCP or UDP listener.
  * NULL or empty host binds all interfaces. Port zero requests an ephemeral
- * operating-system-selected port. A zero backlog selects the default.
+ * operating-system-selected port. NULL backlog uses the internal default.
  * @param out Receives the listener handle.
  * @param options Listener options.
  * @return KC_NETL_OK on success, or a negative status code.
