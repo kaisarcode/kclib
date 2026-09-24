@@ -2682,14 +2682,12 @@ static int kc_flow_buf_printf(kc_flow_buf_t *buf, const char *format, ...) {
 
 /**
  * Finalize one built-in output buffer and transfer ownership to the caller.
- * @param ctx Context pointer.
  * @param buf Built-in output buffer.
  * @param out_data Output data pointer.
  * @param out_size Output size pointer.
- * @return KC_FLOW_OK, KC_FLOW_ERROR, or the stop result.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
 static int kc_flow_builtin_finish(
-    kc_flow_t *ctx,
     kc_flow_buf_t *buf,
     char **out_data,
     size_t *out_size
@@ -2842,7 +2840,7 @@ static int kc_flow_run_command(
                 free(builtin_out.data);
                 return KC_FLOW_ERROR;
             }
-            return kc_flow_builtin_finish(ctx, &builtin_out, out_data, out_size);
+            return kc_flow_builtin_finish(&builtin_out, out_data, out_size);
         }
     }
 
@@ -2978,7 +2976,7 @@ static int kc_flow_run_command(
                 free(builtin_out.data);
                 return KC_FLOW_ERROR;
             }
-            return kc_flow_builtin_finish(ctx, &builtin_out, out_data, out_size);
+            return kc_flow_builtin_finish(&builtin_out, out_data, out_size);
         }
         kc_flow_free_argv(argv);
         argv = NULL;
