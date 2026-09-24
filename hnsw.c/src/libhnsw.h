@@ -65,7 +65,8 @@ int kc_hnsw_open(
 
 /**
  * Add one vector. The index copies both id and values.
- * Adding after build invalidates the graph until kc_hnsw_build() is called again.
+ * Adding after build invalidates the graph until kc_hnsw_build() is called
+ * again.
  * @param hnsw Index handle.
  * @param id Non-empty vector identifier.
  * @param values Vector values matching the configured dimension.
