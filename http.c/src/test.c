@@ -33,18 +33,30 @@ static int test_case_current;
 static const char *test_program_path;
 #endif
 
+/**
+ * expect true.
+ * @return Function result.
+ */
 static int expect_true(const char *label, int condition) {
     if (condition) return 0;
     fprintf(stderr, "FAIL: %s\n", label);
     return 1;
 }
 
+/**
+ * expect int.
+ * @return Function result.
+ */
 static int expect_int(const char *label, int expected, int actual) {
     if (expected == actual) return 0;
     fprintf(stderr, "FAIL: %s: expected %d, got %d\n", label, expected, actual);
     return 1;
 }
 
+/**
+ * expect bytes.
+ * @return Function result.
+ */
 static int expect_bytes(
     const char *label,
     const void *expected,
@@ -60,6 +72,10 @@ static int expect_bytes(
     return 1;
 }
 
+/**
+ * expect contains.
+ * @return Function result.
+ */
 static int expect_contains(
     const char *label,
     const void *data,
@@ -77,6 +93,10 @@ static int expect_contains(
 }
 
 #ifndef __EMSCRIPTEN__
+/**
+ * expect absent.
+ * @return Function result.
+ */
 static int expect_absent(
     const char *label,
     const void *data,
@@ -96,6 +116,10 @@ static int expect_absent(
 }
 #endif
 
+/**
+ * test result.
+ * @return None.
+ */
 static void test_result(int fail, const char *name, const char *detail) {
     test_case_current++;
     printf("[%d/%d] [%s] %s: %s\n",
@@ -106,6 +130,10 @@ static void test_result(int fail, const char *name, const char *detail) {
         detail);
 }
 
+/**
+ * test run.
+ * @return None.
+ */
 static void test_run(int *rc, int (*fn)(void)) {
     if (fn() != 0) (*rc)++;
 }
@@ -128,12 +156,20 @@ typedef struct {
     size_t body_size;
 } parser_state_t;
 
+/**
+ * copy text.
+ * @return None.
+ */
 static void copy_text(char *dst, size_t cap, const char *src) {
     if (cap == 0U) return;
     if (src == NULL) src = "";
     snprintf(dst, cap, "%s", src);
 }
 
+/**
+ * on request.
+ * @return None.
+ */
 static void on_request(const kc_http_request_t *request, void *userdata) {
     parser_state_t *state = (parser_state_t *)userdata;
     size_t i;
@@ -166,6 +202,10 @@ static void on_request(const kc_http_request_t *request, void *userdata) {
     }
 }
 
+/**
+ * on response.
+ * @return None.
+ */
 static void on_response(const kc_http_response_t *response, void *userdata) {
     parser_state_t *state = (parser_state_t *)userdata;
     state->responses++;
@@ -179,12 +219,20 @@ static void on_response(const kc_http_response_t *response, void *userdata) {
     }
 }
 
+/**
+ * on error.
+ * @return None.
+ */
 static void on_error(int status, void *userdata) {
     parser_state_t *state = (parser_state_t *)userdata;
     state->errors++;
     state->last_error = status;
 }
 
+/**
+ * Test kc http parser open.
+ * @return Function result.
+ */
 static int case_kc_http_parser_open(void) {
     kc_http_parser_t *parser = (kc_http_parser_t *)1;
     parser_state_t state;
@@ -205,6 +253,10 @@ static int case_kc_http_parser_open(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc http parser write.
+ * @return Function result.
+ */
 static int case_kc_http_parser_write(void) {
     static const char a[] =
         "POST /api?q=1 HTTP/1.1\r\n"
@@ -276,6 +328,10 @@ static int case_kc_http_parser_write(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc http parser close.
+ * @return Function result.
+ */
 static int case_kc_http_parser_close(void) {
     kc_http_parser_t *parser = NULL;
     parser_state_t state;
@@ -295,6 +351,10 @@ static int case_kc_http_parser_close(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc http request.
+ * @return Function result.
+ */
 static int case_kc_http_request(void) {
     const kc_http_field_t headers[] = {
         { "Host", "example.com" },
@@ -385,6 +445,10 @@ static int case_kc_http_request(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc http response.
+ * @return Function result.
+ */
 static int case_kc_http_response(void) {
     const kc_http_field_t headers[] = {
         { "Content-Type", "text/plain" }
@@ -463,6 +527,10 @@ static int case_kc_http_response(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc http free.
+ * @return Function result.
+ */
 static int case_kc_http_free(void) {
     int fail = 0;
     void *data = NULL;
@@ -478,6 +546,10 @@ static int case_kc_http_free(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc http strerror.
+ * @return Function result.
+ */
 static int case_kc_http_strerror(void) {
     int fail = 0;
     fail += expect_true("ok", strcmp(kc_http_strerror(KC_HTTP_OK), "ok") == 0);
@@ -489,6 +561,10 @@ static int case_kc_http_strerror(void) {
     return fail != 0;
 }
 
+/**
+ * Test kc http version.
+ * @return Function result.
+ */
 static int case_kc_http_version(void) {
     int fail = 0;
     (void)kc_http_version();
@@ -496,8 +572,11 @@ static int case_kc_http_version(void) {
     return fail != 0;
 }
 
-
 #ifndef __EMSCRIPTEN__
+/**
+ * test cli path.
+ * @return Function result.
+ */
 static int test_cli_path(char *out, size_t cap) {
     const char *slash;
     const char *backslash;
@@ -527,6 +606,10 @@ static int test_cli_path(char *out, size_t cap) {
     return 0;
 }
 
+/**
+ * test write file.
+ * @return Function result.
+ */
 static int test_write_file(const char *path, const void *data, size_t size) {
     FILE *file = fopen(path, "wb");
     if (file == NULL) return -1;
@@ -538,6 +621,10 @@ static int test_write_file(const char *path, const void *data, size_t size) {
     return 0;
 }
 
+/**
+ * test read file.
+ * @return Function result.
+ */
 static int test_read_file(
     const char *path,
     unsigned char **out,
@@ -578,6 +665,10 @@ static int test_read_file(
     return 0;
 }
 
+/**
+ * test cli run.
+ * @return Function result.
+ */
 static int test_cli_run(
     const char *args,
     const void *input,
@@ -733,6 +824,10 @@ static int test_cli_run(
     return rc;
 }
 
+/**
+ * test cli dump.
+ * @return None.
+ */
 static void test_cli_dump(
     const char *label,
     int rc,
@@ -756,6 +851,10 @@ static void test_cli_dump(
     }
 }
 
+/**
+ * Test kc http cli.
+ * @return Function result.
+ */
 static int case_kc_http_cli(void) {
     static const char request[] =
         "GET /x?q=1 HTTP/1.1\r\n"
@@ -906,6 +1005,10 @@ static int case_kc_http_cli(void) {
 }
 #endif
 
+/**
+ * test named.
+ * @return Function result.
+ */
 static int test_named(const char *name) {
     if (strcmp(name, "kc_http_parser_open") == 0) return case_kc_http_parser_open();
     if (strcmp(name, "kc_http_parser_write") == 0) return case_kc_http_parser_write();
@@ -922,6 +1025,10 @@ static int test_named(const char *name) {
     return 2;
 }
 
+/**
+ * main.
+ * @return Process exit code.
+ */
 int main(int argc, char **argv) {
     int rc = 0;
 
