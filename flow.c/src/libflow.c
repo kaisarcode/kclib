@@ -20,8 +20,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <stdatomic.h>
 
 #ifndef _WIN32
+#include <pthread.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -118,6 +120,25 @@ struct kc_flow {
     kc_flow_overlay_t overlays[KC_FLOW_MAX_RECORDS];
     size_t overlay_count;
     char error[KC_FLOW_ERROR_SIZE];
+    kc_flow_run_t *run;
+};
+
+struct kc_flow_run {
+    kc_flow_t runtime;
+    char *entry;
+    char *input;
+    size_t input_size;
+    char *output;
+    size_t output_size;
+    int status;
+    int started;
+    int joined;
+    atomic_int stop_requested;
+#ifdef _WIN32
+    HANDLE thread;
+#else
+    pthread_t thread;
+#endif
 };
 
 /**
@@ -183,6 +204,28 @@ static void kc_flow_clear_error(kc_flow_t *ctx) {
     if (ctx) {
         ctx->error[0] = '\0';
     }
+}
+
+/**
+ * Return whether the current run has requested a cooperative stop.
+ * @param ctx Runtime snapshot used by one run.
+ * @return Nonzero when the run must not start another step.
+ */
+static int kc_flow_is_stopped(const kc_flow_t *ctx) {
+    return ctx && ctx->run &&
+        atomic_load_explicit(&ctx->run->stop_requested, memory_order_acquire);
+}
+
+/**
+ * Store the stopped error on one run snapshot.
+ * @param ctx Runtime snapshot used by one run.
+ * @return KC_FLOW_ESTOP.
+ */
+static int kc_flow_fail_stop(kc_flow_t *ctx) {
+    if (ctx) {
+        snprintf(ctx->error, sizeof(ctx->error), "%s", "flow stopped");
+    }
+    return KC_FLOW_ESTOP;
 }
 
 /**
@@ -3190,8 +3233,13 @@ static int kc_flow_run_child(
         }
         entry = kc_flow_model_find(model, target);
         free(target);
-        if (!entry || kc_flow_run_node(ctx, path, model, &params, entry, input, outputs, depth + 1) != KC_FLOW_OK) {
+        if (!entry) {
             rc = kc_flow_fail(ctx, "child flow execution failed");
+        } else {
+            rc = kc_flow_run_node(ctx, path, model, &params, entry, input, outputs, depth + 1);
+            if (rc != KC_FLOW_OK && rc != KC_FLOW_ESTOP) {
+                rc = kc_flow_fail(ctx, "child flow execution failed");
+            }
         }
     }
     kc_flow_store_free(&params);
@@ -3228,6 +3276,9 @@ static int kc_flow_run_node(
     size_t i;
     int rc = KC_FLOW_OK;
 
+    if (kc_flow_is_stopped(ctx)) {
+        return kc_flow_fail_stop(ctx);
+    }
     if (depth > 64) {
         return kc_flow_fail(ctx, "maximum flow depth exceeded");
     }
@@ -3289,6 +3340,10 @@ static int kc_flow_run_node(
         }
         free(import);
         for (i = 0; rc == KC_FLOW_OK && i < active.count; ++i) {
+            if (kc_flow_is_stopped(ctx)) {
+                rc = kc_flow_fail_stop(ctx);
+                break;
+            }
             rc = kc_flow_run_child(ctx, child_path, &node_data, &active.items[i], &next, depth + 1);
         }
         kc_flow_branches_free(&active);
@@ -3298,7 +3353,12 @@ static int kc_flow_run_node(
         kc_flow_branches_t next;
         kc_flow_branches_init(&next);
         for (i = 0; rc == KC_FLOW_OK && i < active.count; ++i) {
-            char *command = kc_flow_template_mode(
+            char *command;
+            if (kc_flow_is_stopped(ctx)) {
+                rc = kc_flow_fail_stop(ctx);
+                break;
+            }
+            command = kc_flow_template_mode(
                 ctx,
                 flow_path,
                 behavior->exec,
@@ -3320,6 +3380,11 @@ static int kc_flow_run_node(
                 break;
             }
             free(command);
+            if (kc_flow_is_stopped(ctx)) {
+                free(out);
+                rc = kc_flow_fail_stop(ctx);
+                break;
+            }
             if (kc_flow_branches_take(&next, out, out_size) != KC_FLOW_OK) {
                 rc = kc_flow_fail(ctx, "too many branches");
             }
@@ -3332,6 +3397,10 @@ static int kc_flow_run_node(
             size_t j;
             for (j = 0; rc == KC_FLOW_OK && j < node->links.count; ++j) {
                 char cache_key[KC_FLOW_MAX_KEY * 2];
+                if (kc_flow_is_stopped(ctx)) {
+                    rc = kc_flow_fail_stop(ctx);
+                    break;
+                }
                 char *target;
                 kc_flow_node_t *next;
 
@@ -3378,6 +3447,9 @@ static int kc_flow_run_node(
             }
         }
     } else if (rc == KC_FLOW_OK) {
+        if (kc_flow_is_stopped(ctx)) {
+            rc = kc_flow_fail_stop(ctx);
+        }
         for (i = 0; rc == KC_FLOW_OK && i < active.count; ++i) {
             rc = kc_flow_branches_copy(outputs, active.items[i].data, active.items[i].size);
         }
@@ -3433,7 +3505,7 @@ static int kc_flow_load(kc_flow_t *ctx, const char *path, const char *entry, kc_
  * @param output_size Output size pointer.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-static int kc_flow_exec_loaded(
+static int kc_flow_run_loaded(
     kc_flow_t *ctx,
     const char *path,
     const char *entry,
@@ -3479,6 +3551,10 @@ static int kc_flow_exec_loaded(
     } else {
         for (i = 0; rc == KC_FLOW_OK && i < model->entries.count; ++i) {
             kc_flow_store_t cache;
+            if (kc_flow_is_stopped(ctx)) {
+                rc = kc_flow_fail_stop(ctx);
+                break;
+            }
             char cache_key[KC_FLOW_MAX_KEY];
             char *target;
             kc_flow_node_t *node;
@@ -3548,13 +3624,107 @@ static int kc_flow_exec_loaded(
 }
 
 /**
- * Open one flow runtime from an existing flow file.
- * @param out Pointer to receive runtime pointer.
+ * Release fields owned by one flow value without releasing the value itself.
+ * @param flow Flow value.
+ * @return None.
+ */
+static void kc_flow_release(kc_flow_t *flow) {
+    size_t i;
+
+    if (!flow) {
+        return;
+    }
+    for (i = 0; i < flow->overlay_count; ++i) {
+        free(flow->overlays[i].key);
+        free(flow->overlays[i].value);
+    }
+    free(flow->path);
+    memset(flow, 0, sizeof(*flow));
+}
+
+/**
+ * Snapshot one opened flow for an independent run.
+ * @param dst Destination runtime snapshot.
+ * @param src Opened flow.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
+ */
+static int kc_flow_snapshot(kc_flow_t *dst, const kc_flow_t *src) {
+    size_t i;
+
+    memset(dst, 0, sizeof(*dst));
+    dst->path = kc_flow_dup(src->path);
+    if (!dst->path) {
+        return KC_FLOW_ERROR;
+    }
+    for (i = 0; i < src->overlay_count; ++i) {
+        dst->overlays[i].kind = src->overlays[i].kind;
+        dst->overlays[i].key = kc_flow_dup(src->overlays[i].key);
+        dst->overlays[i].value = src->overlays[i].value
+            ? kc_flow_dup(src->overlays[i].value)
+            : NULL;
+        if (!dst->overlays[i].key ||
+            (src->overlays[i].value && !dst->overlays[i].value)) {
+            kc_flow_release(dst);
+            return KC_FLOW_ERROR;
+        }
+        dst->overlay_count++;
+    }
+    dst->error[0] = '\0';
+    return KC_FLOW_OK;
+}
+
+/**
+ * Execute one run on its private worker context.
+ * @param arg Run pointer.
+ * @return Platform thread result.
+ */
+#ifdef _WIN32
+static DWORD WINAPI kc_flow_run_worker(LPVOID arg)
+#else
+static void *kc_flow_run_worker(void *arg)
+#endif
+{
+    kc_flow_run_t *run = (kc_flow_run_t *)arg;
+    char *output = NULL;
+    size_t output_size = 0;
+
+    run->status = kc_flow_run_loaded(
+        &run->runtime,
+        run->runtime.path,
+        run->entry,
+        run->input,
+        run->input_size,
+        &output,
+        &output_size
+    );
+    if (run->status == KC_FLOW_OK) {
+        if (output_size == 0) {
+            free(output);
+            output = NULL;
+        }
+        run->output = output;
+        run->output_size = output_size;
+        kc_flow_clear_error(&run->runtime);
+    } else {
+        free(output);
+        run->output = NULL;
+        run->output_size = 0;
+    }
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+/**
+ * Open one flow from an existing flow file.
+ * @param out Pointer to receive flow pointer.
  * @param path Existing flow file path.
  * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
 int kc_flow_open(kc_flow_t **out, const char *path) {
-    kc_flow_t *ctx;
+    kc_flow_t *flow;
     struct stat st;
 
     if (out != NULL) {
@@ -3564,138 +3734,254 @@ int kc_flow_open(kc_flow_t **out, const char *path) {
         return KC_FLOW_ERROR;
     }
 
-    ctx = (kc_flow_t *)calloc(1, sizeof(kc_flow_t));
-    if (!ctx) {
+    flow = (kc_flow_t *)calloc(1, sizeof(*flow));
+    if (!flow) {
         return KC_FLOW_ERROR;
     }
-    ctx->path = kc_flow_dup(path);
-    if (!ctx->path) {
-        free(ctx);
+    flow->path = kc_flow_dup(path);
+    if (!flow->path) {
+        free(flow);
         return KC_FLOW_ERROR;
     }
-
-    ctx->error[0] = '\0';
-    *out = ctx;
-
+    flow->error[0] = '\0';
+    *out = flow;
     return KC_FLOW_OK;
 }
 
 /**
- * Release one flow runtime context.
- * @param ctx Context pointer.
- * @return None.
- */
-void kc_flow_close(kc_flow_t *ctx) {
-    size_t i;
-
-    if (!ctx) {
-        return;
-    }
-
-    for (i = 0; i < ctx->overlay_count; ++i) {
-        free(ctx->overlays[i].key);
-        free(ctx->overlays[i].value);
-    }
-    free(ctx->path);
-    free(ctx);
-}
-
-/**
- * Append one ordered key-value overlay operation.
- * @param ctx Context pointer.
+ * Append one ordered key-value override.
+ * @param flow Flow pointer.
  * @param key Flow document key.
- * @param value Overlay value.
- * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ * @param value Override value.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-int kc_flow_set(kc_flow_t *ctx, const char *key, const char *value) {
+int kc_flow_set(kc_flow_t *flow, const char *key, const char *value) {
     kc_flow_overlay_t *overlay;
 
-    if (!ctx || !key || !value || ctx->overlay_count >= KC_FLOW_MAX_RECORDS || !kc_flow_key_valid(key)) {
-        return kc_flow_fail(ctx, "invalid set overlay");
+    if (!flow || !key || !value ||
+        flow->overlay_count >= KC_FLOW_MAX_RECORDS || !kc_flow_key_valid(key)) {
+        return kc_flow_fail(flow, "invalid set overlay");
     }
-    overlay = &ctx->overlays[ctx->overlay_count];
+    overlay = &flow->overlays[flow->overlay_count];
     overlay->kind = KC_FLOW_OVERLAY_SET;
     overlay->key = kc_flow_dup(key);
     overlay->value = kc_flow_dup(value);
     if (!overlay->key || !overlay->value) {
         free(overlay->key);
         free(overlay->value);
-        return kc_flow_fail(ctx, "out of memory");
+        return kc_flow_fail(flow, "out of memory");
     }
-    ctx->overlay_count++;
-    kc_flow_clear_error(ctx);
+    flow->overlay_count++;
+    kc_flow_clear_error(flow);
     return KC_FLOW_OK;
 }
 
 /**
- * Append one ordered key removal overlay operation.
- * @param ctx Context pointer.
+ * Append one ordered key removal override.
+ * @param flow Flow pointer.
  * @param key Flow document key.
- * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
  */
-int kc_flow_unset(kc_flow_t *ctx, const char *key) {
+int kc_flow_unset(kc_flow_t *flow, const char *key) {
     kc_flow_overlay_t *overlay;
 
-    if (!ctx || !key || ctx->overlay_count >= KC_FLOW_MAX_RECORDS || !kc_flow_key_valid(key)) {
-        return kc_flow_fail(ctx, "invalid unset overlay");
+    if (!flow || !key ||
+        flow->overlay_count >= KC_FLOW_MAX_RECORDS || !kc_flow_key_valid(key)) {
+        return kc_flow_fail(flow, "invalid unset overlay");
     }
-    overlay = &ctx->overlays[ctx->overlay_count];
+    overlay = &flow->overlays[flow->overlay_count];
     overlay->kind = KC_FLOW_OVERLAY_UNSET;
     overlay->key = kc_flow_dup(key);
     if (!overlay->key) {
-        return kc_flow_fail(ctx, "out of memory");
+        return kc_flow_fail(flow, "out of memory");
     }
-    ctx->overlay_count++;
-    kc_flow_clear_error(ctx);
+    flow->overlay_count++;
+    kc_flow_clear_error(flow);
     return KC_FLOW_OK;
 }
 
 /**
- * Execute the opened flow, optionally from one explicit entry node.
- * @param ctx Runtime pointer.
- * @param entry Optional entry node reference, or NULL for declared entries.
- * @param input Optional input buffer.
- * @param input_size Input buffer size.
- * @param out_data Owned output buffer pointer.
- * @param out_size Output buffer size pointer.
- * @return KC_FLOW_OK on success, or KC_FLOW_ERROR on failure.
+ * Start one independent run of an opened flow.
+ * @param flow Flow pointer.
+ * @param out_run Pointer to receive run pointer.
+ * @param entry Optional explicit entry.
+ * @param input Optional input bytes.
+ * @param input_size Input byte size.
+ * @return KC_FLOW_OK when started, or KC_FLOW_ERROR.
  */
-int kc_flow_exec(
-    kc_flow_t *ctx,
+int kc_flow_run(
+    kc_flow_t *flow,
+    kc_flow_run_t **out_run,
     const char *entry,
     const void *input,
-    size_t input_size,
-    void **out_data,
-    size_t *out_size
+    size_t input_size
 ) {
-    char *output = NULL;
-    int rc;
+    kc_flow_run_t *run;
 
-    if (out_data != NULL) {
-        *out_data = NULL;
+    if (out_run) {
+        *out_run = NULL;
     }
-    if (out_size != NULL) {
-        *out_size = 0;
+    if (!flow || !out_run || (entry && !*entry) || (input_size > 0 && !input)) {
+        return KC_FLOW_ERROR;
     }
-    if (!ctx || !out_data || !out_size || (input_size > 0 && !input) || (entry && entry[0] == '\0')) {
-        return kc_flow_fail(ctx, "invalid argument");
+
+    run = (kc_flow_run_t *)calloc(1, sizeof(*run));
+    if (!run) {
+        return KC_FLOW_ERROR;
     }
-    rc = kc_flow_exec_loaded(ctx, ctx->path, entry, input, input_size, &output, out_size);
-    if (rc == KC_FLOW_OK) {
-        if (*out_size == 0) {
-            free(output);
-            output = NULL;
+    if (kc_flow_snapshot(&run->runtime, flow) != KC_FLOW_OK) {
+        free(run);
+        return KC_FLOW_ERROR;
+    }
+    run->runtime.run = run;
+    if (entry) {
+        run->entry = kc_flow_dup(entry);
+        if (!run->entry) {
+            kc_flow_release(&run->runtime);
+            free(run);
+            return KC_FLOW_ERROR;
         }
-        *out_data = output;
-        kc_flow_clear_error(ctx);
-    } else {
-        free(output);
     }
-    return rc;
+    if (input_size > 0) {
+        run->input = kc_flow_dup_bytes(input, input_size);
+        if (!run->input) {
+            free(run->entry);
+            kc_flow_release(&run->runtime);
+            free(run);
+            return KC_FLOW_ERROR;
+        }
+    }
+    run->input_size = input_size;
+    run->status = KC_FLOW_ERROR;
+    atomic_init(&run->stop_requested, 0);
+
+#ifdef _WIN32
+    run->thread = CreateThread(NULL, 0, kc_flow_run_worker, run, 0, NULL);
+    if (!run->thread) {
+        free(run->input);
+        free(run->entry);
+        kc_flow_release(&run->runtime);
+        free(run);
+        return KC_FLOW_ERROR;
+    }
+#else
+    if (pthread_create(&run->thread, NULL, kc_flow_run_worker, run) != 0) {
+        free(run->input);
+        free(run->entry);
+        kc_flow_release(&run->runtime);
+        free(run);
+        return KC_FLOW_ERROR;
+    }
+#endif
+    run->started = 1;
+    *out_run = run;
+    return KC_FLOW_OK;
 }
 
 /**
- * Release one output buffer produced by the runtime.
+ * Cooperatively stop one run after the current step.
+ * @param run Run pointer.
+ * @return KC_FLOW_OK on success, or KC_FLOW_ERROR.
+ */
+int kc_flow_run_stop(kc_flow_run_t *run) {
+    if (!run) {
+        return KC_FLOW_ERROR;
+    }
+    atomic_store_explicit(&run->stop_requested, 1, memory_order_release);
+    return KC_FLOW_OK;
+}
+
+/**
+ * Join one run once.
+ * @param run Run pointer.
+ * @return KC_FLOW_OK on join success, or KC_FLOW_ERROR.
+ */
+static int kc_flow_run_join(kc_flow_run_t *run) {
+    if (!run || !run->started) {
+        return KC_FLOW_ERROR;
+    }
+    if (run->joined) {
+        return KC_FLOW_OK;
+    }
+#ifdef _WIN32
+    if (WaitForSingleObject(run->thread, INFINITE) != WAIT_OBJECT_0) {
+        return KC_FLOW_ERROR;
+    }
+    CloseHandle(run->thread);
+    run->thread = NULL;
+#else
+    if (pthread_join(run->thread, NULL) != 0) {
+        return KC_FLOW_ERROR;
+    }
+#endif
+    run->joined = 1;
+    return KC_FLOW_OK;
+}
+
+/**
+ * Wait for one run and transfer successful final output to the caller.
+ * @param run Run pointer.
+ * @param out_data Pointer to receive owned output.
+ * @param out_size Pointer to receive output size.
+ * @return KC_FLOW_OK, KC_FLOW_ESTOP, or KC_FLOW_ERROR.
+ */
+int kc_flow_run_wait(
+    kc_flow_run_t *run,
+    void **out_data,
+    size_t *out_size
+) {
+    if (out_data) {
+        *out_data = NULL;
+    }
+    if (out_size) {
+        *out_size = 0;
+    }
+    if (!run || !out_data || !out_size) {
+        return KC_FLOW_ERROR;
+    }
+    if (kc_flow_run_join(run) != KC_FLOW_OK) {
+        return KC_FLOW_ERROR;
+    }
+    if (run->status == KC_FLOW_OK) {
+        *out_data = run->output;
+        *out_size = run->output_size;
+        run->output = NULL;
+        run->output_size = 0;
+    }
+    return run->status;
+}
+
+/**
+ * Return one run's contextual error.
+ * @param run Run pointer.
+ * @return Borrowed error string, or NULL.
+ */
+const char *kc_flow_run_error(const kc_flow_run_t *run) {
+    return run ? run->runtime.error : NULL;
+}
+
+/**
+ * Release one run.
+ * @param run Run pointer.
+ * @return None.
+ */
+void kc_flow_run_close(kc_flow_run_t *run) {
+    if (!run) {
+        return;
+    }
+    if (run->started && !run->joined) {
+        (void)kc_flow_run_stop(run);
+        (void)kc_flow_run_join(run);
+    }
+    free(run->output);
+    free(run->input);
+    free(run->entry);
+    kc_flow_release(&run->runtime);
+    free(run);
+}
+
+/**
+ * Release one output buffer produced by a completed run.
  * @param output Owned output buffer.
  * @return None.
  */
@@ -3704,12 +3990,16 @@ void kc_flow_free(void *output) {
 }
 
 /**
- * Returns the last error message from a flow context.
- * @param ctx Context pointer.
- * @return Borrowed error string, or NULL.
+ * Release one opened flow.
+ * @param flow Flow pointer.
+ * @return None.
  */
-const char *kc_flow_error(const kc_flow_t *ctx) {
-    return ctx ? ctx->error : NULL;
+void kc_flow_close(kc_flow_t *flow) {
+    if (!flow) {
+        return;
+    }
+    kc_flow_release(flow);
+    free(flow);
 }
 
 #ifndef KC_FLOW_BUILD_VERSION
