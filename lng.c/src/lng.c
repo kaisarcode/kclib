@@ -268,56 +268,56 @@ int main(int argc, char **argv) {
             options.limit = (size_t)limit;
         }
 
-    if (text) {
-        rc = kc_lng_detect(text, &options, &results, &count);
-        if (rc != KC_LNG_OK) {
-            fprintf(stderr, "lng: detection failed\n");
-            kc_lng_free(results);
-            results = NULL;
-            exit_code = 1;
-            goto cleanup;
-        }
-    } else {
-        if (kc_lng_read_all(KC_LNG_STDIN_FD, &input) != 0) {
-            fprintf(stderr, "lng: failed to read stdin\n");
-            free(input);
-            input = NULL;
-            kc_lng_free(results);
-            results = NULL;
-            exit_code = 1;
-            goto cleanup;
-        }
-
-        if (input == NULL || input[0] == '\0') {
-            free(input);
-            input = NULL;
-            kc_lng_free(results);
-            results = NULL;
-            goto cleanup;
-        }
-
-        rc = kc_lng_detect(input, &options, &results, &count);
-        free(input);
-        input = NULL;
-        if (rc != KC_LNG_OK) {
-            fprintf(stderr, "lng: detection failed\n");
-            kc_lng_free(results);
-            results = NULL;
-            exit_code = 1;
-            goto cleanup;
-        }
-    }
-
-    for (j = 0; j < count; j++) {
-        if ((!limit_set ? 1 : limit) == 1) {
-            printf("%s\n", results[j].code);
+        if (text) {
+            rc = kc_lng_detect(text, &options, &results, &count);
+            if (rc != KC_LNG_OK) {
+                fprintf(stderr, "lng: detection failed\n");
+                kc_lng_free(results);
+                results = NULL;
+                exit_code = 1;
+                goto cleanup;
+            }
         } else {
-            printf("%s: %.4f\n", results[j].code, results[j].score);
-        }
-    }
+            if (kc_lng_read_all(KC_LNG_STDIN_FD, &input) != 0) {
+                fprintf(stderr, "lng: failed to read stdin\n");
+                free(input);
+                input = NULL;
+                kc_lng_free(results);
+                results = NULL;
+                exit_code = 1;
+                goto cleanup;
+            }
 
-    kc_lng_free(results);
-    results = NULL;
+            if (input == NULL || input[0] == '\0') {
+                free(input);
+                input = NULL;
+                kc_lng_free(results);
+                results = NULL;
+                goto cleanup;
+            }
+
+            rc = kc_lng_detect(input, &options, &results, &count);
+            free(input);
+            input = NULL;
+            if (rc != KC_LNG_OK) {
+                fprintf(stderr, "lng: detection failed\n");
+                kc_lng_free(results);
+                results = NULL;
+                exit_code = 1;
+                goto cleanup;
+            }
+        }
+
+        for (j = 0; j < count; j++) {
+            if ((!limit_set ? 1 : limit) == 1) {
+                printf("%s\n", results[j].code);
+            } else {
+                printf("%s: %.4f\n", results[j].code, results[j].score);
+            }
+        }
+
+        kc_lng_free(results);
+        results = NULL;
     }
 
 cleanup:
