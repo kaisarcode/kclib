@@ -289,7 +289,6 @@ static int kc_dmn_cli_relay(kc_dmn_t *daemon) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
-    const char *dir = getenv("KC_DMN_DIR");
     int i = 1;
 
     if (i >= argc) {
@@ -325,7 +324,7 @@ int main(int argc, char **argv) {
         int rc;
 
         if (i + 2 < argc) return 1;
-        rc = kc_dmn_list(dir, &entries, &count);
+        rc = kc_dmn_list(&entries, &count);
         if (rc != KC_DMN_OK) return 1;
         for (n = 0; n < count; n++) {
             if (!filter || strcmp(filter, entries[n].name) == 0)
@@ -337,7 +336,7 @@ int main(int argc, char **argv) {
 
     if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--delete") == 0) {
         if (i + 2 != argc) return 1;
-        return kc_dmn_delete(argv[i + 1], dir) == KC_DMN_OK ? 0 : 1;
+        return kc_dmn_delete(argv[i + 1]) == KC_DMN_OK ? 0 : 1;
     }
 
     if (argv[i][0] == '-') {
@@ -349,7 +348,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i + 1], "-d") == 0 ||
                 strcmp(argv[i + 1], "--delete") == 0) {
             if (i + 2 != argc) return 1;
-            return kc_dmn_delete(argv[i], dir) == KC_DMN_OK ? 0 : 1;
+            return kc_dmn_delete(argv[i]) == KC_DMN_OK ? 0 : 1;
         }
 
         if (strcmp(argv[i + 1], "-l") == 0 ||
@@ -360,7 +359,7 @@ int main(int argc, char **argv) {
             int rc;
 
             if (i + 2 != argc) return 1;
-            rc = kc_dmn_list(dir, &entries, &count);
+            rc = kc_dmn_list(&entries, &count);
             if (rc != KC_DMN_OK) return 1;
             for (n = 0; n < count; n++) {
                 if (strcmp(argv[i], entries[n].name) == 0)
@@ -379,10 +378,6 @@ int main(int argc, char **argv) {
             if (i + 3 != argc) return 1;
             signal = atoi(argv[i + 2]);
             if (kc_dmn_open(&daemon, argv[i]) != KC_DMN_OK) return 1;
-            if (dir && kc_dmn_set_dir(daemon, dir) != KC_DMN_OK) {
-                kc_dmn_close(daemon);
-                return 1;
-            }
             rc = kc_dmn_send_signal(daemon, signal);
             kc_dmn_close(daemon);
             return rc == KC_DMN_OK ? 0 : 1;
@@ -394,7 +389,6 @@ int main(int argc, char **argv) {
 
             kc_dmn_join_args(cmd, sizeof(cmd), argv, i + 1, argc);
             options.cmd = cmd;
-            options.dir = dir;
             return kc_dmn_create(argv[i], &options) == KC_DMN_OK ? 0 : 1;
         }
     }
@@ -404,10 +398,6 @@ int main(int argc, char **argv) {
         int rc;
 
         if (kc_dmn_open(&daemon, argv[i]) != KC_DMN_OK) return 1;
-        if (dir && kc_dmn_set_dir(daemon, dir) != KC_DMN_OK) {
-            kc_dmn_close(daemon);
-            return 1;
-        }
         rc = kc_dmn_cli_relay(daemon);
         kc_dmn_close(daemon);
         return rc == KC_DMN_OK ? 0 : 1;
