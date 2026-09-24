@@ -105,7 +105,7 @@ The index is a persistent in-memory object. The only required configuration is t
 ```c
 #include "libhnsw.h"
 
-kc_hnsw_options_t options = {0};
+kc_hnsw_options_t options = kc_hnsw_options_default();
 kc_hnsw_t *index = NULL;
 kc_hnsw_result_t *results = NULL;
 size_t result_count = 0;
@@ -141,16 +141,15 @@ if (kc_hnsw_open(&index, &options) == KC_HNSW_OK) {
 | `build_effort` | Work spent building a higher-quality search graph | `64` |
 | `search_effort` | Work spent finding better matches during a search | `64` |
 
-A zero value means "use the library default" for every optional field. This makes partial configuration safe for C, LuaJIT FFI, JavaScript bindings, and other consumers without duplicating defaults outside the library.
-
-`kc_hnsw_options_default()` is available when a caller wants an explicit options value with the current defaults already filled in:
+`kc_hnsw_options_default()` returns the concrete defaults for every optional field. Set the required dimension, then override only the options that need different values:
 
 ```c
 kc_hnsw_options_t options = kc_hnsw_options_default();
 options.dimension = 384;
+options.search_effort = 128;
 ```
 
-Both forms are equivalent for the optional fields.
+Every field is interpreted literally by `kc_hnsw_open()`. Zero is not a default sentinel: it is invalid for `metric`, `max_connections`, `build_effort`, and `search_effort`.
 
 ### Lifecycle and ownership
 
