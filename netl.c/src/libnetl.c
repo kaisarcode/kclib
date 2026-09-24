@@ -65,6 +65,9 @@ struct kc_netl {
     unsigned short port;
     kc_netl_connection_t *connections;
     kc_netl_connection_t *retired;
+    kc_netl_pollfd_t *pollfds;
+    kc_netl_connection_t **pollmap;
+    size_t poll_capacity;
     size_t poll_offset;
     int prefer_accept;
     unsigned char buffer[KC_NETL_BUFFER_SIZE];
@@ -394,6 +397,43 @@ static size_t kc_netl_connection_count(const kc_netl_t *listener) {
 }
 
 /**
+ * Ensure reusable poll storage can describe every active connection.
+ * @param listener Listener handle.
+ * @param count Required poll entry count.
+ * @return KC_NETL_OK on success, otherwise KC_NETL_ENOMEM.
+ */
+static int kc_netl_poll_reserve(kc_netl_t *listener, size_t count) {
+    kc_netl_pollfd_t *new_fds;
+    kc_netl_connection_t **new_map;
+    size_t capacity;
+
+    if (count <= listener->poll_capacity) return KC_NETL_OK;
+    capacity = listener->poll_capacity != 0U
+        ? listener->poll_capacity
+        : 16U;
+    while (capacity < count) {
+        if (capacity > ((size_t)-1) / 2U) return KC_NETL_ENOMEM;
+        capacity *= 2U;
+    }
+
+    new_fds = (kc_netl_pollfd_t *)realloc(
+        listener->pollfds,
+        capacity * sizeof(*new_fds)
+    );
+    if (new_fds == NULL) return KC_NETL_ENOMEM;
+    listener->pollfds = new_fds;
+
+    new_map = (kc_netl_connection_t **)realloc(
+        listener->pollmap,
+        capacity * sizeof(*new_map)
+    );
+    if (new_map == NULL) return KC_NETL_ENOMEM;
+    listener->pollmap = new_map;
+    listener->poll_capacity = capacity;
+    return KC_NETL_OK;
+}
+
+/**
  * Return one accepted TCP connection event.
  * @param listener Listener handle.
  * @param event Event destination.
@@ -528,7 +568,14 @@ static int kc_netl_receive_connection(
     if (received < 0 && kc_netl_would_block()) {
         return KC_NETL_EAGAIN;
     }
-    if (received < 0) return KC_NETL_ENET;
+    if (received < 0) {
+        kc_netl_connection_shutdown(connection);
+        event->type = KC_NETL_EVENT_CLOSE;
+        event->connection = connection;
+        event->host = connection->host;
+        event->port = connection->port;
+        return KC_NETL_OK;
+    }
 
     kc_netl_connection_shutdown(connection);
     event->type = KC_NETL_EVENT_CLOSE;
@@ -567,13 +614,13 @@ int kc_netl_poll(
     count = listener->protocol == KC_NETL_TCP
         ? kc_netl_connection_count(listener)
         : 0U;
-    fds = (kc_netl_pollfd_t *)calloc(count + 1U, sizeof(*fds));
-    map = (kc_netl_connection_t **)calloc(count + 1U, sizeof(*map));
-    if (fds == NULL || map == NULL) {
-        free(fds);
-        free(map);
-        return KC_NETL_ENOMEM;
-    }
+    rc = kc_netl_poll_reserve(listener, count + 1U);
+    if (rc != KC_NETL_OK) return rc;
+
+    fds = listener->pollfds;
+    map = listener->pollmap;
+    memset(fds, 0, (count + 1U) * sizeof(*fds));
+    memset(map, 0, (count + 1U) * sizeof(*map));
 
     fds[0].fd = listener->fd;
     fds[0].events = POLLIN;
@@ -593,13 +640,9 @@ int kc_netl_poll(
         timeout_ms < 0 ? -1 : timeout_ms
     );
     if (ready == 0) {
-        free(fds);
-        free(map);
         return KC_NETL_EAGAIN;
     }
     if (ready < 0) {
-        free(fds);
-        free(map);
         return KC_NETL_ENET;
     }
 
@@ -607,16 +650,12 @@ int kc_netl_poll(
         rc = (fds[0].revents & POLLIN) != 0
             ? kc_netl_receive_datagram(listener, event)
             : KC_NETL_EAGAIN;
-        free(fds);
-        free(map);
         return rc;
     }
 
     if ((fds[0].revents & POLLIN) != 0 && listener->prefer_accept) {
         rc = kc_netl_accept(listener, event);
         if (rc == KC_NETL_OK) listener->prefer_accept = 0;
-        free(fds);
-        free(map);
         return rc;
     }
 
@@ -658,9 +697,6 @@ int kc_netl_poll(
         rc = kc_netl_accept(listener, event);
         if (rc == KC_NETL_OK) listener->prefer_accept = 0;
     }
-
-    free(fds);
-    free(map);
     return rc;
 }
 
@@ -699,7 +735,9 @@ int kc_netl_send(
         0
     );
     if (sent < 0) {
-        return kc_netl_would_block() ? KC_NETL_EAGAIN : KC_NETL_ENET;
+        if (kc_netl_would_block()) return KC_NETL_EAGAIN;
+        kc_netl_connection_shutdown(connection);
+        return KC_NETL_ENET;
     }
     *out_sent = (size_t)sent;
     return KC_NETL_OK;
@@ -830,6 +868,8 @@ void kc_netl_close(kc_netl_t *listener) {
         free(connection);
     }
     kc_netl_free_retired(listener);
+    free(listener->pollfds);
+    free(listener->pollmap);
     if (listener->fd != KC_NETL_FD_INVALID) {
         KC_NETL_CLOSE(listener->fd);
     }
