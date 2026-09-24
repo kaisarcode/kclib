@@ -364,7 +364,7 @@ static int case_kc_http_request(void) {
         { "X-Sum", "yes" }
     };
     const unsigned char body[] = { 'A', 0, 'B' };
-    kc_http_request_t request;
+    kc_http_request_build_t request;
     void *data = NULL;
     size_t size = 0U;
     int fail = 0;
@@ -392,7 +392,10 @@ static int case_kc_http_request(void) {
     memset(&request, 0, sizeof(request));
     request.method = "POST";
     request.chunked = 1;
-    request.chunk_size = 2U;
+    {
+        static const size_t chunk_size = 2U;
+        request.chunk_size = &chunk_size;
+    }
     request.body = "abc";
     request.body_size = 3U;
     request.trailers = trailers;
@@ -453,7 +456,7 @@ static int case_kc_http_response(void) {
     const kc_http_field_t headers[] = {
         { "Content-Type", "text/plain" }
     };
-    kc_http_response_t response;
+    kc_http_response_build_t response;
     void *data = NULL;
     size_t size = 0U;
     kc_http_parser_t *parser = NULL;
@@ -466,7 +469,10 @@ static int case_kc_http_response(void) {
     kc_http_free(data);
 
     memset(&response, 0, sizeof(response));
-    response.status = 201;
+    {
+        static const int status_created = 201;
+        response.status = &status_created;
+    }
     response.headers = headers;
     response.header_count = 1U;
     response.body = "created";
@@ -493,7 +499,10 @@ static int case_kc_http_response(void) {
         for (vi = 0U; vi < 2U; vi++) {
             memset(&response, 0, sizeof(response));
             response.version = versions[vi];
-            response.status = 204;
+            {
+                static const int status_no_content = 204;
+                response.status = &status_no_content;
+            }
 
             fail += expect_int("protocol response build", KC_HTTP_OK,
                 kc_http_response(&response, &data, &size));
@@ -519,8 +528,18 @@ static int case_kc_http_response(void) {
     }
 
     memset(&response, 0, sizeof(response));
-    response.status = 99;
+    {
+        static const int status_bad = 99;
+        response.status = &status_bad;
+    }
     fail += expect_int("bad status", KC_HTTP_EINVAL,
+        kc_http_response(&response, &data, &size));
+
+    {
+        static const int status_zero = 0;
+        response.status = &status_zero;
+    }
+    fail += expect_int("explicit zero status", KC_HTTP_EINVAL,
         kc_http_response(&response, &data, &size));
 
     test_result(fail, "kc_http_response", "builds response wire bytes symmetrically");
