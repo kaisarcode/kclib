@@ -428,9 +428,21 @@ test:
 				-DNETL_BUILD_VERSION=$(BUILD_VERSION) \
 				-DNETL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnetl.dll \
 				-DNETL_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnetl.dll.a \
+				-DNETL_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/x86_64/windows/netl.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
+			-DNETL_BUILD_TESTS=ON \
+			-DNETL_BUILD_VERSION=$(BUILD_VERSION) \
+			-DNETL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnetl.dll \
+			-DNETL_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnetl.dll.a \
+			-DNETL_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/x86_64/windows/netl.exe \
+			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target netl_contract_test || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/netl_contract_test.exe all; \
 	else \
@@ -448,9 +460,18 @@ test:
 				-DNETL_BUILD_TESTS=ON \
 				-DNETL_BUILD_VERSION=$(BUILD_VERSION) \
 				-DNETL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DNETL_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/netl$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DNETL_BUILD_TESTS=ON \
+			-DNETL_BUILD_VERSION=$(BUILD_VERSION) \
+			-DNETL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+			-DNETL_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/netl$(NATIVE_EXE_EXT) \
+			$(NATIVE_IMPORT_LIBRARY) \
+			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target netl_contract_test || exit 1; \
 		$(BUILD_DIR)/test/netl_contract_test all; \
 	fi
