@@ -5950,8 +5950,9 @@ static int case_kc_redp2p_heartbeat(void) {
 }
 
 /**
- * Verifies publisher TTL expiration directly against the private index engine.
- * This keeps protocol expiry coverage independent from CLI configuration.
+ * Verifies publisher TTL expiration against the private index engine.
+ * Keeps protocol expiry coverage independent from CLI configuration.
+ * @return 0 on success, 1 on failure.
  */
 static int case_redp2p_protocol_ttl(void)
 {
