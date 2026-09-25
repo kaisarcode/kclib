@@ -877,6 +877,19 @@ static int redp2p_control_bytes_valid(const char *data, size_t len) {
  * @return Complete line length, or a negative value on timeout, EOF, invalid
  * bytes, or capacity exhaustion.
  */
+static int redp2p_wait_readable(redp2p_fd_t fd, int timeout_ms)
+{
+    redp2p_pollfd_t pollfd;
+    int result;
+
+    pollfd.fd = fd;
+    pollfd.events = REDP2P_POLLIN;
+    pollfd.revents = 0;
+    result = redp2p_poll_wait(&pollfd, 1, timeout_ms);
+    if (result <= 0) return result;
+    return redp2p_poll_readable(&pollfd) ? 1 : -1;
+}
+
 static int redp2p_tcp_readline(redp2p_fd_t fd, char *buf, int cap, int timeout_sec) {
     int total = 0;
     int n;
@@ -885,15 +898,10 @@ static int redp2p_tcp_readline(redp2p_fd_t fd, char *buf, int cap, int timeout_s
     if (cap < 1) return -1;
 
     for (;;) {
-        fd_set fds;
-        struct timeval tv;
+        int wait_ms = (timeout_sec > 0 && total == 0) ?
+            timeout_sec * 1000 : 1000;
 
-        FD_ZERO(&fds);
-        if (!redp2p_fdset_add(fd, &fds, NULL)) return -1;
-        tv.tv_sec = (timeout_sec > 0 && total == 0) ? timeout_sec : 1;
-        tv.tv_usec = 0;
-
-        n = select(fd + 1, &fds, NULL, NULL, &tv);
+        n = redp2p_wait_readable(fd, wait_ms);
         if (n <= 0) return -1;
 
         n = redp2p_sock_read(fd, &byte, 1);
@@ -945,17 +953,9 @@ static int redp2p_http_map_error(const char *code)
  */
 static int redp2p_http_read_some(redp2p_fd_t fd, char *buf, int cap)
 {
-    fd_set fds;
-    struct timeval tv;
-    int n;
-
     if (cap < 1) return -1;
-    FD_ZERO(&fds);
-    if (!redp2p_fdset_add(fd, &fds, NULL)) return -1;
-    tv.tv_sec = REDP2P_HTTP_TIMEOUT_S;
-    tv.tv_usec = 0;
-    n = select((int)fd + 1, &fds, NULL, NULL, &tv);
-    if (n <= 0) return -1;
+    if (redp2p_wait_readable(fd, REDP2P_HTTP_TIMEOUT_S * 1000) <= 0)
+        return -1;
     return redp2p_sock_read(fd, buf, cap);
 }
 
