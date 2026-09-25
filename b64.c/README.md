@@ -3,9 +3,6 @@
 `b64.c` is a small C library and CLI for base64 encoding and decoding. It handles RFC 4648 base64 encoding of binary data and strict decoding of canonical base64 strings.
 
 ---
-
----
-
 ## CLI
 
 ### Examples
@@ -48,9 +45,6 @@ When supplied, the text argument takes precedence over stdin.
 | `-v`, `--version` | | Show version |
 
 ---
-
----
-
 ## Public API
 
 ```c
@@ -163,9 +157,6 @@ macOS / iOS:
 - `ctest` (included with cmake)
 
 ---
-
----
-
 ## Beta Notice
 
 This is a beta project tested only on Debian x86_64. It was created out of a
