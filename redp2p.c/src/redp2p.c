@@ -187,11 +187,11 @@ static int redp2p_cli_list(uint16_t port)
     int failed = 0;
     int status;
 
-    status = redp2p_open(&ctx);
+    status = redp2p_context_create(&ctx);
     if (status != REDP2P_OK) return 1;
-    status = redp2p_list_publishers(ctx, "127.0.0.1", port,
+    status = redp2p_idx_query_publishers(ctx, "127.0.0.1", port,
         redp2p_cli_print_id, &failed);
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     if (status != REDP2P_OK) {
         fprintf(stderr, "redp2p: list failed: %s\n", redp2p_strerror(status));
         return 1;
