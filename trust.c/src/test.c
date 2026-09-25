@@ -66,6 +66,7 @@ static int expect_int(const char *name, int expected, int actual) {
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
 static int expect_str(const char *name, const char *expected,
     const char *actual) {
     if (!expected || !actual || strcmp(expected, actual) != 0) {
@@ -75,6 +76,7 @@ static int expect_str(const char *name, const char *expected,
     }
     return 0;
 }
+#endif
 
 static int test_set_dir(const char *dir) {
 #ifdef _WIN32
