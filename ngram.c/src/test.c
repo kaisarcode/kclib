@@ -502,7 +502,7 @@ static int helper_literal(int argc, char **argv) {
     if (helper_consume_stdin() != 0) {
         return 1;
     }
-    if (argc == 3 && strcmp(argv[2], "x;echo nope") == 0) {
+    if (argc == 3 && strcmp(argv[2], "x>ngram-shell-probe.tmp") == 0) {
         fputs("close\n", stdout);
     }
     return 0;
@@ -931,7 +931,7 @@ static int case_kc_ngram_cli(void) {
         snprintf(
             cmd_literal,
             sizeof(cmd_literal),
-            "\"%s\" --helper-literal \"x;echo nope\"",
+            "\"%s\" --helper-literal x>ngram-shell-probe.tmp",
             test_self_path
         ) >= (int)sizeof(cmd_literal)
     ) {
@@ -1088,12 +1088,17 @@ static int case_kc_ngram_cli(void) {
             "a b c\n",
             0
         );
+        (void)remove("ngram-shell-probe.tmp");
         fail += run_cli_expect(
             "CLI command arguments are literal and not shell-evaluated",
             literal,
             NULL,
             "a b c\n",
             0
+        );
+        fail += expect_true(
+            "CLI command did not invoke shell redirection",
+            remove("ngram-shell-probe.tmp") != 0
         );
     }
 
