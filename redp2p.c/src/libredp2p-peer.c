@@ -1191,21 +1191,6 @@ int redp2p_pub_set_protocol(redp2p_t *ctx, int proto) {
 }
 
 /**
- * Set sweep count.
- * @return Status code.
- */
-int redp2p_set_sweep(redp2p_t *ctx, int sweep) {
-    if (!ctx) return REDP2P_EINVAL;
-    if (sweep < 0 || sweep > REDP2P_SWEEP_MAX) {
-        redp2p_set_error(ctx, "sweep must be between 0 and %d", REDP2P_SWEEP_MAX);
-        return REDP2P_EINVAL;
-    }
-    ctx->sweep = sweep;
-    redp2p_set_error(ctx, NULL);
-    return REDP2P_OK;
-}
-
-/**
  * Resolves the effective local port for pub or con.
  * Summary: A nonzero argument overrides a default context port, while a nonzero
  * argument conflicting with an explicitly set context port is rejected.
@@ -1491,16 +1476,6 @@ int redp2p_set_stream_faults(redp2p_t *ctx,
     redp2p_unlock(ctx);
     redp2p_set_error(ctx, NULL);
     return REDP2P_OK;
-}
-
-/**
- * Returns the bind port for a context.
- * @param ctx Open context.
- * @return Bind port, or 0 if not set.
- */
-uint16_t redp2p_get_bind_port(redp2p_t *ctx) {
-    if (!ctx) return 0;
-    return ctx->bind_port;
 }
 
 /**
