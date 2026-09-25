@@ -57,14 +57,15 @@
 #define KC_TRUST_HASH_SIZE 64
 #define KC_TRUST_BLAKE2B_BLOCK 128
 #define KC_TRUST_RECORD_MAGIC_SIZE 4
-#define KC_TRUST_PENDING_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_SK_SIZE + KC_TRUST_PSK_SIZE)
-#define KC_TRUST_PEER_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_SK_SIZE + KC_TRUST_PK_SIZE)
+#define KC_TRUST_PENDING_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE + KC_TRUST_PSK_SIZE)
+#define KC_TRUST_PEER_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE + KC_TRUST_PK_SIZE)
+#define KC_TRUST_LOCAL_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_UID_BYTES)
 
 #define KC_TRUST_INVITE_VERSION 1
-#define KC_TRUST_INVITE_RAW_SIZE (1 + KC_TRUST_UID_BYTES + KC_TRUST_PK_SIZE + KC_TRUST_PSK_SIZE)
+#define KC_TRUST_INVITE_RAW_SIZE (1 + (2 * KC_TRUST_UID_BYTES) + KC_TRUST_PK_SIZE + KC_TRUST_PSK_SIZE)
 
 #define KC_TRUST_XPSK1_MESSAGE_SIZE (KC_TRUST_PK_SIZE + (KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE) + KC_TRUST_MAC_SIZE)
-#define KC_TRUST_CONFIRM_RAW_SIZE (1 + KC_TRUST_UID_BYTES + KC_TRUST_XPSK1_MESSAGE_SIZE)
+#define KC_TRUST_CONFIRM_RAW_SIZE (1 + (2 * KC_TRUST_UID_BYTES) + KC_TRUST_XPSK1_MESSAGE_SIZE)
 
 #define KC_TRUST_K_HANDSHAKE_SIZE (KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE)
 #define KC_TRUST_TRANSPORT_MESSAGE_MAX 65535
@@ -75,6 +76,7 @@
 
 static const unsigned char KC_TRUST_PENDING_MAGIC[4] = { 'K', 'T', 'P', '1' };
 static const unsigned char KC_TRUST_PEER_MAGIC[4] = { 'K', 'T', 'R', '1' };
+static const unsigned char KC_TRUST_LOCAL_MAGIC[4] = { 'K', 'T', 'L', '1' };
 
 struct kc_trust {
     char dir[KC_TRUST_PATH_SIZE];
@@ -257,13 +259,17 @@ static int kc_trust_mkdirs(const char *path) {
 static int kc_trust_store_dirs(kc_trust_t *trust) {
     char pending[KC_TRUST_PATH_SIZE];
     char peers[KC_TRUST_PATH_SIZE];
+    char local[KC_TRUST_PATH_SIZE];
     if (!trust) return -1;
     if (kc_trust_mkdirs(trust->dir) != 0) return -1;
     if (kc_trust_path_join(pending, sizeof(pending), trust->dir, "pending") != 0)
         return -1;
     if (kc_trust_path_join(peers, sizeof(peers), trust->dir, "peers") != 0)
         return -1;
-    if (kc_trust_mkdirs(pending) != 0 || kc_trust_mkdirs(peers) != 0)
+    if (kc_trust_path_join(local, sizeof(local), trust->dir, "local") != 0)
+        return -1;
+    if (kc_trust_mkdirs(pending) != 0 || kc_trust_mkdirs(peers) != 0 ||
+        kc_trust_mkdirs(local) != 0)
         return -1;
     return 0;
 }
@@ -417,32 +423,40 @@ static int kc_trust_file_exists(const char *path) {
 #endif
 }
 
-static int kc_trust_pending_write(kc_trust_t *trust, const char *uid,
+static int kc_trust_pending_write(kc_trust_t *trust, const char *remote_uid,
+    const unsigned char local_uid[KC_TRUST_UID_BYTES],
     const unsigned char sk[KC_TRUST_SK_SIZE],
     const unsigned char psk[KC_TRUST_PSK_SIZE]) {
     unsigned char record[KC_TRUST_PENDING_RECORD_SIZE];
     char path[KC_TRUST_PATH_SIZE];
     int rc;
-    if (kc_trust_record_path(trust, "pending", uid, path) != 0) return -1;
+    if (kc_trust_record_path(trust, "pending", remote_uid, path) != 0)
+        return -1;
     memcpy(record, KC_TRUST_PENDING_MAGIC, 4);
-    memcpy(record + 4, sk, KC_TRUST_SK_SIZE);
-    memcpy(record + 4 + KC_TRUST_SK_SIZE, psk, KC_TRUST_PSK_SIZE);
+    memcpy(record + 4, local_uid, KC_TRUST_UID_BYTES);
+    memcpy(record + 4 + KC_TRUST_UID_BYTES, sk, KC_TRUST_SK_SIZE);
+    memcpy(record + 4 + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE,
+        psk, KC_TRUST_PSK_SIZE);
     rc = kc_trust_write_file(path, record, sizeof(record));
     crypto_wipe(record, sizeof(record));
     return rc;
 }
 
-static int kc_trust_pending_read(kc_trust_t *trust, const char *uid,
+static int kc_trust_pending_read(kc_trust_t *trust, const char *remote_uid,
+    unsigned char local_uid[KC_TRUST_UID_BYTES],
     unsigned char sk[KC_TRUST_SK_SIZE],
     unsigned char psk[KC_TRUST_PSK_SIZE]) {
     unsigned char record[KC_TRUST_PENDING_RECORD_SIZE];
     char path[KC_TRUST_PATH_SIZE];
     int rc = -1;
-    if (kc_trust_record_path(trust, "pending", uid, path) != 0) return -1;
+    if (kc_trust_record_path(trust, "pending", remote_uid, path) != 0)
+        return -1;
     if (kc_trust_read_file(path, record, sizeof(record)) == 0 &&
         memcmp(record, KC_TRUST_PENDING_MAGIC, 4) == 0) {
-        memcpy(sk, record + 4, KC_TRUST_SK_SIZE);
-        memcpy(psk, record + 4 + KC_TRUST_SK_SIZE, KC_TRUST_PSK_SIZE);
+        memcpy(local_uid, record + 4, KC_TRUST_UID_BYTES);
+        memcpy(sk, record + 4 + KC_TRUST_UID_BYTES, KC_TRUST_SK_SIZE);
+        memcpy(psk, record + 4 + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE,
+            KC_TRUST_PSK_SIZE);
         rc = 0;
     }
     crypto_wipe(record, sizeof(record));
@@ -455,32 +469,40 @@ static int kc_trust_pending_remove(kc_trust_t *trust, const char *uid) {
     return kc_trust_remove_file(path);
 }
 
-static int kc_trust_peer_write(kc_trust_t *trust, const char *uid,
+static int kc_trust_peer_write(kc_trust_t *trust, const char *remote_uid,
+    const unsigned char local_uid[KC_TRUST_UID_BYTES],
     const unsigned char local_sk[KC_TRUST_SK_SIZE],
     const unsigned char remote_pk[KC_TRUST_PK_SIZE]) {
     unsigned char record[KC_TRUST_PEER_RECORD_SIZE];
     char path[KC_TRUST_PATH_SIZE];
     int rc;
-    if (kc_trust_record_path(trust, "peers", uid, path) != 0) return -1;
+    if (kc_trust_record_path(trust, "peers", remote_uid, path) != 0)
+        return -1;
     memcpy(record, KC_TRUST_PEER_MAGIC, 4);
-    memcpy(record + 4, local_sk, KC_TRUST_SK_SIZE);
-    memcpy(record + 4 + KC_TRUST_SK_SIZE, remote_pk, KC_TRUST_PK_SIZE);
+    memcpy(record + 4, local_uid, KC_TRUST_UID_BYTES);
+    memcpy(record + 4 + KC_TRUST_UID_BYTES, local_sk, KC_TRUST_SK_SIZE);
+    memcpy(record + 4 + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE,
+        remote_pk, KC_TRUST_PK_SIZE);
     rc = kc_trust_write_file(path, record, sizeof(record));
     crypto_wipe(record, sizeof(record));
     return rc;
 }
 
-static int kc_trust_peer_read(kc_trust_t *trust, const char *uid,
+static int kc_trust_peer_read(kc_trust_t *trust, const char *remote_uid,
+    unsigned char local_uid[KC_TRUST_UID_BYTES],
     unsigned char local_sk[KC_TRUST_SK_SIZE],
     unsigned char remote_pk[KC_TRUST_PK_SIZE]) {
     unsigned char record[KC_TRUST_PEER_RECORD_SIZE];
     char path[KC_TRUST_PATH_SIZE];
     int rc = -1;
-    if (kc_trust_record_path(trust, "peers", uid, path) != 0) return -1;
+    if (kc_trust_record_path(trust, "peers", remote_uid, path) != 0)
+        return -1;
     if (kc_trust_read_file(path, record, sizeof(record)) == 0 &&
         memcmp(record, KC_TRUST_PEER_MAGIC, 4) == 0) {
-        memcpy(local_sk, record + 4, KC_TRUST_SK_SIZE);
-        memcpy(remote_pk, record + 4 + KC_TRUST_SK_SIZE, KC_TRUST_PK_SIZE);
+        memcpy(local_uid, record + 4, KC_TRUST_UID_BYTES);
+        memcpy(local_sk, record + 4 + KC_TRUST_UID_BYTES, KC_TRUST_SK_SIZE);
+        memcpy(remote_pk, record + 4 + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE,
+            KC_TRUST_PK_SIZE);
         rc = 0;
     }
     crypto_wipe(record, sizeof(record));
@@ -490,6 +512,42 @@ static int kc_trust_peer_read(kc_trust_t *trust, const char *uid,
 static int kc_trust_peer_remove(kc_trust_t *trust, const char *uid) {
     char path[KC_TRUST_PATH_SIZE];
     if (kc_trust_record_path(trust, "peers", uid, path) != 0) return -1;
+    return kc_trust_remove_file(path);
+}
+
+static int kc_trust_local_write(kc_trust_t *trust, const char *local_uid,
+    const unsigned char remote_uid[KC_TRUST_UID_BYTES]) {
+    unsigned char record[KC_TRUST_LOCAL_RECORD_SIZE];
+    char path[KC_TRUST_PATH_SIZE];
+    int rc;
+    if (kc_trust_record_path(trust, "local", local_uid, path) != 0)
+        return -1;
+    memcpy(record, KC_TRUST_LOCAL_MAGIC, 4);
+    memcpy(record + 4, remote_uid, KC_TRUST_UID_BYTES);
+    rc = kc_trust_write_file(path, record, sizeof(record));
+    crypto_wipe(record, sizeof(record));
+    return rc;
+}
+
+static int kc_trust_local_read(kc_trust_t *trust, const char *local_uid,
+    unsigned char remote_uid[KC_TRUST_UID_BYTES]) {
+    unsigned char record[KC_TRUST_LOCAL_RECORD_SIZE];
+    char path[KC_TRUST_PATH_SIZE];
+    int rc = -1;
+    if (kc_trust_record_path(trust, "local", local_uid, path) != 0)
+        return -1;
+    if (kc_trust_read_file(path, record, sizeof(record)) == 0 &&
+        memcmp(record, KC_TRUST_LOCAL_MAGIC, 4) == 0) {
+        memcpy(remote_uid, record + 4, KC_TRUST_UID_BYTES);
+        rc = 0;
+    }
+    crypto_wipe(record, sizeof(record));
+    return rc;
+}
+
+static int kc_trust_local_remove(kc_trust_t *trust, const char *uid) {
+    char path[KC_TRUST_PATH_SIZE];
+    if (kc_trust_record_path(trust, "local", uid, path) != 0) return -1;
     return kc_trust_remove_file(path);
 }
 
