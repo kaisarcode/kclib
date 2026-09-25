@@ -166,6 +166,7 @@ static int redp2p_generate_key(char *out) {
         REDP2P_KEY_SZ + 1);
 }
 
+#ifdef REDP2P_TESTING
 /**
  * Sets the base directory for persistent publisher keys and session state.
  * Summary: Stores library-owned data under <dir>/keys/.
@@ -174,7 +175,7 @@ static int redp2p_generate_key(char *out) {
  * @param dir Base directory path (non-NULL).
  * @return REDP2P_OK or REDP2P_EINVAL.
  */
-int redp2p_set_state_dir(redp2p_t *ctx, const char *dir) {
+int redp2p_test_set_state_dir(redp2p_t *ctx, const char *dir) {
     if (!ctx) return REDP2P_EINVAL;
     if (dir == NULL) return REDP2P_EINVAL;
     if (dir[0] == '\0') {
@@ -190,6 +191,8 @@ int redp2p_set_state_dir(redp2p_t *ctx, const char *dir) {
     redp2p_set_error(ctx, NULL);
     return REDP2P_OK;
 }
+
+#endif
 
 /**
  * Serializes access to persisted publisher session secrets within this process.
@@ -263,10 +266,13 @@ static int redp2p_key_paths(redp2p_t *ctx, const char *index_host,
     char filename[65];
     int n;
 
+#ifdef REDP2P_TESTING
     if (ctx->state_dir[0] != '\0') {
         n = snprintf(paths->dir, sizeof(paths->dir),
             "%s/keys", ctx->state_dir);
-    } else {
+    } else
+#endif
+    {
 #ifndef _WIN32
         base = getenv("XDG_DATA_HOME");
         if (base && base[0])
