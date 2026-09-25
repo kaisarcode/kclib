@@ -2627,7 +2627,7 @@ static DWORD WINAPI test_publisher_main(void *arg) {
     redp2p_set_local_port(publisher->ctx, publisher->bind_port);
     if (publisher->pass != NULL) redp2p_set_registration_pass(publisher->ctx, publisher->pass);
     if (publisher->state_dir != NULL)
-        redp2p_set_state_dir(publisher->ctx, publisher->state_dir);
+        redp2p_test_set_state_dir(publisher->ctx, publisher->state_dir);
     atomic_store(&publisher->result,
         redp2p_pub_run(publisher->ctx, publisher->host, publisher->index_port,
             publisher->id, publisher->bind_port));
@@ -2717,7 +2717,7 @@ static void *test_publisher_main(void *arg) {
     redp2p_set_local_port(publisher->ctx, publisher->bind_port);
     if (publisher->pass != NULL) redp2p_set_registration_pass(publisher->ctx, publisher->pass);
     if (publisher->state_dir != NULL)
-        redp2p_set_state_dir(publisher->ctx, publisher->state_dir);
+        redp2p_test_set_state_dir(publisher->ctx, publisher->state_dir);
     atomic_store(&publisher->result,
         redp2p_pub_run(publisher->ctx, publisher->host, publisher->index_port,
             publisher->id, publisher->bind_port));
@@ -4817,9 +4817,9 @@ static int test_tcp_stream_coverage(unsigned short port,
     int rc;
 
     rc = 0;
-    fail_ctx = redp2p_set_stream_faults(pub_ctx, 7, 11);
+    fail_ctx = redp2p_test_set_stream_faults(pub_ctx, 7, 11);
     rc += expect_int("enable publisher stream faults", REDP2P_OK, fail_ctx);
-    fail_ctx = redp2p_set_stream_faults(con_ctx, 7, 11);
+    fail_ctx = redp2p_test_set_stream_faults(con_ctx, 7, 11);
     rc += expect_int("enable consumer stream faults", REDP2P_OK, fail_ctx);
     large = (unsigned char *)malloc(TEST_TCP_LARGE_SIZE);
     rc += expect_true("allocate TCP patterned payload", large != NULL);
@@ -4831,9 +4831,9 @@ static int test_tcp_stream_coverage(unsigned short port,
             test_tcp_roundtrip(port, large, TEST_TCP_LARGE_SIZE));
     }
     rc += expect_int("disable publisher stream faults", REDP2P_OK,
-        redp2p_set_stream_faults(pub_ctx, 0, 0));
+        redp2p_test_set_stream_faults(pub_ctx, 0, 0));
     rc += expect_int("disable consumer stream faults", REDP2P_OK,
-        redp2p_set_stream_faults(con_ctx, 0, 0));
+        redp2p_test_set_stream_faults(con_ctx, 0, 0));
 
     test_tcp_pattern(first, sizeof(first), 11U);
     test_tcp_pattern(second, sizeof(second), 23U);
@@ -5537,7 +5537,7 @@ static int case_kc_redp2p_ttl_expiry(void) {
             if (result == REDP2P_OK) {
                 redp2p_pub_set_protocol(wrong_ctx, REDP2P_PROTO_TCP);
                 redp2p_set_local_port(wrong_ctx, 41007);
-                redp2p_set_state_dir(wrong_ctx, state_dir);
+                redp2p_test_set_state_dir(wrong_ctx, state_dir);
                 result = redp2p_pub_run(wrong_ctx, TEST_HOST, port, "ttlpub",
                     41007);
                 redp2p_context_destroy(wrong_ctx);
@@ -6038,16 +6038,16 @@ static int case_kc_redp2p_set_stream_faults(void) {
 
     fail = 0;
     fail += expect_int("set stream faults NULL", REDP2P_EINVAL,
-        redp2p_set_stream_faults(NULL, 1, 1));
+        redp2p_test_set_stream_faults(NULL, 1, 1));
     fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_int("seed stream fault detail", REDP2P_EINVAL,
         redp2p_pub_set_protocol(ctx, 7));
     fail += expect_int("set stream faults", REDP2P_OK,
-        redp2p_set_stream_faults(ctx, 7, 11));
+        redp2p_test_set_stream_faults(ctx, 7, 11));
     fail += expect_string("stream fault success clears detail", "",
         redp2p_get_error(ctx));
     fail += expect_int("reject negative stream faults", REDP2P_EINVAL,
-        redp2p_set_stream_faults(ctx, -1, 0));
+        redp2p_test_set_stream_faults(ctx, -1, 0));
     redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -6074,15 +6074,15 @@ static int case_kc_redp2p_set_state_dir(void) {
     fail += expect_int("open ctx", REDP2P_OK, redp2p_context_create(&ctx));
     if (ctx) {
         fail += expect_int("set_state_dir NULL ctx", REDP2P_EINVAL,
-            redp2p_set_state_dir(NULL, "/tmp"));
+            redp2p_test_set_state_dir(NULL, "/tmp"));
         fail += expect_int("set_state_dir NULL dir", REDP2P_EINVAL,
-            redp2p_set_state_dir(ctx, NULL));
+            redp2p_test_set_state_dir(ctx, NULL));
         fail += expect_int("set_state_dir empty", REDP2P_OK,
-            redp2p_set_state_dir(ctx, ""));
+            redp2p_test_set_state_dir(ctx, ""));
         fail += expect_int("set_state_dir valid", REDP2P_OK,
-            redp2p_set_state_dir(ctx, "/tmp/redp2p-custom"));
+            redp2p_test_set_state_dir(ctx, "/tmp/redp2p-custom"));
         fail += expect_int("set_state_dir long", REDP2P_EINVAL,
-            redp2p_set_state_dir(ctx,
+            redp2p_test_set_state_dir(ctx,
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
