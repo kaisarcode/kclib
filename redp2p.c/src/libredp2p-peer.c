@@ -395,35 +395,78 @@ void redp2p_stream_fail(redp2p_t *ctx, redp2p_stream_state_t *st) {
 }
 
 /**
- * Drains all currently reconstructed KCP bytes into the local TCP socket.
- * @return 0 on success, -1 on KCP or local socket failure.
+ * Flushes at most one reconstructed KCP chunk into the local TCP socket.
+ *
+ * Partial and would-block writes stay in the stream state. This bounds work
+ * per session and prevents one slow local socket from blocking the event loop.
  */
-static int redp2p_stream_drain(redp2p_t *ctx, redp2p_stream_state_t *st,
+int redp2p_stream_flush_tcp(redp2p_t *ctx, redp2p_stream_state_t *st,
     redp2p_fd_t tcp_fd)
 {
-    unsigned char buf[REDP2P_BUF];
     int available;
     int received;
+    int written;
 
-    for (;;) {
-        available = ikcp_peeksize(st->kcp);
-        if (available < 0) return 0;
-        if (available > (int)sizeof(buf)) {
-            redp2p_set_error(ctx, "stream: KCP receive chunk exceeds buffer");
-            return -1;
-        }
-        received = ikcp_recv(st->kcp, (char *)buf, (int)sizeof(buf));
-        if (received < 0) {
-            redp2p_set_error(ctx, "stream: KCP receive failed");
-            return -1;
-        }
-        if (received > 0 && redp2p_write_all(tcp_fd, (const char *)buf,
-            received) != 0)
-        {
+    if (!st || !st->kcp || tcp_fd == REDP2P_FD_INVALID) return -1;
+
+    if (st->pending_tcp_off < st->pending_tcp_len) {
+        written = (int)send(tcp_fd,
+            (const char *)st->pending_tcp + st->pending_tcp_off,
+            (int)(st->pending_tcp_len - st->pending_tcp_off), 0);
+        if (written < 0) {
+            if (REDP2P_LASTERR() == REDP2P_EWOULD) return 0;
             redp2p_set_error(ctx, "stream: local TCP write failed");
             return -1;
         }
+        if (written == 0) {
+            redp2p_set_error(ctx, "stream: local TCP write closed");
+            return -1;
+        }
+        st->pending_tcp_off += (size_t)written;
+        if (st->pending_tcp_off < st->pending_tcp_len) return 0;
+        st->pending_tcp_off = 0;
+        st->pending_tcp_len = 0;
+        return 0;
     }
+
+    available = ikcp_peeksize(st->kcp);
+    if (available < 0) {
+        if (st->remote_close && !st->remote_shutdown) {
+            redp2p_shutdown_write(tcp_fd);
+            st->remote_shutdown = 1;
+        }
+        return 0;
+    }
+    if (available > (int)sizeof(st->pending_tcp)) {
+        redp2p_set_error(ctx, "stream: KCP receive chunk exceeds buffer");
+        return -1;
+    }
+    received = ikcp_recv(st->kcp, (char *)st->pending_tcp,
+        (int)sizeof(st->pending_tcp));
+    if (received < 0) {
+        redp2p_set_error(ctx, "stream: KCP receive failed");
+        return -1;
+    }
+    st->pending_tcp_off = 0;
+    st->pending_tcp_len = (size_t)received;
+    if (received == 0) return 0;
+
+    written = (int)send(tcp_fd, (const char *)st->pending_tcp, received, 0);
+    if (written < 0) {
+        if (REDP2P_LASTERR() == REDP2P_EWOULD) return 0;
+        redp2p_set_error(ctx, "stream: local TCP write failed");
+        return -1;
+    }
+    if (written == 0) {
+        redp2p_set_error(ctx, "stream: local TCP write closed");
+        return -1;
+    }
+    st->pending_tcp_off = (size_t)written;
+    if (st->pending_tcp_off == st->pending_tcp_len) {
+        st->pending_tcp_off = 0;
+        st->pending_tcp_len = 0;
+    }
+    return 0;
 }
 
 /**
@@ -468,12 +511,11 @@ int redp2p_stream_process_packet(redp2p_t *ctx,
             return -1;
         }
         st->next_update_ms = (uint32_t)redp2p_now_ms();
-        return redp2p_stream_drain(ctx, st, tcp_fd);
+        return redp2p_stream_flush_tcp(ctx, st, tcp_fd);
     }
     if (envelope.type == REDP2P_SESSION_TYPE_CLOSE) {
-        if (redp2p_stream_drain(ctx, st, tcp_fd) != 0) return -1;
-        if (!st->remote_close) redp2p_shutdown_write(tcp_fd);
         st->remote_close = 1;
+        if (redp2p_stream_flush_tcp(ctx, st, tcp_fd) != 0) return -1;
         return redp2p_stream_send_control(ctx, st,
             REDP2P_SESSION_TYPE_CLOSE_ACK);
     }
@@ -580,6 +622,8 @@ uint32_t redp2p_stream_wait_ms(const redp2p_stream_state_t *st,
     int32_t difference;
 
     if (!st || !st->enabled) return 1000;
+    if (st->pending_tcp_off < st->pending_tcp_len) return 10;
+    if (st->remote_close && !st->remote_shutdown) return 10;
     if (!st->ready) {
         if (!st->initiator) return 1000;
         if (!st->hello_sent ||
@@ -600,7 +644,8 @@ uint32_t redp2p_stream_wait_ms(const redp2p_stream_state_t *st,
  * @return 1 when the stream may be cleaned up, 0 otherwise.
  */
 int redp2p_stream_is_done(const redp2p_stream_state_t *st) {
-    return st->local_eof && st->close_acked && st->remote_close && st->kcp &&
+    return st->local_eof && st->close_acked && st->remote_close &&
+        st->remote_shutdown && st->pending_tcp_len == 0 && st->kcp &&
         ikcp_waitsnd(st->kcp) == 0;
 }
 
