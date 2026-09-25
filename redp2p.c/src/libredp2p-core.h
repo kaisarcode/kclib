@@ -130,6 +130,7 @@ typedef struct json_object_t JSON_Object;
 #endif
 
 #define REDP2P_SWEEP_MAX   1024
+#define REDP2P_SWEEP_DEFAULT 20
 #define REDP2P_POW_MAX      32
 #define REDP2P_CTRL_SESSION_MAX    63
 #define REDP2P_HTTP_LINE_MAX      256
