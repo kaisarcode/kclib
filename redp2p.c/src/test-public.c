@@ -52,32 +52,6 @@ static void result(int failed, const char *name, const char *detail)
     if (failed) test_failed++;
 }
 
-static void sleep_ms(unsigned int ms)
-{
-#ifdef _WIN32
-    Sleep(ms);
-#else
-    struct timespec ts;
-
-    ts.tv_sec = (time_t)(ms / 1000U);
-    ts.tv_nsec = (long)(ms % 1000U) * 1000000L;
-    nanosleep(&ts, NULL);
-#endif
-}
-
-static uint64_t monotonic_ms(void)
-{
-#ifdef _WIN32
-    return (uint64_t)GetTickCount64();
-#else
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000U +
-        (uint64_t)(ts.tv_nsec / 1000000L);
-#endif
-}
-
 static void fd_close(test_fd_t fd)
 {
 #ifdef _WIN32
