@@ -829,6 +829,7 @@ static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
     const char *name,
     const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
     const unsigned char responder_uid[KC_TRUST_UID_BYTES]) {
+    unsigned char prologue[2 * KC_TRUST_UID_BYTES];
     size_t name_size = strlen(name);
     memset(state, 0, sizeof(*state));
     if (name_size <= KC_TRUST_HASH_SIZE) {
@@ -839,8 +840,10 @@ static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
     }
     memcpy(state->ck, state->h, KC_TRUST_HASH_SIZE);
     kc_trust_cipher_empty(&state->cipher);
-    kc_trust_mix_hash(state, initiator_uid, KC_TRUST_UID_BYTES);
-    kc_trust_mix_hash(state, responder_uid, KC_TRUST_UID_BYTES);
+    memcpy(prologue, initiator_uid, KC_TRUST_UID_BYTES);
+    memcpy(prologue + KC_TRUST_UID_BYTES, responder_uid, KC_TRUST_UID_BYTES);
+    kc_trust_mix_hash(state, prologue, sizeof(prologue));
+    crypto_wipe(prologue, sizeof(prologue));
 }
 
 static int kc_trust_x25519(unsigned char out[32],
