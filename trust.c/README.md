@@ -1,364 +1,350 @@
-# trust.c - Message Cryptography with TOFU Peer Identity
+# trust.c - Portable scoped trust and message cryptography
 
-`trust.c` is a small C11 library and CLI for protecting messages with the Noise protocol `Noise_X_25519_ChaChaPoly_BLAKE2b` and its one-way `X` handshake pattern.
-Each sealed message carries a fresh ephemeral public key and an encrypted sender static public key.
-Incoming messages are authenticated before being evaluated against an in-memory Trust-On-First-Use store.
+\`trust.c\` establishes small, persistent trust relationships and protects
+messages between the two established endpoints. It deliberately does not
+implement networking.
 
----
+The library is intended to compose with transports such as \`redp2p\`,
+\`netl.c\`, \`nets.c\`, \`http.c\`, pipes, files, or application-specific
+message delivery. A transport moves blobs; \`trust.c\` decides whether a blob
+belongs to an established cryptographic identity and encrypts or decrypts its
+contents.
+
+## Consumer model
+
+The public model is intentionally small:
+
+\`\`\`text
+init
+invite -> join -> confirm
+seal <-> unseal
+revoke
+\`\`\`
+
+All Noise handshake machinery, static and ephemeral keys, PSKs, transcript
+hashes, nonces, and persistent key files are internal implementation details.
+
+A typical application flow is:
+
+\`\`\`javascript
+// Bob's machine
+const bob = trust.init();
+const invitation = bob.invite();
+
+// Bob gives invitation.code to Alice out of band.
+// Bob stores invitation.uid as the application UID for this scope.
+
+// Alice's machine
+const alice = trust.init();
+const joined = alice.join(invitationCode);
+
+// Alice stores joined.uid as the application UID for Bob.
+// The application sends joined.confirmation back to Bob by any transport.
+
+// Bob's machine
+const aliceUid = bob.confirm(confirmation);
+
+// Later:
+const protectedMessage = bob.seal(aliceUid, "Hello Alice!");
+\`\`\`
+
+Alice receives the surrounding application's UID and protected blob:
+
+\`\`\`javascript
+const plaintext = alice.unseal(request.uid, request.message);
+\`\`\`
+
+The UID is an application-visible UUIDv4 identifying one scoped trust
+relationship. Both endpoints use the same UID bytes; each application is free
+to label or associate that UID with its own domain objects.
+
+No human or application name such as \`"alice"\` participates in the
+cryptographic protocol.
+
+## Trust establishment
+
+\`invite()\` creates a one-use invitation. It returns:
+
+- a canonical UUIDv4 string used by the application as the scope UID;
+- an opaque Base64 invitation code suitable for a QR code, text, file, or any
+  other out-of-band transfer selected by the application.
+
+The invitation contains the scope UID, a 32-byte one-use PSK, and the inviter's
+static public key. The inviter persists the matching local static secret and
+PSK as pending state.
+
+\`join(code)\` is performed on the invited endpoint. It:
+
+- imports the UID and inviter public key;
+- generates a static key pair scoped to this relationship;
+- persists the local static secret plus the inviter public key;
+- returns the same UID and one opaque Base64 confirmation.
+
+The confirmation is generated with:
+
+\`\`\`text
+Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b
+\`\`\`
+
+The scope UID is mixed into the Noise prologue. The \`Xpsk1\` pattern lets the
+joining endpoint transmit its static public key to the inviter while proving
+knowledge of the one-use PSK.
+
+\`confirm(confirmation)\` identifies the matching pending invitation from the
+confirmation UID, verifies the Noise message and PSK, records the joiner's
+static public key, destroys the pending invitation secret, and returns the
+confirmed UID.
+
+A confirmation is deterministic from the application's point of view: a valid
+confirmation establishes the relationship; an invalid confirmation is rejected.
+There is no public handshake object or protocol-step API.
+
+The Noise protocol specification is at <https://noiseprotocol.org/noise.html>.
+
+## Messages
+
+After confirmation, each endpoint persists, for that UID:
+
+\`\`\`text
+local static secret key
+remote static public key
+\`\`\`
+
+\`seal(uid, message)\` and \`unseal(uid, protected)\` use:
+
+\`\`\`text
+Noise_K_25519_ChaChaPoly_BLAKE2b
+\`\`\`
+
+The Noise \`K\` one-way pattern is appropriate because both static public keys
+are already known after trust establishment. Every protected blob starts a
+fresh one-way Noise handshake with a fresh ephemeral key. The scope UID is
+mixed into the Noise prologue.
+
+The handshake itself carries an empty payload. After \`Split()\`, the first
+one-way transport \`CipherState\` protects an encrypted logical length followed
+by bounded Noise transport records. This allows one logical message up to
+64 MiB while every individual Noise message remains within Noise's 65535-byte
+limit.
+
+\`seal()\` and \`unseal()\` are blob transforms only:
+
+\`\`\`text
+plaintext + UID -> protected blob
+protected blob + UID -> plaintext
+\`\`\`
+
+They do not send or receive anything.
+
+## Responsibility boundary
+
+\`trust.c\` provides:
+
+- scoped cryptographic identity;
+- one-use out-of-band trust invitations;
+- authentication of the invited endpoint;
+- confidentiality and integrity for established UIDs;
+- local persistence of cryptographic relationship state;
+- explicit revocation.
+
+\`trust.c\` does **not** provide or inspect:
+
+- TCP, UDP, KCP, HTTP, WebSocket, or any other transport;
+- hosts, ports, listeners, connections, requests, or responses;
+- ordering, retries, timeouts, counters, sequence numbers, or replay windows;
+- application usernames or human identity;
+- a clock or temporal validity policy.
+
+If a caller supplies the same valid protected blob repeatedly,
+\`kc_trust_unseal()\` may authenticate and decrypt it repeatedly. Replay policy
+belongs to the composing protocol, such as the counters already maintained by a
+transport.
+
+## Persistent state
+
+Normal callers never select a storage directory.
+
+\`kc_trust_init()\` follows the repository's per-user data convention:
+
+On POSIX, when \`XDG_DATA_HOME\` is set:
+
+\`\`\`text
+$XDG_DATA_HOME/kaisarcode/trust.c
+\`\`\`
+
+otherwise:
+
+\`\`\`text
+$HOME/.local/share/kaisarcode/trust.c
+\`\`\`
+
+On Windows the corresponding per-user application-data directory is used:
+
+\`\`\`text
+%LOCALAPPDATA%\kaisarcode\trust.c
+\`\`\`
+
+with \`APPDATA\` as fallback.
+
+\`KC_TRUST_DIR\` is an advanced process-level override for contract tests and
+controlled deployments. It is not a normal API argument.
+
+State is split internally into pending invitations and established peers.
+Secret-bearing files are written as private per-user files on POSIX. Existing
+trust directories must resolve as real directories rather than symlinked final
+paths and must not be group/world writable.
+
+The file format is private to \`trust.c\`. Applications persist only their own
+UID associations; they do not store or manipulate trust keys.
+
+## Public C API
+
+\`\`\`c
+typedef struct kc_trust kc_trust_t;
+
+#define KC_TRUST_OK 0
+#define KC_TRUST_ERROR -1
+
+#define KC_TRUST_UID_SIZE 36
+#define KC_TRUST_MAX_MESSAGE (64 * 1024 * 1024)
+
+uint64_t kc_trust_version(void);
+
+int kc_trust_init(kc_trust_t **out);
+
+int kc_trust_invite(
+    kc_trust_t *trust,
+    char **out_uid,
+    char **out_code
+);
+
+int kc_trust_join(
+    kc_trust_t *trust,
+    const char *code,
+    char **out_uid,
+    char **out_confirmation
+);
+
+int kc_trust_confirm(
+    kc_trust_t *trust,
+    const char *confirmation,
+    char **out_uid
+);
+
+int kc_trust_seal(
+    kc_trust_t *trust,
+    const char *uid,
+    const void *message,
+    size_t message_size,
+    void **out_data,
+    size_t *out_size
+);
+
+int kc_trust_unseal(
+    kc_trust_t *trust,
+    const char *uid,
+    const void *data,
+    size_t data_size,
+    void **out_message,
+    size_t *out_message_size
+);
+
+int kc_trust_revoke(
+    kc_trust_t *trust,
+    const char *uid
+);
+
+void kc_trust_close(kc_trust_t *trust);
+void kc_trust_free(void *ptr);
+\`\`\`
+
+Strings and blobs returned through \`out_*\` are owned by the caller and are
+released with \`kc_trust_free()\`. The context is released with
+\`kc_trust_close()\`.
 
 ## CLI
 
-### Examples
+The CLI exposes the same semantic operations:
 
-Alice creates an identity and exports its public key:
-
-```bash
+\`\`\`text
 trust init
-trust pk > alice.pub
-```
+trust invite
+trust join <code>
+trust confirm <confirmation>
+trust seal <uid>
+trust unseal <uid>
+trust revoke <uid>
+\`\`\`
 
-Bob does the same:
+\`invite\`, \`join\`, and \`confirm\` print compact JSON containing their
+application-visible UID and portable code/confirmation.
 
-```bash
-trust init
-trust pk > bob.pub
-```
+\`seal\` reads plaintext bytes from stdin and writes only the protected binary
+blob to stdout.
 
-Alice sends `alice.pub` to Bob, and Bob sends `bob.pub` to Alice. These binary
-32-byte files are the canonical public-key exchange format and need no
-conversion. Alice can use Bob's file directly:
+\`unseal\` reads a protected binary blob from stdin and writes only plaintext
+bytes to stdout.
 
-```bash
-trust seal bob.pub < message > payload
-trust trust bob bob.pub
-```
+The application is responsible for transporting those values between the two
+machines.
 
-Bob can use Alice's file directly:
+## Cryptographic implementation
 
-```bash
-trust seal alice.pub < message > payload
-trust trust alice alice.pub
-```
+The protocol profile is fixed:
 
-Open a sealed message from stdin (TOFU with peer_id):
+\`\`\`text
+Trust establishment:
+    Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b
 
-```bash
-trust open alice < payload
-```
+Established messages:
+    Noise_K_25519_ChaChaPoly_BLAKE2b
+\`\`\`
 
-Open a sealed message without trust evaluation:
+The implementation uses the vendored Monocypher sources for X25519,
+ChaCha20-Poly1305, BLAKE2b, constant-time comparison, and secret wiping.
+There is no OpenSSL, OpenSSH, GPG, libsodium runtime, daemon, or system crypto
+command dependency.
 
-```bash
-trust open < payload
-```
+Platform entropy comes from:
 
-Open with a custom key path:
+- \`BCryptGenRandom\` on Windows;
+- \`getentropy()\` under Emscripten;
+- \`/dev/urandom\` on other POSIX targets.
 
-```bash
-trust --key ~/.bob/id open alice < payload
-```
+Low-order X25519 results are rejected.
 
-Explicitly trust a peer binding:
+## WASM
 
-```bash
-trust trust alice alice.pub
-```
+The reusable API is built for Emscripten. Noise and cryptographic operations
+are identical to native builds. State uses the filesystem visible to the
+Emscripten runtime; durable browser persistence, when desired, is supplied by
+the host's filesystem integration rather than by \`trust.c\`.
 
-Remove a peer binding:
+The WASM module exports:
 
-```bash
-trust forget alice
-```
+\`\`\`text
+_kc_trust_init
+_kc_trust_invite
+_kc_trust_join
+_kc_trust_confirm
+_kc_trust_seal
+_kc_trust_unseal
+_kc_trust_revoke
+_kc_trust_close
+_kc_trust_free
+_kc_trust_version
+\`\`\`
 
-List persisted binding hashes:
+The native CLI is not compiled into the WASM reusable contract tests.
 
-```bash
-trust peers
-```
+## Build and test
 
----
-
-### Parameters
-
-| Command/Flag | Description |
-| :--- | :--- |
-| `init` | Generate a new identity keypair |
-| `pk` | Write the local 32-byte public key |
-| `seal <key_file>` | Seal stdin for a recipient |
-| `open [peer_id]` | Open a sealed message from stdin |
-| `trust <peer_id> <key_file>` | Trust a peer binding |
-| `forget <peer_id>` | Remove a peer binding |
-| `peers` | List persisted binding hashes |
-| `--key <path>` | Override the identity key path |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
-
-CLI flags override environment variables, which override built-in defaults.
-
-Identity files are exactly 64 bytes: `[sk:32][pk:32]`. Recipient and `trust`
-key files must be exactly 32-byte public keys or exactly 64-byte identity
-files; for identity files, the public key is derived from the secret half.
-`trust pk` writes exactly 32 raw bytes with no newline or encoding, so its output
-can be used directly as a recipient or trust key file.
-
-`seal` accepts at most 64 MiB (67,108,864 bytes) from stdin. `open` accepts at
-most `KC_TRUST_MAX_PAYLOAD` (67,125,384 bytes). Both reject input containing
-an additional byte.
-
-`trust seal` reads message bytes from stdin and writes the encrypted binary
-payload to stdout. `trust open` reads that payload and
-writes exactly one JSON document to stdout. Successful authenticated results
-use this shape:
-
-```json
-{"ok":true,"status":"ok","peer_pk":"<64 lowercase hex>","message":"<base64>"}
-```
-
-`status` is `ok`, `peer_new`, or `peer_changed`. The message is standard
-Base64 so arbitrary binary and empty messages remain representable. All three
-statuses exit zero because authentication and decryption succeeded; the
-calling application decides trust policy. Normal failures exit nonzero and
-return JSON such as:
-
-```json
-{"ok":false,"error":"authentication_failed"}
-```
-
-The stable error values are `invalid_input`, `message_too_large`,
-`identity_error`, `state_error`, and `authentication_failed`. stderr is
-reserved for exceptional failures that prevent writing a valid JSON response.
-
-`TRUST_STATE_DIR` sets the state directory. Its POSIX default follows the
-XDG Base Directory convention: `$XDG_DATA_HOME/trust` when that variable is
-set, otherwise `$HOME/.local/share/trust`. Its Windows default is
-`%LOCALAPPDATA%\trust`, falling back to `%USERPROFILE%\.trust` when
-`LOCALAPPDATA` is unavailable. Resolution fails if the required platform
-environment variables are unavailable; trust never uses `.` as an implicit
-persistent state root.
-
-The default identity is `<state>/id` and persisted CLI bindings are under
-`<state>/trust/`. `TRUST_KEY` overrides only the identity file and never moves
-the trust directory. The CLI reads these environment variables itself; `--key`
-overrides `TRUST_KEY`, which overrides the default `<state>/id` identity path,
-and `TRUST_STATE_DIR` overrides the platform default state directory. The
-library itself is memory-only and never reads the environment or the
-filesystem.
-
----
-
-## Public API
-
-```c
-#include "libtrust.h"
-
-unsigned char sk[32], pk[32];
-kc_trust_generate(sk, pk);          /* random in-memory keypair */
-kc_trust_t *ctx = NULL;
-if (kc_trust_create(&ctx, sk) == KC_TRUST_OK) {
-    unsigned char recipient_pk[32];
-    /* ... load recipient_pk ... */
-    unsigned char *payload = NULL;
-    size_t payload_len = 0;
-    kc_trust_seal(ctx, recipient_pk, message, message_len,
-        &payload, &payload_len);
-    /* payload contains the sealed message */
-    kc_trust_free(payload);
-    kc_trust_close(ctx);
-}
-```
-
----
-
-## Lifecycle
-
-- `kc_trust_generate()` - generates a random in-memory keypair `[sk][pk]`.
-- `kc_trust_create()` - allocates a caller-owned context from a 32-byte secret key, deriving the public key.
-- `kc_trust_public_key()` - returns the context-owned 32-byte public key.
-- `kc_trust_seal()` - protects an outgoing message for a recipient.
-- `kc_trust_open()` - verifies and opens an incoming payload.
-- `kc_trust_trust()` / `kc_trust_forget()` - maintain an in-memory peer trust binding.
-- `kc_trust_result_free()` - releases a result.
-- `kc_trust_free()` - standard release for `seal` payloads.
-- `kc_trust_close()` - releases the context and wipes all sensitive material (returns nothing).
-
-## Trust Model
-
-`libtrust` trust is context-local, in-memory only, and managed through explicit
-caller operations. The library performs no filesystem persistence.
-
-When `kc_trust_open()` is called with a `peer_id`:
-
-- No binding exists for the peer identifier: `KC_TRUST_PEER_NEW` (1)
-- Binding exists and matches: `KC_TRUST_OK` (0)
-- Binding exists and differs: `KC_TRUST_PEER_CHANGED` (2)
-
-When `peer_id` is NULL, trust evaluation is skipped and the result is `KC_TRUST_OK`.
-
-Incoming processing never modifies trust state. The caller decides what to do with trust-related results.
-
-The CLI separately owns optional persistence under `<state>/trust/`. It stores exactly 32-byte public-key bindings under BLAKE2b-256 hashes of `peer_id`,
-explicitly loads a binding into a library context for `open`, and discards that in-memory binding afterward. Malformed binding files are ignored and therefore evaluate as new peers.
-Incoming processing never creates or updates the persisted binding.
-
-On POSIX, trust-created state and trust directories use mode 0700. Existing
-state and trust directories must be directories, must not be symlinks, and
-must not be writable by group or others. On Windows, both paths must be
-directories and reparse points are rejected. Existing directories are not
-silently rewritten.
-
-Library peer identifiers are opaque sequences from 1 through 256 bytes. CLI
-peer identifiers are non-empty command-line strings of at most 256 bytes and
-are hashed byte-for-byte without normalization.
-
-`trust peers` prints valid persisted filename identifiers: one 64-character
-lowercase BLAKE2b-256 hash per line. The original `peer_id` is not stored or
-printed directly; guessable identifiers can still be tested against the hash.
-
-## Build
-
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-```bash
+\`\`\`sh
+make all
 make test
-```
-
-To run tests in Windows-through-Wine mode:
-
-```bash
-make x86_64/windows
 make test wine
-```
+make test wasm
+\`\`\`
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
-
-### Multiarch Builds
-
-Cross-compiled artifacts are placed under `bin/{arch}/{platform}/` for the requested target.
-
-```bash
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make x86_64/iossim
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make aarch64/ios
-make aarch64/iossim
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
-make wasm32/wasm
-```
-
-Builds a single target only. Cross-compilation verifies compilation only; runtime validation requires the target environment.
-
-### WebAssembly
-
-The `wasm32/wasm` target builds a reusable `libtrust` WebAssembly module
-using the Emscripten SDK. It does not include the CLI. `src/trust.c` is not
-part of the WASM module.
-
-```bash
-make wasm32/wasm
-```
-
-This produces `bin/wasm32/wasm/trust.js` and `bin/wasm32/wasm/trust.wasm`.
-The module exports `_kc_trust_generate`, `_kc_trust_create`, `_kc_trust_close`,
-`_kc_trust_public_key`, `_kc_trust_seal`, `_kc_trust_open`, `_kc_trust_free`,
-`_kc_trust_result_free`, `_kc_trust_trust`, `_kc_trust_forget`, and
-`_kc_trust_version` through the generated `trust.js` glue. The toolchain is
-selected via `WASM_EMCMAKE`, `WASM_EMCC`, and `WASM_NODE` (defaults `emcmake`,
-`emcc`, and `node`).
-
-The reusable library has no identity or trust filesystem persistence dependency.
-Host/application code owns any desired identity persistence.
-
-Secure entropy is mandatory. The Emscripten backend uses `getentropy()`.
-Secure entropy ultimately depends on the Emscripten host environment.
-`kc_trust_generate()` fails if secure entropy cannot be obtained.
-`kc_trust_seal()` also requires secure entropy for its fresh ephemeral key and
-fails if entropy is unavailable. There is no weak or deterministic fallback.
-
-This is a normal JS-hosted Emscripten module suitable for browser and Node-style
-Emscripten environments. It is not built with `STANDALONE_WASM`. Memory growth
-is enabled so the module can support the public large-message contract
-(64 MiB messages).
-
-`make wasm32/wasm` builds the individual WASM target.
-`make test wasm` executes the portable contract suite under Node.
-`wasm32/wasm` is also part of the complete `make all` target matrix.
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### System Libraries
-
-Linux:
-- No additional system libraries required.
-
-Windows (MSVC or MinGW):
-- No additional system libraries required.
-
-macOS / iOS:
-- No additional system libraries required.
-
-### Dependencies
-
-- [Monocypher](https://monocypher.org) (BSD-2-Clause / CC0) - vendored under `lib/monocypher/`
-
-### Optional Cross-Compilation SDKs
-
-Required only for multiarch builds:
-
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- osxcross for macOS cross-compilation from Linux.
-- Android NDK for Android cross-compilation.
-- Emscripten SDK (`emcmake`/`emcc`) for WASM builds.
-
-### Test Dependencies
-
-- `node` for WASM contract tests (the Emscripten SDK bundles one via
-    `EMSDK_NODE`; otherwise set `WASM_NODE=...`).
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support.
-You are free to test it, use it, and modify it as you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Please note that I do not accept pull requests; the goal is to avoid long-term dependency on platforms like GitHub,
-and I do not maintain fixed infrastructure to guarantee long-term stability for these projects.
-
----
-
-## License
-
-[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
-
-This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
+Native and Wine contract runs exercise the reusable API plus exactly one
+grouped \`kc_trust_cli\` case. WASM exercises the reusable API only.
