@@ -727,38 +727,38 @@ REDP2P_INTERNAL void redp2p_append_candidates(JSON_Object *obj,
 REDP2P_INTERNAL redp2p_options_t redp2p_options_default(void);
 REDP2P_INTERNAL void redp2p_options_load_env(redp2p_options_t *opts);
 REDP2P_INTERNAL void redp2p_options_free(redp2p_options_t *opts);
-REDP2P_INTERNAL int redp2p_open(redp2p_t **out);
-REDP2P_INTERNAL int redp2p_close(redp2p_t *ctx);
-REDP2P_INTERNAL int redp2p_stop(redp2p_t *ctx);
+REDP2P_INTERNAL int redp2p_context_create(redp2p_t **out);
+REDP2P_INTERNAL int redp2p_context_destroy(redp2p_t *ctx);
+REDP2P_INTERNAL int redp2p_context_request_stop(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_stop_requested(redp2p_t *ctx);
 REDP2P_INTERNAL uint64_t redp2p_version(void);
 REDP2P_INTERNAL const char *redp2p_strerror(int code);
 REDP2P_INTERNAL const char *redp2p_get_error(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_is_valid_id(const char *id);
 REDP2P_INTERNAL int redp2p_is_valid_pass_token(const char *pass);
-REDP2P_INTERNAL int redp2p_serve_index(redp2p_t *ctx, const char *host,
+REDP2P_INTERNAL int redp2p_idx_run(redp2p_t *ctx, const char *host,
     unsigned short port);
-REDP2P_INTERNAL int redp2p_wait(redp2p_t *ctx, const char *index_host,
+REDP2P_INTERNAL int redp2p_pub_run(redp2p_t *ctx, const char *index_host,
     unsigned short index_port, const char *self_id, unsigned short bind_port);
-REDP2P_INTERNAL int redp2p_connect(redp2p_t *ctx, const char *index_host,
+REDP2P_INTERNAL int redp2p_con_run(redp2p_t *ctx, const char *index_host,
     unsigned short index_port, const char *self_id, const char *target_id,
     unsigned short bind_port);
 REDP2P_INTERNAL int redp2p_deregister(redp2p_t *ctx, const char *index_host,
     unsigned short index_port, const char *id);
-REDP2P_INTERNAL int redp2p_list_publishers(redp2p_t *ctx,
+REDP2P_INTERNAL int redp2p_idx_query_publishers(redp2p_t *ctx,
     const char *index_host, unsigned short index_port,
     redp2p_publisher_cb cb, void *userdata);
-REDP2P_INTERNAL int redp2p_set_seats(redp2p_t *ctx, size_t seats);
-REDP2P_INTERNAL int redp2p_set_max_consumers_per_publisher(redp2p_t *ctx,
+REDP2P_INTERNAL int redp2p_idx_set_capacity(redp2p_t *ctx, size_t seats);
+REDP2P_INTERNAL int redp2p_idx_set_max_consumers(redp2p_t *ctx,
     size_t n);
-REDP2P_INTERNAL int redp2p_set_pow(redp2p_t *ctx, int bits);
-REDP2P_INTERNAL int redp2p_set_port(redp2p_t *ctx, unsigned short port);
-REDP2P_INTERNAL int redp2p_set_protocol(redp2p_t *ctx, int proto);
-REDP2P_INTERNAL int redp2p_set_pass(redp2p_t *ctx, const char *pass);
-REDP2P_INTERNAL int redp2p_set_vip(redp2p_t *ctx, const char *vip,
+REDP2P_INTERNAL int redp2p_idx_set_pow(redp2p_t *ctx, int bits);
+REDP2P_INTERNAL int redp2p_set_local_port(redp2p_t *ctx, unsigned short port);
+REDP2P_INTERNAL int redp2p_pub_set_protocol(redp2p_t *ctx, int proto);
+REDP2P_INTERNAL int redp2p_set_registration_pass(redp2p_t *ctx, const char *pass);
+REDP2P_INTERNAL int redp2p_idx_set_vips(redp2p_t *ctx, const char *vip,
     char *err, size_t err_cap);
 REDP2P_INTERNAL int redp2p_set_sweep(redp2p_t *ctx, int sweep);
-REDP2P_INTERNAL int redp2p_set_stun_url(redp2p_t *ctx, const char *url);
+REDP2P_INTERNAL int redp2p_set_stun_server(redp2p_t *ctx, const char *url);
 REDP2P_INTERNAL int redp2p_set_stream_faults(redp2p_t *ctx,
     int drop_every, int reorder_every);
 REDP2P_INTERNAL int redp2p_set_state_dir(redp2p_t *ctx, const char *dir);
