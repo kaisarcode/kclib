@@ -136,6 +136,7 @@ static int kc_redp2p_make_self_id(char out[KC_REDP2P_ID_MAX + 1])
 
 static void kc_redp2p_public_defaults(redp2p_t *ctx)
 {
+    ctx->sweep = REDP2P_SWEEP_DEFAULT;
     ctx->prune_interval_s = 60;
     ctx->etimeout_sec = 120;
     ctx->heartbeat_s = 15;
