@@ -131,33 +131,44 @@ int kc_redp2p_idx_list(kc_redp2p_idx_t *idx,
 
 /**
  * Stops and releases an index runtime. NULL is a safe no-op.
+ * @param idx Index runtime.
+ * @return None.
  */
 void kc_redp2p_idx_close(kc_redp2p_idx_t *idx);
 
 /**
  * Stops publication, deregisters when possible, and releases the runtime.
  * NULL is a safe no-op.
+ * @param pub Publisher runtime.
+ * @return None.
  */
 void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
 
 /**
  * Closes the local tunnel and releases the consumer runtime.
  * NULL is a safe no-op.
+ * @param con Consumer runtime.
+ * @return None.
  */
 void kc_redp2p_con_close(kc_redp2p_con_t *con);
 
 /**
  * Releases memory returned by REDP2P. NULL is a safe no-op.
+ * @param ptr Memory returned by REDP2P.
+ * @return None.
  */
 void kc_redp2p_free(void *ptr);
 
 /**
  * Returns a stable static description for one REDP2P status.
+ * @param status REDP2P status code.
+ * @return Stable static status description.
  */
 const char *kc_redp2p_strerror(int status);
 
 /**
  * Returns the build version generated at compile time.
+ * @return Build version value.
  */
 uint64_t kc_redp2p_version(void);
 
