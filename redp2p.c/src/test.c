@@ -1242,7 +1242,7 @@ static void test_port_requirement(unsigned int offset, int *tcp, int *udp) {
     {
         anchor = 400U;
         *tcp = offset >= anchor && offset <= anchor + 2U;
-    } else if (strcmp(test_case_name, "redp2p_deregister") == 0) {
+    } else if (strcmp(test_case_name, "redp2p_test_deregister_persisted_publisher") == 0) {
         *tcp = offset >= 60U && offset <= 62U;
     } else if (strcmp(test_case_name, "redp2p_idx_query_publishers") == 0) {
         *tcp = offset >= 80U && offset <= 84U;
@@ -4987,10 +4987,10 @@ static int case_kc_redp2p_tcp_stream(void) {
 }
 
 /**
- * Tests kc_redp2p_deregister.
+ * Tests redp2p_persisted_deregister.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_deregister(void) {
+static int case_redp2p_persisted_deregister(void) {
     test_index_t first_index;
     test_index_t second_index;
     test_publisher_t first_publisher;
@@ -5012,7 +5012,7 @@ static int case_kc_redp2p_deregister(void) {
     int second_publisher_started;
     int publisher_started;
     int count;
-    const char *name = "kc_redp2p_deregister";
+    const char *name = "redp2p_persisted_deregister";
     const char *detail = "deregister removes published service";
     int fail;
 #ifndef _WIN32
@@ -5040,18 +5040,18 @@ static int case_kc_redp2p_deregister(void) {
     fail += expect_int("open client", REDP2P_OK, redp2p_context_create(&client));
     if (!client) goto cleanup;
     fail += expect_int("deregister NULL context", REDP2P_EINVAL,
-        redp2p_deregister(NULL, TEST_HOST, base, "absent"));
+        redp2p_test_deregister_persisted_publisher(NULL, TEST_HOST, base, "absent"));
     fail += expect_int("deregister NULL host", REDP2P_EINVAL,
-        redp2p_deregister(client, NULL, base, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, NULL, base, "absent"));
     fail += expect_true("NULL host detail", redp2p_get_error(client)[0] != '\0');
     fail += expect_int("deregister empty host", REDP2P_EINVAL,
-        redp2p_deregister(client, "", base, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, "", base, "absent"));
     fail += expect_int("deregister zero port", REDP2P_EINVAL,
-        redp2p_deregister(client, TEST_HOST, 0, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, 0, "absent"));
     fail += expect_int("deregister invalid id", REDP2P_EINVAL,
-        redp2p_deregister(client, TEST_HOST, base, "../unsafe"));
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, base, "../unsafe"));
     fail += expect_int("deregister missing key", REDP2P_ENOENT,
-        redp2p_deregister(client, TEST_HOST, base, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, base, "absent"));
 
     if (test_index_start(&first_index, (unsigned short)(base + 1U)) != 0)
         goto cleanup;
@@ -5099,7 +5099,7 @@ static int case_kc_redp2p_deregister(void) {
     }
 
     fail += expect_int("deregister first scoped publisher", REDP2P_OK,
-        redp2p_deregister(client, TEST_HOST, (unsigned short)(base + 1U),
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, (unsigned short)(base + 1U),
             "shared"));
     fail += expect_string("successful deregistration clears detail", "",
         redp2p_get_error(client));
@@ -5118,19 +5118,19 @@ static int case_kc_redp2p_deregister(void) {
     fail += expect_int("write malformed key", 0,
         test_file_write(paths[0], "0123456789abcdeg", 16));
     fail += expect_int("reject malformed key", REDP2P_EPROTO,
-        redp2p_deregister(client, TEST_HOST, (unsigned short)(base + 2U),
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, (unsigned short)(base + 2U),
             "shared"));
     fail += expect_true("malformed key preserved", test_path_exists(paths[0]));
     fail += expect_int("write truncated key", 0,
         test_file_write(paths[0], "01234567", 8));
     fail += expect_int("reject truncated key", REDP2P_EPROTO,
-        redp2p_deregister(client, TEST_HOST, (unsigned short)(base + 2U),
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, (unsigned short)(base + 2U),
             "shared"));
     fail += expect_true("truncated key preserved", test_path_exists(paths[0]));
     fail += expect_int("write extra key", 0,
         test_file_write(paths[0], "0123456789abcdefx", 17));
     fail += expect_int("reject extra key", REDP2P_EPROTO,
-        redp2p_deregister(client, TEST_HOST, (unsigned short)(base + 2U),
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, (unsigned short)(base + 2U),
             "shared"));
     fail += expect_true("extra key preserved", test_path_exists(paths[0]));
     fail += expect_int("restore valid key", 0,
@@ -5139,7 +5139,7 @@ static int case_kc_redp2p_deregister(void) {
     test_index_stop(&second_index);
     second_index_started = 0;
     fail += expect_int("failed deregistration category", REDP2P_ENET,
-        redp2p_deregister(client, TEST_HOST, (unsigned short)(base + 2U),
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, (unsigned short)(base + 2U),
             "shared"));
     fail += expect_true("failed deregistration preserves key",
         test_path_exists(paths[0]));
@@ -5149,7 +5149,7 @@ static int case_kc_redp2p_deregister(void) {
 #ifndef _WIN32
     fail += expect_int("create key path directory", 0, mkdir(paths[0], 0700));
     fail += expect_int("reject key path directory", REDP2P_ERROR,
-        redp2p_deregister(client, TEST_HOST, (unsigned short)(base + 2U),
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, (unsigned short)(base + 2U),
             "shared"));
     fail += expect_int("remove key path directory", 0, rmdir(paths[0]));
 #endif
@@ -5183,7 +5183,7 @@ static int case_kc_redp2p_deregister(void) {
         test_file_write(legacy_path, key_data, key_len));
     fail += expect_int("remove scoped key for migration", 0, remove(paths[0]));
     fail += expect_int("legacy deregistration", REDP2P_OK,
-        redp2p_deregister(client, TEST_HOST, (unsigned short)(base + 1U),
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, (unsigned short)(base + 1U),
             "legacy"));
     fail += expect_true("successful legacy lookup removes legacy key",
         !test_path_exists(legacy_path));
@@ -5194,24 +5194,24 @@ static int case_kc_redp2p_deregister(void) {
     test_setenv("USERPROFILE", test_home_path);
     test_setenv("HOME", NULL);
     fail += expect_int("missing HOME uses USERPROFILE", REDP2P_ENOENT,
-        redp2p_deregister(client, TEST_HOST, base, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, base, "absent"));
     test_setenv("HOME", "");
     fail += expect_int("empty HOME uses USERPROFILE", REDP2P_ENOENT,
-        redp2p_deregister(client, TEST_HOST, base, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, base, "absent"));
 #else
     test_setenv("HOME", NULL);
     fail += expect_int("missing HOME category", REDP2P_ERROR,
-        redp2p_deregister(client, TEST_HOST, base, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, base, "absent"));
     fail += expect_true("missing HOME detail", redp2p_get_error(client)[0] != '\0');
     test_setenv("HOME", "");
     fail += expect_int("empty HOME category", REDP2P_ERROR,
-        redp2p_deregister(client, TEST_HOST, base, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, base, "absent"));
 #endif
     memset(long_home, 'x', sizeof(long_home) - 1);
     long_home[sizeof(long_home) - 1] = '\0';
     test_setenv("HOME", long_home);
     fail += expect_int("overlong HOME category", REDP2P_ERROR,
-        redp2p_deregister(client, TEST_HOST, base, "absent"));
+        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, base, "absent"));
     test_setenv("HOME", test_home_path);
 
     if (snprintf(blocked_home, sizeof(blocked_home), "%s/blocked-home",
@@ -6290,7 +6290,7 @@ static int case_all(void) {
     run_case(&rc, case_redp2p_protocol_ttl);
     run_case(&rc, case_kc_redp2p_udp_tunnel);
     run_case(&rc, case_kc_redp2p_tcp_stream);
-    run_case(&rc, case_kc_redp2p_deregister);
+    run_case(&rc, case_redp2p_persisted_deregister);
     run_case(&rc, case_kc_redp2p_list_publishers);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -6315,7 +6315,7 @@ static int dispatch_case(const char *name) {
     if (strcmp(name, "kc_redp2p_ttl_expiry") == 0) return case_redp2p_protocol_ttl();
     if (strcmp(name, "kc_redp2p_udp_tunnel") == 0) return case_kc_redp2p_udp_tunnel();
     if (strcmp(name, "kc_redp2p_tcp_stream") == 0) return case_kc_redp2p_tcp_stream();
-    if (strcmp(name, "kc_redp2p_deregister") == 0) return case_kc_redp2p_deregister();
+    if (strcmp(name, "redp2p_persisted_deregister") == 0) return case_redp2p_persisted_deregister();
     if (strcmp(name, "kc_redp2p_list_publishers") == 0) return case_kc_redp2p_list_publishers();
     fprintf(stderr, "unknown test case: %s\n", name);
     return 2;
