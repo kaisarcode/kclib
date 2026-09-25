@@ -2,6 +2,8 @@
 
 `nets.c` provides a native asynchronous library and a one-shot CLI for sending raw bytes to one TCP, UDP, or optional TLS destination.
 
+---
+
 ## CLI
 
 The CLI reads all input from standard input, sends it to one target, and prints stream response bytes to standard output.
@@ -26,6 +28,8 @@ URL-shaped targets select transport and authority defaults only. They do not add
 
 TLS is available only when the library is compiled with OpenSSL. The TLS transport sets SNI but does not verify the server certificate or hostname, so it must not be treated as authenticated transport.
 
+---
+
 ## Public API
 
 A `kc_nets_t` represents one active transfer.
@@ -41,7 +45,7 @@ static void complete(
 ) {
     (void)userdata;
 
-    if (status == KC_NETS_OK && data != NULL) {
+if (status == KC_NETS_OK && data != NULL) {
         /* data[0..size) is the borrowed response */
     }
 }
@@ -50,7 +54,7 @@ int main(void) {
     const unsigned char message[] = "hello";
     kc_nets_t *transfer = NULL;
 
-    if (kc_nets_send(
+if (kc_nets_send(
             &transfer,
             "127.0.0.1",
             8080,
@@ -63,17 +67,17 @@ int main(void) {
         return 1;
     }
 
-    /*
+/*
      * The transfer may continue asynchronously.
      * Call kc_nets_stop(transfer) when graceful interruption is required.
      */
 
-    /* Close the transfer after the terminal callback has completed. */
+/* Close the transfer after the terminal callback has completed. */
     return 0;
 }
 ```
 
-## Transfer semantics
+### Transfer semantics
 
 `kc_nets_send()` starts one asynchronous transfer and returns after the operation has been launched. The library copies the host string and input bytes before returning, so the caller may immediately reuse or release its input storage.
 
@@ -93,7 +97,7 @@ UDP sends the complete input as one datagram and reports success with no respons
 
 `kc_nets_version()` returns the generated build version.
 
-## Protocol behavior
+### Protocol behavior
 
 TCP connects to one resolved address, sends all input bytes, closes the write side, and reads response bytes until peer EOF.
 
@@ -103,45 +107,63 @@ TLS applies the same stream-oriented send/response model over the optional OpenS
 
 The library resolves destinations using the platform resolver and tries resolved addresses in order until one succeeds, the operation is stopped, or all addresses fail.
 
-## WASM
-
-WASM support is not provided for this library. The reusable capability is arbitrary raw TCP, UDP, and TLS networking, which standard browser WASM environments do not expose. Substituting WebSocket, WebTransport, or another browser transport would change the capability contract.
+---
 
 ## Build
 
-A plain build targets the current host architecture.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
 ```
 
-Multi-architecture artifacts are written under `bin/{arch}/{platform}/`.
+### Tests
 
-```bash
-make all
-```
-
-## Tests
-
-Build project artifacts before running the contract suite.
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
 make
 make test
 ```
 
-Windows artifacts can be validated through Wine:
+To run through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-The test suite covers the reusable asynchronous API and one grouped `kc_nets_cli` case for the shipped command-line interface.
+### Multiarch Builds
 
-WASM tests are not applicable because the browser runtime cannot represent the raw socket capability without changing its semantics.
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
 
-## Dependencies
+```bash
+make all
+```
+
+---
+
+## Development Requirements
+
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Other cross-compilation toolchains are required only by enabled targets.
+
+### Dependencies
 
 Build tools:
 
@@ -161,3 +183,25 @@ Optional:
 - MinGW and Wine for Windows cross-compilation and validation
 - osxcross SDKs for macOS and iOS cross-compilation
 - Android NDK for Android cross-compilation
+
+---
+
+## Beta Notice
+
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
+
+---
+
+## License
+
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
