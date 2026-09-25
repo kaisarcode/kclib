@@ -3,9 +3,6 @@
 `lng.c` is a minimalist C library and CLI for detecting the language of the given text using internal language profiles. It is designed as a composable native primitive for the KaisarCode ecosystem.
 
 ---
-
----
-
 ## CLI
 
 Detect the language of text provided as an argument or via standard input.
@@ -61,9 +58,6 @@ es: 0.0400
 Defaults are threshold `0.001` and limit `1`. Limit `1` prints only the code; larger limits print `code: score` with four decimal places. Empty input produces no output.
 
 ---
-
----
-
 ## Public API
 
 Stateless detection over heap-allocated results. No handle or explicit initialization required - internal language profiles are initialized automatically exactly once with platform once-control and remain read-only thereafter, safe for concurrent detection.
@@ -131,9 +125,6 @@ kc_lng_free(results);
 No explicit initialization required. Internal profiles are initialized automatically on first detection, exactly once, in a thread-safe manner. Once initialized, profile state remains read-only and safe for concurrent detection without additional synchronization. Results are sorted by descending heuristic score. Scores remain heuristic ranking values, not probabilities or confidence percentages.
 
 ---
-
----
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
