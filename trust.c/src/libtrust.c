@@ -99,12 +99,24 @@ typedef struct {
 } kc_trust_symmetric_state_t;
 
 #ifdef _WIN32
+/**
+ * Reads cryptographically secure random bytes.
+ * @param buf Destination buffer.
+ * @param size Byte count.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_read_random(unsigned char *buf, size_t size) {
     if (!buf || size > 0xFFFFFFFFU) return -1;
     return BCryptGenRandom(NULL, buf, (ULONG)size,
         BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
 }
 #elif defined(__EMSCRIPTEN__)
+/**
+ * Reads cryptographically secure random bytes.
+ * @param buf Destination buffer.
+ * @param size Byte count.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_read_random(unsigned char *buf, size_t size) {
     size_t done = 0;
     if (!buf) return -1;
@@ -117,6 +129,12 @@ static int kc_trust_read_random(unsigned char *buf, size_t size) {
     return 0;
 }
 #else
+/**
+ * Reads cryptographically secure random bytes.
+ * @param buf Destination buffer.
+ * @param size Byte count.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_read_random(unsigned char *buf, size_t size) {
     FILE *f;
     size_t done = 0;
@@ -135,6 +153,11 @@ static int kc_trust_read_random(unsigned char *buf, size_t size) {
 }
 #endif
 
+/**
+ * Allocates a wipeable public result buffer.
+ * @param size Byte count.
+ * @return Allocated buffer, or NULL on failure.
+ */
 static void *kc_trust_alloc(size_t size) {
     kc_trust_alloc_header_t *header;
     if (size > SIZE_MAX - sizeof(*header)) return NULL;
@@ -145,6 +168,11 @@ static void *kc_trust_alloc(size_t size) {
     return header + 1;
 }
 
+/**
+ * Releases a buffer returned by trust.c.
+ * @param ptr Allocation pointer.
+ * @return No return value.
+ */
 void kc_trust_free(void *ptr) {
     kc_trust_alloc_header_t *header;
     if (!ptr) return;
@@ -154,6 +182,11 @@ void kc_trust_free(void *ptr) {
     free(header);
 }
 
+/**
+ * Copies a string into a public result buffer.
+ * @param value Input value.
+ * @return Allocated copy, or NULL on failure.
+ */
 static char *kc_trust_public_strdup(const char *value) {
     size_t size;
     char *copy;
@@ -165,6 +198,14 @@ static char *kc_trust_public_strdup(const char *value) {
     return copy;
 }
 
+/**
+ * Joins two filesystem path components.
+ * @param out Destination output.
+ * @param cap Buffer capacity.
+ * @param a First path component.
+ * @param b Second path component.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_path_join(char *out, size_t cap,
     const char *a, const char *b) {
 #ifdef _WIN32
@@ -174,6 +215,12 @@ static int kc_trust_path_join(char *out, size_t cap,
 #endif
 }
 
+/**
+ * Resolves the per-user trust state directory.
+ * @param out Destination output.
+ * @param cap Buffer capacity.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_resolve_dir(char *out, size_t cap) {
     const char *override = getenv("KC_TRUST_DIR");
     if (!out || cap == 0) return -1;
@@ -199,6 +246,11 @@ static int kc_trust_resolve_dir(char *out, size_t cap) {
 }
 
 #ifdef _WIN32
+/**
+ * Checks whether a state directory is acceptable.
+ * @param path Filesystem path.
+ * @return 1 when acceptable, or 0 otherwise.
+ */
 static int kc_trust_dir_secure(const char *path) {
     DWORD attrs = GetFileAttributesA(path);
     if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
@@ -207,6 +259,11 @@ static int kc_trust_dir_secure(const char *path) {
     return 1;
 }
 
+/**
+ * Creates a private directory tree.
+ * @param path Filesystem path.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_mkdirs(const char *path) {
     char buf[KC_TRUST_PATH_SIZE];
     char *p;
@@ -228,6 +285,11 @@ static int kc_trust_mkdirs(const char *path) {
     return kc_trust_dir_secure(path) ? 0 : -1;
 }
 #else
+/**
+ * Checks whether a state directory is acceptable.
+ * @param path Filesystem path.
+ * @return 1 when acceptable, or 0 otherwise.
+ */
 static int kc_trust_dir_secure(const char *path) {
     struct stat st;
     if (lstat(path, &st) != 0) return 0;
@@ -236,6 +298,11 @@ static int kc_trust_dir_secure(const char *path) {
     return 1;
 }
 
+/**
+ * Creates a private directory tree.
+ * @param path Filesystem path.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_mkdirs(const char *path) {
     char buf[KC_TRUST_PATH_SIZE];
     char *p;
@@ -256,6 +323,11 @@ static int kc_trust_mkdirs(const char *path) {
 }
 #endif
 
+/**
+ * Ensures all trust state directories exist.
+ * @param trust Trust context.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_store_dirs(kc_trust_t *trust) {
     char pending[KC_TRUST_PATH_SIZE];
     char peers[KC_TRUST_PATH_SIZE];
@@ -274,6 +346,12 @@ static int kc_trust_store_dirs(kc_trust_t *trust) {
     return 0;
 }
 
+/**
+ * Formats binary UID bytes as canonical UUID text.
+ * @param uid UID string.
+ * @param out Destination output.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_uid_format(const unsigned char uid[KC_TRUST_UID_BYTES],
     char out[KC_TRUST_UID_SIZE + 1]) {
     static const char hex[] = "0123456789abcdef";
@@ -293,6 +371,11 @@ static int kc_trust_uid_format(const unsigned char uid[KC_TRUST_UID_BYTES],
     return pos == KC_TRUST_UID_SIZE ? 0 : -1;
 }
 
+/**
+ * Decodes one hexadecimal character.
+ * @param c Function parameter.
+ * @return Decoded nibble, or -1 for invalid input.
+ */
 static int kc_trust_hex_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -300,6 +383,12 @@ static int kc_trust_hex_value(char c) {
     return -1;
 }
 
+/**
+ * Parses canonical UUID text into UID bytes.
+ * @param text Input text.
+ * @param uid UID string.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_uid_parse(const char *text,
     unsigned char uid[KC_TRUST_UID_BYTES]) {
     static const int hyphens[] = { 8, 13, 18, 23 };
@@ -327,6 +416,12 @@ static int kc_trust_uid_parse(const char *text,
     return out == KC_TRUST_UID_BYTES ? 0 : -1;
 }
 
+/**
+ * Generates one random UUIDv4 UID.
+ * @param uid UID string.
+ * @param text Input text.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_uid_new(unsigned char uid[KC_TRUST_UID_BYTES],
     char text[KC_TRUST_UID_SIZE + 1]) {
     if (kc_trust_read_random(uid, KC_TRUST_UID_BYTES) != 0) return -1;
@@ -335,6 +430,14 @@ static int kc_trust_uid_new(unsigned char uid[KC_TRUST_UID_BYTES],
     return kc_trust_uid_format(uid, text);
 }
 
+/**
+ * Builds the path for one UID state record.
+ * @param trust Trust context.
+ * @param kind State record kind.
+ * @param uid UID string.
+ * @param out Destination output.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_record_path(const kc_trust_t *trust, const char *kind,
     const char *uid, char out[KC_TRUST_PATH_SIZE]) {
     unsigned char parsed[KC_TRUST_UID_BYTES];
@@ -348,6 +451,13 @@ static int kc_trust_record_path(const kc_trust_t *trust, const char *kind,
     return kc_trust_path_join(out, KC_TRUST_PATH_SIZE, dir, canonical);
 }
 
+/**
+ * Writes one private state file.
+ * @param path Filesystem path.
+ * @param data Input bytes.
+ * @param size Byte count.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_write_file(const char *path,
     const unsigned char *data, size_t size) {
 #ifdef _WIN32
@@ -390,6 +500,13 @@ static int kc_trust_write_file(const char *path,
 #endif
 }
 
+/**
+ * Reads one fixed-size state file.
+ * @param path Filesystem path.
+ * @param data Input bytes.
+ * @param size Byte count.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_read_file(const char *path,
     unsigned char *data, size_t size) {
     FILE *f;
@@ -404,6 +521,11 @@ static int kc_trust_read_file(const char *path,
     return done == size && extra == EOF ? 0 : -1;
 }
 
+/**
+ * Removes one state file.
+ * @param path Filesystem path.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_remove_file(const char *path) {
 #ifdef _WIN32
     return DeleteFileA(path) ? 0 : -1;
@@ -412,6 +534,15 @@ static int kc_trust_remove_file(const char *path) {
 #endif
 }
 
+/**
+ * Persists one pending invitation record.
+ * @param trust Trust context.
+ * @param remote_uid Remote endpoint UID.
+ * @param local_uid Local endpoint UID.
+ * @param sk Static secret key.
+ * @param psk One-use invitation secret.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_pending_write(kc_trust_t *trust, const char *remote_uid,
     const unsigned char local_uid[KC_TRUST_UID_BYTES],
     const unsigned char sk[KC_TRUST_SK_SIZE],
@@ -431,6 +562,15 @@ static int kc_trust_pending_write(kc_trust_t *trust, const char *remote_uid,
     return rc;
 }
 
+/**
+ * Loads one pending invitation record.
+ * @param trust Trust context.
+ * @param remote_uid Remote endpoint UID.
+ * @param local_uid Local endpoint UID.
+ * @param sk Static secret key.
+ * @param psk One-use invitation secret.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_pending_read(kc_trust_t *trust, const char *remote_uid,
     unsigned char local_uid[KC_TRUST_UID_BYTES],
     unsigned char sk[KC_TRUST_SK_SIZE],
@@ -452,12 +592,27 @@ static int kc_trust_pending_read(kc_trust_t *trust, const char *remote_uid,
     return rc;
 }
 
+/**
+ * Removes one pending invitation record.
+ * @param trust Trust context.
+ * @param uid UID string.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_pending_remove(kc_trust_t *trust, const char *uid) {
     char path[KC_TRUST_PATH_SIZE];
     if (kc_trust_record_path(trust, "pending", uid, path) != 0) return -1;
     return kc_trust_remove_file(path);
 }
 
+/**
+ * Persists one established remote relationship.
+ * @param trust Trust context.
+ * @param remote_uid Remote endpoint UID.
+ * @param local_uid Local endpoint UID.
+ * @param local_sk Local static secret key.
+ * @param remote_pk Remote static public key.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_peer_write(kc_trust_t *trust, const char *remote_uid,
     const unsigned char local_uid[KC_TRUST_UID_BYTES],
     const unsigned char local_sk[KC_TRUST_SK_SIZE],
@@ -477,6 +632,15 @@ static int kc_trust_peer_write(kc_trust_t *trust, const char *remote_uid,
     return rc;
 }
 
+/**
+ * Loads one established remote relationship.
+ * @param trust Trust context.
+ * @param remote_uid Remote endpoint UID.
+ * @param local_uid Local endpoint UID.
+ * @param local_sk Local static secret key.
+ * @param remote_pk Remote static public key.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_peer_read(kc_trust_t *trust, const char *remote_uid,
     unsigned char local_uid[KC_TRUST_UID_BYTES],
     unsigned char local_sk[KC_TRUST_SK_SIZE],
@@ -498,12 +662,25 @@ static int kc_trust_peer_read(kc_trust_t *trust, const char *remote_uid,
     return rc;
 }
 
+/**
+ * Removes one established remote relationship.
+ * @param trust Trust context.
+ * @param uid UID string.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_peer_remove(kc_trust_t *trust, const char *uid) {
     char path[KC_TRUST_PATH_SIZE];
     if (kc_trust_record_path(trust, "peers", uid, path) != 0) return -1;
     return kc_trust_remove_file(path);
 }
 
+/**
+ * Persists one local-UID relationship index.
+ * @param trust Trust context.
+ * @param local_uid Local endpoint UID.
+ * @param remote_uid Remote endpoint UID.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_local_write(kc_trust_t *trust, const char *local_uid,
     const unsigned char remote_uid[KC_TRUST_UID_BYTES]) {
     unsigned char record[KC_TRUST_LOCAL_RECORD_SIZE];
@@ -518,6 +695,13 @@ static int kc_trust_local_write(kc_trust_t *trust, const char *local_uid,
     return rc;
 }
 
+/**
+ * Loads one local-UID relationship index.
+ * @param trust Trust context.
+ * @param local_uid Local endpoint UID.
+ * @param remote_uid Remote endpoint UID.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_local_read(kc_trust_t *trust, const char *local_uid,
     unsigned char remote_uid[KC_TRUST_UID_BYTES]) {
     unsigned char record[KC_TRUST_LOCAL_RECORD_SIZE];
@@ -534,12 +718,23 @@ static int kc_trust_local_read(kc_trust_t *trust, const char *local_uid,
     return rc;
 }
 
+/**
+ * Removes one local-UID relationship index.
+ * @param trust Trust context.
+ * @param uid UID string.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_local_remove(kc_trust_t *trust, const char *uid) {
     char path[KC_TRUST_PATH_SIZE];
     if (kc_trust_record_path(trust, "local", uid, path) != 0) return -1;
     return kc_trust_remove_file(path);
 }
 
+/**
+ * Decodes one Base64 character.
+ * @param c Function parameter.
+ * @return Decoded sextet, or -1 for invalid input.
+ */
 static int kc_trust_base64_value(char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
     if (c >= 'a' && c <= 'z') return c - 'a' + 26;
@@ -549,6 +744,12 @@ static int kc_trust_base64_value(char c) {
     return -1;
 }
 
+/**
+ * Encodes bytes as portable Base64 text.
+ * @param data Input bytes.
+ * @param size Byte count.
+ * @return Allocated Base64 string, or NULL on failure.
+ */
 static char *kc_trust_base64_encode(const unsigned char *data, size_t size) {
     static const char alphabet[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -588,6 +789,12 @@ static char *kc_trust_base64_encode(const unsigned char *data, size_t size) {
     return out;
 }
 
+/**
+ * Decodes portable Base64 text.
+ * @param text Input text.
+ * @param out_size Destination byte count.
+ * @return Allocated bytes, or NULL on failure.
+ */
 static unsigned char *kc_trust_base64_decode(const char *text,
     size_t *out_size) {
     size_t len;
@@ -629,6 +836,15 @@ static unsigned char *kc_trust_base64_decode(const char *text,
     return out;
 }
 
+/**
+ * Computes HMAC-BLAKE2b.
+ * @param out Destination output.
+ * @param key Key bytes.
+ * @param key_size Key byte count.
+ * @param data Input bytes.
+ * @param data_size Function parameter.
+ * @return No return value.
+ */
 static void kc_trust_hmac_blake2b(unsigned char out[KC_TRUST_HASH_SIZE],
     const unsigned char *key, size_t key_size,
     const unsigned char *data, size_t data_size) {
@@ -659,6 +875,15 @@ static void kc_trust_hmac_blake2b(unsigned char out[KC_TRUST_HASH_SIZE],
     crypto_wipe(inner, sizeof(inner));
 }
 
+/**
+ * Derives two Noise HKDF outputs.
+ * @param out1 First derived output.
+ * @param out2 Second derived output.
+ * @param ck Function parameter.
+ * @param ikm Function parameter.
+ * @param ikm_size Function parameter.
+ * @return No return value.
+ */
 static void kc_trust_hkdf2(unsigned char out1[KC_TRUST_HASH_SIZE],
     unsigned char out2[KC_TRUST_HASH_SIZE],
     const unsigned char ck[KC_TRUST_HASH_SIZE],
@@ -676,6 +901,16 @@ static void kc_trust_hkdf2(unsigned char out1[KC_TRUST_HASH_SIZE],
     crypto_wipe(input, sizeof(input));
 }
 
+/**
+ * Derives three Noise HKDF outputs.
+ * @param out1 First derived output.
+ * @param out2 Second derived output.
+ * @param out3 Third derived output.
+ * @param ck Function parameter.
+ * @param ikm Function parameter.
+ * @param ikm_size Function parameter.
+ * @return No return value.
+ */
 static void kc_trust_hkdf3(unsigned char out1[KC_TRUST_HASH_SIZE],
     unsigned char out2[KC_TRUST_HASH_SIZE],
     unsigned char out3[KC_TRUST_HASH_SIZE],
@@ -698,10 +933,21 @@ static void kc_trust_hkdf3(unsigned char out1[KC_TRUST_HASH_SIZE],
     crypto_wipe(input, sizeof(input));
 }
 
+/**
+ * Initializes an empty Noise cipher state.
+ * @param cipher Cipher state.
+ * @return No return value.
+ */
 static void kc_trust_cipher_empty(kc_trust_cipher_state_t *cipher) {
     memset(cipher, 0, sizeof(*cipher));
 }
 
+/**
+ * Initializes a keyed Noise cipher state.
+ * @param cipher Cipher state.
+ * @param key Key bytes.
+ * @return No return value.
+ */
 static void kc_trust_cipher_key(kc_trust_cipher_state_t *cipher,
     const unsigned char key[32]) {
     memcpy(cipher->k, key, 32);
@@ -709,6 +955,16 @@ static void kc_trust_cipher_key(kc_trust_cipher_state_t *cipher,
     cipher->has_key = 1;
 }
 
+/**
+ * Encrypts one Noise cipher-state message.
+ * @param cipher Cipher state.
+ * @param ad Associated data.
+ * @param ad_size Associated-data byte count.
+ * @param plain Plaintext bytes.
+ * @param plain_size Plaintext byte count.
+ * @param out Destination output.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_cipher_encrypt(kc_trust_cipher_state_t *cipher,
     const unsigned char *ad, size_t ad_size,
     const unsigned char *plain, size_t plain_size,
@@ -727,6 +983,16 @@ static int kc_trust_cipher_encrypt(kc_trust_cipher_state_t *cipher,
     return 0;
 }
 
+/**
+ * Decrypts one Noise cipher-state message.
+ * @param cipher Cipher state.
+ * @param ad Associated data.
+ * @param ad_size Associated-data byte count.
+ * @param data Input bytes.
+ * @param data_size Function parameter.
+ * @param out Destination output.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_cipher_decrypt(kc_trust_cipher_state_t *cipher,
     const unsigned char *ad, size_t ad_size,
     const unsigned char *data, size_t data_size,
@@ -750,6 +1016,13 @@ static int kc_trust_cipher_decrypt(kc_trust_cipher_state_t *cipher,
     return 0;
 }
 
+/**
+ * Mixes bytes into the Noise handshake hash.
+ * @param state Noise symmetric state.
+ * @param data Input bytes.
+ * @param size Byte count.
+ * @return No return value.
+ */
 static void kc_trust_mix_hash(kc_trust_symmetric_state_t *state,
     const unsigned char *data, size_t size) {
     unsigned char next[KC_TRUST_HASH_SIZE];
@@ -762,6 +1035,13 @@ static void kc_trust_mix_hash(kc_trust_symmetric_state_t *state,
     crypto_wipe(next, sizeof(next));
 }
 
+/**
+ * Mixes key material into Noise symmetric state.
+ * @param state Noise symmetric state.
+ * @param input Input bytes.
+ * @param size Byte count.
+ * @return No return value.
+ */
 static void kc_trust_mix_key(kc_trust_symmetric_state_t *state,
     const unsigned char *input, size_t size) {
     unsigned char ck[KC_TRUST_HASH_SIZE];
@@ -773,6 +1053,12 @@ static void kc_trust_mix_key(kc_trust_symmetric_state_t *state,
     crypto_wipe(key, sizeof(key));
 }
 
+/**
+ * Mixes PSK material into Noise symmetric state.
+ * @param state Noise symmetric state.
+ * @param psk One-use invitation secret.
+ * @return No return value.
+ */
 static void kc_trust_mix_key_and_hash(kc_trust_symmetric_state_t *state,
     const unsigned char psk[KC_TRUST_PSK_SIZE]) {
     unsigned char ck[KC_TRUST_HASH_SIZE];
@@ -787,6 +1073,14 @@ static void kc_trust_mix_key_and_hash(kc_trust_symmetric_state_t *state,
     crypto_wipe(key, sizeof(key));
 }
 
+/**
+ * Encrypts and hashes one Noise handshake field.
+ * @param state Noise symmetric state.
+ * @param plain Plaintext bytes.
+ * @param plain_size Plaintext byte count.
+ * @param out Destination output.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_encrypt_and_hash(kc_trust_symmetric_state_t *state,
     const unsigned char *plain, size_t plain_size, unsigned char *out) {
     if (kc_trust_cipher_encrypt(&state->cipher, state->h,
@@ -795,6 +1089,14 @@ static int kc_trust_encrypt_and_hash(kc_trust_symmetric_state_t *state,
     return 0;
 }
 
+/**
+ * Decrypts and hashes one Noise handshake field.
+ * @param state Noise symmetric state.
+ * @param data Input bytes.
+ * @param data_size Function parameter.
+ * @param out Destination output.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_decrypt_and_hash(kc_trust_symmetric_state_t *state,
     const unsigned char *data, size_t data_size, unsigned char *out) {
     if (kc_trust_cipher_decrypt(&state->cipher, state->h,
@@ -803,6 +1105,13 @@ static int kc_trust_decrypt_and_hash(kc_trust_symmetric_state_t *state,
     return 0;
 }
 
+/**
+ * Splits Noise symmetric state into transport ciphers.
+ * @param state Noise symmetric state.
+ * @param first Function parameter.
+ * @param second Function parameter.
+ * @return No return value.
+ */
 static void kc_trust_split(const kc_trust_symmetric_state_t *state,
     kc_trust_cipher_state_t *first, kc_trust_cipher_state_t *second) {
     unsigned char first_key[KC_TRUST_HASH_SIZE];
@@ -814,6 +1123,14 @@ static void kc_trust_split(const kc_trust_symmetric_state_t *state,
     crypto_wipe(second_key, sizeof(second_key));
 }
 
+/**
+ * Initializes Noise state with directional UID prologue.
+ * @param state Noise symmetric state.
+ * @param name Name string.
+ * @param initiator_uid Initiator endpoint UID.
+ * @param responder_uid Responder endpoint UID.
+ * @return No return value.
+ */
 static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
     const char *name,
     const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
@@ -835,6 +1152,13 @@ static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
     crypto_wipe(prologue, sizeof(prologue));
 }
 
+/**
+ * Computes and validates one X25519 shared secret.
+ * @param out Destination output.
+ * @param sk Static secret key.
+ * @param pk Static public key.
+ * @return 0 on success, or -1 for a low-order point.
+ */
 static int kc_trust_x25519(unsigned char out[32],
     const unsigned char sk[32], const unsigned char pk[32]) {
     unsigned char zero[32] = {0};
@@ -846,27 +1170,58 @@ static int kc_trust_x25519(unsigned char out[32],
     return 0;
 }
 
+/**
+ * Stores a 64-bit integer in network byte order.
+ * @param out Destination output.
+ * @param value Input value.
+ * @return No return value.
+ */
 static void kc_trust_store_u64(unsigned char out[8], uint64_t value) {
     for (size_t i = 0; i < 8; i++)
         out[7 - i] = (unsigned char)(value >> (8 * i));
 }
 
+/**
+ * Loads a 64-bit integer from network byte order.
+ * @param in Input bytes.
+ * @return Decoded 64-bit value.
+ */
 static uint64_t kc_trust_load_u64(const unsigned char in[8]) {
     uint64_t value = 0;
     for (size_t i = 0; i < 8; i++) value = (value << 8) | in[i];
     return value;
 }
 
+/**
+ * Returns transport record count for a payload.
+ * @param size Byte count.
+ * @return Required transport record count.
+ */
 static size_t kc_trust_record_count(size_t size) {
     if (size == 0) return 0;
     return 1 + (size - 1) / KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
 }
 
+/**
+ * Returns protected blob size for a payload.
+ * @param size Byte count.
+ * @return Required protected blob size.
+ */
 static size_t kc_trust_payload_size(size_t size) {
     return KC_TRUST_PAYLOAD_BASE_SIZE + size +
         kc_trust_record_count(size) * KC_TRUST_MAC_SIZE;
 }
 
+/**
+ * Writes one Noise Xpsk1 enrollment message.
+ * @param initiator_uid Initiator endpoint UID.
+ * @param responder_uid Responder endpoint UID.
+ * @param local_sk Local static secret key.
+ * @param remote_pk Remote static public key.
+ * @param psk One-use invitation secret.
+ * @param out Destination output.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_xpsk1_write(
     const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
     const unsigned char responder_uid[KC_TRUST_UID_BYTES],
@@ -910,6 +1265,16 @@ done:
     return rc;
 }
 
+/**
+ * Reads one Noise Xpsk1 enrollment message.
+ * @param initiator_uid Initiator endpoint UID.
+ * @param responder_uid Responder endpoint UID.
+ * @param local_sk Local static secret key.
+ * @param psk One-use invitation secret.
+ * @param message Message bytes.
+ * @param remote_pk Remote static public key.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_xpsk1_read(
     const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
     const unsigned char responder_uid[KC_TRUST_UID_BYTES],
@@ -952,6 +1317,17 @@ done:
     return rc;
 }
 
+/**
+ * Writes one Noise K protected message.
+ * @param initiator_uid Initiator endpoint UID.
+ * @param responder_uid Responder endpoint UID.
+ * @param local_sk Local static secret key.
+ * @param remote_pk Remote static public key.
+ * @param message Message bytes.
+ * @param message_size Message byte count.
+ * @param out Destination output.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_k_write(
     const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
     const unsigned char responder_uid[KC_TRUST_UID_BYTES],
@@ -1012,6 +1388,18 @@ done:
     return rc;
 }
 
+/**
+ * Reads one Noise K protected message.
+ * @param initiator_uid Initiator endpoint UID.
+ * @param responder_uid Responder endpoint UID.
+ * @param local_sk Local static secret key.
+ * @param remote_pk Remote static public key.
+ * @param data Input bytes.
+ * @param data_size Function parameter.
+ * @param out_message Destination plaintext pointer.
+ * @param out_message_size Destination plaintext byte count.
+ * @return 0 on success, or -1 on failure.
+ */
 static int kc_trust_k_read(
     const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
     const unsigned char responder_uid[KC_TRUST_UID_BYTES],
@@ -1084,10 +1472,19 @@ done:
     return rc;
 }
 
+/**
+ * Returns the generated trust build version.
+ * @return Generated build timestamp.
+ */
 uint64_t kc_trust_version(void) {
     return (uint64_t)KC_TRUST_BUILD_VERSION;
 }
 
+/**
+ * Initializes the local persistent trust store.
+ * @param out Destination output.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ */
 int kc_trust_init(kc_trust_t **out) {
     kc_trust_t *trust;
     if (out) *out = NULL;
@@ -1104,6 +1501,13 @@ int kc_trust_init(kc_trust_t **out) {
     return KC_TRUST_OK;
 }
 
+/**
+ * Creates one out-of-band trust invitation.
+ * @param trust Trust context.
+ * @param out_uid Destination UID string.
+ * @param out_code Destination invitation code.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ */
 int kc_trust_invite(kc_trust_t *trust, char **out_uid, char **out_code) {
     unsigned char remote_uid[KC_TRUST_UID_BYTES];
     unsigned char local_uid[KC_TRUST_UID_BYTES];
@@ -1164,6 +1568,14 @@ done:
     return rc;
 }
 
+/**
+ * Joins one out-of-band trust invitation.
+ * @param trust Trust context.
+ * @param code Invitation code.
+ * @param out_uid Destination UID string.
+ * @param out_confirmation Destination confirmation code.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ */
 int kc_trust_join(kc_trust_t *trust, const char *code,
     char **out_uid, char **out_confirmation) {
     unsigned char *raw = NULL;
@@ -1252,6 +1664,13 @@ done:
     return rc;
 }
 
+/**
+ * Confirms one pending trust invitation.
+ * @param trust Trust context.
+ * @param confirmation Confirmation code.
+ * @param out_uid Destination UID string.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ */
 int kc_trust_confirm(kc_trust_t *trust, const char *confirmation,
     char **out_uid) {
     unsigned char *raw = NULL;
@@ -1329,6 +1748,16 @@ done:
     return rc;
 }
 
+/**
+ * Protects one message for a remote UID.
+ * @param trust Trust context.
+ * @param uid UID string.
+ * @param message Message bytes.
+ * @param message_size Message byte count.
+ * @param out_data Destination protected-data pointer.
+ * @param out_size Destination byte count.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ */
 int kc_trust_seal(kc_trust_t *trust, const char *uid,
     const void *message, size_t message_size,
     void **out_data, size_t *out_size) {
@@ -1372,6 +1801,16 @@ done:
     return rc;
 }
 
+/**
+ * Authenticates and opens one message for a local UID.
+ * @param trust Trust context.
+ * @param uid UID string.
+ * @param data Input bytes.
+ * @param data_size Function parameter.
+ * @param out_message Destination plaintext pointer.
+ * @param out_message_size Destination plaintext byte count.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ */
 int kc_trust_unseal(kc_trust_t *trust, const char *uid,
     const void *data, size_t data_size,
     void **out_message, size_t *out_message_size) {
@@ -1418,6 +1857,12 @@ done:
     return rc;
 }
 
+/**
+ * Revokes one remote UID or pending invitation.
+ * @param trust Trust context.
+ * @param uid UID string.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ */
 int kc_trust_revoke(kc_trust_t *trust, const char *uid) {
     unsigned char remote_uid[KC_TRUST_UID_BYTES];
     unsigned char local_uid[KC_TRUST_UID_BYTES];
@@ -1448,6 +1893,11 @@ int kc_trust_revoke(kc_trust_t *trust, const char *uid) {
     return removed ? KC_TRUST_OK : KC_TRUST_ERROR;
 }
 
+/**
+ * Releases one trust context.
+ * @param trust Trust context.
+ * @return No return value.
+ */
 void kc_trust_close(kc_trust_t *trust) {
     if (!trust) return;
     crypto_wipe(trust, sizeof(*trust));
