@@ -863,7 +863,7 @@ static int redp2p_discard_key(redp2p_t *ctx, const char *path)
  * @param sequence Next publisher control sequence.
  * @return 0 on success, -1 on error.
  */
-static int redp2p_deregister_with_key(
+static int redp2p_pub_deregister_registration(
     redp2p_t *ctx,
     const char *index_host,
     unsigned short index_port,
@@ -899,11 +899,12 @@ static int redp2p_deregister_with_key(
     return REDP2P_OK;
 }
 
+#ifdef REDP2P_TESTING
 /**
  * Deregister.
  * @return 0 on success, -1 on error.
  */
-int redp2p_deregister(
+int redp2p_test_deregister_persisted_publisher(
     redp2p_t *ctx,
     const char *index_host,
     unsigned short index_port,
@@ -953,7 +954,7 @@ int redp2p_deregister(
             crypto_wipe(key, sizeof(key));
             return REDP2P_ERROR;
         }
-        result = redp2p_deregister_with_key(ctx, index_host, index_port, id,
+        result = redp2p_pub_deregister_registration(ctx, index_host, index_port, id,
             key, sequence + 1);
         if (result == REDP2P_OK)
             result = redp2p_remove_key(ctx, loaded_path, key);
@@ -961,6 +962,8 @@ int redp2p_deregister(
     crypto_wipe(key, sizeof(key));
     return result;
 }
+
+#endif
 
 /**
  * Validates publisher inputs and opens its control and UDP transports.
@@ -1242,7 +1245,7 @@ redp2p_publisher_runtime_t *runtime)
     if (path_result != REDP2P_OK ||
         redp2p_save_key(ctx, &paths, ctx->key, ctx->sequence) != REDP2P_OK)
     {
-        redp2p_deregister_with_key(NULL, runtime->borrowed_index_host,
+        redp2p_pub_deregister_registration(NULL, runtime->borrowed_index_host,
             runtime->index_port, runtime->borrowed_self_id, ctx->key,
             ctx->sequence + 1);
         if (path_result == REDP2P_OK)
@@ -1579,7 +1582,7 @@ redp2p_publisher_runtime_t *runtime)
         runtime->index_port, runtime->borrowed_self_id, &paths) == REDP2P_OK &&
         redp2p_save_key(ctx, &paths, ctx->key, ctx->sequence) != REDP2P_OK)
     {
-        redp2p_deregister_with_key(NULL, runtime->borrowed_index_host,
+        redp2p_pub_deregister_registration(NULL, runtime->borrowed_index_host,
             runtime->index_port, runtime->borrowed_self_id, ctx->key,
             ctx->sequence + 1);
         ctx->key[0] = '\0';
@@ -2084,7 +2087,7 @@ int *wait_result)
     if (ctx->key[0] != '\0') {
         memcpy(prior_error, ctx->err_buf, sizeof(prior_error));
         removed = REDP2P_OK;
-        deregistered = redp2p_deregister_with_key(ctx,
+        deregistered = redp2p_pub_deregister_registration(ctx,
             runtime->borrowed_index_host, runtime->index_port,
             runtime->borrowed_self_id, ctx->key, ctx->sequence + 1);
         if (deregistered == REDP2P_OK) {
