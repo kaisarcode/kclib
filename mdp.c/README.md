@@ -3,9 +3,6 @@
 `mdp.c` parses Markdown text, extracts optional YAML frontmatter, and renders the body as an HTML fragment through a small C library and stdin/stdout CLI.
 
 ---
-
----
-
 ## CLI
 
 ### Examples
@@ -41,9 +38,6 @@ echo $'---\ntitle: Home\n---\n# Hello' | mdp --body
 | `-v`, `--version` | Show version |
 
 ---
-
----
-
 ## Public API
 
 The reusable API models one parsed Markdown document. Frontmatter is split from
@@ -129,9 +123,6 @@ closing tag is emitted without Markdown processing. Text that only resembles
 HTML, such as `2 < 3` or `<3`, stays escaped.
 
 ---
-
----
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
