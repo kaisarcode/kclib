@@ -46,9 +46,14 @@ typedef struct {
     unsigned short index_port;
     redp2p_fd_t local_fd;
     redp2p_fd_t tcp_listen_fd;
+    redp2p_fd_t wake_read_fd;
+    redp2p_fd_t wake_write_fd;
     redp2p_udp_consumer_session_t *sessions;
     int n_sessions;
     int cap_sessions;
+    redp2p_pollfd_t *pollfds;
+    size_t poll_count;
+    size_t poll_capacity;
     int platform_initialized;
     redp2p_candidate_t peer_candidates[REDP2P_PEER_CANDIDATES_MAX];
     int n_peer_candidates;
@@ -447,6 +452,8 @@ int *should_run)
     runtime->target_id = target_id;
     runtime->local_fd = REDP2P_FD_INVALID;
     runtime->tcp_listen_fd = REDP2P_FD_INVALID;
+    runtime->wake_read_fd = REDP2P_FD_INVALID;
+    runtime->wake_write_fd = REDP2P_FD_INVALID;
     *should_run = 0;
     redp2p_set_error(runtime->ctx, NULL);
     if (redp2p_is_stop_requested(runtime->ctx)) {
@@ -475,6 +482,14 @@ int *should_run)
     runtime->platform_initialized = 1;
     runtime->udp_any_host = redp2p_host_is_ipv6_literal(runtime->index_host) ?
         "::" : "0.0.0.0";
+    if (redp2p_wake_open(ctx, &runtime->wake_read_fd,
+        &runtime->wake_write_fd) != REDP2P_OK)
+    {
+        redp2p_platform_cleanup();
+        runtime->platform_initialized = 0;
+        redp2p_set_error(ctx, "connect: wakeup socket setup failed");
+        return REDP2P_ENET;
+    }
     *should_run = 1;
     return REDP2P_OK;
 }
@@ -578,66 +593,84 @@ static int redp2p_consumer_open_local(redp2p_consumer_runtime_t *runtime)
  * @param maxfd Output highest descriptor.
  * @return 1 when selectable, 0 after a session close, or -1 on fatal error.
  */
-static int redp2p_consumer_fdset_build(
-redp2p_consumer_runtime_t *runtime,
-fd_set *fds,
-int *maxfd)
+static int redp2p_consumer_build_poll(
+redp2p_consumer_runtime_t *runtime)
 {
-    int failed;
+    size_t needed;
+    redp2p_pollfd_t *grown;
     int i;
 
-    FD_ZERO(fds);
-    *maxfd = -1;
-    if (!redp2p_fdset_add(runtime->local_fd, fds, maxfd)) {
-        redp2p_set_error(runtime->ctx,
-            "connect: local descriptor cannot be represented by fd_set");
-        return -1;
-    }
-    if (!REDP2P_ISERR(runtime->tcp_listen_fd) &&
-        !redp2p_fdset_add(runtime->tcp_listen_fd, fds, maxfd))
-    {
-        redp2p_set_error(runtime->ctx,
-            "connect: listener cannot be represented by fd_set");
-        return -1;
-    }
-
-    failed = 0;
+    needed = 2;
+    if (!REDP2P_ISERR(runtime->tcp_listen_fd)) needed++;
     for (i = 0; i < runtime->n_sessions; i++) {
         if (!runtime->sessions[i].active) continue;
-        if (!redp2p_fdset_add(runtime->sessions[i].fd, fds, maxfd)) {
-            redp2p_set_error(runtime->ctx,
-                "connect: peer descriptor cannot be represented by fd_set");
-            if (runtime->sessions[i].is_tcp) {
-                redp2p_stream_fail(runtime->ctx, &runtime->sessions[i].stream);
-            }
-            redp2p_consumer_session_close(&runtime->sessions[i]);
-            failed = 1;
-            continue;
-        }
+        needed++;
+        if (runtime->sessions[i].is_tcp &&
+            runtime->sessions[i].tcp_fd != REDP2P_FD_INVALID &&
+            redp2p_stream_can_send_data(&runtime->sessions[i].stream))
+            needed++;
+    }
+    if (needed > runtime->poll_capacity) {
+        if (needed > SIZE_MAX / sizeof(*runtime->pollfds))
+            return REDP2P_ERROR;
+        grown = (redp2p_pollfd_t *)realloc(runtime->pollfds,
+            needed * sizeof(*runtime->pollfds));
+        if (!grown) return REDP2P_ERROR;
+        runtime->pollfds = grown;
+        runtime->poll_capacity = needed;
+    }
+
+    runtime->poll_count = 0;
+    runtime->pollfds[runtime->poll_count].fd = runtime->local_fd;
+    runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+    runtime->pollfds[runtime->poll_count].revents = 0;
+    runtime->poll_count++;
+    runtime->pollfds[runtime->poll_count].fd = runtime->wake_read_fd;
+    runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+    runtime->pollfds[runtime->poll_count].revents = 0;
+    runtime->poll_count++;
+
+    if (!REDP2P_ISERR(runtime->tcp_listen_fd)) {
+        runtime->pollfds[runtime->poll_count].fd = runtime->tcp_listen_fd;
+        runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+        runtime->pollfds[runtime->poll_count].revents = 0;
+        runtime->poll_count++;
+    }
+
+    for (i = 0; i < runtime->n_sessions; i++) {
+        if (!runtime->sessions[i].active) continue;
+        runtime->pollfds[runtime->poll_count].fd = runtime->sessions[i].fd;
+        runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+        runtime->pollfds[runtime->poll_count].revents = 0;
+        runtime->poll_count++;
         if (!runtime->sessions[i].is_tcp ||
             runtime->sessions[i].tcp_fd == REDP2P_FD_INVALID ||
             !redp2p_stream_can_send_data(&runtime->sessions[i].stream))
             continue;
-        if (!redp2p_fdset_add(runtime->sessions[i].tcp_fd, fds, maxfd)) {
-            redp2p_set_error(runtime->ctx,
-                "connect: client descriptor cannot be represented by fd_set");
-            redp2p_stream_fail(runtime->ctx, &runtime->sessions[i].stream);
-            redp2p_consumer_session_close(&runtime->sessions[i]);
-            failed = 1;
-        }
+        runtime->pollfds[runtime->poll_count].fd =
+            runtime->sessions[i].tcp_fd;
+        runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+        runtime->pollfds[runtime->poll_count].revents = 0;
+        runtime->poll_count++;
     }
-    return failed ? 0 : 1;
+    return REDP2P_OK;
 }
 
-/**
- * Accepts and establishes one pending local TCP client.
- * @param runtime Consumer runtime owning accepted sessions.
- * @param fds Selected descriptor set.
- * @return 1 when the current event iteration must end, 0 otherwise.
- */
+static int redp2p_consumer_poll_ready(
+const redp2p_consumer_runtime_t *runtime,
+redp2p_fd_t fd)
+{
+    size_t i;
+
+    for (i = 0; i < runtime->poll_count; i++) {
+        if (runtime->pollfds[i].fd == fd)
+            return redp2p_poll_readable(&runtime->pollfds[i]);
+    }
+    return 0;
+}
+
 static int redp2p_consumer_tcp_accept(
-redp2p_consumer_runtime_t *runtime,
-const fd_set *fds)
+redp2p_consumer_runtime_t *runtime)
 {
     unsigned char session_bin[REDP2P_SESSION_ID_SZ];
     char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1];
@@ -648,7 +681,7 @@ const fd_set *fds)
     int skip_iteration;
 
     if (REDP2P_ISERR(runtime->tcp_listen_fd) ||
-        !FD_ISSET(runtime->tcp_listen_fd, fds))
+        !redp2p_consumer_poll_ready(runtime, runtime->tcp_listen_fd))
         return 0;
     client_fd = accept(runtime->tcp_listen_fd, NULL, NULL);
     if (REDP2P_ISERR(client_fd)) return 0;
@@ -683,8 +716,7 @@ const fd_set *fds)
  * @return 1 when processing may continue, or 0 after oversized input.
  */
 static int redp2p_consumer_udp_receive(
-redp2p_consumer_runtime_t *runtime,
-const fd_set *fds)
+redp2p_consumer_runtime_t *runtime)
 {
     unsigned char session_bin[REDP2P_SESSION_ID_SZ];
     char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1];
@@ -698,7 +730,7 @@ const fd_set *fds)
     int n;
 
     if (!REDP2P_ISERR(runtime->tcp_listen_fd) ||
-        !FD_ISSET(runtime->local_fd, fds))
+        !redp2p_consumer_poll_ready(runtime, runtime->local_fd))
         return 1;
     fromlen = sizeof(from);
     n = (int)recvfrom(runtime->local_fd, buf, sizeof(buf), 0,
@@ -736,15 +768,15 @@ const fd_set *fds)
  * @return None.
  */
 static void redp2p_consumer_tcp_pump(
-redp2p_consumer_runtime_t *runtime,
-const fd_set *fds)
+redp2p_consumer_runtime_t *runtime)
 {
     int i;
 
     if (REDP2P_ISERR(runtime->tcp_listen_fd)) return;
     for (i = 0; i < runtime->n_sessions; i++) {
         if (!runtime->sessions[i].active) continue;
-        if (!FD_ISSET(runtime->sessions[i].tcp_fd, fds)) continue;
+        if (!redp2p_consumer_poll_ready(runtime,
+            runtime->sessions[i].tcp_fd)) continue;
         if (redp2p_stream_pump_tcp(runtime->ctx,
             &runtime->sessions[i].stream, runtime->sessions[i].tcp_fd) != 0)
         {
@@ -761,8 +793,7 @@ const fd_set *fds)
  * @return None.
  */
 static void redp2p_consumer_peer_receive(
-redp2p_consumer_runtime_t *runtime,
-const fd_set *fds)
+redp2p_consumer_runtime_t *runtime)
 {
     int i;
 
@@ -774,7 +805,8 @@ const fd_set *fds)
         redp2p_session_envelope_t envelope;
 
         if (!runtime->sessions[i].active) continue;
-        if (!FD_ISSET(runtime->sessions[i].fd, fds)) continue;
+        if (!redp2p_consumer_poll_ready(runtime,
+            runtime->sessions[i].fd)) continue;
         fromlen = sizeof(from);
         n = (int)recvfrom(runtime->sessions[i].fd, buf, sizeof(buf), 0,
             (struct sockaddr *)&from, &fromlen);
@@ -886,7 +918,8 @@ static uint32_t redp2p_consumer_wait_ms(
  * @param runtime Initialized and target-validated consumer runtime.
  * @return REDP2P_OK on stop, or REDP2P_ENET on fatal descriptor failure.
  */
-static int redp2p_consumer_loop(redp2p_consumer_runtime_t *runtime) {
+static int redp2p_consumer_loop(redp2p_consumer_runtime_t *runtime)
+{
     int result;
 
     result = REDP2P_OK;
@@ -895,37 +928,34 @@ static int redp2p_consumer_loop(redp2p_consumer_runtime_t *runtime) {
         redp2p_set_nonblock(runtime->tcp_listen_fd);
 
     while (!runtime->ctx->stop_requested) {
-        fd_set fds;
-        struct timeval tv;
-        int fdset_result;
-        int maxfd;
+        int poll_result;
         int selected;
         uint32_t wait_ms;
 
-        fdset_result = redp2p_consumer_fdset_build(runtime, &fds, &maxfd);
-        if (fdset_result < 0) {
-            result = REDP2P_ENET;
+        poll_result = redp2p_consumer_build_poll(runtime);
+        if (poll_result != REDP2P_OK) {
+            result = poll_result;
             break;
         }
-        if (fdset_result == 0) continue;
         wait_ms = redp2p_consumer_wait_ms(runtime);
-        tv.tv_sec = (long)(wait_ms / 1000u);
-        tv.tv_usec = (long)((wait_ms % 1000u) * 1000u);
-        selected = select(maxfd + 1, &fds, NULL, NULL, &tv);
+        selected = redp2p_poll_wait(runtime->pollfds, runtime->poll_count,
+            (int)wait_ms);
         if (selected < 0) continue;
+        if (redp2p_consumer_poll_ready(runtime, runtime->wake_read_fd))
+            redp2p_wake_drain(runtime->wake_read_fd);
         if (runtime->ctx->stop_requested) break;
 
-        if (redp2p_consumer_tcp_accept(runtime, &fds)) {
+        if (redp2p_consumer_tcp_accept(runtime)) {
             redp2p_consumer_session_maintain(runtime);
             continue;
         }
         if (!REDP2P_ISERR(runtime->tcp_listen_fd)) {
-            redp2p_consumer_tcp_pump(runtime, &fds);
-        } else if (!redp2p_consumer_udp_receive(runtime, &fds)) {
+            redp2p_consumer_tcp_pump(runtime);
+        } else if (!redp2p_consumer_udp_receive(runtime)) {
             redp2p_consumer_session_maintain(runtime);
             continue;
         }
-        redp2p_consumer_peer_receive(runtime, &fds);
+        redp2p_consumer_peer_receive(runtime);
         redp2p_consumer_session_maintain(runtime);
     }
     return result;
@@ -950,6 +980,10 @@ int reset_stop)
     runtime->sessions = NULL;
     runtime->n_sessions = 0;
     runtime->cap_sessions = 0;
+    free(runtime->pollfds);
+    runtime->pollfds = NULL;
+    runtime->poll_count = 0;
+    runtime->poll_capacity = 0;
     if (!REDP2P_ISERR(runtime->local_fd)) {
         REDP2P_FD_CLOSE(runtime->local_fd);
         runtime->local_fd = REDP2P_FD_INVALID;
@@ -958,6 +992,10 @@ int reset_stop)
         REDP2P_FD_CLOSE(runtime->tcp_listen_fd);
         runtime->tcp_listen_fd = REDP2P_FD_INVALID;
     }
+    redp2p_wake_close(runtime->ctx, runtime->wake_read_fd,
+        runtime->wake_write_fd);
+    runtime->wake_read_fd = REDP2P_FD_INVALID;
+    runtime->wake_write_fd = REDP2P_FD_INVALID;
     if (runtime->platform_initialized) {
         redp2p_platform_cleanup();
         runtime->platform_initialized = 0;
