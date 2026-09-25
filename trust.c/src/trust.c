@@ -17,6 +17,11 @@
 #include <io.h>
 #endif
 
+/**
+ * Prints trust CLI usage information.
+ * @param name Name string.
+ * @return No return value.
+ */
 static void kc_print_help(const char *name) {
     printf("Usage: %s <command> [arguments]\n", name);
     printf("\n");
@@ -34,10 +39,21 @@ static void kc_print_help(const char *name) {
     printf("    -v, --version           Show version\n");
 }
 
+/**
+ * Prints the trust build version.
+ * @return No return value.
+ */
 static void kc_print_version(void) {
     printf("trust build %llu\n", (unsigned long long)kc_trust_version());
 }
 
+/**
+ * Reads bounded binary input from standard input.
+ * @param out Destination output.
+ * @param out_size Destination byte count.
+ * @param max_size Maximum byte count.
+ * @return 0 on success, or 1 on failure.
+ */
 static int kc_read_stdin(void **out, size_t *out_size, size_t max_size) {
     unsigned char *data;
     size_t size = 0;
@@ -85,6 +101,12 @@ static int kc_read_stdin(void **out, size_t *out_size, size_t max_size) {
     return 0;
 }
 
+/**
+ * Writes binary output to standard output.
+ * @param data Input bytes.
+ * @param size Byte count.
+ * @return 0 on success, or 1 on failure.
+ */
 static int kc_write_stdout(const void *data, size_t size) {
 #ifdef _WIN32
     if (_setmode(_fileno(stdout), _O_BINARY) == -1) return 1;
@@ -92,6 +114,12 @@ static int kc_write_stdout(const void *data, size_t size) {
     return fwrite(data, 1, size, stdout) == size && fflush(stdout) == 0 ? 0 : 1;
 }
 
+/**
+ * Runs the trust command-line interface.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return 0 on success, or 1 on command failure.
+ */
 int main(int argc, char **argv) {
     kc_trust_t *trust = NULL;
     const char *cmd;
