@@ -8,28 +8,10 @@ It does not listen on ports, own sockets, route requests, or perform outgoing
 network transfers. Those responsibilities belong to transport libraries such as
 `netl.c` and `nets.c`.
 
-The intended scripting composition is:
-
-```js
-const parser = http.parser();
-
-client.on("data", (data) => {
-    parser.write(data);
-});
-
-parser.on("request", (request) => {
-    const response = http.response({
-        status: 200,
-        headers: [["content-type", "text/plain"]],
-        body: "hello"
-    });
-
-    client.send(response);
-});
-```
-
 One parser belongs to one HTTP byte stream. A write may complete zero, one, or
 multiple HTTP messages.
+
+---
 
 ## CLI
 
@@ -101,6 +83,8 @@ Common options:
 
 - `-h`, `--help`
 - `-v`, `--version`
+
+---
 
 ## Public API
 
@@ -212,37 +196,17 @@ Non-NULL scalar pointers are explicit. An explicit response status outside
 `100..599` is invalid, including `0`. An explicit chunk size of `0` is
 invalid.
 
-## Transport composition
+### Transport composition
 
 `http.c` deliberately has no client/server socket API.
 
 For an HTTP server, `netl.c` owns listening, accepted TCP connections, and
 connection identity. Each accepted TCP connection gets its own HTTP parser:
 
-```js
-netl.listen({ port: 8080, protocol: "tcp" });
-
-netl.on("connection", (client) => {
-    const parser = http.parser();
-
-    parser.on("request", (request) => {
-        client.send(http.response({ status: 200 }));
-    });
-
-    client.on("data", (data) => {
-        parser.write(data);
-    });
-
-    client.on("close", () => {
-        parser.close();
-    });
-});
-```
-
 `nets.c` remains an independent outbound transfer API. Returned bytes may also
 be fed to an HTTP parser when that transfer carries HTTP.
 
-## Protocol support
+### Protocol support
 
 | Version | Status |
 | :--- | :--- |
@@ -252,7 +216,7 @@ be fed to an HTTP parser when that transfer carries HTTP.
 | HTTP/2 | Existing HEADERS/DATA frame parse/build capability retained |
 | HTTP/3 | Existing HEADERS/DATA frame parse/build capability retained |
 
-## Source layout
+### Source layout
 
 | File | Role |
 | :--- | :--- |
@@ -261,71 +225,95 @@ be fed to an HTTP parser when that transfer carries HTTP.
 | `src/libhttp.h` | Public C contract |
 | `src/test.c` | Public contract tests |
 
+---
+
 ## Build
 
-A plain `make` builds the current host target into
-`bin/{arch}/{platform}/`.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
 ```
 
-Build every configured target:
+### Tests
 
-```bash
-make all
-```
-
-Individual targets include Linux, Windows, macOS, iOS, Android, and WebAssembly
-variants defined by the project Makefile.
-
-## Tests
-
-Build artifacts first, then run the native public-contract tests:
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
 make
 make test
 ```
 
-Windows-through-Wine:
+To run through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-WebAssembly:
+### WebAssembly (Emscripten)
 
 ```bash
 make wasm32/wasm
 make test wasm
 ```
 
-The WebAssembly module contains the reusable parser/builders only; the CLI is
-not compiled into the module.
+- Artifact: `bin/wasm32/wasm/http.wasm`
+- Exports: `kc_http_parser_open`, `kc_http_parser_write`, `kc_http_parser_close`, `kc_http_free`, `kc_http_request`, `kc_http_response`, `kc_http_strerror`, `kc_http_version`
+- The module contains the reusable library only; the CLI is not compiled into
+    it.
 
-WASM exports:
+`wasm32/wasm` is included in `make all`.
 
-```text
-kc_http_parser_open
-kc_http_parser_write
-kc_http_parser_close
-kc_http_request
-kc_http_response
-kc_http_free
-kc_http_strerror
-kc_http_version
+### Multiarch Builds
+
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
+
+```bash
+make all
 ```
 
-## Development requirements
+---
 
-Core build tools:
+## Development Requirements
 
-- GNU Make
-- CMake >= 3.14
-- Ninja
-- a C11 compiler
+### Build Tools
 
-Optional toolchains are required only for their matching cross-build targets,
-including MinGW/Wine, Emscripten, osxcross, and the Android NDK.
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Emscripten SDK and Node.js for WebAssembly builds and tests.
+- Other cross-compilation toolchains are required only by enabled targets.
+
+---
+
+## Beta Notice
+
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
+
+---
+
+## License
+
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
