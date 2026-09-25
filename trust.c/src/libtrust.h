@@ -1,6 +1,6 @@
 /**
- * libtrust.h - Message cryptography with TOFU peer identity.
- * Summary: Public API for the trust library.
+ * libtrust.h - Portable identity trust and message cryptography.
+ * Summary: Public API for scoped trust relationships backed by Noise.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -19,23 +19,11 @@ extern "C" {
 
 typedef struct kc_trust kc_trust_t;
 
-#define KC_TRUST_OK           0
-#define KC_TRUST_ERROR       -1
-#define KC_TRUST_PEER_NEW     1
-#define KC_TRUST_PEER_CHANGED 2
+#define KC_TRUST_OK 0
+#define KC_TRUST_ERROR -1
 
-#define KC_TRUST_PK_SIZE      32
-#define KC_TRUST_SK_SIZE      32
-#define KC_TRUST_MAX_MESSAGE  (64 * 1024 * 1024)
-#define KC_TRUST_MAX_PEER_ID  256
-#define KC_TRUST_MAX_PAYLOAD  67125384
-
-typedef struct {
-    int status;
-    unsigned char peer_pk[KC_TRUST_PK_SIZE];
-    unsigned char *message;
-    size_t message_len;
-} kc_trust_result_t;
+#define KC_TRUST_UID_SIZE 36
+#define KC_TRUST_MAX_MESSAGE (64 * 1024 * 1024)
 
 /**
  * Returns the build version generated at compile time.
@@ -44,121 +32,120 @@ typedef struct {
 uint64_t kc_trust_version(void);
 
 /**
- * Generate a fresh random keypair for a new identity.
- * Writes the random 32-byte secret key and its derived 32-byte public key
- * to the caller-provided buffers.  Memory-only: no files, no environment,
- * no paths.  Both output pointers are required.  On failure the output
- * buffers remain zeroed.
- * @param secret_key Destination for the random 32-byte secret key.
- * @param public_key Destination for the derived 32-byte public key.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
- */
-int kc_trust_generate(unsigned char secret_key[KC_TRUST_SK_SIZE],
-    unsigned char public_key[KC_TRUST_PK_SIZE]);
-
-/**
- * Initialise a new trust context from a caller-provided secret key.
- * Copies the secret key into the context, derives the context public key,
- * and initializes empty in-memory TOFU state.  Memory-only: no files, no
- * environment, no paths.
+ * Initialize the local trust store.
+ *
+ * The library resolves its per-user data directory automatically. If the
+ * store does not exist it is created. KC_TRUST_DIR is an advanced
+ * process-level override intended for tests and controlled deployments.
+ *
  * @param out Destination context pointer.
- * @param secret_key 32-byte secret key to install in the context.
  * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
  */
-int kc_trust_create(kc_trust_t **out,
-    const unsigned char secret_key[KC_TRUST_SK_SIZE]);
+int kc_trust_init(kc_trust_t **out);
 
 /**
- * Release a trust context and wipe all sensitive material.
- * @param ctx Context pointer.  NULL is a safe no-op.
- * @return Nothing.
- */
-void kc_trust_close(kc_trust_t *ctx);
-
-/**
- * Return the context's 32-byte public key.
- * The returned pointer is owned by the context, remains valid until
- * kc_trust_close(), and must not be freed by the caller.
- * @param ctx Context pointer.
- * @return Pointer to 32 bytes, or NULL on error.
- */
-const unsigned char *kc_trust_public_key(const kc_trust_t *ctx);
-
-/**
- * Protect an outgoing message.
- * @param ctx Context carrying the local identity.
- * @param recipient_pk 32-byte recipient public key.
- * @param message Application message bytes.
- * @param message_len Message length.
- * @param payload Destination pointer for the allocated encrypted payload,
- *                released with kc_trust_free().
- * @param payload_len Destination payload length.
+ * Create a one-use invitation for a new scoped trust relationship.
+ *
+ * Both returned strings are allocated by the library and released with
+ * kc_trust_free(). The UID is the application-visible identifier for the
+ * new scope. The code contains the cryptographic invitation and may be
+ * transported by any out-of-band mechanism chosen by the application.
+ *
+ * @param trust Trust context.
+ * @param out_uid Destination for the allocated canonical UUID string.
+ * @param out_code Destination for the allocated invitation code.
  * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
  */
-int kc_trust_seal(const kc_trust_t *ctx,
-    const unsigned char recipient_pk[KC_TRUST_PK_SIZE],
-    const unsigned char *message, size_t message_len,
-    unsigned char **payload, size_t *payload_len);
+int kc_trust_invite(kc_trust_t *trust, char **out_uid, char **out_code);
 
 /**
- * Release an allocation returned by kc_trust_seal().
- * @param ptr Payload pointer.  NULL is a safe no-op.
- * @return Nothing.
+ * Join a trust relationship from an invitation code.
+ *
+ * The returned UID identifies the inviter in the local application. The
+ * confirmation is an opaque portable string that must be delivered back to
+ * the inviter by the application. Both strings are released with
+ * kc_trust_free().
+ *
+ * @param trust Trust context.
+ * @param code Invitation code obtained out of band.
+ * @param out_uid Destination for the allocated canonical UUID string.
+ * @param out_confirmation Destination for the allocated confirmation string.
+ * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
+ */
+int kc_trust_join(kc_trust_t *trust, const char *code,
+    char **out_uid, char **out_confirmation);
+
+/**
+ * Confirm a response to one pending invitation.
+ *
+ * A valid confirmation atomically replaces the pending invitation with the
+ * established trust relationship and destroys the one-use invitation secret.
+ * The returned UID is the application-visible scope identifier originally
+ * returned by kc_trust_invite().
+ *
+ * @param trust Trust context.
+ * @param confirmation Opaque confirmation received from the joining side.
+ * @param out_uid Destination for the allocated canonical UUID string.
+ * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
+ */
+int kc_trust_confirm(kc_trust_t *trust, const char *confirmation,
+    char **out_uid);
+
+/**
+ * Encrypt and authenticate one message for an established UID.
+ *
+ * trust.c performs no transport, ordering, replay, retry, timeout, or request
+ * lifecycle handling. The returned blob may be transported by any mechanism.
+ *
+ * @param trust Trust context.
+ * @param uid Established peer UID.
+ * @param message Plaintext bytes.
+ * @param message_size Plaintext size.
+ * @param out_data Destination for the allocated protected blob.
+ * @param out_size Destination protected blob size.
+ * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
+ */
+int kc_trust_seal(kc_trust_t *trust, const char *uid,
+    const void *message, size_t message_size,
+    void **out_data, size_t *out_size);
+
+/**
+ * Authenticate and decrypt one message from an established UID.
+ *
+ * This operation intentionally has no replay or temporal policy. Replaying the
+ * same valid blob is the responsibility of the composing transport/protocol.
+ *
+ * @param trust Trust context.
+ * @param uid Established peer UID supplied by the surrounding application.
+ * @param data Protected blob from kc_trust_seal().
+ * @param data_size Protected blob size.
+ * @param out_message Destination for the allocated plaintext.
+ * @param out_message_size Destination plaintext size.
+ * @return KC_TRUST_OK on success, KC_TRUST_ERROR on authentication or input failure.
+ */
+int kc_trust_unseal(kc_trust_t *trust, const char *uid,
+    const void *data, size_t data_size,
+    void **out_message, size_t *out_message_size);
+
+/**
+ * Revoke an established or pending UID from the local trust store.
+ * @param trust Trust context.
+ * @param uid UID to revoke.
+ * @return KC_TRUST_OK when something was removed, KC_TRUST_ERROR otherwise.
+ */
+int kc_trust_revoke(kc_trust_t *trust, const char *uid);
+
+/**
+ * Release a trust context.
+ * @param trust Context pointer. NULL is a safe no-op.
+ */
+void kc_trust_close(kc_trust_t *trust);
+
+/**
+ * Release an allocation returned by trust.c.
+ * @param ptr Allocation pointer. NULL is a safe no-op.
  */
 void kc_trust_free(void *ptr);
-
-/**
- * Authenticate and open an encrypted payload.
- * If peer_id is non-NULL, the trust store is evaluated against the
- * sender public key using the provided caller-defined identifier.
- * @param ctx Context carrying local identity and trust state.
- * @param payload Encrypted payload produced by kc_trust_seal.
- * @param payload_len Payload length.
- * @param peer_id Optional caller-defined peer identifier for trust evaluation.
- *                NULL skips trust evaluation and returns KC_TRUST_OK status.
- * @param peer_id_len Length of peer_id.  Must be > 0 when peer_id is
- *                    non-NULL and at most KC_TRUST_MAX_PEER_ID.
- * @param result Destination structured result, freed by kc_trust_result_free.
- * @return KC_TRUST_OK when the result is populated, KC_TRUST_ERROR on failure.
- */
-int kc_trust_open(const kc_trust_t *ctx,
-    const unsigned char *payload, size_t payload_len,
-    const unsigned char *peer_id, size_t peer_id_len,
-    kc_trust_result_t **result);
-
-/**
- * Release resources owned by a result.
- * @param result Result pointer.  NULL is a safe no-op.
- * @return Nothing.
- */
-void kc_trust_result_free(kc_trust_result_t *result);
-
-/**
- * Explicitly trust a peer binding.
- * Creates or replaces the binding for the given caller-defined
- * peer identifier in this context's in-memory trust state.  This function
- * performs no filesystem persistence.
- * @param ctx       Context.
- * @param peer_id   Opaque caller-defined peer identifier.
- * @param peer_id_len Identifier length (1 through KC_TRUST_MAX_PEER_ID).
- * @param peer_pk   32-byte public key to bind.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
- */
-int kc_trust_trust(kc_trust_t *ctx,
-    const unsigned char *peer_id, size_t peer_id_len,
-    const unsigned char peer_pk[KC_TRUST_PK_SIZE]);
-
-/**
- * Remove a peer trust binding.
- * Removes only this context's in-memory binding and performs no filesystem
- * persistence.
- * @param ctx       Context.
- * @param peer_id   Opaque caller-defined peer identifier.
- * @param peer_id_len Identifier length (1 through KC_TRUST_MAX_PEER_ID).
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR if not found.
- */
-int kc_trust_forget(kc_trust_t *ctx,
-    const unsigned char *peer_id, size_t peer_id_len);
 
 #ifdef __cplusplus
 }
