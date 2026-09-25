@@ -107,7 +107,6 @@ typedef WSAPOLLFD redp2p_pollfd_t;
 #  define REDP2P_LASTERR()   ((int)WSAGetLastError())
 #  define REDP2P_EWOULD      WSAEWOULDBLOCK
 #else
-#  include <sys/select.h>
 #  include <sys/socket.h>
 #  include <poll.h>
 #  include <netinet/in.h>
@@ -583,16 +582,6 @@ REDP2P_INTERNAL int redp2p_sockaddr_equal(const struct sockaddr_storage *a,
  */
 REDP2P_INTERNAL int redp2p_candidate_dest_allowed(int family, const void *host,
     unsigned short port);
-
-/**
- * Adds one descriptor to one select set with descriptor-range validation.
- * Summary: Rejects descriptors that cannot be represented by fd_set.
- * @param fd    Descriptor to add.
- * @param set   Select set to update.
- * @param maxfd Current maximum descriptor, updated on success.
- * @return 1 when added, 0 when rejected.
- */
-REDP2P_INTERNAL int redp2p_fdset_add(redp2p_fd_t fd, fd_set *set, int *maxfd);
 
 /**
  * Sock read.
