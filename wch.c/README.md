@@ -10,6 +10,8 @@ Each filesystem event can execute the configured persistent command and can also
 be observed temporarily by processes that open the watcher and subscribe with
 `kc_wch_on()`.
 
+---
+
 ## CLI
 
 The CLI contract remains:
@@ -48,6 +50,8 @@ name and path:
 The event names are `add`, `upd`, and `del`.
 
 `KC_WCH_DIR` is an advanced process-level override for the runtime directory. Normal API and CLI callers do not need to select a directory.
+
+---
 
 ## Public API
 
@@ -174,47 +178,7 @@ The returned entries and their strings share one allocation released with
 uint64_t kc_wch_version(void);
 ```
 
-## Lua model
-
-```lua
-wch.create("my_watcher", {
-    path = "./src",
-    cmd = "make build",
-    recursive = true
-})
-
-local watchers = wch.list()
-
-local watcher = wch.open("my_watcher")
-print(watcher:get_path())
-print(watcher:get_cmd())
-print(watcher:get_recursive())
-
-watcher:set_path("./lib")
-watcher:set_cmd("make test")
-watcher:set_recursive(false)
-
-watcher:on("add", function(path)
-    print(path)
-end)
-
-watcher:on("upd", function(path)
-    print(path)
-end)
-
-watcher:on("del", function(path)
-    print(path)
-end)
-
-watcher:close()
-
-wch.delete("my_watcher")
-```
-
-The intended binding is mechanical. The public C names map directly to the
-scripting operations.
-
-## Runtime model
+### Runtime model
 
 The native filesystem backends remain private implementation details:
 
@@ -233,20 +197,80 @@ not part of the public API.
 Browser WebAssembly is not applicable to the resident product because a browser
 runtime cannot provide a system process that survives the host application.
 
+---
+
 ## Build
+
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
-make all
 ```
 
-Tests:
+### Tests
+
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
+make
 make test
+```
+
+To run through Wine:
+
+```bash
+make x86_64/windows
 make test wine
 ```
 
+### Multiarch Builds
+
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
+
+```bash
+make all
+```
+
+---
+
+## Development Requirements
+
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Other cross-compilation toolchains are required only by enabled targets.
+
+---
+
+## Beta Notice
+
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
+
+---
+
 ## License
 
-GNU General Public License version 3 (GPLv3).
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
