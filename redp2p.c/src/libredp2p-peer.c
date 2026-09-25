@@ -830,10 +830,63 @@ static void redp2p_shutdown_write(redp2p_fd_t fd) {
 }
 
 /**
- * Tcp connect.
+ * Restores one socket to blocking mode after a bounded nonblocking connect.
+ * @param fd Socket descriptor.
  * @return 0 on success, -1 on error.
  */
-static redp2p_fd_t redp2p_tcp_connect(const char *host, unsigned short port) {
+static int redp2p_set_blocking(redp2p_fd_t fd)
+{
+#ifdef _WIN32
+    u_long mode = 0;
+    return ioctlsocket(fd, FIONBIO, &mode) == 0 ? 0 : -1;
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) return -1;
+    return fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+#endif
+}
+
+/**
+ * Waits until one nonblocking TCP connect completes.
+ * @param fd Socket descriptor.
+ * @param timeout_ms Maximum wait in milliseconds.
+ * @return 1 when connected, 0 on timeout, -1 on socket failure.
+ */
+static int redp2p_wait_connected(redp2p_fd_t fd, int timeout_ms)
+{
+    redp2p_pollfd_t pollfd;
+    int result;
+    int socket_error;
+#ifdef _WIN32
+    int error_len;
+#else
+    socklen_t error_len;
+#endif
+
+    pollfd.fd = fd;
+#ifdef _WIN32
+    pollfd.events = POLLWRNORM;
+#else
+    pollfd.events = POLLOUT;
+#endif
+    pollfd.revents = 0;
+    result = redp2p_poll_wait(&pollfd, 1, timeout_ms);
+    if (result <= 0) return result;
+
+    socket_error = 0;
+    error_len = (int)sizeof(socket_error);
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&socket_error,
+        &error_len) != 0)
+        return -1;
+    return socket_error == 0 ? 1 : -1;
+}
+
+/**
+ * Opens one TCP connection with a bounded connect timeout.
+ * @return Connected socket, or REDP2P_FD_INVALID on error or timeout.
+ */
+static redp2p_fd_t redp2p_tcp_connect(const char *host, unsigned short port)
+{
     redp2p_fd_t fd;
     struct addrinfo hints;
     struct addrinfo *ai;
@@ -846,12 +899,36 @@ static redp2p_fd_t redp2p_tcp_connect(const char *host, unsigned short port) {
     snprintf(port_str, sizeof(port_str), "%u", (unsigned)port);
     if (getaddrinfo(host, port_str, &hints, &ai) != 0)
         return REDP2P_FD_INVALID;
+
     fd = REDP2P_FD_INVALID;
     for (it = ai; it; it = it->ai_next) {
+        int connected;
+
         fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
         if (REDP2P_ISERR(fd)) continue;
-        if (connect(fd, it->ai_addr, (socklen_t)it->ai_addrlen) == 0)
-            break;
+        if (redp2p_set_nonblock(fd) != 0) {
+            REDP2P_FD_CLOSE(fd);
+            fd = REDP2P_FD_INVALID;
+            continue;
+        }
+
+        connected = connect(fd, it->ai_addr, (socklen_t)it->ai_addrlen) == 0;
+        if (!connected) {
+#ifdef _WIN32
+            int error = WSAGetLastError();
+            if (error == WSAEWOULDBLOCK || error == WSAEINPROGRESS ||
+                error == WSAEALREADY)
+                connected = redp2p_wait_connected(fd,
+                    REDP2P_HTTP_TIMEOUT_S * 1000) > 0;
+#else
+            if (errno == EINPROGRESS || errno == EWOULDBLOCK ||
+                errno == EAGAIN)
+                connected = redp2p_wait_connected(fd,
+                    REDP2P_HTTP_TIMEOUT_S * 1000) > 0;
+#endif
+        }
+
+        if (connected && redp2p_set_blocking(fd) == 0) break;
         REDP2P_FD_CLOSE(fd);
         fd = REDP2P_FD_INVALID;
     }
