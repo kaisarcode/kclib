@@ -826,7 +826,9 @@ static void kc_trust_split(const kc_trust_symmetric_state_t *state,
 }
 
 static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
-    const char *name, const unsigned char uid[KC_TRUST_UID_BYTES]) {
+    const char *name,
+    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
+    const unsigned char responder_uid[KC_TRUST_UID_BYTES]) {
     size_t name_size = strlen(name);
     memset(state, 0, sizeof(*state));
     if (name_size <= KC_TRUST_HASH_SIZE) {
@@ -837,7 +839,8 @@ static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
     }
     memcpy(state->ck, state->h, KC_TRUST_HASH_SIZE);
     kc_trust_cipher_empty(&state->cipher);
-    kc_trust_mix_hash(state, uid, KC_TRUST_UID_BYTES);
+    kc_trust_mix_hash(state, initiator_uid, KC_TRUST_UID_BYTES);
+    kc_trust_mix_hash(state, responder_uid, KC_TRUST_UID_BYTES);
 }
 
 static int kc_trust_x25519(unsigned char out[32],
@@ -873,7 +876,8 @@ static size_t kc_trust_payload_size(size_t size) {
 }
 
 static int kc_trust_xpsk1_write(
-    const unsigned char uid[KC_TRUST_UID_BYTES],
+    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
+    const unsigned char responder_uid[KC_TRUST_UID_BYTES],
     const unsigned char local_sk[KC_TRUST_SK_SIZE],
     const unsigned char remote_pk[KC_TRUST_PK_SIZE],
     const unsigned char psk[KC_TRUST_PSK_SIZE],
@@ -886,7 +890,7 @@ static int kc_trust_xpsk1_write(
     unsigned char *p = out;
     int rc = -1;
     crypto_x25519_public_key(local_pk, local_sk);
-    kc_trust_noise_init(&state, name, uid);
+    kc_trust_noise_init(&state, name, initiator_uid, responder_uid);
     kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
     if (kc_trust_read_random(eph_sk, sizeof(eph_sk)) != 0) goto done;
     crypto_x25519_public_key(p, eph_sk);
@@ -915,7 +919,8 @@ done:
 }
 
 static int kc_trust_xpsk1_read(
-    const unsigned char uid[KC_TRUST_UID_BYTES],
+    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
+    const unsigned char responder_uid[KC_TRUST_UID_BYTES],
     const unsigned char local_sk[KC_TRUST_SK_SIZE],
     const unsigned char psk[KC_TRUST_PSK_SIZE],
     const unsigned char message[KC_TRUST_XPSK1_MESSAGE_SIZE],
@@ -928,7 +933,7 @@ static int kc_trust_xpsk1_read(
     const unsigned char *p = message;
     int rc = -1;
     crypto_x25519_public_key(local_pk, local_sk);
-    kc_trust_noise_init(&state, name, uid);
+    kc_trust_noise_init(&state, name, initiator_uid, responder_uid);
     kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
     kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
     kc_trust_mix_key(&state, p, KC_TRUST_PK_SIZE);
@@ -956,7 +961,8 @@ done:
 }
 
 static int kc_trust_k_write(
-    const unsigned char uid[KC_TRUST_UID_BYTES],
+    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
+    const unsigned char responder_uid[KC_TRUST_UID_BYTES],
     const unsigned char local_sk[KC_TRUST_SK_SIZE],
     const unsigned char remote_pk[KC_TRUST_PK_SIZE],
     const unsigned char *message, size_t message_size,
@@ -973,7 +979,7 @@ static int kc_trust_k_write(
     size_t offset = 0;
     int rc = -1;
     crypto_x25519_public_key(local_pk, local_sk);
-    kc_trust_noise_init(&state, name, uid);
+    kc_trust_noise_init(&state, name, initiator_uid, responder_uid);
     kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
     kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
     if (kc_trust_read_random(eph_sk, sizeof(eph_sk)) != 0) goto done;
@@ -1015,7 +1021,8 @@ done:
 }
 
 static int kc_trust_k_read(
-    const unsigned char uid[KC_TRUST_UID_BYTES],
+    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
+    const unsigned char responder_uid[KC_TRUST_UID_BYTES],
     const unsigned char local_sk[KC_TRUST_SK_SIZE],
     const unsigned char remote_pk[KC_TRUST_PK_SIZE],
     const unsigned char *data, size_t data_size,
@@ -1036,7 +1043,7 @@ static int kc_trust_k_read(
     int rc = -1;
     if (data_size < KC_TRUST_PAYLOAD_BASE_SIZE) return -1;
     crypto_x25519_public_key(local_pk, local_sk);
-    kc_trust_noise_init(&state, name, uid);
+    kc_trust_noise_init(&state, name, initiator_uid, responder_uid);
     kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
     kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
     kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
