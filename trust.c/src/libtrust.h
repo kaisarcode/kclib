@@ -47,9 +47,10 @@ int kc_trust_init(kc_trust_t **out);
  * Create a one-use invitation for a new scoped trust relationship.
  *
  * Both returned strings are allocated by the library and released with
- * kc_trust_free(). The UID is the application-visible identifier for the
- * new scope. The code contains the cryptographic invitation and may be
- * transported by any out-of-band mechanism chosen by the application.
+ * kc_trust_free(). The UID is the application-visible identifier Bob stores
+ * for the invited endpoint. The code contains that assigned UID, Bob's local
+ * UID for this scoped relationship, and the cryptographic invitation material.
+ * It may be transported by any out-of-band mechanism chosen by the application.
  *
  * @param trust Trust context.
  * @param out_uid Destination for the allocated canonical UUID string.
@@ -61,10 +62,10 @@ int kc_trust_invite(kc_trust_t *trust, char **out_uid, char **out_code);
 /**
  * Join a trust relationship from an invitation code.
  *
- * The returned UID identifies the inviter in the local application. The
+ * The returned UID identifies the inviter in the joining application and is
+ * distinct from the UID the inviter assigned to the joining endpoint. The
  * confirmation is an opaque portable string that must be delivered back to
- * the inviter by the application. Both strings are released with
- * kc_trust_free().
+ * the inviter by the application. Both strings are released with kc_trust_free().
  *
  * @param trust Trust context.
  * @param code Invitation code obtained out of band.
@@ -81,7 +82,8 @@ int kc_trust_join(kc_trust_t *trust, const char *code,
  * A valid confirmation atomically replaces the pending invitation with the
  * established trust relationship and destroys the one-use invitation secret.
  * The returned UID is the application-visible scope identifier originally
- * returned by kc_trust_invite().
+ * returned by kc_trust_invite(). It is the UID the inviter stores for the
+ * joining endpoint.
  *
  * @param trust Trust context.
  * @param confirmation Opaque confirmation received from the joining side.
@@ -98,7 +100,7 @@ int kc_trust_confirm(kc_trust_t *trust, const char *confirmation,
  * lifecycle handling. The returned blob may be transported by any mechanism.
  *
  * @param trust Trust context.
- * @param uid Established peer UID.
+ * @param uid Established remote UID returned by invite/confirm or join.
  * @param message Plaintext bytes.
  * @param message_size Plaintext size.
  * @param out_data Destination for the allocated protected blob.
@@ -116,7 +118,8 @@ int kc_trust_seal(kc_trust_t *trust, const char *uid,
  * same valid blob is the responsibility of the composing transport/protocol.
  *
  * @param trust Trust context.
- * @param uid Established peer UID supplied by the surrounding application.
+ * @param uid Local destination UID carried by the surrounding application's
+ * message envelope.
  * @param data Protected blob from kc_trust_seal().
  * @param data_size Protected blob size.
  * @param out_message Destination for the allocated plaintext.
@@ -128,9 +131,9 @@ int kc_trust_unseal(kc_trust_t *trust, const char *uid,
     void **out_message, size_t *out_message_size);
 
 /**
- * Revoke an established or pending UID from the local trust store.
+ * Revoke an established remote UID or pending invitation from the local trust store.
  * @param trust Trust context.
- * @param uid UID to revoke.
+ * @param uid Remote UID previously returned by invite/confirm or join.
  * @return KC_TRUST_OK when something was removed, KC_TRUST_ERROR otherwise.
  */
 int kc_trust_revoke(kc_trust_t *trust, const char *uid);
