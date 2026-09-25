@@ -55,9 +55,14 @@ typedef struct {
     const char *borrowed_udp_any_host;
     unsigned short index_port;
     redp2p_fd_t owned_udp_fd;
+    redp2p_fd_t wake_read_fd;
+    redp2p_fd_t wake_write_fd;
     redp2p_udp_server_session_t *owned_sessions;
     int session_count;
     int session_capacity;
+    redp2p_pollfd_t *pollfds;
+    size_t poll_count;
+    size_t poll_capacity;
     uint64_t last_heartbeat;
     uint64_t last_punch_poll;
 } redp2p_publisher_runtime_t;
@@ -977,6 +982,8 @@ unsigned short bind_port)
     runtime->borrowed_self_id = self_id;
     runtime->index_port = index_port;
     runtime->owned_udp_fd = REDP2P_FD_INVALID;
+    runtime->wake_read_fd = REDP2P_FD_INVALID;
+    runtime->wake_write_fd = REDP2P_FD_INVALID;
     if (ctx->proto != REDP2P_PROTO_TCP && ctx->proto != REDP2P_PROTO_UDP) {
         redp2p_set_error(ctx, "wait: invalid transport protocol");
         return REDP2P_EINVAL;
@@ -997,6 +1004,14 @@ unsigned short bind_port)
     runtime->owned_udp_fd = redp2p_create_socket(
         runtime->borrowed_udp_any_host, 0);
     if (REDP2P_ISERR(runtime->owned_udp_fd)) {
+        return REDP2P_ENET;
+    }
+    if (redp2p_wake_open(ctx, &runtime->wake_read_fd,
+        &runtime->wake_write_fd) != REDP2P_OK)
+    {
+        REDP2P_FD_CLOSE(runtime->owned_udp_fd);
+        runtime->owned_udp_fd = REDP2P_FD_INVALID;
+        redp2p_set_error(ctx, "wait: wakeup socket setup failed");
         return REDP2P_ENET;
     }
     return REDP2P_OK;
@@ -1478,49 +1493,72 @@ JSON_Object *out)
  * @param max_fd Output highest descriptor.
  * @return 1 when selectable, 0 to retry, or REDP2P_ENET on fatal failure.
  */
-static int redp2p_publisher_build_fdset(
-redp2p_publisher_runtime_t *runtime,
-fd_set *read_fds,
-int *max_fd)
+static int redp2p_publisher_build_poll(
+redp2p_publisher_runtime_t *runtime)
 {
-    redp2p_t *ctx;
-    int failed;
+    size_t needed;
+    redp2p_pollfd_t *grown;
     int i;
 
-    ctx = runtime->borrowed_ctx;
-    FD_ZERO(read_fds);
-    *max_fd = -1;
-    if (!redp2p_fdset_add(runtime->owned_udp_fd, read_fds, max_fd))
-    {
-        redp2p_set_error(ctx,
-            "wait: essential descriptor cannot be represented by fd_set");
-        return REDP2P_ENET;
-    }
-    failed = 0;
+    needed = 2;
     for (i = 0; i < runtime->session_count; i++) {
         if (!runtime->owned_sessions[i].active) continue;
-        if (runtime->owned_sessions[i].backend_fd == REDP2P_FD_INVALID) continue;
+        if (runtime->owned_sessions[i].backend_fd == REDP2P_FD_INVALID)
+            continue;
         if (runtime->owned_sessions[i].is_tcp &&
             !redp2p_stream_can_send_data(&runtime->owned_sessions[i].stream))
             continue;
-        if (redp2p_fdset_add(runtime->owned_sessions[i].backend_fd, read_fds,
-            max_fd))
-            continue;
-        redp2p_set_error(ctx,
-            "wait: backend descriptor cannot be represented by fd_set");
-        if (runtime->owned_sessions[i].is_tcp)
-            redp2p_stream_fail(ctx, &runtime->owned_sessions[i].stream);
-        redp2p_server_session_close(&runtime->owned_sessions[i]);
-        failed = 1;
+        needed++;
     }
-    return failed ? 0 : 1;
+    if (needed > runtime->poll_capacity) {
+        if (needed > SIZE_MAX / sizeof(*runtime->pollfds))
+            return REDP2P_ERROR;
+        grown = (redp2p_pollfd_t *)realloc(runtime->pollfds,
+            needed * sizeof(*runtime->pollfds));
+        if (!grown) return REDP2P_ERROR;
+        runtime->pollfds = grown;
+        runtime->poll_capacity = needed;
+    }
+
+    runtime->poll_count = 0;
+    runtime->pollfds[runtime->poll_count].fd = runtime->owned_udp_fd;
+    runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+    runtime->pollfds[runtime->poll_count].revents = 0;
+    runtime->poll_count++;
+    runtime->pollfds[runtime->poll_count].fd = runtime->wake_read_fd;
+    runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+    runtime->pollfds[runtime->poll_count].revents = 0;
+    runtime->poll_count++;
+
+    for (i = 0; i < runtime->session_count; i++) {
+        if (!runtime->owned_sessions[i].active) continue;
+        if (runtime->owned_sessions[i].backend_fd == REDP2P_FD_INVALID)
+            continue;
+        if (runtime->owned_sessions[i].is_tcp &&
+            !redp2p_stream_can_send_data(&runtime->owned_sessions[i].stream))
+            continue;
+        runtime->pollfds[runtime->poll_count].fd =
+            runtime->owned_sessions[i].backend_fd;
+        runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+        runtime->pollfds[runtime->poll_count].revents = 0;
+        runtime->poll_count++;
+    }
+    return REDP2P_OK;
 }
 
-/**
- * Re-registers the publisher and refreshes its persisted key after expiry.
- * @param runtime Publisher runtime owning UDP and identity state.
- * @return REDP2P_OK on success, or a negative error code on failure.
- */
+static int redp2p_publisher_poll_ready(
+const redp2p_publisher_runtime_t *runtime,
+redp2p_fd_t fd)
+{
+    size_t i;
+
+    for (i = 0; i < runtime->poll_count; i++) {
+        if (runtime->pollfds[i].fd == fd)
+            return redp2p_poll_readable(&runtime->pollfds[i]);
+    }
+    return 0;
+}
+
 static int redp2p_publisher_reregister(
 redp2p_publisher_runtime_t *runtime)
 {
@@ -1709,8 +1747,7 @@ redp2p_publisher_runtime_t *runtime)
  * @return 0 to continue, 1 to skip the iteration, or a negative error code.
  */
 static int redp2p_publisher_receive_peer(
-redp2p_publisher_runtime_t *runtime,
-const fd_set *read_fds)
+redp2p_publisher_runtime_t *runtime)
 {
     redp2p_udp_server_session_t *session;
     struct sockaddr_storage from;
@@ -1726,7 +1763,7 @@ const fd_set *read_fds)
     int n;
     redp2p_session_envelope_t envelope;
 
-    if (!FD_ISSET(runtime->owned_udp_fd, read_fds)) return 0;
+    if (!redp2p_publisher_poll_ready(runtime, runtime->owned_udp_fd)) return 0;
     from_length = sizeof(from);
     receive_flags = 0;
 #ifndef _WIN32
@@ -1804,8 +1841,7 @@ const fd_set *read_fds)
  * @return None.
  */
 static void redp2p_publisher_process_backends(
-redp2p_publisher_runtime_t *runtime,
-const fd_set *read_fds)
+redp2p_publisher_runtime_t *runtime)
 {
     struct sockaddr_in backend_from;
     char buf[REDP2P_BUF];
@@ -1816,7 +1852,8 @@ const fd_set *read_fds)
     for (i = 0; i < runtime->session_count; i++) {
         if (!runtime->owned_sessions[i].active) continue;
         if (runtime->owned_sessions[i].backend_fd == REDP2P_FD_INVALID) continue;
-        if (!FD_ISSET(runtime->owned_sessions[i].backend_fd, read_fds))
+        if (!redp2p_publisher_poll_ready(runtime,
+            runtime->owned_sessions[i].backend_fd))
             continue;
         if (runtime->owned_sessions[i].is_tcp) {
             if (redp2p_stream_pump_tcp(runtime->borrowed_ctx,
@@ -1931,10 +1968,7 @@ static uint32_t redp2p_publisher_wait_ms(
 static int redp2p_publisher_event_loop(
 redp2p_publisher_runtime_t *runtime)
 {
-    fd_set read_fds;
-    struct timeval timeout;
     int stage_result;
-    int max_fd;
     int selected;
     int result;
     uint32_t wait_ms;
@@ -1944,18 +1978,19 @@ redp2p_publisher_runtime_t *runtime)
     runtime->last_punch_poll = redp2p_now_ms();
     redp2p_set_nonblock(runtime->owned_udp_fd);
     while (!runtime->borrowed_ctx->stop_requested) {
-        stage_result = redp2p_publisher_build_fdset(runtime, &read_fds, &max_fd);
-        if (stage_result < 0) {
+        stage_result = redp2p_publisher_build_poll(runtime);
+        if (stage_result != REDP2P_OK) {
             result = stage_result;
             break;
         }
-        if (stage_result == 0) continue;
         wait_ms = redp2p_publisher_wait_ms(runtime);
-        timeout.tv_sec = (long)(wait_ms / 1000u);
-        timeout.tv_usec = (long)((wait_ms % 1000u) * 1000u);
-        selected = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
+        selected = redp2p_poll_wait(runtime->pollfds, runtime->poll_count,
+            (int)wait_ms);
         if (selected < 0) continue;
+        if (redp2p_publisher_poll_ready(runtime, runtime->wake_read_fd))
+            redp2p_wake_drain(runtime->wake_read_fd);
         if (runtime->borrowed_ctx->stop_requested) break;
+
         stage_result = redp2p_publisher_heartbeat(runtime);
         if (stage_result != REDP2P_OK && stage_result != REDP2P_ETIMEOUT) {
             result = stage_result;
@@ -1966,7 +2001,7 @@ redp2p_publisher_runtime_t *runtime)
             result = stage_result;
             break;
         }
-        stage_result = redp2p_publisher_receive_peer(runtime, &read_fds);
+        stage_result = redp2p_publisher_receive_peer(runtime);
         if (stage_result < 0) {
             result = stage_result;
             break;
@@ -1975,7 +2010,7 @@ redp2p_publisher_runtime_t *runtime)
             redp2p_publisher_maintain_sessions(runtime);
             continue;
         }
-        redp2p_publisher_process_backends(runtime, &read_fds);
+        redp2p_publisher_process_backends(runtime);
         redp2p_publisher_maintain_sessions(runtime);
     }
     redp2p_publisher_session_close_all(runtime);
@@ -1984,10 +2019,6 @@ redp2p_publisher_runtime_t *runtime)
 
 /**
  * Loads one persisted publisher session and proves its current ownership.
- * @param runtime Initialized publisher runtime.
- * @return REDP2P_OK on resumed session, REDP2P_ENOENT when no state exists,
- *         or a negative error code.
- */
 static int redp2p_publisher_resume_session(
 redp2p_publisher_runtime_t *runtime)
 {
@@ -2081,9 +2112,17 @@ int reset_stop)
             sizeof(*runtime->owned_sessions));
     free(runtime->owned_sessions);
     runtime->owned_sessions = NULL;
+    free(runtime->pollfds);
+    runtime->pollfds = NULL;
+    runtime->poll_count = 0;
+    runtime->poll_capacity = 0;
     if (!REDP2P_ISERR(runtime->owned_udp_fd))
         REDP2P_FD_CLOSE(runtime->owned_udp_fd);
     runtime->owned_udp_fd = REDP2P_FD_INVALID;
+    redp2p_wake_close(runtime->borrowed_ctx, runtime->wake_read_fd,
+        runtime->wake_write_fd);
+    runtime->wake_read_fd = REDP2P_FD_INVALID;
+    runtime->wake_write_fd = REDP2P_FD_INVALID;
     if (reset_stop)
         atomic_store(&runtime->borrowed_ctx->stop_requested, 0);
 }
