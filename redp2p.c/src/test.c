@@ -6048,8 +6048,12 @@ int main(int argc, char **argv) {
         return 1;
     }
     rc = dispatch_case(argv[1]);
+    fprintf(stderr, "[cleanup] port reservation\n");
     test_port_base_release();
+    fprintf(stderr, "[cleanup] socket state\n");
     test_socket_stop();
+    fprintf(stderr, "[cleanup] test home\n");
     if (test_home_cleanup() != 0 && rc == 0) rc = 1;
+    fprintf(stderr, "[cleanup] done\n");
     return rc;
 }
