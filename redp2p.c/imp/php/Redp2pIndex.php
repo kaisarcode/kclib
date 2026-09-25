@@ -597,6 +597,10 @@ class Redp2pIndex
         return array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN));
     }
 
+    /**
+     * Handles the list operation.
+     * @return array<string, mixed> JSON response body.
+     */
     private function handleList(): array
     {
         return $this->jsonOk(['ids' => $this->list()], false);
