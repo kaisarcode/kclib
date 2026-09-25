@@ -565,6 +565,12 @@ REDP2P_INTERNAL int redp2p_fdset_add(redp2p_fd_t fd, fd_set *set, int *maxfd);
 REDP2P_INTERNAL int redp2p_sock_read(redp2p_fd_t fd, char *buf, int len);
 
 /**
+ * Writes one socket chunk without raising SIGPIPE where the platform supports it.
+ * @return Bytes written, or -1 on error.
+ */
+REDP2P_INTERNAL int redp2p_sock_write(redp2p_fd_t fd, const char *buf, int len);
+
+/**
  * Write all.
  * @return 0 on success, -1 on error.
  */
