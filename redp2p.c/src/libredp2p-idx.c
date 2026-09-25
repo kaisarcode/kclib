@@ -2312,6 +2312,12 @@ static int redp2p_index_prepare_poll(redp2p_index_runtime_t *runtime)
     return REDP2P_OK;
 }
 
+/**
+ * Reports whether one index socket is ready in the current poll set.
+ * @param runtime Index runtime.
+ * @param fd Socket descriptor.
+ * @return 1 when ready, 0 otherwise.
+ */
 static int redp2p_index_poll_ready(const redp2p_index_runtime_t *runtime,
     redp2p_fd_t fd)
 {
@@ -2324,6 +2330,11 @@ static int redp2p_index_poll_ready(const redp2p_index_runtime_t *runtime,
     return 0;
 }
 
+/**
+ * Accepts at most one ready index client connection.
+ * @param runtime Index runtime.
+ * @return None.
+ */
 static void redp2p_index_accept_connection(redp2p_index_runtime_t *runtime) {
     struct sockaddr_storage client_address;
     socklen_t client_address_length;
@@ -2447,8 +2458,10 @@ static int redp2p_index_event_loop(redp2p_index_runtime_t *runtime)
 }
 
 /**
- * Releases all index-owned connections, listener, wakeup sockets, and platform
- * state.
+ * Releases all index-owned connections, listener, wakeup sockets, and
+ * platform state.
+ * @param runtime Index runtime.
+ * @return None.
  */
 static void redp2p_index_runtime_cleanup(redp2p_index_runtime_t *runtime) {
     int i;
