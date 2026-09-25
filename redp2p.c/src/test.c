@@ -1315,7 +1315,7 @@ static int test_port_available(unsigned short base, unsigned int offset,
 
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     addr.sin_port = htons((unsigned short)(base + offset));
     fd = socket(AF_INET, type, 0);
     if (fd == TEST_SOCKET_INVALID) return 0;
@@ -1952,7 +1952,7 @@ static int test_port_open(unsigned short port) {
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     rc = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
     test_socket_close(fd);
     return rc == 0 ? 1 : 0;
@@ -3062,7 +3062,7 @@ static int test_consumer_stop(test_consumer_t *consumer) {
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_port = htons(consumer->bind_port);
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_addr.s_addr = htonl(0x7f000001UL);
         if (consumer->protocol == REDP2P_PROTO_TCP)
             connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
         else
@@ -3091,7 +3091,7 @@ static int test_udp_echo_start(test_udp_echo_t *echo, unsigned short port) {
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     if (bind(echo->fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
         test_socket_close(echo->fd);
         return 1;
@@ -3114,7 +3114,7 @@ static int test_udp_echo_stop(test_udp_echo_t *echo) {
         memset(&addr, 0, sizeof(addr));
         addr.sin_family = AF_INET;
         addr.sin_port = htons(echo->port);
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_addr.s_addr = htonl(0x7f000001UL);
         sendto(fd, "", 0, 0, (const struct sockaddr *)&addr, sizeof(addr));
         test_socket_close(fd);
     }
@@ -3146,7 +3146,7 @@ static int test_tcp_echo_start(test_tcp_echo_t *echo, unsigned short port) {
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     if (bind(echo->fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0 ||
         listen(echo->fd, 8) != 0)
     {
@@ -3192,7 +3192,7 @@ static int test_control_stub_start(test_control_stub_t *stub,
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     if (bind(stub->fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0 ||
         listen(stub->fd, 1) != 0)
     {
@@ -3245,7 +3245,7 @@ static int test_publisher_control_stub_start(test_publisher_control_stub_t *stub
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     if (bind(stub->fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0 ||
         listen(stub->fd, 8) != 0)
     {
@@ -3358,7 +3358,7 @@ static test_socket_t test_tcp_connect(unsigned short port) {
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     fd = TEST_SOCKET_INVALID;
     for (attempt = 0; attempt < 20U; attempt++) {
         fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -3502,7 +3502,7 @@ static int test_http_request_from(const char *source, unsigned short port,
         local.sin_family = AF_INET;
         remote.sin_family = AF_INET;
         remote.sin_port = htons(port);
-        remote.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        remote.sin_addr.s_addr = htonl(0x7f000001UL);
         if (inet_pton(AF_INET, source, &local.sin_addr) != 1) return 1;
         fd = socket(AF_INET, SOCK_STREAM, 0);
         if (fd == TEST_SOCKET_INVALID) return 1;
@@ -3681,7 +3681,7 @@ static int test_udp_roundtrip(unsigned short port, const unsigned char *data,
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     attempts = timeout_ms / 500U;
     if (attempts == 0) attempts = 1;
     n = -1;
@@ -3722,7 +3722,7 @@ static int test_udp_send_only(unsigned short port, const unsigned char *data,
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     result = sendto(fd, (const char *)data, len, 0,
         (const struct sockaddr *)&addr, sizeof(addr)) < 0;
     test_socket_close(fd);
