@@ -652,6 +652,10 @@ const fd_set *fds)
         return 0;
     client_fd = accept(runtime->tcp_listen_fd, NULL, NULL);
     if (REDP2P_ISERR(client_fd)) return 0;
+    if (redp2p_set_nonblock(client_fd) != 0) {
+        REDP2P_FD_CLOSE(client_fd);
+        return 0;
+    }
     if (redp2p_consumer_establish_peer(runtime, 1, &peer_fd, &peer_addr,
         session_bin, session_hex, &skip_iteration) != REDP2P_OK)
     {
@@ -819,7 +823,10 @@ redp2p_consumer_runtime_t *runtime)
     for (i = 0; i < runtime->n_sessions; i++) {
         if (!runtime->sessions[i].active) continue;
         if (runtime->sessions[i].is_tcp) {
-            if (redp2p_stream_tick(runtime->ctx,
+            if (redp2p_stream_flush_tcp(runtime->ctx,
+                &runtime->sessions[i].stream,
+                runtime->sessions[i].tcp_fd) != 0 ||
+                redp2p_stream_tick(runtime->ctx,
                 &runtime->sessions[i].stream) != 0)
             {
                 redp2p_stream_fail(runtime->ctx,
