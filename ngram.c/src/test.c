@@ -53,7 +53,7 @@ typedef struct {
 static int test_case_total = 0;
 static int test_case_current = 0;
 #ifndef __EMSCRIPTEN__
-static const char *test_self_path = NULL;
+static char test_self_path[4096];
 #endif
 
 static size_t chunk_end(const kc_ngram_chunk_t *chunk) {
@@ -914,7 +914,7 @@ static int case_kc_ngram_cli(void) {
     }
 
     if (
-        test_self_path == NULL ||
+        test_self_path[0] == '\0' ||
         snprintf(
             cmd_output,
             sizeof(cmd_output),
@@ -1180,7 +1180,32 @@ static int case_all(void) {
 
 int main(int argc, char **argv) {
 #ifndef __EMSCRIPTEN__
-    test_self_path = argv[0];
+#ifdef _WIN32
+    {
+        DWORD path_len = GetModuleFileNameA(
+            NULL,
+            test_self_path,
+            (DWORD)sizeof(test_self_path)
+        );
+
+        if (path_len == 0U || path_len >= (DWORD)sizeof(test_self_path)) {
+            fprintf(stderr, "test case: cannot resolve executable path\n");
+            return 2;
+        }
+    }
+#else
+    if (
+        snprintf(
+            test_self_path,
+            sizeof(test_self_path),
+            "%s",
+            argv[0]
+        ) >= (int)sizeof(test_self_path)
+    ) {
+        fprintf(stderr, "test case: executable path is too long\n");
+        return 2;
+    }
+#endif
 
     if (argc >= 2 && strcmp(argv[1], "--helper-output") == 0) {
         return helper_output();
