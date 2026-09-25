@@ -57,14 +57,6 @@ typedef struct redp2p redp2p_t;
 #define REDP2P_STUN_BINDING      0x0001
 #define REDP2P_STUN_BINDING_RESP 0x0101
 
-typedef struct redp2p_options {
-    size_t seats;
-    int pow;
-    char pass[REDP2P_PASS_MAX + 1];
-    char *vip;
-    int sweep;
-    char stun_url[256];
-} redp2p_options_t;
 
 typedef enum {
     REDP2P_CAND_HOST = 1,
@@ -724,13 +716,9 @@ REDP2P_INTERNAL void redp2p_append_candidates(JSON_Object *obj,
     const char *field, const redp2p_candidate_t *cands, int n);
 
 /* Private protocol/runtime entry points used by the REDP2P engine. */
-REDP2P_INTERNAL redp2p_options_t redp2p_options_default(void);
-REDP2P_INTERNAL void redp2p_options_load_env(redp2p_options_t *opts);
-REDP2P_INTERNAL void redp2p_options_free(redp2p_options_t *opts);
 REDP2P_INTERNAL int redp2p_context_create(redp2p_t **out);
 REDP2P_INTERNAL int redp2p_context_destroy(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_context_request_stop(redp2p_t *ctx);
-REDP2P_INTERNAL int redp2p_stop_requested(redp2p_t *ctx);
 REDP2P_INTERNAL uint64_t redp2p_version(void);
 REDP2P_INTERNAL const char *redp2p_strerror(int code);
 REDP2P_INTERNAL const char *redp2p_get_error(redp2p_t *ctx);
@@ -757,11 +745,9 @@ REDP2P_INTERNAL int redp2p_pub_set_protocol(redp2p_t *ctx, int proto);
 REDP2P_INTERNAL int redp2p_set_registration_pass(redp2p_t *ctx, const char *pass);
 REDP2P_INTERNAL int redp2p_idx_set_vips(redp2p_t *ctx, const char *vip,
     char *err, size_t err_cap);
-REDP2P_INTERNAL int redp2p_set_sweep(redp2p_t *ctx, int sweep);
 REDP2P_INTERNAL int redp2p_set_stun_server(redp2p_t *ctx, const char *url);
 REDP2P_INTERNAL int redp2p_set_stream_faults(redp2p_t *ctx,
     int drop_every, int reorder_every);
 REDP2P_INTERNAL int redp2p_set_state_dir(redp2p_t *ctx, const char *dir);
-REDP2P_INTERNAL uint16_t redp2p_get_bind_port(redp2p_t *ctx);
 
 #endif
