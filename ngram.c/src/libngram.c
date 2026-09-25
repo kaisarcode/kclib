@@ -406,115 +406,102 @@ static int kc_ngram_add_closed_span(
 }
 
 /**
- * Returns the default traversal options by value.
- * The separators pointer borrows a string literal.
- * @return Default options structure.
- */
-kc_ngram_options_t kc_ngram_options_default(void) {
-    kc_ngram_options_t options;
-
-    options.max_tokens = 10;
-    options.min_tokens = 1;
-    options.separators = " \t\r\n";
-    return options;
-}
-
-/**
- * Executes descending sliding-window traversal for the input text.
+ * Traverses descending sliding-window n-grams for the input text.
  * This function is reentrant and uses only per-call traversal state.
+ * Omitted option fields use library defaults.
  * @param input Input text to tokenize and traverse.
- * @param options Traversal options, or NULL to use defaults.
- * @param visit Callback invoked for each chunk.
- * @param userdata Caller-provided opaque user data.
- * @param out_count Receives the number of emitted chunks.
+ * @param options Optional traversal configuration. NULL fields use defaults.
+ * @param visit Synchronous callback invoked for each chunk.
+ * @param userdata Caller-provided opaque user data for the callback.
  * @return KC_NGRAM_OK on success, KC_NGRAM_EABORT on visitor abort,
  *         or KC_NGRAM_ERROR on failure.
  */
-int kc_ngram_execute(
+int kc_ngram_traverse(
     const char *input,
     const kc_ngram_options_t *options,
     kc_ngram_visit_fn visit,
-    void *userdata,
-    size_t *out_count
+    void *userdata
 ) {
-    kc_ngram_options_t default_options;
     kc_ngram_token_list_t tokens;
     kc_ngram_span_t *closed_spans;
+    const char *separators;
+    size_t max_tokens;
+    size_t min_tokens;
     size_t closed_count;
     size_t closed_cap;
     size_t loop_max;
     size_t window_size;
     size_t start;
-    size_t emitted;
 
-    if (out_count != NULL) {
-        *out_count = 0;
-    }
-
-    if (input == NULL || visit == NULL || out_count == NULL) {
+    if (input == NULL || visit == NULL) {
         return KC_NGRAM_ERROR;
     }
 
-    if (options == NULL) {
-        default_options = kc_ngram_options_default();
-        options = &default_options;
+    max_tokens = 10U;
+    min_tokens = 1U;
+    separators = " \t\r\n";
+
+    if (options != NULL) {
+        if (options->max_tokens != NULL) {
+            max_tokens = *options->max_tokens;
+        }
+        if (options->min_tokens != NULL) {
+            min_tokens = *options->min_tokens;
+        }
+        if (options->separators != NULL) {
+            separators = options->separators;
+        }
     }
 
     if (
-        options->min_tokens < 1 ||
-        (options->max_tokens != 0 && options->max_tokens < options->min_tokens)
+        min_tokens < 1U ||
+        (max_tokens != 0U && max_tokens < min_tokens)
     ) {
         return KC_NGRAM_ERROR;
     }
 
-    if (kc_ngram_split_tokens(input, options->separators, &tokens) != 0) {
+    if (kc_ngram_split_tokens(input, separators, &tokens) != 0) {
         return KC_NGRAM_ERROR;
     }
 
-    if (tokens.count == 0) {
+    if (tokens.count == 0U) {
         kc_ngram_free_tokens(&tokens);
         return KC_NGRAM_OK;
     }
 
     closed_spans = NULL;
-    closed_count = 0;
-    closed_cap = 0;
+    closed_count = 0U;
+    closed_cap = 0U;
 
-    loop_max = options->max_tokens;
-    if (loop_max == 0 || tokens.count < loop_max) {
+    loop_max = max_tokens;
+    if (loop_max == 0U || tokens.count < loop_max) {
         loop_max = tokens.count;
     }
 
-    emitted = 0;
-
     window_size = loop_max;
-    while (window_size >= options->min_tokens) {
-        for (start = 0; start <= tokens.count - window_size; start++) {
+    while (window_size >= min_tokens) {
+        for (start = 0U; start <= tokens.count - window_size; start++) {
             kc_ngram_chunk_t chunk;
             size_t end;
             int decision;
 
-            end = start + window_size - 1;
+            end = start + window_size - 1U;
             if (kc_ngram_span_is_closed(start, end, closed_spans, closed_count)) {
                 continue;
             }
 
-            chunk.input = input;
-            chunk.byte_start = tokens.items[start].byte_start;
-            chunk.byte_end = tokens.items[end].byte_end;
-            chunk.start = start;
-            chunk.end = end;
-            chunk.size = window_size;
+            chunk.data = input + tokens.items[start].byte_start;
+            chunk.data_size =
+                tokens.items[end].byte_end - tokens.items[start].byte_start;
+            chunk.token_start = start;
+            chunk.token_count = window_size;
 
             decision = visit(&chunk, userdata);
             if (decision < 0) {
-                *out_count = emitted;
                 free(closed_spans);
                 kc_ngram_free_tokens(&tokens);
                 return KC_NGRAM_EABORT;
             }
-
-            emitted++;
 
             if (decision == 1) {
                 if (
@@ -533,7 +520,7 @@ int kc_ngram_execute(
             }
         }
 
-        if (window_size == options->min_tokens) {
+        if (window_size == min_tokens) {
             break;
         }
         window_size--;
@@ -541,7 +528,6 @@ int kc_ngram_execute(
 
     free(closed_spans);
     kc_ngram_free_tokens(&tokens);
-    *out_count = emitted;
     return KC_NGRAM_OK;
 }
 
