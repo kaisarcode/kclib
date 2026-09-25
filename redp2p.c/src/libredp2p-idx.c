@@ -365,7 +365,7 @@ static int redp2p_add_vip(redp2p_t *ctx, const char *id, const char *pass,
  * Set seats.
  * @return 0 on success, -1 on error.
  */
-int redp2p_set_seats(redp2p_t *ctx, size_t seats) {
+int redp2p_idx_set_capacity(redp2p_t *ctx, size_t seats) {
     if (!ctx) return REDP2P_EINVAL;
     if (seats > SIZE_MAX / sizeof(*ctx->peers)) {
         redp2p_set_error(ctx, "seats exceeds the platform allocation range");
@@ -386,7 +386,7 @@ int redp2p_set_seats(redp2p_t *ctx, size_t seats) {
  * @param n   Per-publisher consumer window; 0 restores the default of 32.
  * @return REDP2P_OK on success, REDP2P_EINVAL on error.
  */
-int redp2p_set_max_consumers_per_publisher(redp2p_t *ctx, size_t n) {
+int redp2p_idx_set_max_consumers(redp2p_t *ctx, size_t n) {
     if (!ctx) return REDP2P_EINVAL;
     ctx->max_consumers_per_publisher = n == 0
         ? REDP2P_MAX_PENDING_CALLS_PER_PUBLISHER : n;
@@ -398,7 +398,7 @@ int redp2p_set_max_consumers_per_publisher(redp2p_t *ctx, size_t n) {
  * Set pow.
  * @return 0 on success, -1 on error.
  */
-int redp2p_set_pow(redp2p_t *ctx, int bits) {
+int redp2p_idx_set_pow(redp2p_t *ctx, int bits) {
     if (!ctx) return REDP2P_EINVAL;
     if (bits < 0 || bits > REDP2P_POW_MAX) {
         redp2p_set_error(ctx, "pow must be between 0 and %d", REDP2P_POW_MAX);
@@ -417,7 +417,7 @@ int redp2p_set_pow(redp2p_t *ctx, int bits) {
  * @param err_cap Output error buffer capacity.
  * @return REDP2P_OK on success, REDP2P_ERROR on parse failure.
  */
-int redp2p_set_vip(
+int redp2p_idx_set_vips(
 redp2p_t *ctx,
 const char *vip,
 char *err,
@@ -2476,7 +2476,7 @@ static void redp2p_index_runtime_cleanup(redp2p_index_runtime_t *runtime) {
  * @param port Listener port.
  * @return REDP2P_OK on requested stop, or a negative error code on failure.
  */
-int redp2p_serve_index(
+int redp2p_idx_run(
     redp2p_t *ctx,
     const char *host,
     unsigned short port)
