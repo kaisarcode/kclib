@@ -183,7 +183,7 @@ static int kc_redp2p_apply_vips(redp2p_t *ctx,
     }
     err[0] = '\0';
     {
-        int status = redp2p_set_vip(ctx, text, err, sizeof(err));
+        int status = redp2p_idx_set_vips(ctx, text, err, sizeof(err));
         memset(text, 0, size);
         free(text);
         return status;
@@ -221,10 +221,10 @@ static void kc_redp2p_runtime_join(kc_redp2p_runtime_t *runtime)
 static void kc_redp2p_runtime_close(kc_redp2p_runtime_t *runtime)
 {
     if (!runtime) return;
-    if (runtime->ctx) redp2p_stop(runtime->ctx);
+    if (runtime->ctx) redp2p_context_request_stop(runtime->ctx);
     kc_redp2p_runtime_join(runtime);
     if (runtime->ctx) {
-        redp2p_close(runtime->ctx);
+        redp2p_context_destroy(runtime->ctx);
         runtime->ctx = NULL;
     }
 }
@@ -236,7 +236,7 @@ static void *kc_redp2p_idx_worker(void *arg)
 #endif
 {
     kc_redp2p_idx_t *idx = (kc_redp2p_idx_t *)arg;
-    idx->runtime.result = redp2p_serve_index(idx->runtime.ctx,
+    idx->runtime.result = redp2p_idx_run(idx->runtime.ctx,
         idx->host[0] ? idx->host : NULL, idx->port);
     atomic_store(&idx->runtime.done, 1);
 #ifdef _WIN32
@@ -253,7 +253,7 @@ static void *kc_redp2p_pub_worker(void *arg)
 #endif
 {
     kc_redp2p_pub_t *pub = (kc_redp2p_pub_t *)arg;
-    pub->runtime.result = redp2p_wait(pub->runtime.ctx, pub->index_host,
+    pub->runtime.result = redp2p_pub_run(pub->runtime.ctx, pub->index_host,
         pub->index_port, pub->id, pub->port);
     atomic_store(&pub->runtime.done, 1);
 #ifdef _WIN32
@@ -270,7 +270,7 @@ static void *kc_redp2p_con_worker(void *arg)
 #endif
 {
     kc_redp2p_con_t *con = (kc_redp2p_con_t *)arg;
-    con->runtime.result = redp2p_connect(con->runtime.ctx, con->index_host,
+    con->runtime.result = redp2p_con_run(con->runtime.ctx, con->index_host,
         con->index_port, con->self_id, con->id, con->port);
     atomic_store(&con->runtime.done, 1);
 #ifdef _WIN32
@@ -345,7 +345,7 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
     port = options && options->port ? options->port : KC_REDP2P_PORT_DEFAULT;
     idx->port = port;
 
-    status = redp2p_open(&idx->runtime.ctx);
+    status = redp2p_context_create(&idx->runtime.ctx);
     if (status != REDP2P_OK) {
         free(idx);
         return status;
@@ -353,19 +353,19 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
     kc_redp2p_public_defaults(idx->runtime.ctx);
     if (options) {
         if (options->seats) {
-            status = redp2p_set_seats(idx->runtime.ctx, *options->seats);
+            status = redp2p_idx_set_capacity(idx->runtime.ctx, *options->seats);
             if (status != REDP2P_OK) goto fail;
         }
-        status = redp2p_set_pow(idx->runtime.ctx, (int)options->pow);
+        status = redp2p_idx_set_pow(idx->runtime.ctx, (int)options->pow);
         if (status != REDP2P_OK) goto fail;
         if (options->pass) {
-            status = redp2p_set_pass(idx->runtime.ctx, options->pass);
+            status = redp2p_set_registration_pass(idx->runtime.ctx, options->pass);
             if (status != REDP2P_OK) goto fail;
         }
         status = kc_redp2p_apply_vips(idx->runtime.ctx, options->vips,
             options->vip_count);
         if (status != REDP2P_OK) goto fail;
-        status = redp2p_set_max_consumers_per_publisher(idx->runtime.ctx,
+        status = redp2p_idx_set_max_consumers(idx->runtime.ctx,
             options->max_consumers);
         if (status != REDP2P_OK) goto fail;
     }
@@ -384,7 +384,7 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
     return KC_REDP2P_OK;
 
 fail:
-    redp2p_close(idx->runtime.ctx);
+    redp2p_context_destroy(idx->runtime.ctx);
     free(idx);
     return status;
 }
@@ -411,19 +411,19 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     memcpy(pub->id, options->id, strlen(options->id) + 1);
     pub->port = options->port;
 
-    status = redp2p_open(&pub->runtime.ctx);
+    status = redp2p_context_create(&pub->runtime.ctx);
     if (status != REDP2P_OK) goto fail_no_ctx;
     kc_redp2p_public_defaults(pub->runtime.ctx);
-    status = redp2p_set_protocol(pub->runtime.ctx, options->protocol);
+    status = redp2p_pub_set_protocol(pub->runtime.ctx, options->protocol);
     if (status != REDP2P_OK) goto fail;
-    status = redp2p_set_port(pub->runtime.ctx, options->port);
+    status = redp2p_set_local_port(pub->runtime.ctx, options->port);
     if (status != REDP2P_OK) goto fail;
     if (options->pass) {
-        status = redp2p_set_pass(pub->runtime.ctx, options->pass);
+        status = redp2p_set_registration_pass(pub->runtime.ctx, options->pass);
         if (status != REDP2P_OK) goto fail;
     }
     if (options->stun) {
-        status = redp2p_set_stun_url(pub->runtime.ctx, options->stun);
+        status = redp2p_set_stun_server(pub->runtime.ctx, options->stun);
         if (status != REDP2P_OK) goto fail;
     }
 
@@ -441,7 +441,7 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     return KC_REDP2P_OK;
 
 fail:
-    redp2p_close(pub->runtime.ctx);
+    redp2p_context_destroy(pub->runtime.ctx);
 fail_no_ctx:
     free(pub);
     return status;
@@ -467,13 +467,13 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     memcpy(con->id, options->id, strlen(options->id) + 1);
     con->port = options->port;
 
-    status = redp2p_open(&con->runtime.ctx);
+    status = redp2p_context_create(&con->runtime.ctx);
     if (status != REDP2P_OK) goto fail_no_ctx;
     kc_redp2p_public_defaults(con->runtime.ctx);
-    status = redp2p_set_port(con->runtime.ctx, options->port);
+    status = redp2p_set_local_port(con->runtime.ctx, options->port);
     if (status != REDP2P_OK) goto fail;
     if (options->stun) {
-        status = redp2p_set_stun_url(con->runtime.ctx, options->stun);
+        status = redp2p_set_stun_server(con->runtime.ctx, options->stun);
         if (status != REDP2P_OK) goto fail;
     }
 
@@ -491,7 +491,7 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     return KC_REDP2P_OK;
 
 fail:
-    redp2p_close(con->runtime.ctx);
+    redp2p_context_destroy(con->runtime.ctx);
 fail_no_ctx:
     free(con);
     return status;
