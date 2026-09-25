@@ -328,7 +328,8 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
     uint16_t port;
     int status;
 
-    if (!out) return KC_REDP2P_EINVAL;
+    if (!out || (options && options->pow > REDP2P_POW_MAX))
+        return KC_REDP2P_EINVAL;
     *out = NULL;
     idx = (kc_redp2p_idx_t *)calloc(1, sizeof(*idx));
     if (!idx) return KC_REDP2P_ERROR;
