@@ -236,8 +236,8 @@ static void *kc_redp2p_idx_worker(void *arg)
 #endif
 {
     kc_redp2p_idx_t *idx = (kc_redp2p_idx_t *)arg;
-    idx->runtime.result = redp2p_serve_index(idx->runtime.ctx, idx->host,
-        idx->port);
+    idx->runtime.result = redp2p_serve_index(idx->runtime.ctx,
+        idx->host[0] ? idx->host : NULL, idx->port);
     atomic_store(&idx->runtime.done, 1);
 #ifdef _WIN32
     return 0;
@@ -341,8 +341,6 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
             return KC_REDP2P_EINVAL;
         }
         memcpy(idx->host, options->host, strlen(options->host) + 1);
-    } else {
-        memcpy(idx->host, "0.0.0.0", 8);
     }
     port = options && options->port ? options->port : KC_REDP2P_PORT_DEFAULT;
     idx->port = port;
