@@ -17,6 +17,14 @@
 extern "C" {
 #endif
 
+#if defined(_WIN32) && defined(KC_REDP2P_BUILD_DLL)
+#define KC_REDP2P_API __declspec(dllexport)
+#elif defined(__GNUC__) || defined(__clang__)
+#define KC_REDP2P_API __attribute__((visibility("default")))
+#else
+#define KC_REDP2P_API
+#endif
+
 typedef struct kc_redp2p_idx kc_redp2p_idx_t;
 typedef struct kc_redp2p_pub kc_redp2p_pub_t;
 typedef struct kc_redp2p_con kc_redp2p_con_t;
@@ -86,7 +94,7 @@ typedef struct {
  * @param options Index policy and listener configuration.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
-int kc_redp2p_idx(kc_redp2p_idx_t **out,
+KC_REDP2P_API int kc_redp2p_idx(kc_redp2p_idx_t **out,
     const kc_redp2p_idx_options_t *options);
 
 /**
@@ -98,7 +106,7 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
  * @param options Publisher identity, index, protocol, and local port.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
-int kc_redp2p_pub(kc_redp2p_pub_t **out,
+KC_REDP2P_API int kc_redp2p_pub(kc_redp2p_pub_t **out,
     const kc_redp2p_pub_options_t *options);
 
 /**
@@ -112,7 +120,7 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
  * @param options Target publisher, index, and local tunnel port.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
-int kc_redp2p_con(kc_redp2p_con_t **out,
+KC_REDP2P_API int kc_redp2p_con(kc_redp2p_con_t **out,
     const kc_redp2p_con_options_t *options);
 
 /**
@@ -126,40 +134,40 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
  * @param out_count Destination entry count.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
-int kc_redp2p_idx_list(kc_redp2p_idx_t *idx,
+KC_REDP2P_API int kc_redp2p_idx_list(kc_redp2p_idx_t *idx,
     kc_redp2p_idx_entry_t **out_entries, size_t *out_count);
 
 /**
  * Stops and releases an index runtime. NULL is a safe no-op.
  */
-void kc_redp2p_idx_close(kc_redp2p_idx_t *idx);
+KC_REDP2P_API void kc_redp2p_idx_close(kc_redp2p_idx_t *idx);
 
 /**
  * Stops publication, deregisters when possible, and releases the runtime.
  * NULL is a safe no-op.
  */
-void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
+KC_REDP2P_API void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
 
 /**
  * Closes the local tunnel and releases the consumer runtime.
  * NULL is a safe no-op.
  */
-void kc_redp2p_con_close(kc_redp2p_con_t *con);
+KC_REDP2P_API void kc_redp2p_con_close(kc_redp2p_con_t *con);
 
 /**
  * Releases memory returned by REDP2P. NULL is a safe no-op.
  */
-void kc_redp2p_free(void *ptr);
+KC_REDP2P_API void kc_redp2p_free(void *ptr);
 
 /**
  * Returns a stable static description for one REDP2P status.
  */
-const char *kc_redp2p_strerror(int status);
+KC_REDP2P_API const char *kc_redp2p_strerror(int status);
 
 /**
  * Returns the build version generated at compile time.
  */
-uint64_t kc_redp2p_version(void);
+KC_REDP2P_API uint64_t kc_redp2p_version(void);
 
 #ifdef __cplusplus
 }
