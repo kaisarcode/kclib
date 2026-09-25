@@ -1334,7 +1334,7 @@ int redp2p_is_valid_pass_token(const char *pass) {
  * Open.
  * @return 0 on success, -1 on error.
  */
-int redp2p_open(redp2p_t **out) {
+int redp2p_context_create(redp2p_t **out) {
     redp2p_t *ctx;
     if (!out) return REDP2P_ERROR;
     ctx = (redp2p_t *)calloc(1, sizeof(redp2p_t));
@@ -1430,7 +1430,7 @@ int redp2p_open(redp2p_t **out) {
  * Close.
  * @return 0 on success, -1 on error.
  */
-int redp2p_close(redp2p_t *ctx) {
+int redp2p_context_destroy(redp2p_t *ctx) {
     int i;
     if (!ctx) return REDP2P_ERROR;
     if (ctx->conns) {
@@ -1465,7 +1465,7 @@ int redp2p_close(redp2p_t *ctx) {
  * @param ctx Context to stop.
  * @return 0 on success, -1 on error.
  */
-int redp2p_stop(redp2p_t *ctx) {
+int redp2p_context_request_stop(redp2p_t *ctx) {
     redp2p_fd_t wake_fd;
     const char byte = 1;
 
@@ -1614,7 +1614,7 @@ void redp2p_options_free(redp2p_options_t *opts) {
  * @param pass Shared password string.
  * @return 0 on success, -1 on error.
  */
-int redp2p_set_pass(redp2p_t *ctx, const char *pass) {
+int redp2p_set_registration_pass(redp2p_t *ctx, const char *pass) {
     if (!ctx) return REDP2P_EINVAL;
     if (!pass || (pass[0] && !redp2p_is_valid_pass_token(pass))) {
         redp2p_set_error(ctx, "registration password contains invalid bytes");
