@@ -2111,10 +2111,14 @@ int redp2p_wait(
             wait_result = redp2p_publisher_persist_registration(&runtime);
     }
     if (wait_result != REDP2P_OK) {
+        atomic_store(&ctx->ready_status, wait_result);
+        atomic_store(&ctx->ready_state, -1);
         redp2p_publisher_runtime_cleanup(&runtime, 0);
         return wait_result;
     }
     redp2p_set_error(ctx, NULL);
+    atomic_store(&ctx->ready_status, REDP2P_OK);
+    atomic_store(&ctx->ready_state, 1);
     wait_result = redp2p_publisher_event_loop(&runtime);
     redp2p_publisher_remove_registration(&runtime, &wait_result);
     redp2p_publisher_runtime_cleanup(&runtime, 1);
