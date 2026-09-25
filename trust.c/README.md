@@ -4,8 +4,8 @@
 establishes scoped identities and protects messages, but it does not implement
 networking or any other transport.
 
-The library can be composed with `redp2p`, `netl.c`, `nets.c`, HTTP,
-pipes, files, or any application-specific delivery mechanism.
+The library can be composed with any transport or application-specific
+message delivery mechanism.
 
 ## Local model
 
@@ -197,8 +197,7 @@ Revocation is an explicit local administrative action. A failed
 If the caller supplies the same valid protected blob more than once,
 `kc_trust_unseal()` may successfully decrypt it more than once.
 
-Replay policy belongs to the protocol or transport that has temporal context.
-For example, `redp2p` can enforce replay protection with its own counters
+Replay policy belongs to the protocol or transport that has temporal context,
 without involving `trust.c`.
 
 ## Persistent state
