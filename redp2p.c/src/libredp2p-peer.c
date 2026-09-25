@@ -1163,7 +1163,7 @@ int redp2p_http_client(redp2p_t *ctx, const char *phase,
  * @param port Local bind port.
  * @return 0 on success, -1 on error.
  */
-int redp2p_set_port(redp2p_t *ctx, unsigned short port) {
+int redp2p_set_local_port(redp2p_t *ctx, unsigned short port) {
     if (!ctx) return REDP2P_EINVAL;
     if (port == 0) {
         redp2p_set_error(ctx, "port must be between 1 and 65535");
@@ -1179,7 +1179,7 @@ int redp2p_set_port(redp2p_t *ctx, unsigned short port) {
  * Set protocol.
  * @return 0 on success, -1 on error.
  */
-int redp2p_set_protocol(redp2p_t *ctx, int proto) {
+int redp2p_pub_set_protocol(redp2p_t *ctx, int proto) {
     if (!ctx) return REDP2P_EINVAL;
     if (proto != REDP2P_PROTO_TCP && proto != REDP2P_PROTO_UDP) {
         redp2p_set_error(ctx, "protocol must be REDP2P_PROTO_TCP or REDP2P_PROTO_UDP");
@@ -1210,7 +1210,7 @@ int redp2p_set_sweep(redp2p_t *ctx, int sweep) {
  * Summary: A nonzero argument overrides a default context port, while a nonzero
  * argument conflicting with an explicitly set context port is rejected.
  * @param ctx        Open context.
- * @param arg_port  Port argument from redp2p_wait or redp2p_connect.
+ * @param arg_port  Port argument from redp2p_pub_run or redp2p_con_run.
  * @param out        Effective port output.
  * @return REDP2P_OK on success, REDP2P_ERROR on conflicting ports.
  */
@@ -1453,7 +1453,7 @@ static int redp2p_stun_binding(redp2p_t *ctx, int udp_fd,
  * Set stun url.
  * @return 0 on success, -1 on error.
  */
-int redp2p_set_stun_url(redp2p_t *ctx, const char *url) {
+int redp2p_set_stun_server(redp2p_t *ctx, const char *url) {
     if (!ctx) return REDP2P_EINVAL;
     if (url) {
         strncpy(ctx->stun_url, url, sizeof(ctx->stun_url) - 1);
@@ -1819,7 +1819,7 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd, const char *
  * List publishers.
  * @return 0 on success, negative error code on failure.
  */
-int redp2p_list_publishers(
+int redp2p_idx_query_publishers(
     redp2p_t *ctx,
     const char *index_host,
     unsigned short index_port,
