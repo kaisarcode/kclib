@@ -4,6 +4,8 @@ A minimalist C library and CLI for fixed-dimension vector indexing with Approxim
 
 ---
 
+---
+
 ## CLI
 
 Run a nearest neighbor search over a vector dataset.
@@ -31,25 +33,25 @@ item_3 0.0 0.0 1.0
 Basic search:
 
 ```bash
-./bin/x86_64/linux/hnsw --dim 3 --input vectors.txt --query "1 0 0"
+hnsw --dim 3 --input vectors.txt --query "1 0 0"
 ```
 
 Using a different metric and limiting results:
 
 ```bash
-./bin/x86_64/linux/hnsw --dim 3 --input vectors.txt --query "1 0 0" --metric cosine --top 5
+hnsw --dim 3 --input vectors.txt --query "1 0 0" --metric cosine --top 5
 ```
 
 Applying a threshold:
 
 ```bash
-./bin/x86_64/linux/hnsw --dim 3 --input vectors.txt --query "1 0 0" --threshold 0.8
+hnsw --dim 3 --input vectors.txt --query "1 0 0" --threshold 0.8
 ```
 
 Pipe query vector through standard input:
 
 ```bash
-echo "1 0 0" | ./bin/x86_64/linux/hnsw --dim 3 --input vectors.txt
+echo "1 0 0" | hnsw --dim 3 --input vectors.txt
 ```
 
 ### Parameters
@@ -80,22 +82,6 @@ Results are printed as:
 
 ---
 
-## Metrics
-
-Available metrics:
-
-- `l2`: squared Euclidean distance
-- `cosine`: cosine similarity
-- `inner` (or `inner_product`): inner product similarity
-
-`l2` uses squared Euclidean distance:
-
-```
-d(a, b) = sum((a[i] - b[i])^2)
-```
-
-Note: no square root is applied. Rankings are identical to Euclidean distance.
-
 ---
 
 ## Public API
@@ -124,7 +110,7 @@ if (kc_hnsw_open(&index, &options) == KC_HNSW_OK) {
         &result_count
     );
 
-    kc_hnsw_free(results);
+kc_hnsw_free(results);
     kc_hnsw_close(index);
 }
 ```
@@ -153,8 +139,6 @@ options.dimension = 384;
 options.search_effort = &search_effort;
 ```
 
-There is no public default-initialization helper. Bindings can map property presence mechanically: an absent property becomes NULL, while a present property points to its value. Default values remain owned by the library.
-
 ### Lifecycle and ownership
 
 - `kc_hnsw_open()` creates one reusable in-memory index. `dimension` must be greater than zero.
@@ -173,60 +157,108 @@ The library performs approximate nearest-neighbor search. It is in-memory only a
 
 ---
 
+### Metrics
+
+Available metrics:
+
+- `l2`: squared Euclidean distance
+- `cosine`: cosine similarity
+- `inner` (or `inner_product`): inner product similarity
+
+`l2` uses squared Euclidean distance:
+
+```
+d(a, b) = sum((a[i] - b[i])^2)
+```
+
+Note: no square root is applied. Rankings are identical to Euclidean distance.
+
+---
+
+---
+
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
 ```
 
-### Multiarch Builds
+### Tests
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
-make all
-make x86_64/linux
+make
+make test
+```
+
+To run through Wine:
+
+```bash
 make x86_64/windows
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
+make test wine
 ```
 
 ### WebAssembly (Emscripten)
 
-The `wasm32/wasm` target builds the reusable index library as a WebAssembly module using the Emscripten CMake toolchain:
-
 ```bash
 make wasm32/wasm
+make test wasm
 ```
 
 - Artifact: `bin/wasm32/wasm/hnsw.wasm`
-- Test: `make test wasm`
-- Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the normalized reusable index API: `kc_hnsw_open`, `kc_hnsw_add`, `kc_hnsw_build`, `kc_hnsw_search`, `kc_hnsw_free`, `kc_hnsw_dimension`, `kc_hnsw_metric`, `kc_hnsw_count`, `kc_hnsw_close`, `kc_hnsw_strerror`, and `kc_hnsw_version`. The CLI is not compiled into the module.
+- Exports: `kc_hnsw_open`, `kc_hnsw_build`, `kc_hnsw_add`, `kc_hnsw_free`, `kc_hnsw_search`, `kc_hnsw_dimension`, `kc_hnsw_metric`, `kc_hnsw_count`, `kc_hnsw_close`, `kc_hnsw_strerror`, `kc_hnsw_version`
+- The module contains the reusable library only; the CLI is not compiled into
+    it.
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the reusable public-API contract tests under Node.js. Native and Wine tests additionally run the grouped `kc_hnsw_cli` case against the shipped executable.
+`wasm32/wasm` is included in `make all`.
+
+### Multiarch Builds
+
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
+
+```bash
+make all
+```
+
+---
+
+## Development Requirements
+
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Emscripten SDK and Node.js for WebAssembly builds and tests.
+- Other cross-compilation toolchains are required only by enabled targets.
 
 ---
 
 ## Beta Notice
 
-This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support. You are free to test it, use it, and modify it as you please.
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
 
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Please note that I do not accept pull requests; the goal is to avoid long-term dependency on platforms like GitHub, and I do not maintain fixed infrastructure to guarantee long-term stability for these projects.
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
 
 ---
 
