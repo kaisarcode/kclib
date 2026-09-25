@@ -344,8 +344,8 @@ class Redp2pIndex
     /**
      * Applies constructor options with environment fallback.
      *
-     * @param array $options Option overrides for pass, vip, seats, pow, ttl
-     *   and pending_ttl_s.
+     * @param array $options Operator overrides for pass, vip, seats, pow,
+     *   and max_consumers_per_publisher.
      *   Falls back to REDP2P_* environment variables.
      * @return void
      */
@@ -355,10 +355,6 @@ class Redp2pIndex
         $vip = $options['vip'] ?? $this->env('REDP2P_VIP');
         $seats = $options['seats'] ?? $this->env('REDP2P_SEATS');
         $pow = $options['pow'] ?? $this->env('REDP2P_POW') ?? 0;
-        $ttl = $options['ttl'] ?? $this->env('REDP2P_ETIMEOUT_SEC') ?? self::DEFAULT_TTL_S;
-        $pendingTtl = $options['pending_ttl_s']
-            ?? $this->env('REDP2P_PENDING_CALL_TTL_S')
-            ?? self::PENDING_TTL_S;
         $maxConsumers = $options['max_consumers_per_publisher']
             ?? $this->env('REDP2P_MAX_CONSUMERS_PER_PUBLISHER');
 
@@ -373,8 +369,6 @@ class Redp2pIndex
             $this->setMaxConsumersPerPublisher((int)$maxConsumers);
         }
         $this->setPow((int)$pow);
-        $this->setTtl((int)$ttl);
-        $this->setPendingTtl((int)$pendingTtl);
     }
 
     /**
