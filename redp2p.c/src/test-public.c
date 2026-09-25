@@ -20,6 +20,7 @@
 #include <windows.h>
 typedef SOCKET test_fd_t;
 typedef HANDLE test_thread_t;
+typedef int test_socklen_t;
 #define TEST_INVALID INVALID_SOCKET
 #else
 #include <arpa/inet.h>
@@ -29,6 +30,7 @@ typedef HANDLE test_thread_t;
 #include <unistd.h>
 typedef int test_fd_t;
 typedef pthread_t test_thread_t;
+typedef socklen_t test_socklen_t;
 #define TEST_INVALID (-1)
 #endif
 
@@ -87,7 +89,7 @@ static uint16_t reserve_port(void)
 {
     test_fd_t fd;
     struct sockaddr_in addr;
-    socklen_t len;
+    test_socklen_t len;
     uint16_t port = 0;
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -148,7 +150,7 @@ static void *echo_main(void *arg)
 static int echo_start(echo_t *echo)
 {
     struct sockaddr_in addr;
-    socklen_t len;
+    test_socklen_t len;
     int one = 1;
 
     memset(echo, 0, sizeof(*echo));
@@ -200,6 +202,23 @@ static int tcp_roundtrip(uint16_t port)
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd == TEST_INVALID) return 1;
+#ifdef _WIN32
+    {
+        DWORD timeout = 2000;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout,
+            sizeof(timeout));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout,
+            sizeof(timeout));
+    }
+#else
+    {
+        struct timeval timeout;
+        timeout.tv_sec = 2;
+        timeout.tv_usec = 0;
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    }
+#endif
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
