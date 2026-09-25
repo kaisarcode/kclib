@@ -1007,7 +1007,7 @@ int reset_stop)
  * Runs the consumer lifecycle for one local edge adapter.
  * @return Existing public REDP2P result code.
  */
-int redp2p_connect(
+int redp2p_con_run(
 redp2p_t *ctx,
 const char *index_host,
 unsigned short index_port,
