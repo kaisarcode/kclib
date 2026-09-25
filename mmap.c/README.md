@@ -8,9 +8,6 @@ After `del()`, any operation other than final cleanup is an error. Reopening the
 same path creates a new valid instance whose `get()` returns `null`.
 
 ---
-
----
-
 ## CLI
 
 The CLI is a one-shot adapter over the same file/value operations.
@@ -60,9 +57,6 @@ mmap file.bin -del
 | `mmap -v\|--version` | Show version |
 
 ---
-
----
-
 ## Public API
 
 ```c
