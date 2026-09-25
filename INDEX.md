@@ -32,7 +32,7 @@ index is the summary, not the contract.
 
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
-| [`trust`](https://github.com/kaisarcode/kclib/trust.c) | Seals and opens messages with Noise X and reports TOFU peer identity continuity. | Encrypted, authenticated peer messaging. |
+| [`trust`](https://github.com/kaisarcode/kclib/trust.c) | Establishes scoped identities by one-use Noise invitations and seals/unseals messages for confirmed UIDs. | Transport-agnostic identity trust and authenticated encryption. |
 
 ## Network and IPC
 
