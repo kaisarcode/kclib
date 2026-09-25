@@ -60,6 +60,10 @@ typedef struct {
     int close_sent;
     int close_acked;
     int remote_close;
+    int remote_shutdown;
+    unsigned char pending_tcp[REDP2P_BUF];
+    size_t pending_tcp_off;
+    size_t pending_tcp_len;
     unsigned char session_id[REDP2P_SESSION_ID_SZ];
     char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1];
     uint8_t transport_protocol;
@@ -129,6 +133,14 @@ REDP2P_INTERNAL void redp2p_stream_fail(redp2p_t *ctx, redp2p_stream_state_t *st
 REDP2P_INTERNAL int redp2p_stream_process_packet(redp2p_t *ctx,
     redp2p_stream_state_t *st, redp2p_fd_t tcp_fd,
     const unsigned char *buf, size_t len);
+
+/**
+ * Flushes at most one bounded KCP/TCP output chunk for one stream.
+ * Would-block is retained as per-session backpressure.
+ * @return 0 on progress/would-block, -1 on terminal socket or KCP failure.
+ */
+REDP2P_INTERNAL int redp2p_stream_flush_tcp(redp2p_t *ctx,
+    redp2p_stream_state_t *st, redp2p_fd_t tcp_fd);
 
 /**
  * Reads one local TCP chunk and queues its bytes in KCP stream mode.
