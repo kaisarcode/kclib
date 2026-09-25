@@ -3,9 +3,6 @@
 `tpl.c` is a simple template renderer with includes, scoped variables, blocks, and basic control directives. It provides reusable template instances through `libtpl` and a one-shot `tpl` CLI.
 
 ---
-
----
-
 ## CLI
 
 The CLI receives all render configuration in one invocation. The template
@@ -119,9 +116,6 @@ next. The returned output is caller-owned and must be released with
 | `{{@foreach item in list}} ... {{@endforeach}}` | Iterate over a comma-separated list or `[a,b,c]` |
 
 ---
-
----
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
