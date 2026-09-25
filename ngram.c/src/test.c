@@ -1192,6 +1192,16 @@ int main(int argc, char **argv) {
             fprintf(stderr, "test case: cannot resolve executable path\n");
             return 2;
         }
+
+        {
+            DWORD i;
+
+            for (i = 0U; i < path_len; i++) {
+                if (test_self_path[i] == '\\') {
+                    test_self_path[i] = '/';
+                }
+            }
+        }
     }
 #else
     if (
