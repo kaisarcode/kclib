@@ -9,9 +9,6 @@ commands, expand child flows, and fan out through links. Branches stay
 independent and do not merge.
 
 ---
-
----
-
 ## CLI
 
 The `flow` command executes one workflow file, accepts optional input from
@@ -227,9 +224,6 @@ printf "Hello" | flow file.flow --link page
 | `-v`, `--version` | Show version |
 
 ---
-
----
-
 ## Public API
 
 ```c
@@ -307,9 +301,6 @@ For rendering visual graph representations of `.flow` documents, you can check t
 [fldot](https://github.com/kaisarcode/fldot) conversion tool.
 
 ---
-
----
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
