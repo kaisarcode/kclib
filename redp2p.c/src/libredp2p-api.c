@@ -170,10 +170,12 @@ static int kc_redp2p_apply_vips(redp2p_t *ctx,
         used += (size_t)n;
     }
     err[0] = '\0';
-    i = (size_t)redp2p_set_vip(ctx, text, err, sizeof(err));
-    memset(text, 0, size);
-    free(text);
-    return (int)i;
+    {
+        int status = redp2p_set_vip(ctx, text, err, sizeof(err));
+        memset(text, 0, size);
+        free(text);
+        return status;
+    }
 }
 
 static int kc_redp2p_runtime_wait_ready(kc_redp2p_runtime_t *runtime)
