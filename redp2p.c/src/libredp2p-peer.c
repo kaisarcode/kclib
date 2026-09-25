@@ -410,9 +410,9 @@ int redp2p_stream_flush_tcp(redp2p_t *ctx, redp2p_stream_state_t *st,
     if (!st || !st->kcp || tcp_fd == REDP2P_FD_INVALID) return -1;
 
     if (st->pending_tcp_off < st->pending_tcp_len) {
-        written = (int)send(tcp_fd,
+        written = redp2p_sock_write(tcp_fd,
             (const char *)st->pending_tcp + st->pending_tcp_off,
-            (int)(st->pending_tcp_len - st->pending_tcp_off), 0);
+            (int)(st->pending_tcp_len - st->pending_tcp_off));
         if (written < 0) {
             if (REDP2P_LASTERR() == REDP2P_EWOULD) return 0;
             redp2p_set_error(ctx, "stream: local TCP write failed");
@@ -451,7 +451,8 @@ int redp2p_stream_flush_tcp(redp2p_t *ctx, redp2p_stream_state_t *st,
     st->pending_tcp_len = (size_t)received;
     if (received == 0) return 0;
 
-    written = (int)send(tcp_fd, (const char *)st->pending_tcp, received, 0);
+    written = redp2p_sock_write(tcp_fd,
+        (const char *)st->pending_tcp, received);
     if (written < 0) {
         if (REDP2P_LASTERR() == REDP2P_EWOULD) return 0;
         redp2p_set_error(ctx, "stream: local TCP write failed");
