@@ -32,121 +32,116 @@ typedef struct kc_trust kc_trust_t;
 uint64_t kc_trust_version(void);
 
 /**
- * Initialize the local trust store.
+ * Initializes the local trust store.
  *
  * The library resolves its per-user data directory automatically. If the
- * store does not exist it is created. KC_TRUST_DIR is an advanced
- * process-level override intended for tests and controlled deployments.
+ * store does not exist, it is created. KC_TRUST_DIR is an advanced
+ * process-level override for tests and controlled deployments.
  *
  * @param out Destination context pointer.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR on failure.
  */
 int kc_trust_init(kc_trust_t **out);
 
 /**
- * Create a one-use invitation for a new scoped trust relationship.
+ * Creates a one-use invitation for a scoped trust relationship.
  *
- * Both returned strings are allocated by the library and released with
- * kc_trust_free(). The UID is the application-visible identifier Bob stores
- * for the invited endpoint. The code contains that assigned UID, Bob's local
- * UID for this scoped relationship, and the cryptographic invitation material.
- * It may be transported by any out-of-band mechanism chosen by the application.
+ * The returned UID identifies the invited endpoint for the inviter.
+ * The code contains both endpoint UIDs and cryptographic invitation data.
+ * The application may transport it by any out-of-band mechanism.
  *
  * @param trust Trust context.
  * @param out_uid Destination for the allocated canonical UUID string.
  * @param out_code Destination for the allocated invitation code.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR on failure.
  */
 int kc_trust_invite(kc_trust_t *trust, char **out_uid, char **out_code);
 
 /**
- * Join a trust relationship from an invitation code.
+ * Joins a trust relationship from an invitation code.
  *
- * The returned UID identifies the inviter in the joining application and is
- * distinct from the UID the inviter assigned to the joining endpoint. The
- * confirmation is an opaque portable string that must be delivered back to
- * the inviter by the application. Both strings are released with kc_trust_free().
+ * The returned UID identifies the inviter in the joining application.
+ * It is distinct from the UID assigned to the joining endpoint.
+ * The confirmation must be delivered back by the application.
  *
  * @param trust Trust context.
  * @param code Invitation code obtained out of band.
  * @param out_uid Destination for the allocated canonical UUID string.
- * @param out_confirmation Destination for the allocated confirmation string.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
+ * @param out_confirmation Destination allocated confirmation string.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR on failure.
  */
 int kc_trust_join(kc_trust_t *trust, const char *code,
     char **out_uid, char **out_confirmation);
 
 /**
- * Confirm a response to one pending invitation.
+ * Confirms a response to one pending invitation.
  *
- * A valid confirmation atomically replaces the pending invitation with the
- * established trust relationship and destroys the one-use invitation secret.
- * The returned UID is the application-visible scope identifier originally
- * returned by kc_trust_invite(). It is the UID the inviter stores for the
- * joining endpoint.
+ * A valid confirmation establishes the trust relationship and destroys
+ * the one-use invitation secret. The returned UID is the invited endpoint
+ * UID originally produced by kc_trust_invite().
  *
  * @param trust Trust context.
- * @param confirmation Opaque confirmation received from the joining side.
+ * @param confirmation Opaque confirmation from the joining endpoint.
  * @param out_uid Destination for the allocated canonical UUID string.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR on failure.
  */
 int kc_trust_confirm(kc_trust_t *trust, const char *confirmation,
     char **out_uid);
 
 /**
- * Encrypt and authenticate one message for an established UID.
+ * Encrypts and authenticates one message for an established remote UID.
  *
- * trust.c performs no transport, ordering, replay, retry, timeout, or request
- * lifecycle handling. The returned blob may be transported by any mechanism.
+ * trust.c performs no transport, ordering, replay, retry, timeout, or
+ * request-lifecycle handling.
  *
  * @param trust Trust context.
- * @param uid Established remote UID returned by invite/confirm or join.
+ * @param uid Established remote UID.
  * @param message Plaintext bytes.
- * @param message_size Plaintext size.
+ * @param message_size Plaintext byte count.
  * @param out_data Destination for the allocated protected blob.
- * @param out_size Destination protected blob size.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
+ * @param out_size Destination protected blob byte count.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR on failure.
  */
 int kc_trust_seal(kc_trust_t *trust, const char *uid,
     const void *message, size_t message_size,
     void **out_data, size_t *out_size);
 
 /**
- * Authenticate and decrypt one message from an established UID.
+ * Authenticates and decrypts one message addressed to a local UID.
  *
- * This operation intentionally has no replay or temporal policy. Replaying the
- * same valid blob is the responsibility of the composing transport/protocol.
+ * This operation intentionally has no replay or temporal policy.
  *
  * @param trust Trust context.
- * @param uid Local destination UID carried by the surrounding application's
- * message envelope.
+ * @param uid Local destination UID from the application envelope.
  * @param data Protected blob from kc_trust_seal().
- * @param data_size Protected blob size.
+ * @param data_size Protected blob byte count.
  * @param out_message Destination for the allocated plaintext.
- * @param out_message_size Destination plaintext size.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on authentication or input failure.
+ * @param out_message_size Destination plaintext byte count.
+ * @return KC_TRUST_OK on success, or KC_TRUST_ERROR on failure.
  */
 int kc_trust_unseal(kc_trust_t *trust, const char *uid,
     const void *data, size_t data_size,
     void **out_message, size_t *out_message_size);
 
 /**
- * Revoke an established remote UID or pending invitation from the local trust store.
+ * Revokes an established remote UID or pending invitation.
  * @param trust Trust context.
- * @param uid Remote UID previously returned by invite/confirm or join.
- * @return KC_TRUST_OK when something was removed, KC_TRUST_ERROR otherwise.
+ * @param uid Remote UID returned by invite, confirm, or join.
+ * @return KC_TRUST_OK when removed, or KC_TRUST_ERROR otherwise.
  */
 int kc_trust_revoke(kc_trust_t *trust, const char *uid);
 
 /**
- * Release a trust context.
+ * Releases a trust context.
  * @param trust Context pointer. NULL is a safe no-op.
+ * @return No return value.
  */
 void kc_trust_close(kc_trust_t *trust);
 
 /**
- * Release an allocation returned by trust.c.
+ * Releases an allocation returned by trust.c.
  * @param ptr Allocation pointer. NULL is a safe no-op.
+ * @return No return value.
  */
 void kc_trust_free(void *ptr);
 
