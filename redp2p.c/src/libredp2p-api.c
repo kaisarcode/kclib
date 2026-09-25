@@ -21,6 +21,8 @@
 #include <time.h>
 #endif
 
+#define KC_REDP2P_READY_TIMEOUT_MS 10000U
+
 typedef struct {
     redp2p_t *ctx;
 #ifdef _WIN32
@@ -65,6 +67,19 @@ static void kc_redp2p_sleep_tick(void)
     ts.tv_sec = 0;
     ts.tv_nsec = 1000000L;
     nanosleep(&ts, NULL);
+#endif
+}
+
+static uint64_t kc_redp2p_now_ms(void)
+{
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000U +
+        (uint64_t)(ts.tv_nsec / 1000000L);
 #endif
 }
 
@@ -192,12 +207,15 @@ static int kc_redp2p_apply_vips(redp2p_t *ctx,
 
 static int kc_redp2p_runtime_wait_ready(kc_redp2p_runtime_t *runtime)
 {
+    uint64_t deadline;
     int state;
 
+    deadline = kc_redp2p_now_ms() + KC_REDP2P_READY_TIMEOUT_MS;
     for (;;) {
         state = atomic_load(&runtime->ctx->ready_state);
         if (state != 0) break;
         if (atomic_load(&runtime->done)) break;
+        if (kc_redp2p_now_ms() >= deadline) return REDP2P_ETIMEOUT;
         kc_redp2p_sleep_tick();
     }
     if (state > 0) return REDP2P_OK;
