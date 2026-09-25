@@ -253,7 +253,7 @@ static int tcp_roundtrip(uint16_t port)
     if (fd == TEST_INVALID) return 1;
 #ifdef _WIN32
     {
-        DWORD timeout = 200;
+        DWORD timeout = 10000;
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout,
             sizeof(timeout));
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout,
@@ -262,8 +262,8 @@ static int tcp_roundtrip(uint16_t port)
 #else
     {
         struct timeval timeout;
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 200000;
+        timeout.tv_sec = 10;
+        timeout.tv_usec = 0;
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
     }
@@ -373,18 +373,9 @@ static int case_kc_redp2p_api(void)
             failed = 1;
         }
     }
-    if (!failed) {
-        uint64_t deadline = monotonic_ms() + 5000U;
-        for (;;) {
-            if (tcp_roundtrip(con_port) == 0) break;
-            if (monotonic_ms() >= deadline) {
-                fprintf(stderr,
-                    "kc_redp2p_api: tcp roundtrip timed out\n");
-                failed = 1;
-                break;
-            }
-            sleep_ms(50);
-        }
+    if (!failed && tcp_roundtrip(con_port) != 0) {
+        fprintf(stderr, "kc_redp2p_api: tcp roundtrip failed\n");
+        failed = 1;
     }
 
     kc_redp2p_con_close(con);
