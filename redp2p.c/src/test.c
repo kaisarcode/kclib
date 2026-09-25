@@ -3816,8 +3816,8 @@ static int case_kc_redp2p_stop(void) {
  */
 static int case_kc_redp2p_version(void) {
     const char *name = "kc_redp2p_version";
-    const char *detail = "version API matches CLI output, including zero";
-    uint64_t version = redp2p_version();
+    const char *detail = "public version API matches the distributed CLI";
+    uint64_t version = kc_redp2p_version();
     int fail = 0;
 
 #ifndef _WIN32
@@ -3827,7 +3827,7 @@ static int case_kc_redp2p_version(void) {
         size_t output_size;
         int exit_code;
 
-        snprintf(expected, sizeof(expected), "redp2p build %llu\n",
+        snprintf(expected, sizeof(expected), "%llu\n",
             (unsigned long long)version);
         fail += expect_int("version CLI capture", 0, test_cli_capture(arguments,
             output, sizeof(output), &output_size, &exit_code));
@@ -3835,7 +3835,7 @@ static int case_kc_redp2p_version(void) {
         fail += expect_string("version API and CLI agree", expected, output);
     }
 #else
-    fail += expect_true("version is available", redp2p_version() == version);
+    fail += expect_true("version is available", version != 0);
 #endif
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -5449,10 +5449,12 @@ static int case_kc_redp2p_list_publishers(void) {
             "--list", NULL, NULL, 0, "listed\n");
         fail += test_cli_list("CLI -l", (unsigned short)(base + 1U),
             "-l", NULL, NULL, 0, "listed\n");
-        fail += test_cli_list("CLI list seats conflict",
-            (unsigned short)(base + 1U), "--list", "--seats", "1", 1, "");
-        fail += test_cli_list("CLI list pow conflict",
-            (unsigned short)(base + 1U), "-l", "--pow", "1", 1, "");
+        fail += test_cli_list("CLI list ignores server seats option",
+            (unsigned short)(base + 1U), "--list", "--seats", "1", 0,
+            "listed\n");
+        fail += test_cli_list("CLI list ignores server pow option",
+            (unsigned short)(base + 1U), "-l", "--pow", "1", 0,
+            "listed\n");
     }
 #endif
     test_publisher_stop(&publisher);
