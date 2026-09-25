@@ -1,6 +1,6 @@
 /**
- * libtrust.c - Core implementation for the trust library.
- * Summary: Message cryptography with TOFU peer identity.
+ * libtrust.c - Portable identity trust and message cryptography.
+ * Summary: Scoped trust relationships using Noise one-way patterns.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -19,10 +19,11 @@
 
 #include "libtrust.h"
 
+#include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -34,6 +35,9 @@
 #pragma comment(lib, "bcrypt.lib")
 #endif
 #else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -43,92 +47,42 @@
 #define KC_TRUST_BUILD_VERSION 0
 #endif
 
-#define KC_TRUST_MAX_TRUST 256
-#define KC_TRUST_NONCE_SIZE 12
+#define KC_TRUST_PATH_SIZE 4096
+#define KC_TRUST_SK_SIZE 32
+#define KC_TRUST_PK_SIZE 32
+#define KC_TRUST_PSK_SIZE 32
+#define KC_TRUST_UID_BYTES 16
 #define KC_TRUST_MAC_SIZE 16
-#define KC_TRUST_ENCRYPTED_PK_SIZE (KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE)
-#define KC_TRUST_HANDSHAKE_SIZE (KC_TRUST_PK_SIZE + KC_TRUST_ENCRYPTED_PK_SIZE + KC_TRUST_MAC_SIZE)
+#define KC_TRUST_NONCE_SIZE 12
+#define KC_TRUST_HASH_SIZE 64
+#define KC_TRUST_BLAKE2B_BLOCK 128
+#define KC_TRUST_RECORD_MAGIC_SIZE 4
+#define KC_TRUST_PENDING_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_SK_SIZE + KC_TRUST_PSK_SIZE)
+#define KC_TRUST_PEER_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_SK_SIZE + KC_TRUST_PK_SIZE)
+
+#define KC_TRUST_INVITE_VERSION 1
+#define KC_TRUST_INVITE_RAW_SIZE (1 + KC_TRUST_UID_BYTES + KC_TRUST_PK_SIZE + KC_TRUST_PSK_SIZE)
+
+#define KC_TRUST_XPSK1_MESSAGE_SIZE (KC_TRUST_PK_SIZE + (KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE) + KC_TRUST_MAC_SIZE)
+#define KC_TRUST_CONFIRM_RAW_SIZE (1 + KC_TRUST_UID_BYTES + KC_TRUST_XPSK1_MESSAGE_SIZE)
+
+#define KC_TRUST_K_HANDSHAKE_SIZE (KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE)
 #define KC_TRUST_TRANSPORT_MESSAGE_MAX 65535
 #define KC_TRUST_TRANSPORT_PLAINTEXT_MAX (KC_TRUST_TRANSPORT_MESSAGE_MAX - KC_TRUST_MAC_SIZE)
 #define KC_TRUST_LOGICAL_LENGTH_SIZE 8
 #define KC_TRUST_LENGTH_RECORD_SIZE (KC_TRUST_LOGICAL_LENGTH_SIZE + KC_TRUST_MAC_SIZE)
-#define KC_TRUST_PAYLOAD_BASE_SIZE (KC_TRUST_HANDSHAKE_SIZE + KC_TRUST_LENGTH_RECORD_SIZE)
+#define KC_TRUST_PAYLOAD_BASE_SIZE (KC_TRUST_K_HANDSHAKE_SIZE + KC_TRUST_LENGTH_RECORD_SIZE)
 
-#ifdef _WIN32
-
-/**
- * Reads random bytes using BCryptGenRandom on Windows.
- * @param buf Destination buffer.
- * @param len Number of bytes to read.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_read_random(unsigned char *buf, size_t len) {
-    if (len > 0xFFFFFFFF) return -1;
-    NTSTATUS rc = BCryptGenRandom(NULL, buf, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-    return rc == 0 ? 0 : -1;
-}
-
-#elif defined(__EMSCRIPTEN__)
-
-/**
- * Reads random bytes using getentropy on Emscripten.
- * Processes requests in chunks of at most 256 bytes per call, returning
- * failure if any individual call fails.  Never opens /dev/urandom and
- * never falls back to a deterministic source.
- * @param buf Destination buffer.
- * @param len Number of bytes to read.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_read_random(unsigned char *buf, size_t len) {
-    size_t done = 0;
-    while (done < len) {
-        size_t part = len - done;
-        if (part > 256) part = 256;
-        if (getentropy(buf + done, part) != 0) return -1;
-        done += part;
-    }
-    return 0;
-}
-
-#else
-
-/**
- * Reads random bytes from /dev/urandom.
- * @param buf Destination buffer.
- * @param len Number of bytes to read.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_read_random(unsigned char *buf, size_t len) {
-    FILE *f = fopen("/dev/urandom", "rb");
-    if (!f) return -1;
-    size_t done = 0;
-    while (done < len) {
-        size_t n = fread(buf + done, 1, len - done, f);
-        if (n == 0) { fclose(f); return -1; }
-        done += n;
-    }
-    fclose(f);
-    return 0;
-}
-
-#endif
-
-typedef struct {
-    size_t id_len;
-    unsigned char id[256];
-    unsigned char pk[KC_TRUST_PK_SIZE];
-} kc_trust_trust_entry_t;
+static const unsigned char KC_TRUST_PENDING_MAGIC[4] = { 'K', 'T', 'P', '1' };
+static const unsigned char KC_TRUST_PEER_MAGIC[4] = { 'K', 'T', 'R', '1' };
 
 struct kc_trust {
-    unsigned char sk[KC_TRUST_SK_SIZE];
-    unsigned char pk[KC_TRUST_PK_SIZE];
-    int has_identity;
-    kc_trust_trust_entry_t trust[KC_TRUST_MAX_TRUST];
-    int trust_count;
+    char dir[KC_TRUST_PATH_SIZE];
 };
 
-#define KC_TRUST_BLAKE2B_BLOCK 128
-#define KC_TRUST_HASH_SIZE 64
+typedef struct {
+    size_t size;
+} kc_trust_alloc_header_t;
 
 typedef struct {
     unsigned char k[32];
@@ -142,776 +96,1185 @@ typedef struct {
     kc_trust_cipher_state_t cipher;
 } kc_trust_symmetric_state_t;
 
-/**
- * Returns the number of transport data records for a logical message.
- * @param message_len Logical message length.
- * @return Number of transport data records.
- */
-static size_t kc_trust_transport_record_count(size_t message_len) {
-    if (message_len == 0) return 0;
-    return 1 + (message_len - 1) / KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
+#ifdef _WIN32
+static int kc_trust_read_random(unsigned char *buf, size_t size) {
+    if (!buf || size > 0xFFFFFFFFU) return -1;
+    return BCryptGenRandom(NULL, buf, (ULONG)size,
+        BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
 }
-
-/**
- * Returns the exact payload size for a supported logical message.
- * @param message_len Logical message length.
- * @return Exact payload size.
- */
-static size_t kc_trust_payload_size(size_t message_len) {
-    return KC_TRUST_PAYLOAD_BASE_SIZE + message_len +
-        kc_trust_transport_record_count(message_len) * KC_TRUST_MAC_SIZE;
-}
-
-/**
- * Encodes a 64-bit unsigned integer in big-endian byte order.
- * @param output Eight-byte destination.
- * @param value Value to encode.
- * @return Nothing.
- */
-static void kc_trust_store_u64_be(unsigned char output[8], uint64_t value) {
-    for (size_t i = 0; i < 8; i++)
-        output[7 - i] = (unsigned char)(value >> (8 * i));
-}
-
-/**
- * Decodes a big-endian 64-bit unsigned integer.
- * @param input Eight-byte input.
- * @return Decoded value.
- */
-static uint64_t kc_trust_load_u64_be(const unsigned char input[8]) {
-    uint64_t value = 0;
-    for (size_t i = 0; i < 8; i++)
-        value = (value << 8) | input[i];
-    return value;
-}
-
-/**
- * Computes HMAC-BLAKE2b over a message.
- * @param out 64-byte destination for the MAC.
- * @param key HMAC key.
- * @param key_len HMAC key length.
- * @param msg Message input.
- * @param msg_len Message length.
- * @return Nothing.
- */
-static void kc_trust_hmac_blake2b(unsigned char out[KC_TRUST_HASH_SIZE],
-const unsigned char *key, size_t key_len,
-const unsigned char *msg, size_t msg_len) {
-    unsigned char k_pad[KC_TRUST_BLAKE2B_BLOCK];
-    unsigned char o_key[KC_TRUST_BLAKE2B_BLOCK];
-    unsigned char i_key[KC_TRUST_BLAKE2B_BLOCK];
-    unsigned char inner[KC_TRUST_HASH_SIZE];
-    crypto_blake2b_ctx ctx;
-
-    memset(k_pad, 0, KC_TRUST_BLAKE2B_BLOCK);
-    memcpy(k_pad, key, key_len);
-
-    memcpy(o_key, k_pad, KC_TRUST_BLAKE2B_BLOCK);
-    memcpy(i_key, k_pad, KC_TRUST_BLAKE2B_BLOCK);
-    for (int i = 0; i < KC_TRUST_BLAKE2B_BLOCK; i++) {
-        o_key[i] ^= 0x5c;
-        i_key[i] ^= 0x36;
+#elif defined(__EMSCRIPTEN__)
+static int kc_trust_read_random(unsigned char *buf, size_t size) {
+    size_t done = 0;
+    if (!buf) return -1;
+    while (done < size) {
+        size_t part = size - done;
+        if (part > 256U) part = 256U;
+        if (getentropy(buf + done, part) != 0) return -1;
+        done += part;
     }
+    return 0;
+}
+#else
+static int kc_trust_read_random(unsigned char *buf, size_t size) {
+    FILE *f;
+    size_t done = 0;
+    if (!buf) return -1;
+    f = fopen("/dev/urandom", "rb");
+    if (!f) return -1;
+    while (done < size) {
+        size_t n = fread(buf + done, 1, size - done, f);
+        if (n == 0) {
+            fclose(f);
+            return -1;
+        }
+        done += n;
+    }
+    return fclose(f) == 0 ? 0 : -1;
+}
+#endif
 
-    crypto_blake2b_init(&ctx, KC_TRUST_HASH_SIZE);
-    crypto_blake2b_update(&ctx, i_key, KC_TRUST_BLAKE2B_BLOCK);
-    crypto_blake2b_update(&ctx, msg, msg_len);
-    crypto_blake2b_final(&ctx, inner);
-
-    crypto_blake2b_init(&ctx, KC_TRUST_HASH_SIZE);
-    crypto_blake2b_update(&ctx, o_key, KC_TRUST_BLAKE2B_BLOCK);
-    crypto_blake2b_update(&ctx, inner, KC_TRUST_HASH_SIZE);
-    crypto_blake2b_final(&ctx, out);
-
-    crypto_wipe(k_pad, KC_TRUST_BLAKE2B_BLOCK);
-    crypto_wipe(o_key, KC_TRUST_BLAKE2B_BLOCK);
-    crypto_wipe(i_key, KC_TRUST_BLAKE2B_BLOCK);
-    crypto_wipe(inner, KC_TRUST_HASH_SIZE);
+static void *kc_trust_alloc(size_t size) {
+    kc_trust_alloc_header_t *header;
+    if (size > SIZE_MAX - sizeof(*header)) return NULL;
+    header = (kc_trust_alloc_header_t *)malloc(sizeof(*header) + (size ? size : 1));
+    if (!header) return NULL;
+    header->size = size ? size : 1;
+    memset(header + 1, 0, header->size);
+    return header + 1;
 }
 
-/**
- * Produces two Noise HKDF outputs.
- * @param out1 First 64-byte output.
- * @param out2 Second 64-byte output.
- * @param ck Chaining key.
- * @param ikm Input key material.
- * @param ikm_len Input key material length.
- * @return Nothing.
- */
-static void kc_trust_noise_hkdf_2(unsigned char out1[KC_TRUST_HASH_SIZE],
-unsigned char out2[KC_TRUST_HASH_SIZE],
-const unsigned char ck[KC_TRUST_HASH_SIZE],
-const unsigned char *ikm, size_t ikm_len) {
+void kc_trust_free(void *ptr) {
+    kc_trust_alloc_header_t *header;
+    if (!ptr) return;
+    header = ((kc_trust_alloc_header_t *)ptr) - 1;
+    crypto_wipe(ptr, header->size);
+    crypto_wipe(header, sizeof(*header));
+    free(header);
+}
+
+static char *kc_trust_public_strdup(const char *value) {
+    size_t size;
+    char *copy;
+    if (!value) return NULL;
+    size = strlen(value) + 1;
+    copy = (char *)kc_trust_alloc(size);
+    if (!copy) return NULL;
+    memcpy(copy, value, size);
+    return copy;
+}
+
+static int kc_trust_path_join(char *out, size_t cap,
+    const char *a, const char *b) {
+#ifdef _WIN32
+    return (size_t)snprintf(out, cap, "%s\\%s", a, b) < cap ? 0 : -1;
+#else
+    return (size_t)snprintf(out, cap, "%s/%s", a, b) < cap ? 0 : -1;
+#endif
+}
+
+static int kc_trust_resolve_dir(char *out, size_t cap) {
+    const char *override = getenv("KC_TRUST_DIR");
+    if (!out || cap == 0) return -1;
+    if (override && override[0])
+        return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : -1;
+#ifdef _WIN32
+    {
+        const char *base = getenv("LOCALAPPDATA");
+        if (!base || !base[0]) base = getenv("APPDATA");
+        if (!base || !base[0]) return -1;
+        return (size_t)snprintf(out, cap, "%s\\kaisarcode\\trust.c", base) < cap ? 0 : -1;
+    }
+#else
+    {
+        const char *xdg = getenv("XDG_DATA_HOME");
+        const char *home = getenv("HOME");
+        if (xdg && xdg[0])
+            return (size_t)snprintf(out, cap, "%s/kaisarcode/trust.c", xdg) < cap ? 0 : -1;
+        if (!home || !home[0]) return -1;
+        return (size_t)snprintf(out, cap, "%s/.local/share/kaisarcode/trust.c", home) < cap ? 0 : -1;
+    }
+#endif
+}
+
+#ifdef _WIN32
+static int kc_trust_dir_secure(const char *path) {
+    DWORD attrs = GetFileAttributesA(path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
+    if (!(attrs & FILE_ATTRIBUTE_DIRECTORY)) return 0;
+    if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) return 0;
+    return 1;
+}
+
+static int kc_trust_mkdirs(const char *path) {
+    char buf[KC_TRUST_PATH_SIZE];
+    char *p;
+    if (!path || (size_t)snprintf(buf, sizeof(buf), "%s", path) >= sizeof(buf))
+        return -1;
+    p = buf;
+    if (buf[0] && buf[1] == ':') p = buf + 3;
+    for (; *p; p++) {
+        if (*p == '\\' || *p == '/') {
+            char saved = *p;
+            *p = '\0';
+            if (buf[0] && !CreateDirectoryA(buf, NULL) &&
+                GetLastError() != ERROR_ALREADY_EXISTS) return -1;
+            *p = saved;
+        }
+    }
+    if (!CreateDirectoryA(buf, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+        return -1;
+    return kc_trust_dir_secure(path) ? 0 : -1;
+}
+#else
+static int kc_trust_dir_secure(const char *path) {
+    struct stat st;
+    if (lstat(path, &st) != 0) return 0;
+    if (!S_ISDIR(st.st_mode)) return 0;
+    if ((st.st_mode & 0022) != 0) return 0;
+    return 1;
+}
+
+static int kc_trust_mkdirs(const char *path) {
+    char buf[KC_TRUST_PATH_SIZE];
+    char *p;
+    if (!path || (size_t)snprintf(buf, sizeof(buf), "%s", path) >= sizeof(buf))
+        return -1;
+    for (p = buf + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(buf, 0700) != 0 && errno != EEXIST) return -1;
+            *p = '/';
+        }
+    }
+    if (mkdir(buf, 0700) != 0 && errno != EEXIST) return -1;
+    if (chmod(path, 0700) != 0) return -1;
+    return kc_trust_dir_secure(path) ? 0 : -1;
+}
+#endif
+
+static int kc_trust_store_dirs(kc_trust_t *trust) {
+    char pending[KC_TRUST_PATH_SIZE];
+    char peers[KC_TRUST_PATH_SIZE];
+    if (!trust) return -1;
+    if (kc_trust_mkdirs(trust->dir) != 0) return -1;
+    if (kc_trust_path_join(pending, sizeof(pending), trust->dir, "pending") != 0)
+        return -1;
+    if (kc_trust_path_join(peers, sizeof(peers), trust->dir, "peers") != 0)
+        return -1;
+    if (kc_trust_mkdirs(pending) != 0 || kc_trust_mkdirs(peers) != 0)
+        return -1;
+    return 0;
+}
+
+static int kc_trust_uid_format(const unsigned char uid[KC_TRUST_UID_BYTES],
+    char out[KC_TRUST_UID_SIZE + 1]) {
+    static const char hex[] = "0123456789abcdef";
+    static const int hyphen_after[] = { 4, 6, 8, 10 };
+    size_t pos = 0;
+    int h = 0;
+    if (!uid || !out) return -1;
+    for (int i = 0; i < KC_TRUST_UID_BYTES; i++) {
+        out[pos++] = hex[uid[i] >> 4];
+        out[pos++] = hex[uid[i] & 15];
+        if (h < 4 && i + 1 == hyphen_after[h]) {
+            out[pos++] = '-';
+            h++;
+        }
+    }
+    out[pos] = '\0';
+    return pos == KC_TRUST_UID_SIZE ? 0 : -1;
+}
+
+static int kc_trust_hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static int kc_trust_uid_parse(const char *text,
+    unsigned char uid[KC_TRUST_UID_BYTES]) {
+    static const int hyphens[] = { 8, 13, 18, 23 };
+    size_t i = 0;
+    size_t out = 0;
+    int h = 0;
+    if (!text || strlen(text) != KC_TRUST_UID_SIZE || !uid) return -1;
+    while (i < KC_TRUST_UID_SIZE) {
+        int hi;
+        int lo;
+        if (h < 4 && (int)i == hyphens[h]) {
+            if (text[i] != '-') return -1;
+            i++;
+            h++;
+            continue;
+        }
+        if (i + 1 >= KC_TRUST_UID_SIZE || out >= KC_TRUST_UID_BYTES)
+            return -1;
+        hi = kc_trust_hex_value(text[i]);
+        lo = kc_trust_hex_value(text[i + 1]);
+        if (hi < 0 || lo < 0) return -1;
+        uid[out++] = (unsigned char)((hi << 4) | lo);
+        i += 2;
+    }
+    return out == KC_TRUST_UID_BYTES ? 0 : -1;
+}
+
+static int kc_trust_uid_new(unsigned char uid[KC_TRUST_UID_BYTES],
+    char text[KC_TRUST_UID_SIZE + 1]) {
+    if (kc_trust_read_random(uid, KC_TRUST_UID_BYTES) != 0) return -1;
+    uid[6] = (unsigned char)((uid[6] & 0x0fU) | 0x40U);
+    uid[8] = (unsigned char)((uid[8] & 0x3fU) | 0x80U);
+    return kc_trust_uid_format(uid, text);
+}
+
+static int kc_trust_record_path(const kc_trust_t *trust, const char *kind,
+    const char *uid, char out[KC_TRUST_PATH_SIZE]) {
+    unsigned char parsed[KC_TRUST_UID_BYTES];
+    char canonical[KC_TRUST_UID_SIZE + 1];
+    char dir[KC_TRUST_PATH_SIZE];
+    if (!trust || !kind || !uid || !out) return -1;
+    if (kc_trust_uid_parse(uid, parsed) != 0 ||
+        kc_trust_uid_format(parsed, canonical) != 0) return -1;
+    if (kc_trust_path_join(dir, sizeof(dir), trust->dir, kind) != 0)
+        return -1;
+    return kc_trust_path_join(out, KC_TRUST_PATH_SIZE, dir, canonical);
+}
+
+static int kc_trust_write_file(const char *path,
+    const unsigned char *data, size_t size) {
+#ifdef _WIN32
+    HANDLE file;
+    DWORD written = 0;
+    if (!path || (!data && size)) return -1;
+    file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return -1;
+    if (size > 0xFFFFFFFFU ||
+        !WriteFile(file, data, (DWORD)size, &written, NULL) ||
+        written != (DWORD)size || !FlushFileBuffers(file)) {
+        CloseHandle(file);
+        return -1;
+    }
+    return CloseHandle(file) ? 0 : -1;
+#else
+    int fd;
+    size_t done = 0;
+    if (!path || (!data && size)) return -1;
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return -1;
+    if (fchmod(fd, 0600) != 0) {
+        close(fd);
+        return -1;
+    }
+    while (done < size) {
+        ssize_t n = write(fd, data + done, size - done);
+        if (n <= 0) {
+            close(fd);
+            return -1;
+        }
+        done += (size_t)n;
+    }
+    if (fsync(fd) != 0) {
+        close(fd);
+        return -1;
+    }
+    return close(fd) == 0 ? 0 : -1;
+#endif
+}
+
+static int kc_trust_read_file(const char *path,
+    unsigned char *data, size_t size) {
+    FILE *f;
+    size_t done;
+    int extra;
+    if (!path || !data) return -1;
+    f = fopen(path, "rb");
+    if (!f) return -1;
+    done = fread(data, 1, size, f);
+    extra = fgetc(f);
+    if (fclose(f) != 0) return -1;
+    return done == size && extra == EOF ? 0 : -1;
+}
+
+static int kc_trust_remove_file(const char *path) {
+#ifdef _WIN32
+    return DeleteFileA(path) ? 0 : -1;
+#else
+    return unlink(path) == 0 ? 0 : -1;
+#endif
+}
+
+static int kc_trust_file_exists(const char *path) {
+#ifdef _WIN32
+    DWORD attrs = GetFileAttributesA(path);
+    return attrs != INVALID_FILE_ATTRIBUTES &&
+        !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    struct stat st;
+    return lstat(path, &st) == 0 && S_ISREG(st.st_mode);
+#endif
+}
+
+static int kc_trust_pending_write(kc_trust_t *trust, const char *uid,
+    const unsigned char sk[KC_TRUST_SK_SIZE],
+    const unsigned char psk[KC_TRUST_PSK_SIZE]) {
+    unsigned char record[KC_TRUST_PENDING_RECORD_SIZE];
+    char path[KC_TRUST_PATH_SIZE];
+    int rc;
+    if (kc_trust_record_path(trust, "pending", uid, path) != 0) return -1;
+    memcpy(record, KC_TRUST_PENDING_MAGIC, 4);
+    memcpy(record + 4, sk, KC_TRUST_SK_SIZE);
+    memcpy(record + 4 + KC_TRUST_SK_SIZE, psk, KC_TRUST_PSK_SIZE);
+    rc = kc_trust_write_file(path, record, sizeof(record));
+    crypto_wipe(record, sizeof(record));
+    return rc;
+}
+
+static int kc_trust_pending_read(kc_trust_t *trust, const char *uid,
+    unsigned char sk[KC_TRUST_SK_SIZE],
+    unsigned char psk[KC_TRUST_PSK_SIZE]) {
+    unsigned char record[KC_TRUST_PENDING_RECORD_SIZE];
+    char path[KC_TRUST_PATH_SIZE];
+    int rc = -1;
+    if (kc_trust_record_path(trust, "pending", uid, path) != 0) return -1;
+    if (kc_trust_read_file(path, record, sizeof(record)) == 0 &&
+        memcmp(record, KC_TRUST_PENDING_MAGIC, 4) == 0) {
+        memcpy(sk, record + 4, KC_TRUST_SK_SIZE);
+        memcpy(psk, record + 4 + KC_TRUST_SK_SIZE, KC_TRUST_PSK_SIZE);
+        rc = 0;
+    }
+    crypto_wipe(record, sizeof(record));
+    return rc;
+}
+
+static int kc_trust_pending_remove(kc_trust_t *trust, const char *uid) {
+    char path[KC_TRUST_PATH_SIZE];
+    if (kc_trust_record_path(trust, "pending", uid, path) != 0) return -1;
+    return kc_trust_remove_file(path);
+}
+
+static int kc_trust_peer_write(kc_trust_t *trust, const char *uid,
+    const unsigned char local_sk[KC_TRUST_SK_SIZE],
+    const unsigned char remote_pk[KC_TRUST_PK_SIZE]) {
+    unsigned char record[KC_TRUST_PEER_RECORD_SIZE];
+    char path[KC_TRUST_PATH_SIZE];
+    int rc;
+    if (kc_trust_record_path(trust, "peers", uid, path) != 0) return -1;
+    memcpy(record, KC_TRUST_PEER_MAGIC, 4);
+    memcpy(record + 4, local_sk, KC_TRUST_SK_SIZE);
+    memcpy(record + 4 + KC_TRUST_SK_SIZE, remote_pk, KC_TRUST_PK_SIZE);
+    rc = kc_trust_write_file(path, record, sizeof(record));
+    crypto_wipe(record, sizeof(record));
+    return rc;
+}
+
+static int kc_trust_peer_read(kc_trust_t *trust, const char *uid,
+    unsigned char local_sk[KC_TRUST_SK_SIZE],
+    unsigned char remote_pk[KC_TRUST_PK_SIZE]) {
+    unsigned char record[KC_TRUST_PEER_RECORD_SIZE];
+    char path[KC_TRUST_PATH_SIZE];
+    int rc = -1;
+    if (kc_trust_record_path(trust, "peers", uid, path) != 0) return -1;
+    if (kc_trust_read_file(path, record, sizeof(record)) == 0 &&
+        memcmp(record, KC_TRUST_PEER_MAGIC, 4) == 0) {
+        memcpy(local_sk, record + 4, KC_TRUST_SK_SIZE);
+        memcpy(remote_pk, record + 4 + KC_TRUST_SK_SIZE, KC_TRUST_PK_SIZE);
+        rc = 0;
+    }
+    crypto_wipe(record, sizeof(record));
+    return rc;
+}
+
+static int kc_trust_peer_remove(kc_trust_t *trust, const char *uid) {
+    char path[KC_TRUST_PATH_SIZE];
+    if (kc_trust_record_path(trust, "peers", uid, path) != 0) return -1;
+    return kc_trust_remove_file(path);
+}
+
+static int kc_trust_base64_value(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static char *kc_trust_base64_encode(const unsigned char *data, size_t size) {
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out_size;
+    char *out;
+    size_t i = 0;
+    size_t p = 0;
+    if (!data && size) return NULL;
+    if (size > (SIZE_MAX - 2) / 3) return NULL;
+    out_size = ((size + 2) / 3) * 4;
+    out = (char *)kc_trust_alloc(out_size + 1);
+    if (!out) return NULL;
+    while (i + 3 <= size) {
+        unsigned v = ((unsigned)data[i] << 16) |
+            ((unsigned)data[i + 1] << 8) | data[i + 2];
+        out[p++] = alphabet[(v >> 18) & 63];
+        out[p++] = alphabet[(v >> 12) & 63];
+        out[p++] = alphabet[(v >> 6) & 63];
+        out[p++] = alphabet[v & 63];
+        i += 3;
+    }
+    if (i < size) {
+        unsigned v = (unsigned)data[i] << 16;
+        out[p++] = alphabet[(v >> 18) & 63];
+        if (i + 1 < size) {
+            v |= (unsigned)data[i + 1] << 8;
+            out[p++] = alphabet[(v >> 12) & 63];
+            out[p++] = alphabet[(v >> 6) & 63];
+            out[p++] = '=';
+        } else {
+            out[p++] = alphabet[(v >> 12) & 63];
+            out[p++] = '=';
+            out[p++] = '=';
+        }
+    }
+    out[p] = '\0';
+    return out;
+}
+
+static unsigned char *kc_trust_base64_decode(const char *text,
+    size_t *out_size) {
+    size_t len;
+    size_t size;
+    unsigned char *out;
+    size_t p = 0;
+    if (out_size) *out_size = 0;
+    if (!text || !out_size) return NULL;
+    len = strlen(text);
+    if (len == 0 || (len % 4) != 0) return NULL;
+    size = (len / 4) * 3;
+    if (text[len - 1] == '=') size--;
+    if (text[len - 2] == '=') size--;
+    out = (unsigned char *)malloc(size ? size : 1);
+    if (!out) return NULL;
+    for (size_t i = 0; i < len; i += 4) {
+        int a = kc_trust_base64_value(text[i]);
+        int b = kc_trust_base64_value(text[i + 1]);
+        int c = text[i + 2] == '=' ? -2 : kc_trust_base64_value(text[i + 2]);
+        int d = text[i + 3] == '=' ? -2 : kc_trust_base64_value(text[i + 3]);
+        unsigned v;
+        int last = i + 4 == len;
+        if (a < 0 || b < 0 || c == -1 || d == -1 ||
+            (!last && (c == -2 || d == -2)) ||
+            (c == -2 && d != -2)) {
+            crypto_wipe(out, size ? size : 1);
+            free(out);
+            return NULL;
+        }
+        if (c == -2) c = 0;
+        if (d == -2) d = 0;
+        v = ((unsigned)a << 18) | ((unsigned)b << 12) |
+            ((unsigned)c << 6) | (unsigned)d;
+        if (p < size) out[p++] = (unsigned char)(v >> 16);
+        if (p < size) out[p++] = (unsigned char)(v >> 8);
+        if (p < size) out[p++] = (unsigned char)v;
+    }
+    *out_size = size;
+    return out;
+}
+
+static void kc_trust_hmac_blake2b(unsigned char out[KC_TRUST_HASH_SIZE],
+    const unsigned char *key, size_t key_size,
+    const unsigned char *data, size_t data_size) {
+    unsigned char kpad[KC_TRUST_BLAKE2B_BLOCK];
+    unsigned char outer[KC_TRUST_BLAKE2B_BLOCK];
+    unsigned char inner_pad[KC_TRUST_BLAKE2B_BLOCK];
+    unsigned char inner[KC_TRUST_HASH_SIZE];
+    crypto_blake2b_ctx hash;
+    memset(kpad, 0, sizeof(kpad));
+    memcpy(kpad, key, key_size);
+    memcpy(outer, kpad, sizeof(outer));
+    memcpy(inner_pad, kpad, sizeof(inner_pad));
+    for (size_t i = 0; i < sizeof(kpad); i++) {
+        outer[i] ^= 0x5c;
+        inner_pad[i] ^= 0x36;
+    }
+    crypto_blake2b_init(&hash, KC_TRUST_HASH_SIZE);
+    crypto_blake2b_update(&hash, inner_pad, sizeof(inner_pad));
+    if (data_size) crypto_blake2b_update(&hash, data, data_size);
+    crypto_blake2b_final(&hash, inner);
+    crypto_blake2b_init(&hash, KC_TRUST_HASH_SIZE);
+    crypto_blake2b_update(&hash, outer, sizeof(outer));
+    crypto_blake2b_update(&hash, inner, sizeof(inner));
+    crypto_blake2b_final(&hash, out);
+    crypto_wipe(kpad, sizeof(kpad));
+    crypto_wipe(outer, sizeof(outer));
+    crypto_wipe(inner_pad, sizeof(inner_pad));
+    crypto_wipe(inner, sizeof(inner));
+}
+
+static void kc_trust_hkdf2(unsigned char out1[KC_TRUST_HASH_SIZE],
+    unsigned char out2[KC_TRUST_HASH_SIZE],
+    const unsigned char ck[KC_TRUST_HASH_SIZE],
+    const unsigned char *ikm, size_t ikm_size) {
     unsigned char temp[KC_TRUST_HASH_SIZE];
-    kc_trust_hmac_blake2b(temp, ck, KC_TRUST_HASH_SIZE, ikm, ikm_len);
-    unsigned char c1 = 0x01;
-    kc_trust_hmac_blake2b(out1, temp, KC_TRUST_HASH_SIZE, &c1, 1);
-    unsigned char prefix[KC_TRUST_HASH_SIZE + 1];
-    memcpy(prefix, out1, KC_TRUST_HASH_SIZE);
-    prefix[KC_TRUST_HASH_SIZE] = 0x02;
+    unsigned char input[KC_TRUST_HASH_SIZE + 1];
+    unsigned char one = 1;
+    kc_trust_hmac_blake2b(temp, ck, KC_TRUST_HASH_SIZE, ikm, ikm_size);
+    kc_trust_hmac_blake2b(out1, temp, KC_TRUST_HASH_SIZE, &one, 1);
+    memcpy(input, out1, KC_TRUST_HASH_SIZE);
+    input[KC_TRUST_HASH_SIZE] = 2;
     kc_trust_hmac_blake2b(out2, temp, KC_TRUST_HASH_SIZE,
-        prefix, sizeof(prefix));
+        input, sizeof(input));
     crypto_wipe(temp, sizeof(temp));
-    crypto_wipe(prefix, sizeof(prefix));
+    crypto_wipe(input, sizeof(input));
 }
 
-/**
- * Clears a Noise cipher state key and nonce.
- * @param cipher Cipher state to initialize.
- * @return Nothing.
- */
-static void kc_trust_cipher_initialize_empty(kc_trust_cipher_state_t *cipher) {
+static void kc_trust_hkdf3(unsigned char out1[KC_TRUST_HASH_SIZE],
+    unsigned char out2[KC_TRUST_HASH_SIZE],
+    unsigned char out3[KC_TRUST_HASH_SIZE],
+    const unsigned char ck[KC_TRUST_HASH_SIZE],
+    const unsigned char *ikm, size_t ikm_size) {
+    unsigned char temp[KC_TRUST_HASH_SIZE];
+    unsigned char input[KC_TRUST_HASH_SIZE + 1];
+    unsigned char one = 1;
+    kc_trust_hmac_blake2b(temp, ck, KC_TRUST_HASH_SIZE, ikm, ikm_size);
+    kc_trust_hmac_blake2b(out1, temp, KC_TRUST_HASH_SIZE, &one, 1);
+    memcpy(input, out1, KC_TRUST_HASH_SIZE);
+    input[KC_TRUST_HASH_SIZE] = 2;
+    kc_trust_hmac_blake2b(out2, temp, KC_TRUST_HASH_SIZE,
+        input, sizeof(input));
+    memcpy(input, out2, KC_TRUST_HASH_SIZE);
+    input[KC_TRUST_HASH_SIZE] = 3;
+    kc_trust_hmac_blake2b(out3, temp, KC_TRUST_HASH_SIZE,
+        input, sizeof(input));
+    crypto_wipe(temp, sizeof(temp));
+    crypto_wipe(input, sizeof(input));
+}
+
+static void kc_trust_cipher_empty(kc_trust_cipher_state_t *cipher) {
     memset(cipher, 0, sizeof(*cipher));
 }
 
-/**
- * Installs a Noise cipher key and resets its nonce.
- * @param cipher Cipher state to initialize.
- * @param key 32-byte cipher key.
- * @return Nothing.
- */
-static void kc_trust_cipher_initialize_key(kc_trust_cipher_state_t *cipher,
-const unsigned char key[32]) {
+static void kc_trust_cipher_key(kc_trust_cipher_state_t *cipher,
+    const unsigned char key[32]) {
     memcpy(cipher->k, key, 32);
     cipher->n = 0;
     cipher->has_key = 1;
 }
 
-/**
- * Encrypts with a Noise ChaChaPoly cipher state.
- * @param cipher Cipher state.
- * @param ad Associated data.
- * @param ad_len Associated data length.
- * @param plaintext Plaintext input.
- * @param plaintext_len Plaintext length.
- * @param ciphertext Ciphertext and tag output.
- * @return 0 on success, -1 on nonce exhaustion or invalid state.
- */
 static int kc_trust_cipher_encrypt(kc_trust_cipher_state_t *cipher,
-const unsigned char *ad, size_t ad_len,
-const unsigned char *plaintext, size_t plaintext_len,
-unsigned char *ciphertext) {
-    if (!cipher->has_key || cipher->n == UINT64_MAX) return -1;
+    const unsigned char *ad, size_t ad_size,
+    const unsigned char *plain, size_t plain_size,
+    unsigned char *out) {
     unsigned char nonce[KC_TRUST_NONCE_SIZE] = {0};
+    crypto_aead_ctx aead;
+    if (!cipher || !cipher->has_key || cipher->n == UINT64_MAX || !out)
+        return -1;
     for (size_t i = 0; i < 8; i++)
         nonce[4 + i] = (unsigned char)(cipher->n >> (8 * i));
-    crypto_aead_ctx aead;
     crypto_aead_init_ietf(&aead, cipher->k, nonce);
-    crypto_aead_write(&aead, ciphertext, ciphertext + plaintext_len,
-        ad, ad_len, plaintext, plaintext_len);
+    crypto_aead_write(&aead, out, out + plain_size, ad, ad_size,
+        plain, plain_size);
     crypto_wipe(&aead, sizeof(aead));
     cipher->n++;
     return 0;
 }
 
-/**
- * Decrypts with a Noise ChaChaPoly cipher state.
- * @param cipher Cipher state.
- * @param ad Associated data.
- * @param ad_len Associated data length.
- * @param ciphertext Ciphertext input.
- * @param ciphertext_len Ciphertext length including the tag.
- * @param plaintext Plaintext output.
- * @return 0 on success, -1 on authentication failure or invalid state.
- */
 static int kc_trust_cipher_decrypt(kc_trust_cipher_state_t *cipher,
-const unsigned char *ad, size_t ad_len,
-const unsigned char *ciphertext, size_t ciphertext_len,
-unsigned char *plaintext) {
-    if (!cipher->has_key || cipher->n == UINT64_MAX ||
-        ciphertext_len < KC_TRUST_MAC_SIZE) return -1;
-    size_t plaintext_len = ciphertext_len - KC_TRUST_MAC_SIZE;
+    const unsigned char *ad, size_t ad_size,
+    const unsigned char *data, size_t data_size,
+    unsigned char *out) {
     unsigned char nonce[KC_TRUST_NONCE_SIZE] = {0};
+    crypto_aead_ctx aead;
+    size_t plain_size;
+    int rc;
+    if (!cipher || !cipher->has_key || cipher->n == UINT64_MAX ||
+        !data || data_size < KC_TRUST_MAC_SIZE || !out)
+        return -1;
+    plain_size = data_size - KC_TRUST_MAC_SIZE;
     for (size_t i = 0; i < 8; i++)
         nonce[4 + i] = (unsigned char)(cipher->n >> (8 * i));
-    crypto_aead_ctx aead;
     crypto_aead_init_ietf(&aead, cipher->k, nonce);
-    int rc = crypto_aead_read(&aead, plaintext,
-        ciphertext + plaintext_len, ad, ad_len,
-        ciphertext, plaintext_len);
+    rc = crypto_aead_read(&aead, out, data + plain_size,
+        ad, ad_size, data, plain_size);
     crypto_wipe(&aead, sizeof(aead));
     if (rc != 0) return -1;
     cipher->n++;
     return 0;
 }
 
-/**
- * Mixes bytes into a Noise handshake hash.
- * @param state Symmetric state.
- * @param data Input bytes.
- * @param data_len Input length.
- * @return Nothing.
- */
-static void kc_trust_noise_mix_hash(kc_trust_symmetric_state_t *state,
-const unsigned char *data, size_t data_len) {
+static void kc_trust_mix_hash(kc_trust_symmetric_state_t *state,
+    const unsigned char *data, size_t size) {
     unsigned char next[KC_TRUST_HASH_SIZE];
     crypto_blake2b_ctx hash;
     crypto_blake2b_init(&hash, KC_TRUST_HASH_SIZE);
     crypto_blake2b_update(&hash, state->h, KC_TRUST_HASH_SIZE);
-    crypto_blake2b_update(&hash, data, data_len);
+    if (size) crypto_blake2b_update(&hash, data, size);
     crypto_blake2b_final(&hash, next);
-    memcpy(state->h, next, KC_TRUST_HASH_SIZE);
+    memcpy(state->h, next, sizeof(next));
     crypto_wipe(next, sizeof(next));
 }
 
-/**
- * Mixes DH output into a Noise chaining key and cipher state.
- * @param state Symmetric state.
- * @param input_key_material Input key material.
- * @param input_len Input length.
- * @return Nothing.
- */
-static void kc_trust_noise_mix_key(kc_trust_symmetric_state_t *state,
-const unsigned char *input_key_material, size_t input_len) {
-    unsigned char next_ck[KC_TRUST_HASH_SIZE];
-    unsigned char temp_k[KC_TRUST_HASH_SIZE];
-    kc_trust_noise_hkdf_2(next_ck, temp_k, state->ck,
-        input_key_material, input_len);
-    memcpy(state->ck, next_ck, KC_TRUST_HASH_SIZE);
-    kc_trust_cipher_initialize_key(&state->cipher, temp_k);
-    crypto_wipe(next_ck, sizeof(next_ck));
-    crypto_wipe(temp_k, sizeof(temp_k));
+static void kc_trust_mix_key(kc_trust_symmetric_state_t *state,
+    const unsigned char *input, size_t size) {
+    unsigned char ck[KC_TRUST_HASH_SIZE];
+    unsigned char key[KC_TRUST_HASH_SIZE];
+    kc_trust_hkdf2(ck, key, state->ck, input, size);
+    memcpy(state->ck, ck, sizeof(ck));
+    kc_trust_cipher_key(&state->cipher, key);
+    crypto_wipe(ck, sizeof(ck));
+    crypto_wipe(key, sizeof(key));
 }
 
-/**
- * Encrypts plaintext and mixes the resulting ciphertext into the hash.
- * @param state Symmetric state.
- * @param plaintext Plaintext input.
- * @param plaintext_len Plaintext length.
- * @param ciphertext Ciphertext and tag output.
- * @return 0 on success, -1 on failure.
- */
-static int kc_trust_noise_encrypt_and_hash(kc_trust_symmetric_state_t *state,
-const unsigned char *plaintext, size_t plaintext_len,
-unsigned char *ciphertext) {
+static void kc_trust_mix_key_and_hash(kc_trust_symmetric_state_t *state,
+    const unsigned char psk[KC_TRUST_PSK_SIZE]) {
+    unsigned char ck[KC_TRUST_HASH_SIZE];
+    unsigned char hash[KC_TRUST_HASH_SIZE];
+    unsigned char key[KC_TRUST_HASH_SIZE];
+    kc_trust_hkdf3(ck, hash, key, state->ck, psk, KC_TRUST_PSK_SIZE);
+    memcpy(state->ck, ck, sizeof(ck));
+    kc_trust_mix_hash(state, hash, sizeof(hash));
+    kc_trust_cipher_key(&state->cipher, key);
+    crypto_wipe(ck, sizeof(ck));
+    crypto_wipe(hash, sizeof(hash));
+    crypto_wipe(key, sizeof(key));
+}
+
+static int kc_trust_encrypt_and_hash(kc_trust_symmetric_state_t *state,
+    const unsigned char *plain, size_t plain_size, unsigned char *out) {
     if (kc_trust_cipher_encrypt(&state->cipher, state->h,
-        KC_TRUST_HASH_SIZE, plaintext, plaintext_len, ciphertext) != 0)
-        return -1;
-    kc_trust_noise_mix_hash(state, ciphertext,
-        plaintext_len + KC_TRUST_MAC_SIZE);
+        KC_TRUST_HASH_SIZE, plain, plain_size, out) != 0) return -1;
+    kc_trust_mix_hash(state, out, plain_size + KC_TRUST_MAC_SIZE);
     return 0;
 }
 
-/**
- * Decrypts ciphertext and then mixes it into the handshake hash.
- * @param state Symmetric state.
- * @param ciphertext Ciphertext input including the tag.
- * @param ciphertext_len Ciphertext length.
- * @param plaintext Plaintext output.
- * @return 0 on success, -1 on authentication failure.
- */
-static int kc_trust_noise_decrypt_and_hash(kc_trust_symmetric_state_t *state,
-const unsigned char *ciphertext, size_t ciphertext_len,
-unsigned char *plaintext) {
+static int kc_trust_decrypt_and_hash(kc_trust_symmetric_state_t *state,
+    const unsigned char *data, size_t data_size, unsigned char *out) {
     if (kc_trust_cipher_decrypt(&state->cipher, state->h,
-        KC_TRUST_HASH_SIZE, ciphertext, ciphertext_len, plaintext) != 0)
-        return -1;
-    kc_trust_noise_mix_hash(state, ciphertext, ciphertext_len);
+        KC_TRUST_HASH_SIZE, data, data_size, out) != 0) return -1;
+    kc_trust_mix_hash(state, data, data_size);
     return 0;
 }
 
-/**
- * Derives the two Noise transport cipher states.
- * @param state Symmetric state.
- * @param first First transport cipher state.
- * @param second Second transport cipher state.
- * @return Nothing.
- */
-static void kc_trust_noise_split(const kc_trust_symmetric_state_t *state,
-kc_trust_cipher_state_t *first, kc_trust_cipher_state_t *second) {
+static void kc_trust_split(const kc_trust_symmetric_state_t *state,
+    kc_trust_cipher_state_t *first, kc_trust_cipher_state_t *second) {
     unsigned char first_key[KC_TRUST_HASH_SIZE];
     unsigned char second_key[KC_TRUST_HASH_SIZE];
-    kc_trust_noise_hkdf_2(first_key, second_key, state->ck, NULL, 0);
-    kc_trust_cipher_initialize_key(first, first_key);
-    kc_trust_cipher_initialize_key(second, second_key);
+    kc_trust_hkdf2(first_key, second_key, state->ck, NULL, 0);
+    kc_trust_cipher_key(first, first_key);
+    kc_trust_cipher_key(second, second_key);
     crypto_wipe(first_key, sizeof(first_key));
     crypto_wipe(second_key, sizeof(second_key));
 }
 
-/**
- * Initializes Noise X and processes its responder-static pre-message.
- * @param state Symmetric state output.
- * @param recipient_pk Responder static public key.
- * @return Nothing.
- */
-static void kc_trust_noise_initialize(kc_trust_symmetric_state_t *state,
-const unsigned char recipient_pk[KC_TRUST_PK_SIZE]) {
-    static const unsigned char name[] =
-        "Noise_X_25519_ChaChaPoly_BLAKE2b";
-    memset(state->h, 0, KC_TRUST_HASH_SIZE);
-    memcpy(state->h, name, sizeof(name) - 1);
+static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
+    const char *name, const unsigned char uid[KC_TRUST_UID_BYTES]) {
+    size_t name_size = strlen(name);
+    memset(state, 0, sizeof(*state));
+    if (name_size <= KC_TRUST_HASH_SIZE) {
+        memcpy(state->h, name, name_size);
+    } else {
+        crypto_blake2b(state->h, KC_TRUST_HASH_SIZE,
+            (const unsigned char *)name, name_size);
+    }
     memcpy(state->ck, state->h, KC_TRUST_HASH_SIZE);
-    kc_trust_cipher_initialize_empty(&state->cipher);
-    kc_trust_noise_mix_hash(state, NULL, 0);
-    kc_trust_noise_mix_hash(state, recipient_pk, KC_TRUST_PK_SIZE);
+    kc_trust_cipher_empty(&state->cipher);
+    kc_trust_mix_hash(state, uid, KC_TRUST_UID_BYTES);
 }
 
-/**
- * Validates that an X25519 shared secret is not all-zero.
- * @param ss 32-byte shared secret.
- * @return 1 if valid, 0 if all-zero (low-order point).
- */
-static int kc_trust_x25519_valid(const unsigned char ss[32]) {
-    unsigned char z[32];
-    memset(z, 0, 32);
-    return crypto_verify32(ss, z) != 0;
+static int kc_trust_x25519(unsigned char out[32],
+    const unsigned char sk[32], const unsigned char pk[32]) {
+    unsigned char zero[32] = {0};
+    crypto_x25519(out, sk, pk);
+    if (crypto_verify32(out, zero) == 0) {
+        crypto_wipe(out, 32);
+        return -1;
+    }
+    return 0;
 }
 
-/**
- * Returns the build version generated at compile time.
- * @return Unix timestamp for the current build.
- */
+static void kc_trust_store_u64(unsigned char out[8], uint64_t value) {
+    for (size_t i = 0; i < 8; i++)
+        out[7 - i] = (unsigned char)(value >> (8 * i));
+}
+
+static uint64_t kc_trust_load_u64(const unsigned char in[8]) {
+    uint64_t value = 0;
+    for (size_t i = 0; i < 8; i++) value = (value << 8) | in[i];
+    return value;
+}
+
+static size_t kc_trust_record_count(size_t size) {
+    if (size == 0) return 0;
+    return 1 + (size - 1) / KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
+}
+
+static size_t kc_trust_payload_size(size_t size) {
+    return KC_TRUST_PAYLOAD_BASE_SIZE + size +
+        kc_trust_record_count(size) * KC_TRUST_MAC_SIZE;
+}
+
+static int kc_trust_xpsk1_write(
+    const unsigned char uid[KC_TRUST_UID_BYTES],
+    const unsigned char local_sk[KC_TRUST_SK_SIZE],
+    const unsigned char remote_pk[KC_TRUST_PK_SIZE],
+    const unsigned char psk[KC_TRUST_PSK_SIZE],
+    unsigned char out[KC_TRUST_XPSK1_MESSAGE_SIZE]) {
+    static const char name[] = "Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b";
+    kc_trust_symmetric_state_t state;
+    unsigned char local_pk[KC_TRUST_PK_SIZE];
+    unsigned char eph_sk[KC_TRUST_SK_SIZE];
+    unsigned char dh[32];
+    unsigned char *p = out;
+    int rc = -1;
+    crypto_x25519_public_key(local_pk, local_sk);
+    kc_trust_noise_init(&state, name, uid);
+    kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
+    if (kc_trust_read_random(eph_sk, sizeof(eph_sk)) != 0) goto done;
+    crypto_x25519_public_key(p, eph_sk);
+    kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
+    kc_trust_mix_key(&state, p, KC_TRUST_PK_SIZE);
+    if (kc_trust_x25519(dh, eph_sk, remote_pk) != 0) goto done;
+    kc_trust_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    p += KC_TRUST_PK_SIZE;
+    if (kc_trust_encrypt_and_hash(&state, local_pk, KC_TRUST_PK_SIZE, p) != 0)
+        goto done;
+    p += KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE;
+    if (kc_trust_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_trust_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    kc_trust_mix_key_and_hash(&state, psk);
+    if (kc_trust_encrypt_and_hash(&state, NULL, 0, p) != 0) goto done;
+    rc = 0;
+done:
+    crypto_wipe(local_pk, sizeof(local_pk));
+    crypto_wipe(eph_sk, sizeof(eph_sk));
+    crypto_wipe(dh, sizeof(dh));
+    crypto_wipe(&state, sizeof(state));
+    if (rc != 0) crypto_wipe(out, KC_TRUST_XPSK1_MESSAGE_SIZE);
+    return rc;
+}
+
+static int kc_trust_xpsk1_read(
+    const unsigned char uid[KC_TRUST_UID_BYTES],
+    const unsigned char local_sk[KC_TRUST_SK_SIZE],
+    const unsigned char psk[KC_TRUST_PSK_SIZE],
+    const unsigned char message[KC_TRUST_XPSK1_MESSAGE_SIZE],
+    unsigned char remote_pk[KC_TRUST_PK_SIZE]) {
+    static const char name[] = "Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b";
+    kc_trust_symmetric_state_t state;
+    unsigned char local_pk[KC_TRUST_PK_SIZE];
+    unsigned char dh[32];
+    unsigned char empty[1];
+    const unsigned char *p = message;
+    int rc = -1;
+    crypto_x25519_public_key(local_pk, local_sk);
+    kc_trust_noise_init(&state, name, uid);
+    kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
+    kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
+    kc_trust_mix_key(&state, p, KC_TRUST_PK_SIZE);
+    if (kc_trust_x25519(dh, local_sk, p) != 0) goto done;
+    kc_trust_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    p += KC_TRUST_PK_SIZE;
+    if (kc_trust_decrypt_and_hash(&state, p,
+        KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE, remote_pk) != 0) goto done;
+    p += KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE;
+    if (kc_trust_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_trust_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    kc_trust_mix_key_and_hash(&state, psk);
+    if (kc_trust_decrypt_and_hash(&state, p, KC_TRUST_MAC_SIZE, empty) != 0)
+        goto done;
+    rc = 0;
+done:
+    crypto_wipe(local_pk, sizeof(local_pk));
+    crypto_wipe(dh, sizeof(dh));
+    crypto_wipe(empty, sizeof(empty));
+    crypto_wipe(&state, sizeof(state));
+    if (rc != 0) crypto_wipe(remote_pk, KC_TRUST_PK_SIZE);
+    return rc;
+}
+
+static int kc_trust_k_write(
+    const unsigned char uid[KC_TRUST_UID_BYTES],
+    const unsigned char local_sk[KC_TRUST_SK_SIZE],
+    const unsigned char remote_pk[KC_TRUST_PK_SIZE],
+    const unsigned char *message, size_t message_size,
+    unsigned char *out) {
+    static const char name[] = "Noise_K_25519_ChaChaPoly_BLAKE2b";
+    kc_trust_symmetric_state_t state;
+    kc_trust_cipher_state_t first;
+    kc_trust_cipher_state_t second;
+    unsigned char local_pk[KC_TRUST_PK_SIZE];
+    unsigned char eph_sk[KC_TRUST_SK_SIZE];
+    unsigned char dh[32];
+    unsigned char logical[8];
+    unsigned char *p = out;
+    size_t offset = 0;
+    int rc = -1;
+    crypto_x25519_public_key(local_pk, local_sk);
+    kc_trust_noise_init(&state, name, uid);
+    kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
+    kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
+    if (kc_trust_read_random(eph_sk, sizeof(eph_sk)) != 0) goto done;
+    crypto_x25519_public_key(p, eph_sk);
+    kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
+    if (kc_trust_x25519(dh, eph_sk, remote_pk) != 0) goto done;
+    kc_trust_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    if (kc_trust_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_trust_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    p += KC_TRUST_PK_SIZE;
+    if (kc_trust_encrypt_and_hash(&state, NULL, 0, p) != 0) goto done;
+    p += KC_TRUST_MAC_SIZE;
+    kc_trust_split(&state, &first, &second);
+    kc_trust_store_u64(logical, (uint64_t)message_size);
+    if (kc_trust_cipher_encrypt(&first, NULL, 0, logical, sizeof(logical), p) != 0)
+        goto done;
+    p += KC_TRUST_LENGTH_RECORD_SIZE;
+    while (offset < message_size) {
+        size_t part = message_size - offset;
+        if (part > KC_TRUST_TRANSPORT_PLAINTEXT_MAX)
+            part = KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
+        if (kc_trust_cipher_encrypt(&first, NULL, 0, message + offset,
+            part, p) != 0) goto done;
+        p += part + KC_TRUST_MAC_SIZE;
+        offset += part;
+    }
+    rc = 0;
+done:
+    crypto_wipe(local_pk, sizeof(local_pk));
+    crypto_wipe(eph_sk, sizeof(eph_sk));
+    crypto_wipe(dh, sizeof(dh));
+    crypto_wipe(logical, sizeof(logical));
+    crypto_wipe(&first, sizeof(first));
+    crypto_wipe(&second, sizeof(second));
+    crypto_wipe(&state, sizeof(state));
+    return rc;
+}
+
+static int kc_trust_k_read(
+    const unsigned char uid[KC_TRUST_UID_BYTES],
+    const unsigned char local_sk[KC_TRUST_SK_SIZE],
+    const unsigned char remote_pk[KC_TRUST_PK_SIZE],
+    const unsigned char *data, size_t data_size,
+    unsigned char **out_message, size_t *out_message_size) {
+    static const char name[] = "Noise_K_25519_ChaChaPoly_BLAKE2b";
+    kc_trust_symmetric_state_t state;
+    kc_trust_cipher_state_t first;
+    kc_trust_cipher_state_t second;
+    unsigned char local_pk[KC_TRUST_PK_SIZE];
+    unsigned char dh[32];
+    unsigned char empty[1];
+    unsigned char logical[8];
+    unsigned char *message = NULL;
+    const unsigned char *p = data;
+    uint64_t logical_size;
+    size_t message_size;
+    size_t offset = 0;
+    int rc = -1;
+    if (data_size < KC_TRUST_PAYLOAD_BASE_SIZE) return -1;
+    crypto_x25519_public_key(local_pk, local_sk);
+    kc_trust_noise_init(&state, name, uid);
+    kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
+    kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
+    kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
+    if (kc_trust_x25519(dh, local_sk, p) != 0) goto done;
+    kc_trust_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    if (kc_trust_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_trust_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    p += KC_TRUST_PK_SIZE;
+    if (kc_trust_decrypt_and_hash(&state, p, KC_TRUST_MAC_SIZE, empty) != 0)
+        goto done;
+    p += KC_TRUST_MAC_SIZE;
+    kc_trust_split(&state, &first, &second);
+    if (kc_trust_cipher_decrypt(&first, NULL, 0, p,
+        KC_TRUST_LENGTH_RECORD_SIZE, logical) != 0) goto done;
+    p += KC_TRUST_LENGTH_RECORD_SIZE;
+    logical_size = kc_trust_load_u64(logical);
+    if (logical_size > KC_TRUST_MAX_MESSAGE) goto done;
+    message_size = (size_t)logical_size;
+    if (data_size != kc_trust_payload_size(message_size)) goto done;
+    message = (unsigned char *)kc_trust_alloc(message_size ? message_size : 1);
+    if (!message) goto done;
+    while (offset < message_size) {
+        size_t part = message_size - offset;
+        if (part > KC_TRUST_TRANSPORT_PLAINTEXT_MAX)
+            part = KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
+        if (kc_trust_cipher_decrypt(&first, NULL, 0, p,
+            part + KC_TRUST_MAC_SIZE, message + offset) != 0) goto done;
+        p += part + KC_TRUST_MAC_SIZE;
+        offset += part;
+    }
+    *out_message = message;
+    *out_message_size = message_size;
+    message = NULL;
+    rc = 0;
+done:
+    kc_trust_free(message);
+    crypto_wipe(local_pk, sizeof(local_pk));
+    crypto_wipe(dh, sizeof(dh));
+    crypto_wipe(empty, sizeof(empty));
+    crypto_wipe(logical, sizeof(logical));
+    crypto_wipe(&first, sizeof(first));
+    crypto_wipe(&second, sizeof(second));
+    crypto_wipe(&state, sizeof(state));
+    return rc;
+}
+
 uint64_t kc_trust_version(void) {
     return (uint64_t)KC_TRUST_BUILD_VERSION;
 }
 
-/**
- * Generates a fresh random keypair for a new identity.
- * Zeroes both output buffers, then fills the secret key with random bytes
- * from the platform entropy backend and derives the public key.
- * Memory-only: no files, no environment, no paths.
- * @param secret_key Destination for the random 32-byte secret key.
- * @param public_key Destination for the derived 32-byte public key.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
- */
-int kc_trust_generate(unsigned char secret_key[KC_TRUST_SK_SIZE],
-unsigned char public_key[KC_TRUST_PK_SIZE]) {
-    if (!secret_key || !public_key) return KC_TRUST_ERROR;
-    memset(secret_key, 0, KC_TRUST_SK_SIZE);
-    memset(public_key, 0, KC_TRUST_PK_SIZE);
-    if (kc_trust_read_random(secret_key, KC_TRUST_SK_SIZE) != 0) {
-        memset(secret_key, 0, KC_TRUST_SK_SIZE);
-        memset(public_key, 0, KC_TRUST_PK_SIZE);
-        return KC_TRUST_ERROR;
-    }
-    crypto_x25519_public_key(public_key, secret_key);
-    return KC_TRUST_OK;
-}
-
-/**
- * Initialises a new trust context from a caller-provided secret key.
- * Copies the secret key, derives the context public key, and initializes
- * empty in-memory TOFU state.  Memory-only: no files, no environment.
- * @param out Destination context pointer.
- * @param secret_key 32-byte secret key to install in the context.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
- */
-int kc_trust_create(kc_trust_t **out,
-const unsigned char secret_key[KC_TRUST_SK_SIZE]) {
+int kc_trust_init(kc_trust_t **out) {
+    kc_trust_t *trust;
     if (out) *out = NULL;
-    if (!out || !secret_key) return KC_TRUST_ERROR;
-    kc_trust_t *ctx = (kc_trust_t *)calloc(1, sizeof(kc_trust_t));
-    if (!ctx) return KC_TRUST_ERROR;
-    memcpy(ctx->sk, secret_key, KC_TRUST_SK_SIZE);
-    crypto_x25519_public_key(ctx->pk, ctx->sk);
-    ctx->has_identity = 1;
-    *out = ctx;
+    if (!out) return KC_TRUST_ERROR;
+    trust = (kc_trust_t *)calloc(1, sizeof(*trust));
+    if (!trust) return KC_TRUST_ERROR;
+    if (kc_trust_resolve_dir(trust->dir, sizeof(trust->dir)) != 0 ||
+        kc_trust_store_dirs(trust) != 0) {
+        crypto_wipe(trust, sizeof(*trust));
+        free(trust);
+        return KC_TRUST_ERROR;
+    }
+    *out = trust;
     return KC_TRUST_OK;
 }
 
-/**
- * Releases a trust context and wipes all sensitive material.
- * @param ctx Context pointer. NULL is a safe no-op.
- * @return Nothing.
- */
-void kc_trust_close(kc_trust_t *ctx) {
-    if (!ctx) return;
-    crypto_wipe(ctx->sk, KC_TRUST_SK_SIZE);
-    for (int i = 0; i < ctx->trust_count; i++)
-        crypto_wipe(ctx->trust[i].pk, KC_TRUST_PK_SIZE);
-    crypto_wipe(ctx, sizeof(*ctx));
-    free(ctx);
+int kc_trust_invite(kc_trust_t *trust, char **out_uid, char **out_code) {
+    unsigned char uid[KC_TRUST_UID_BYTES];
+    unsigned char sk[KC_TRUST_SK_SIZE];
+    unsigned char pk[KC_TRUST_PK_SIZE];
+    unsigned char psk[KC_TRUST_PSK_SIZE];
+    unsigned char raw[KC_TRUST_INVITE_RAW_SIZE];
+    char uid_text[KC_TRUST_UID_SIZE + 1];
+    char *uid_copy = NULL;
+    char *code = NULL;
+    int rc = KC_TRUST_ERROR;
+    if (out_uid) *out_uid = NULL;
+    if (out_code) *out_code = NULL;
+    if (!trust || !out_uid || !out_code) return KC_TRUST_ERROR;
+    if (kc_trust_uid_new(uid, uid_text) != 0 ||
+        kc_trust_read_random(sk, sizeof(sk)) != 0 ||
+        kc_trust_read_random(psk, sizeof(psk)) != 0) goto done;
+    crypto_x25519_public_key(pk, sk);
+    raw[0] = KC_TRUST_INVITE_VERSION;
+    memcpy(raw + 1, uid, sizeof(uid));
+    memcpy(raw + 1 + KC_TRUST_UID_BYTES, pk, sizeof(pk));
+    memcpy(raw + 1 + KC_TRUST_UID_BYTES + KC_TRUST_PK_SIZE, psk, sizeof(psk));
+    if (kc_trust_pending_write(trust, uid_text, sk, psk) != 0) goto done;
+    uid_copy = kc_trust_public_strdup(uid_text);
+    code = kc_trust_base64_encode(raw, sizeof(raw));
+    if (!uid_copy || !code) {
+        kc_trust_pending_remove(trust, uid_text);
+        goto done;
+    }
+    *out_uid = uid_copy;
+    *out_code = code;
+    uid_copy = NULL;
+    code = NULL;
+    rc = KC_TRUST_OK;
+done:
+    kc_trust_free(uid_copy);
+    kc_trust_free(code);
+    crypto_wipe(uid, sizeof(uid));
+    crypto_wipe(sk, sizeof(sk));
+    crypto_wipe(pk, sizeof(pk));
+    crypto_wipe(psk, sizeof(psk));
+    crypto_wipe(raw, sizeof(raw));
+    return rc;
 }
 
-/**
- * Returns the context's 32-byte public key.
- * @param ctx Context pointer.
- * @return Pointer to 32 bytes, or NULL on error.
- */
-const unsigned char *kc_trust_public_key(const kc_trust_t *ctx) {
-    if (!ctx || !ctx->has_identity) return NULL;
-    return ctx->pk;
+int kc_trust_join(kc_trust_t *trust, const char *code,
+    char **out_uid, char **out_confirmation) {
+    unsigned char *raw = NULL;
+    size_t raw_size = 0;
+    unsigned char uid[KC_TRUST_UID_BYTES];
+    unsigned char remote_pk[KC_TRUST_PK_SIZE];
+    unsigned char psk[KC_TRUST_PSK_SIZE];
+    unsigned char local_sk[KC_TRUST_SK_SIZE];
+    unsigned char confirmation[KC_TRUST_CONFIRM_RAW_SIZE];
+    char uid_text[KC_TRUST_UID_SIZE + 1];
+    char *uid_copy = NULL;
+    char *confirmation_text = NULL;
+    int rc = KC_TRUST_ERROR;
+    if (out_uid) *out_uid = NULL;
+    if (out_confirmation) *out_confirmation = NULL;
+    if (!trust || !code || !out_uid || !out_confirmation)
+        return KC_TRUST_ERROR;
+    raw = kc_trust_base64_decode(code, &raw_size);
+    if (!raw || raw_size != KC_TRUST_INVITE_RAW_SIZE ||
+        raw[0] != KC_TRUST_INVITE_VERSION) goto done;
+    memcpy(uid, raw + 1, sizeof(uid));
+    memcpy(remote_pk, raw + 1 + KC_TRUST_UID_BYTES, sizeof(remote_pk));
+    memcpy(psk, raw + 1 + KC_TRUST_UID_BYTES + KC_TRUST_PK_SIZE, sizeof(psk));
+    if (kc_trust_uid_format(uid, uid_text) != 0 ||
+        kc_trust_read_random(local_sk, sizeof(local_sk)) != 0) goto done;
+    confirmation[0] = KC_TRUST_INVITE_VERSION;
+    memcpy(confirmation + 1, uid, sizeof(uid));
+    if (kc_trust_xpsk1_write(uid, local_sk, remote_pk, psk,
+        confirmation + 1 + KC_TRUST_UID_BYTES) != 0) goto done;
+    if (kc_trust_peer_write(trust, uid_text, local_sk, remote_pk) != 0)
+        goto done;
+    uid_copy = kc_trust_public_strdup(uid_text);
+    confirmation_text = kc_trust_base64_encode(confirmation,
+        sizeof(confirmation));
+    if (!uid_copy || !confirmation_text) {
+        kc_trust_peer_remove(trust, uid_text);
+        goto done;
+    }
+    *out_uid = uid_copy;
+    *out_confirmation = confirmation_text;
+    uid_copy = NULL;
+    confirmation_text = NULL;
+    rc = KC_TRUST_OK;
+done:
+    if (raw) {
+        crypto_wipe(raw, raw_size ? raw_size : 1);
+        free(raw);
+    }
+    kc_trust_free(uid_copy);
+    kc_trust_free(confirmation_text);
+    crypto_wipe(uid, sizeof(uid));
+    crypto_wipe(remote_pk, sizeof(remote_pk));
+    crypto_wipe(psk, sizeof(psk));
+    crypto_wipe(local_sk, sizeof(local_sk));
+    crypto_wipe(confirmation, sizeof(confirmation));
+    return rc;
 }
 
-/**
- * Protects an outgoing message.
- * @param ctx Context (carries local identity).
- * @param recipient_pk 32-byte recipient public key.
- * @param message Application message.
- * @param message_len Message length.
- * @param payload Destination pointer for the allocated encrypted payload.
- * @param payload_len Destination payload length.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
- */
-int kc_trust_seal(const kc_trust_t *ctx,
-const unsigned char recipient_pk[KC_TRUST_PK_SIZE],
-const unsigned char *message, size_t message_len,
-unsigned char **payload, size_t *payload_len) {
-    if (payload) *payload = NULL;
-    if (payload_len) *payload_len = 0;
-    if (!payload || !payload_len) return KC_TRUST_ERROR;
-    if (!ctx || !ctx->has_identity || !recipient_pk)
-        return KC_TRUST_ERROR;
-    if (message_len > KC_TRUST_MAX_MESSAGE)
-        return KC_TRUST_ERROR;
-    if (message_len > 0 && !message) return KC_TRUST_ERROR;
-
-    size_t encoded_len = kc_trust_payload_size(message_len);
-    unsigned char *encoded = (unsigned char *)malloc(encoded_len);
-    if (!encoded) return KC_TRUST_ERROR;
-
-    unsigned char eph_sk[KC_TRUST_SK_SIZE];
-    if (kc_trust_read_random(eph_sk, KC_TRUST_SK_SIZE) != 0) {
-        free(encoded);
-        return KC_TRUST_ERROR;
+int kc_trust_confirm(kc_trust_t *trust, const char *confirmation,
+    char **out_uid) {
+    unsigned char *raw = NULL;
+    size_t raw_size = 0;
+    unsigned char uid[KC_TRUST_UID_BYTES];
+    unsigned char local_sk[KC_TRUST_SK_SIZE];
+    unsigned char psk[KC_TRUST_PSK_SIZE];
+    unsigned char remote_pk[KC_TRUST_PK_SIZE];
+    char uid_text[KC_TRUST_UID_SIZE + 1];
+    char *uid_copy = NULL;
+    int rc = KC_TRUST_ERROR;
+    if (out_uid) *out_uid = NULL;
+    if (!trust || !confirmation || !out_uid) return KC_TRUST_ERROR;
+    raw = kc_trust_base64_decode(confirmation, &raw_size);
+    if (!raw || raw_size != KC_TRUST_CONFIRM_RAW_SIZE ||
+        raw[0] != KC_TRUST_INVITE_VERSION) goto done;
+    memcpy(uid, raw + 1, sizeof(uid));
+    if (kc_trust_uid_format(uid, uid_text) != 0 ||
+        kc_trust_pending_read(trust, uid_text, local_sk, psk) != 0)
+        goto done;
+    if (kc_trust_xpsk1_read(uid, local_sk, psk,
+        raw + 1 + KC_TRUST_UID_BYTES, remote_pk) != 0) goto done;
+    if (kc_trust_peer_write(trust, uid_text, local_sk, remote_pk) != 0)
+        goto done;
+    if (kc_trust_pending_remove(trust, uid_text) != 0) {
+        kc_trust_peer_remove(trust, uid_text);
+        goto done;
     }
-    crypto_x25519_public_key(encoded, eph_sk);
-
-    kc_trust_symmetric_state_t state;
-    kc_trust_noise_initialize(&state, recipient_pk);
-    kc_trust_noise_mix_hash(&state, encoded, KC_TRUST_PK_SIZE);
-
-    unsigned char dh[32];
-    crypto_x25519(dh, eph_sk, recipient_pk);
-    if (!kc_trust_x25519_valid(dh)) {
-        crypto_wipe(dh, sizeof(dh));
-        crypto_wipe(eph_sk, sizeof(eph_sk));
-        crypto_wipe(&state, sizeof(state));
-        free(encoded);
-        return KC_TRUST_ERROR;
+    uid_copy = kc_trust_public_strdup(uid_text);
+    if (!uid_copy) goto done;
+    *out_uid = uid_copy;
+    uid_copy = NULL;
+    rc = KC_TRUST_OK;
+done:
+    if (raw) {
+        crypto_wipe(raw, raw_size ? raw_size : 1);
+        free(raw);
     }
-    kc_trust_noise_mix_key(&state, dh, sizeof(dh));
-    crypto_wipe(dh, sizeof(dh));
-
-    unsigned char *encrypted_static = encoded + KC_TRUST_PK_SIZE;
-    if (kc_trust_noise_encrypt_and_hash(&state, ctx->pk,
-        KC_TRUST_PK_SIZE, encrypted_static) != 0) {
-        crypto_wipe(eph_sk, sizeof(eph_sk));
-        crypto_wipe(&state, sizeof(state));
-        free(encoded);
-        return KC_TRUST_ERROR;
-    }
-
-    crypto_x25519(dh, ctx->sk, recipient_pk);
-    if (!kc_trust_x25519_valid(dh)) {
-        crypto_wipe(dh, sizeof(dh));
-        crypto_wipe(eph_sk, sizeof(eph_sk));
-        crypto_wipe(&state, sizeof(state));
-        free(encoded);
-        return KC_TRUST_ERROR;
-    }
-    kc_trust_noise_mix_key(&state, dh, sizeof(dh));
-    crypto_wipe(dh, sizeof(dh));
-
-    unsigned char *empty_handshake_payload =
-        encrypted_static + KC_TRUST_ENCRYPTED_PK_SIZE;
-    if (kc_trust_noise_encrypt_and_hash(&state, NULL, 0,
-        empty_handshake_payload) != 0) {
-        crypto_wipe(eph_sk, sizeof(eph_sk));
-        crypto_wipe(&state, sizeof(state));
-        free(encoded);
-        return KC_TRUST_ERROR;
-    }
-
-    kc_trust_cipher_state_t first;
-    kc_trust_cipher_state_t second;
-    kc_trust_noise_split(&state, &first, &second);
-    unsigned char logical_length[KC_TRUST_LOGICAL_LENGTH_SIZE];
-    kc_trust_store_u64_be(logical_length, message_len);
-    unsigned char *record = encoded + KC_TRUST_HANDSHAKE_SIZE;
-    if (kc_trust_cipher_encrypt(&first, NULL, 0, logical_length,
-        sizeof(logical_length), record) != 0) {
-        crypto_wipe(&first, sizeof(first));
-        crypto_wipe(&second, sizeof(second));
-        crypto_wipe(logical_length, sizeof(logical_length));
-        crypto_wipe(eph_sk, sizeof(eph_sk));
-        crypto_wipe(&state, sizeof(state));
-        free(encoded);
-        return KC_TRUST_ERROR;
-    }
-    crypto_wipe(logical_length, sizeof(logical_length));
-    record += KC_TRUST_LENGTH_RECORD_SIZE;
-    size_t offset = 0;
-    while (offset < message_len) {
-        size_t chunk_len = message_len - offset;
-        if (chunk_len > KC_TRUST_TRANSPORT_PLAINTEXT_MAX)
-            chunk_len = KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
-        if (kc_trust_cipher_encrypt(&first, NULL, 0, message + offset,
-            chunk_len, record) != 0) {
-            crypto_wipe(&first, sizeof(first));
-            crypto_wipe(&second, sizeof(second));
-            crypto_wipe(eph_sk, sizeof(eph_sk));
-            crypto_wipe(&state, sizeof(state));
-            free(encoded);
-            return KC_TRUST_ERROR;
-        }
-        offset += chunk_len;
-        record += chunk_len + KC_TRUST_MAC_SIZE;
-    }
-    crypto_wipe(&first, sizeof(first));
-    crypto_wipe(&second, sizeof(second));
-    crypto_wipe(eph_sk, sizeof(eph_sk));
-    crypto_wipe(&state, sizeof(state));
-
-    *payload = encoded;
-    *payload_len = encoded_len;
-    return KC_TRUST_OK;
+    kc_trust_free(uid_copy);
+    crypto_wipe(uid, sizeof(uid));
+    crypto_wipe(local_sk, sizeof(local_sk));
+    crypto_wipe(psk, sizeof(psk));
+    crypto_wipe(remote_pk, sizeof(remote_pk));
+    return rc;
 }
 
-/**
- * Explicitly trusts a peer binding.
- * @param ctx Context.
- * @param peer_id Opaque caller-defined peer identifier.
- * @param peer_id_len Identifier length (must be > 0).
- * @param peer_pk 32-byte public key to bind.
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR on failure.
- */
-int kc_trust_trust(kc_trust_t *ctx,
-    const unsigned char *peer_id, size_t peer_id_len,
-    const unsigned char peer_pk[KC_TRUST_PK_SIZE]) {
-    if (!ctx || !peer_id || peer_id_len == 0 || !peer_pk) return KC_TRUST_ERROR;
-    if (peer_id_len > KC_TRUST_MAX_PEER_ID) return KC_TRUST_ERROR;
-
-    for (int i = 0; i < ctx->trust_count; i++) {
-        if (ctx->trust[i].id_len == peer_id_len &&
-            memcmp(ctx->trust[i].id, peer_id, peer_id_len) == 0) {
-            memcpy(ctx->trust[i].pk, peer_pk, KC_TRUST_PK_SIZE);
-            return KC_TRUST_OK;
-        }
-    }
-
-    if (ctx->trust_count >= KC_TRUST_MAX_TRUST) return KC_TRUST_ERROR;
-
-    kc_trust_trust_entry_t *e = &ctx->trust[ctx->trust_count++];
-    e->id_len = peer_id_len;
-    memcpy(e->id, peer_id, peer_id_len);
-    memcpy(e->pk, peer_pk, KC_TRUST_PK_SIZE);
-    return KC_TRUST_OK;
+int kc_trust_seal(kc_trust_t *trust, const char *uid,
+    const void *message, size_t message_size,
+    void **out_data, size_t *out_size) {
+    unsigned char uid_bytes[KC_TRUST_UID_BYTES];
+    unsigned char local_sk[KC_TRUST_SK_SIZE];
+    unsigned char remote_pk[KC_TRUST_PK_SIZE];
+    unsigned char *data = NULL;
+    size_t data_size;
+    int rc = KC_TRUST_ERROR;
+    if (out_data) *out_data = NULL;
+    if (out_size) *out_size = 0;
+    if (!trust || !uid || !out_data || !out_size ||
+        (message_size && !message) || message_size > KC_TRUST_MAX_MESSAGE)
+        return KC_TRUST_ERROR;
+    if (kc_trust_uid_parse(uid, uid_bytes) != 0 ||
+        kc_trust_peer_read(trust, uid, local_sk, remote_pk) != 0)
+        goto done;
+    data_size = kc_trust_payload_size(message_size);
+    data = (unsigned char *)kc_trust_alloc(data_size);
+    if (!data) goto done;
+    if (kc_trust_k_write(uid_bytes, local_sk, remote_pk,
+        (const unsigned char *)message, message_size, data) != 0) goto done;
+    *out_data = data;
+    *out_size = data_size;
+    data = NULL;
+    rc = KC_TRUST_OK;
+done:
+    kc_trust_free(data);
+    crypto_wipe(uid_bytes, sizeof(uid_bytes));
+    crypto_wipe(local_sk, sizeof(local_sk));
+    crypto_wipe(remote_pk, sizeof(remote_pk));
+    return rc;
 }
 
-/**
- * Removes a peer trust binding.
- * @param ctx Context.
- * @param peer_id Opaque caller-defined peer identifier.
- * @param peer_id_len Identifier length (must be > 0).
- * @return KC_TRUST_OK on success, KC_TRUST_ERROR if not found.
- */
-int kc_trust_forget(kc_trust_t *ctx,
-    const unsigned char *peer_id, size_t peer_id_len) {
-    if (!ctx || !peer_id || peer_id_len == 0) return KC_TRUST_ERROR;
-    if (peer_id_len > KC_TRUST_MAX_PEER_ID) return KC_TRUST_ERROR;
-
-    for (int i = 0; i < ctx->trust_count; i++) {
-        if (ctx->trust[i].id_len == peer_id_len &&
-            memcmp(ctx->trust[i].id, peer_id, peer_id_len) == 0) {
-            crypto_wipe(ctx->trust[i].pk, KC_TRUST_PK_SIZE);
-            ctx->trust_count--;
-            if (i < ctx->trust_count)
-                ctx->trust[i] = ctx->trust[ctx->trust_count];
-            return KC_TRUST_OK;
-        }
-    }
-    return KC_TRUST_ERROR;
+int kc_trust_unseal(kc_trust_t *trust, const char *uid,
+    const void *data, size_t data_size,
+    void **out_message, size_t *out_message_size) {
+    unsigned char uid_bytes[KC_TRUST_UID_BYTES];
+    unsigned char local_sk[KC_TRUST_SK_SIZE];
+    unsigned char remote_pk[KC_TRUST_PK_SIZE];
+    unsigned char *message = NULL;
+    size_t message_size = 0;
+    int rc = KC_TRUST_ERROR;
+    if (out_message) *out_message = NULL;
+    if (out_message_size) *out_message_size = 0;
+    if (!trust || !uid || !data || !out_message || !out_message_size)
+        return KC_TRUST_ERROR;
+    if (kc_trust_uid_parse(uid, uid_bytes) != 0 ||
+        kc_trust_peer_read(trust, uid, local_sk, remote_pk) != 0)
+        goto done;
+    if (kc_trust_k_read(uid_bytes, local_sk, remote_pk,
+        (const unsigned char *)data, data_size,
+        &message, &message_size) != 0) goto done;
+    *out_message = message;
+    *out_message_size = message_size;
+    message = NULL;
+    rc = KC_TRUST_OK;
+done:
+    kc_trust_free(message);
+    crypto_wipe(uid_bytes, sizeof(uid_bytes));
+    crypto_wipe(local_sk, sizeof(local_sk));
+    crypto_wipe(remote_pk, sizeof(remote_pk));
+    return rc;
 }
 
-/**
- * Evaluates trust status for a sender public key against a peer
- * identifier in the trust store.
- * @param ctx Context.
- * @param peer_id Caller-defined peer identifier.
- * @param peer_id_len Peer identifier length.
- * @param sender_pk Sender public key to compare.
- * @return Trust status code.
- */
-static int kc_trust_eval_trust(const kc_trust_t *ctx,
-    const unsigned char *peer_id, size_t peer_id_len,
-    const unsigned char sender_pk[KC_TRUST_PK_SIZE]) {
-    for (int i = 0; i < ctx->trust_count; i++) {
-        if (ctx->trust[i].id_len == peer_id_len &&
-            memcmp(ctx->trust[i].id, peer_id, peer_id_len) == 0) {
-            if (crypto_verify32(ctx->trust[i].pk, sender_pk) == 0)
-                return KC_TRUST_OK;
-            return KC_TRUST_PEER_CHANGED;
-        }
-    }
-    return KC_TRUST_PEER_NEW;
+int kc_trust_revoke(kc_trust_t *trust, const char *uid) {
+    char peer_path[KC_TRUST_PATH_SIZE];
+    char pending_path[KC_TRUST_PATH_SIZE];
+    int removed = 0;
+    if (!trust || !uid ||
+        kc_trust_record_path(trust, "peers", uid, peer_path) != 0 ||
+        kc_trust_record_path(trust, "pending", uid, pending_path) != 0)
+        return KC_TRUST_ERROR;
+    if (kc_trust_file_exists(peer_path) && kc_trust_peer_remove(trust, uid) == 0)
+        removed = 1;
+    if (kc_trust_file_exists(pending_path) &&
+        kc_trust_pending_remove(trust, uid) == 0) removed = 1;
+    return removed ? KC_TRUST_OK : KC_TRUST_ERROR;
 }
 
-/**
- * Authenticates and opens an encrypted payload.
- * @param ctx Context (carries local identity and trust state).
- * @param payload Encrypted payload produced by kc_trust_seal.
- * @param payload_len Payload length.
- * @param peer_id Optional peer identifier for trust evaluation.
- * @param peer_id_len Peer identifier length.
- * @param result Destination result. Caller must free with
- *                kc_trust_result_free().
- * @return KC_TRUST_OK when the result is populated, KC_TRUST_ERROR on failure.
- */
-int kc_trust_open(const kc_trust_t *ctx,
-const unsigned char *payload, size_t payload_len,
-const unsigned char *peer_id, size_t peer_id_len,
-kc_trust_result_t **result) {
-    if (result) *result = NULL;
-    if (!result || !ctx || !payload) return KC_TRUST_ERROR;
-    if (peer_id && (peer_id_len == 0 ||
-        peer_id_len > KC_TRUST_MAX_PEER_ID)) return KC_TRUST_ERROR;
-
-    if (payload_len < KC_TRUST_PAYLOAD_BASE_SIZE)
-        return KC_TRUST_ERROR;
-    if (payload_len > KC_TRUST_MAX_PAYLOAD)
-        return KC_TRUST_ERROR;
-
-    const unsigned char *eph_pk = payload;
-    const unsigned char *encrypted_static = eph_pk + KC_TRUST_PK_SIZE;
-    const unsigned char *empty_handshake_payload =
-        encrypted_static + KC_TRUST_ENCRYPTED_PK_SIZE;
-    const unsigned char *length_record =
-        payload + KC_TRUST_HANDSHAKE_SIZE;
-
-    kc_trust_symmetric_state_t state;
-    kc_trust_noise_initialize(&state, ctx->pk);
-    kc_trust_noise_mix_hash(&state, eph_pk, KC_TRUST_PK_SIZE);
-
-    unsigned char dh[32];
-    crypto_x25519(dh, ctx->sk, eph_pk);
-    if (!kc_trust_x25519_valid(dh)) {
-        crypto_wipe(dh, sizeof(dh));
-        crypto_wipe(&state, sizeof(state));
-        return KC_TRUST_ERROR;
-    }
-    kc_trust_noise_mix_key(&state, dh, sizeof(dh));
-    crypto_wipe(dh, sizeof(dh));
-
-    unsigned char sender_pk[KC_TRUST_PK_SIZE];
-    if (kc_trust_noise_decrypt_and_hash(&state, encrypted_static,
-        KC_TRUST_ENCRYPTED_PK_SIZE, sender_pk) != 0) {
-        crypto_wipe(sender_pk, sizeof(sender_pk));
-        crypto_wipe(&state, sizeof(state));
-        return KC_TRUST_ERROR;
-    }
-
-    crypto_x25519(dh, ctx->sk, sender_pk);
-    if (!kc_trust_x25519_valid(dh)) {
-        crypto_wipe(dh, sizeof(dh));
-        crypto_wipe(sender_pk, sizeof(sender_pk));
-        crypto_wipe(&state, sizeof(state));
-        return KC_TRUST_ERROR;
-    }
-    kc_trust_noise_mix_key(&state, dh, sizeof(dh));
-    crypto_wipe(dh, sizeof(dh));
-
-    unsigned char empty_payload[1];
-    if (kc_trust_noise_decrypt_and_hash(&state, empty_handshake_payload,
-        KC_TRUST_MAC_SIZE, empty_payload) != 0) {
-        crypto_wipe(sender_pk, sizeof(sender_pk));
-        crypto_wipe(&state, sizeof(state));
-        return KC_TRUST_ERROR;
-    }
-
-    kc_trust_cipher_state_t first;
-    kc_trust_cipher_state_t second;
-    kc_trust_noise_split(&state, &first, &second);
-    unsigned char logical_length[KC_TRUST_LOGICAL_LENGTH_SIZE];
-    if (kc_trust_cipher_decrypt(&first, NULL, 0, length_record,
-        KC_TRUST_LENGTH_RECORD_SIZE, logical_length) != 0) {
-        crypto_wipe(&first, sizeof(first));
-        crypto_wipe(&second, sizeof(second));
-        crypto_wipe(sender_pk, sizeof(sender_pk));
-        crypto_wipe(&state, sizeof(state));
-        return KC_TRUST_ERROR;
-    }
-    uint64_t encoded_len = kc_trust_load_u64_be(logical_length);
-    crypto_wipe(logical_length, sizeof(logical_length));
-    if (encoded_len > KC_TRUST_MAX_MESSAGE) {
-        crypto_wipe(&first, sizeof(first));
-        crypto_wipe(&second, sizeof(second));
-        crypto_wipe(sender_pk, sizeof(sender_pk));
-        crypto_wipe(&state, sizeof(state));
-        return KC_TRUST_ERROR;
-    }
-    size_t message_len = (size_t)encoded_len;
-    if (payload_len != kc_trust_payload_size(message_len)) {
-        crypto_wipe(&first, sizeof(first));
-        crypto_wipe(&second, sizeof(second));
-        crypto_wipe(sender_pk, sizeof(sender_pk));
-        crypto_wipe(&state, sizeof(state));
-        return KC_TRUST_ERROR;
-    }
-    unsigned char *message = (unsigned char *)malloc(
-        message_len > 0 ? message_len : 1);
-    if (!message) {
-        crypto_wipe(&first, sizeof(first));
-        crypto_wipe(&second, sizeof(second));
-        crypto_wipe(sender_pk, sizeof(sender_pk));
-        crypto_wipe(&state, sizeof(state));
-        return KC_TRUST_ERROR;
-    }
-    const unsigned char *record = payload + KC_TRUST_PAYLOAD_BASE_SIZE;
-    size_t offset = 0;
-    while (offset < message_len) {
-        size_t chunk_len = message_len - offset;
-        if (chunk_len > KC_TRUST_TRANSPORT_PLAINTEXT_MAX)
-            chunk_len = KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
-        if (kc_trust_cipher_decrypt(&first, NULL, 0, record,
-            chunk_len + KC_TRUST_MAC_SIZE, message + offset) != 0) {
-            crypto_wipe(message, message_len);
-            free(message);
-            crypto_wipe(&first, sizeof(first));
-            crypto_wipe(&second, sizeof(second));
-            crypto_wipe(sender_pk, sizeof(sender_pk));
-            crypto_wipe(&state, sizeof(state));
-            return KC_TRUST_ERROR;
-        }
-        offset += chunk_len;
-        record += chunk_len + KC_TRUST_MAC_SIZE;
-    }
-    crypto_wipe(&first, sizeof(first));
-    crypto_wipe(&second, sizeof(second));
-    crypto_wipe(&state, sizeof(state));
-
-    kc_trust_result_t *r = (kc_trust_result_t *)calloc(1, sizeof(kc_trust_result_t));
-    if (!r) {
-        crypto_wipe(message, message_len);
-        free(message);
-        crypto_wipe(sender_pk, sizeof(sender_pk));
-        return KC_TRUST_ERROR;
-    }
-
-    memcpy(r->peer_pk, sender_pk, KC_TRUST_PK_SIZE);
-    r->message = message;
-    r->message_len = message_len;
-
-    if (peer_id) {
-        r->status = kc_trust_eval_trust(ctx, peer_id, peer_id_len, sender_pk);
-    } else {
-        r->status = KC_TRUST_OK;
-    }
-    crypto_wipe(sender_pk, sizeof(sender_pk));
-
-    *result = r;
-    return KC_TRUST_OK;
-}
-
-/**
- * Releases an allocation returned by kc_trust_seal().
- * @param ptr Payload pointer. NULL is a safe no-op.
- * @return Nothing.
- */
-void kc_trust_free(void *ptr) {
-    free(ptr);
-}
-
-/**
- * Releases resources owned by a result.
- * @param result Result pointer. NULL is a safe no-op.
- * @return Nothing.
- */
-void kc_trust_result_free(kc_trust_result_t *result) {
-    if (!result) return;
-    if (result->message && result->message_len > 0)
-        crypto_wipe(result->message, result->message_len);
-    free(result->message);
-    crypto_wipe(result, sizeof(*result));
-    free(result);
+void kc_trust_close(kc_trust_t *trust) {
+    if (!trust) return;
+    crypto_wipe(trust, sizeof(*trust));
+    free(trust);
 }
