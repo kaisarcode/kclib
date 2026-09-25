@@ -279,7 +279,6 @@ static int test_cli_run_input(
     PROCESS_INFORMATION pi;
     DWORD exit_code;
     DWORD written;
-    size_t n;
     int i;
 
     if (test_cli_to_wide(KC_NGRAM_TEST_CLI, exe, sizeof(exe) / sizeof(wchar_t))) {
