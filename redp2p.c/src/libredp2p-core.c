@@ -1248,28 +1248,6 @@ int redp2p_candidate_dest_allowed(int family, const void *host,
 }
 
 /**
- * Adds one descriptor to one select set with descriptor-range validation.
- * Summary: Rejects descriptors that cannot be represented by fd_set.
- * @param fd    Descriptor to add.
- * @param set   Select set to update.
- * @param maxfd Current maximum descriptor, updated on success.
- * @return 1 when added, 0 when rejected.
- */
-int redp2p_fdset_add(redp2p_fd_t fd, fd_set *set, int *maxfd) {
-#ifdef _WIN32
-    (void)maxfd;
-    if (fd == INVALID_SOCKET) return 0;
-    if ((int)set->fd_count >= FD_SETSIZE) return 0;
-#else
-    if (fd < 0) return 0;
-    if (fd >= FD_SETSIZE) return 0;
-    if (maxfd && (int)fd > *maxfd) *maxfd = (int)fd;
-#endif
-    FD_SET(fd, set);
-    return 1;
-}
-
-/**
  * Sock read.
  * @return 0 on success, -1 on error.
  */
