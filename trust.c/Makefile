@@ -446,7 +446,7 @@ test:
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test-wine --target trust_contract_test; \
+		cmake --build $(BUILD_DIR)/test-wine --target trust_contract_test || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/trust_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
 		if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1 || ! command -v $(WASM_EMCC) >/dev/null 2>&1; then \
@@ -465,7 +465,7 @@ test:
 				-DTRUST_BUILD_VERSION=$(BUILD_VERSION) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test-wasm --target trust_contract_test; \
+		cmake --build $(BUILD_DIR)/test-wasm --target trust_contract_test || exit 1; \
 		if [ -n "$(EMSDK_NODE)" ]; then node="$(EMSDK_NODE)"; else node="$(WASM_NODE)"; fi; \
 		if ! command -v "$$node" >/dev/null 2>&1; then \
 			echo "Missing Emscripten test runtime: $$node" >&2; \
@@ -491,7 +491,7 @@ test:
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test --target trust_contract_test; \
+		cmake --build $(BUILD_DIR)/test --target trust_contract_test || exit 1; \
 		$(BUILD_DIR)/test/trust_contract_test all; \
 	fi
 
