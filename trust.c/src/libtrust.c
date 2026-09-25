@@ -412,17 +412,6 @@ static int kc_trust_remove_file(const char *path) {
 #endif
 }
 
-static int kc_trust_file_exists(const char *path) {
-#ifdef _WIN32
-    DWORD attrs = GetFileAttributesA(path);
-    return attrs != INVALID_FILE_ATTRIBUTES &&
-        !(attrs & FILE_ATTRIBUTE_DIRECTORY);
-#else
-    struct stat st;
-    return lstat(path, &st) == 0 && S_ISREG(st.st_mode);
-#endif
-}
-
 static int kc_trust_pending_write(kc_trust_t *trust, const char *remote_uid,
     const unsigned char local_uid[KC_TRUST_UID_BYTES],
     const unsigned char sk[KC_TRUST_SK_SIZE],
