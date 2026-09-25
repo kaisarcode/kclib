@@ -723,7 +723,7 @@ REDP2P_INTERNAL int redp2p_parse_candidates(JSON_Object *obj, const char *field,
 REDP2P_INTERNAL void redp2p_append_candidates(JSON_Object *obj,
     const char *field, const redp2p_candidate_t *cands, int n);
 
-/* Legacy protocol/runtime entry points retained only for the private engine. */
+/* Private protocol/runtime entry points used by the REDP2P engine. */
 REDP2P_INTERNAL redp2p_options_t redp2p_options_default(void);
 REDP2P_INTERNAL void redp2p_options_load_env(redp2p_options_t *opts);
 REDP2P_INTERNAL void redp2p_options_free(redp2p_options_t *opts);
