@@ -1118,7 +1118,7 @@ int redp2p_wake_open(redp2p_t *ctx, redp2p_fd_t *read_fd,
     if (REDP2P_ISERR(rfd)) return REDP2P_ENET;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     addr.sin_port = 0;
     if (bind(rfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         REDP2P_FD_CLOSE(rfd);
