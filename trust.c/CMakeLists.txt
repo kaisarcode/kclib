@@ -55,7 +55,7 @@ if(EMSCRIPTEN)
     )
     target_link_options(trust_wasm PRIVATE
         --no-entry
-        -sEXPORTED_FUNCTIONS=_kc_trust_generate,_kc_trust_create,_kc_trust_close,_kc_trust_public_key,_kc_trust_seal,_kc_trust_open,_kc_trust_free,_kc_trust_result_free,_kc_trust_trust,_kc_trust_forget,_kc_trust_version
+        -sEXPORTED_FUNCTIONS=_kc_trust_init,_kc_trust_invite,_kc_trust_join,_kc_trust_confirm,_kc_trust_seal,_kc_trust_unseal,_kc_trust_revoke,_kc_trust_close,_kc_trust_free,_kc_trust_version
         ${TRUST_WASM_MEMORY_FLAGS}
     )
 endif()
@@ -115,6 +115,11 @@ if(TRUST_BUILD_TESTS)
         add_executable(trust_contract_test src/test.c)
         target_include_directories(trust_contract_test PRIVATE src lib/monocypher)
         target_link_libraries(trust_contract_test PRIVATE ${TRUST_TEST_SHARED_TARGET})
+        if(DEFINED TRUST_TEST_CLI)
+            target_compile_definitions(trust_contract_test PRIVATE
+                TRUST_TEST_CLI="${TRUST_TEST_CLI}"
+            )
+        endif()
 
         add_custom_command(TARGET trust_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
