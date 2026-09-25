@@ -2474,7 +2474,13 @@ int redp2p_serve_index(
         return REDP2P_EINVAL;
     }
     result = redp2p_index_runtime_initialize(&runtime, ctx, host, port);
-    if (result != REDP2P_OK) return result;
+    if (result != REDP2P_OK) {
+        atomic_store(&ctx->ready_status, result);
+        atomic_store(&ctx->ready_state, -1);
+        return result;
+    }
+    atomic_store(&ctx->ready_status, REDP2P_OK);
+    atomic_store(&ctx->ready_state, 1);
     result = redp2p_index_event_loop(&runtime);
     redp2p_index_runtime_cleanup(&runtime);
     return result == REDP2P_OK ? REDP2P_OK : result;
