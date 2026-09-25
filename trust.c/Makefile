@@ -442,6 +442,7 @@ test:
 				-DTRUST_BUILD_VERSION=$(BUILD_VERSION) \
 				-DTRUST_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtrust.dll \
 				-DTRUST_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtrust.dll.a \
+				-DTRUST_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/trust.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -486,6 +487,7 @@ test:
 				-DTRUST_BUILD_TESTS=ON \
 				-DTRUST_BUILD_VERSION=$(BUILD_VERSION) \
 				-DTRUST_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DTRUST_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/trust$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
