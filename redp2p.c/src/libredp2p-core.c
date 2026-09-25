@@ -1469,7 +1469,7 @@ redp2p_options_t redp2p_options_default(void) {
     memset(&opts, 0, sizeof(opts));
     opts.seats = 0;
     opts.pow = 0;
-    opts.sweep = 20;
+    opts.sweep = REDP2P_SWEEP_DEFAULT;
     return opts;
 }
 
