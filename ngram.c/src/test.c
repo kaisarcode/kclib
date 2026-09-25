@@ -56,10 +56,21 @@ static int test_case_current = 0;
 static char test_self_path[4096];
 #endif
 
+/**
+ * Returns the inclusive token end index for a chunk.
+ * @param chunk Chunk whose token range is inspected.
+ * @return Inclusive token end index.
+ */
 static size_t chunk_end(const kc_ngram_chunk_t *chunk) {
     return chunk->token_start + chunk->token_count - 1U;
 }
 
+/**
+ * Counts visited chunks and records the largest token count.
+ * @param chunk Current chunk.
+ * @param context Counter state.
+ * @return 0 to continue traversal.
+ */
 static int count_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     counter_state_t *st = (counter_state_t *)context;
 
@@ -70,6 +81,12 @@ static int count_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     return 0;
 }
 
+/**
+ * Records one visited token span in traversal order.
+ * @param chunk Current chunk.
+ * @param context Recorded-pairs state.
+ * @return 0 to continue traversal.
+ */
 static int record_span_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     recorded_pairs_t *rec = (recorded_pairs_t *)context;
 
@@ -81,6 +98,12 @@ static int record_span_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     return 0;
 }
 
+/**
+ * Records one chunk value for field-contract checks.
+ * @param chunk Current chunk.
+ * @param context Chunk-record state.
+ * @return 0 to continue traversal.
+ */
 static int record_chunk_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     chunk_records_t *rec = (chunk_records_t *)context;
 
@@ -91,6 +114,12 @@ static int record_chunk_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     return 0;
 }
 
+/**
+ * Records visits and closes the configured pivot span.
+ * @param chunk Current chunk.
+ * @param context Recorded-pairs state.
+ * @return 1 for the pivot span, otherwise 0.
+ */
 static int close_pivot_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     recorded_pairs_t *rec = (recorded_pairs_t *)context;
 
@@ -101,12 +130,24 @@ static int close_pivot_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     return 0;
 }
 
+/**
+ * Aborts traversal on the first callback.
+ * @param chunk Current chunk.
+ * @param context Unused caller context.
+ * @return Negative value to abort traversal.
+ */
 static int abort_first_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     (void)chunk;
     (void)context;
     return -1;
 }
 
+/**
+ * Aborts when traversal reaches the first one-token span.
+ * @param chunk Current chunk.
+ * @param context Unused caller context.
+ * @return Negative value at the abort span, otherwise 0.
+ */
 static int abort_third_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     (void)context;
     if (chunk->token_start == 0U && chunk->token_count == 1U) {
@@ -115,6 +156,13 @@ static int abort_third_visitor(const kc_ngram_chunk_t *chunk, void *context) {
     return 0;
 }
 
+/**
+ * Verifies one integer result.
+ * @param name Check description.
+ * @param expected Expected value.
+ * @param actual Actual value.
+ * @return 0 on success, or 1 on failure.
+ */
 static int expect_int(const char *name, int expected, int actual) {
     if (expected != actual) {
         printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
@@ -123,6 +171,12 @@ static int expect_int(const char *name, int expected, int actual) {
     return 0;
 }
 
+/**
+ * Verifies one boolean condition.
+ * @param name Check description.
+ * @param condition Non-zero when the check passes.
+ * @return 0 on success, or 1 on failure.
+ */
 static int expect_true(const char *name, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", name);
@@ -132,6 +186,13 @@ static int expect_true(const char *name, int condition) {
 }
 
 #ifndef __EMSCRIPTEN__
+/**
+ * Verifies one string result.
+ * @param name Check description.
+ * @param expected Expected string.
+ * @param actual Actual string.
+ * @return 0 on success, or 1 on failure.
+ */
 static int expect_str(const char *name, const char *expected, const char *actual) {
     if (strcmp(expected, actual) != 0) {
         printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected, actual);
@@ -141,6 +202,15 @@ static int expect_str(const char *name, const char *expected, const char *actual
 }
 #endif
 
+/**
+ * Verifies one recorded token span.
+ * @param name Check description.
+ * @param rec Recorded-pairs state.
+ * @param index Record index to inspect.
+ * @param start Expected inclusive token start.
+ * @param end Expected inclusive token end.
+ * @return 0 on success, or 1 on failure.
+ */
 static int expect_pair(
     const char *name,
     const recorded_pairs_t *rec,
@@ -167,6 +237,14 @@ static int expect_pair(
     return 0;
 }
 
+/**
+ * Verifies that a token span was not visited.
+ * @param name Check description.
+ * @param rec Recorded-pairs state.
+ * @param start Token start that must be absent.
+ * @param end Token end that must be absent.
+ * @return 0 on success, or 1 on failure.
+ */
 static int expect_not_visited(
     const char *name,
     const recorded_pairs_t *rec,
@@ -184,6 +262,13 @@ static int expect_not_visited(
     return 0;
 }
 
+/**
+ * Prints one grouped test-case result line.
+ * @param fail Non-zero when the case failed.
+ * @param name Canonical case name.
+ * @param detail Case behavior description.
+ * @return No return value.
+ */
 static void case_result(int fail, const char *name, const char *detail) {
     printf(
         "[%d/%d] [%s] %s: %s\n",
@@ -197,6 +282,12 @@ static void case_result(int fail, const char *name, const char *detail) {
 
 typedef int (*case_fn)(void);
 
+/**
+ * Runs one case and accumulates its result.
+ * @param rc Failure accumulator.
+ * @param fn Case function to execute.
+ * @return No return value.
+ */
 static void run_case(int *rc, case_fn fn) {
     test_case_current++;
     *rc += fn();
@@ -204,6 +295,13 @@ static void run_case(int *rc, case_fn fn) {
 
 #ifndef __EMSCRIPTEN__
 #ifdef _WIN32
+/**
+ * Appends one quoted argument to a Windows command line.
+ * @param cmd Destination command-line buffer.
+ * @param cap Buffer capacity in wide characters.
+ * @param arg Argument to append.
+ * @return 0 on success, or 1 on failure.
+ */
 static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     size_t n = wcslen(cmd);
     size_t len = wcslen(arg);
@@ -240,10 +338,24 @@ static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     return 0;
 }
 
+/**
+ * Converts one UTF-8 string to a Windows wide string.
+ * @param in UTF-8 input.
+ * @param out Destination wide-character buffer.
+ * @param cap Destination capacity in wide characters.
+ * @return 0 on success, or 1 on failure.
+ */
 static int test_cli_to_wide(const char *in, wchar_t *out, size_t cap) {
     return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
 }
 
+/**
+ * Reads captured process output into a NUL-terminated buffer.
+ * @param pipe Pipe handle to read.
+ * @param buf Destination buffer.
+ * @param size Destination buffer size.
+ * @return No return value.
+ */
 static void test_cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
     DWORD count;
     size_t used = 0U;
@@ -258,6 +370,18 @@ static void test_cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
     buf[used] = '\0';
 }
 
+/**
+ * Runs the ngram CLI with captured stdin, stdout, and stderr.
+ * @param argv CLI argument vector.
+ * @param input Optional stdin bytes.
+ * @param input_len Input byte count.
+ * @param out Captured stdout buffer.
+ * @param out_size Stdout buffer size.
+ * @param err Captured stderr buffer.
+ * @param err_size Stderr buffer size.
+ * @param out_status Receives the process exit status.
+ * @return 0 on successful process execution, or 1 on harness failure.
+ */
 static int test_cli_run_input(
     char *const argv[],
     const char *input,
@@ -380,6 +504,18 @@ static int test_cli_run_input(
     return 0;
 }
 #else
+/**
+ * Runs the ngram CLI with captured stdin, stdout, and stderr.
+ * @param argv CLI argument vector.
+ * @param input Optional stdin bytes.
+ * @param input_len Input byte count.
+ * @param out Captured stdout buffer.
+ * @param out_size Stdout buffer size.
+ * @param err Captured stderr buffer.
+ * @param err_size Stderr buffer size.
+ * @param out_status Receives the process exit status.
+ * @return 0 on successful process execution, or 1 on harness failure.
+ */
 static int test_cli_run_input(
     char *const argv[],
     const char *input,
@@ -477,6 +613,10 @@ static int test_cli_run_input(
 }
 #endif
 
+/**
+ * Consumes all helper-process stdin.
+ * @return 0 on success, or 1 on read failure.
+ */
 static int helper_consume_stdin(void) {
     char buffer[256];
 
@@ -485,6 +625,10 @@ static int helper_consume_stdin(void) {
     return ferror(stdin) ? 1 : 0;
 }
 
+/**
+ * Helper command that emits stdout after consuming stdin.
+ * @return 0 on success, or 1 on read failure.
+ */
 static int helper_output(void) {
     if (helper_consume_stdin() != 0) {
         return 1;
@@ -493,10 +637,20 @@ static int helper_output(void) {
     return 0;
 }
 
+/**
+ * Helper command that consumes stdin without producing stdout.
+ * @return 0 on success, or 1 on read failure.
+ */
 static int helper_silent(void) {
     return helper_consume_stdin();
 }
 
+/**
+ * Helper command that validates a literal command argument.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return 0 on success, or 1 on read failure.
+ */
 static int helper_literal(int argc, char **argv) {
     if (helper_consume_stdin() != 0) {
         return 1;
@@ -508,6 +662,10 @@ static int helper_literal(int argc, char **argv) {
 }
 #endif
 
+/**
+ * Tests traversal argument and explicit-bound validation.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_traverse_validation(void) {
     const char *name = "kc_ngram_traverse_validation";
     const char *detail = "rejects invalid input, visitor, and explicit bounds";
@@ -551,6 +709,10 @@ static int case_kc_ngram_traverse_validation(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests empty-input traversal behavior.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_traverse_empty(void) {
     const char *name = "kc_ngram_traverse_empty";
     const char *detail = "returns OK without visiting for empty input";
@@ -568,6 +730,10 @@ static int case_kc_ngram_traverse_empty(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests descending window traversal order.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_traverse_order(void) {
     const char *name = "kc_ngram_traverse_order";
     const char *detail = "descends from largest to smallest windows, left to right";
@@ -601,6 +767,10 @@ static int case_kc_ngram_traverse_order(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests the public chunk field and borrowing contract.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_traverse_chunk(void) {
     const char *name = "kc_ngram_traverse_chunk";
     const char *detail = "reports borrowed byte spans and token position";
@@ -659,6 +829,10 @@ static int case_kc_ngram_traverse_chunk(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests omitted defaults and explicit traversal bounds.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_traverse_bounds(void) {
     const char *name = "kc_ngram_traverse_bounds";
     const char *detail = "honors omitted defaults and explicit zero/min/max bounds";
@@ -735,6 +909,10 @@ static int case_kc_ngram_traverse_bounds(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests default and custom separator behavior.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_traverse_separators(void) {
     const char *name = "kc_ngram_traverse_separators";
     const char *detail = "uses the default separators when omitted and custom bytes when explicit";
@@ -762,6 +940,10 @@ static int case_kc_ngram_traverse_separators(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests span closure and contained-window suppression.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_traverse_closure(void) {
     const char *name = "kc_ngram_traverse_closure";
     const char *detail = "visitor return 1 closes a span and suppresses contained windows";
@@ -805,6 +987,10 @@ static int case_kc_ngram_traverse_closure(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests callback-driven traversal abort behavior.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_traverse_abort(void) {
     const char *name = "kc_ngram_traverse_abort";
     const char *detail = "negative visitor return aborts immediately with EABORT";
@@ -832,6 +1018,10 @@ static int case_kc_ngram_traverse_abort(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests the generated build version.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_version(void) {
     const char *name = "kc_ngram_version";
     const char *detail = "returns a non-zero build timestamp";
@@ -842,6 +1032,15 @@ static int case_kc_ngram_version(void) {
 }
 
 #ifndef __EMSCRIPTEN__
+/**
+ * Runs one CLI assertion and checks status and stdout.
+ * @param check Check description.
+ * @param argv CLI argument vector.
+ * @param input Optional stdin string.
+ * @param expected_out Optional expected stdout.
+ * @param expected_status Expected process exit status.
+ * @return Number of failed assertions.
+ */
 static int run_cli_expect(
     const char *check,
     char *const argv[],
@@ -894,6 +1093,10 @@ static int run_cli_expect(
     return fail;
 }
 
+/**
+ * Tests the complete shipped ngram CLI contract as one grouped case.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_ngram_cli(void) {
     const char *name = "kc_ngram_cli";
     const char *detail =
@@ -1145,6 +1348,10 @@ static int case_kc_ngram_cli(void) {
 }
 #endif
 
+/**
+ * Runs all applicable ngram contract test cases.
+ * @return 0 when all cases pass, otherwise non-zero.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -1178,6 +1385,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Dispatches helper modes and named test cases.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return 0 on success, 1 on test failure, or 2 on usage failure.
+ */
 int main(int argc, char **argv) {
 #ifndef __EMSCRIPTEN__
 #ifdef _WIN32
