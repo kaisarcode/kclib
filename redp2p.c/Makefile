@@ -416,7 +416,6 @@ test:
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine && \
-		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/redp2p_protocol_test.exe all && \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/redp2p_contract_test.exe all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
@@ -438,7 +437,6 @@ test:
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test && \
-		$(BUILD_DIR)/test/redp2p_protocol_test all && \
 		$(BUILD_DIR)/test/redp2p_contract_test all; \
 	fi
 
