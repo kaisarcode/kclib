@@ -1026,9 +1026,9 @@ static int case_kc_redp2p_register_order(void) {
     memset(&index, 0, sizeof(index));
     index.port = port;
     index.result = 999;
-    fail += expect_int("open ordering index", REDP2P_OK, redp2p_open(&index.ctx));
+    fail += expect_int("open ordering index", REDP2P_OK, redp2p_context_create(&index.ctx));
     fail += expect_int("configure ordering index pow", REDP2P_OK,
-        redp2p_set_pow(index.ctx, 8));
+        redp2p_idx_set_pow(index.ctx, 8));
     if (test_thread_start(&index.thread, test_index_main, &index) != 0) return 1;
     if (!test_wait_port(port, 1)) return 1;
     n = snprintf(body, sizeof(body), "{\"op\":\"challenge\",\"id\":\"orderpub\"}");
@@ -1227,11 +1227,11 @@ static void test_port_requirement(unsigned int offset, int *tcp, int *udp) {
 
     *tcp = 0;
     *udp = 0;
-    if (strcmp(test_case_name, "redp2p_serve_index") == 0) {
+    if (strcmp(test_case_name, "redp2p_idx_run") == 0) {
         *tcp = offset >= 1U && offset <= 4U;
-    } else if (strcmp(test_case_name, "redp2p_wait") == 0) {
+    } else if (strcmp(test_case_name, "redp2p_pub_run") == 0) {
         *tcp = offset == 20U || offset == 22U;
-    } else if (strcmp(test_case_name, "redp2p_connect") == 0) {
+    } else if (strcmp(test_case_name, "redp2p_con_run") == 0) {
         *tcp = offset >= 40U && offset <= 45U;
         if (offset == 47U) *tcp = 1;
     } else if (strcmp(test_case_name, "redp2p_udp_tunnel") == 0) {
@@ -1244,7 +1244,7 @@ static void test_port_requirement(unsigned int offset, int *tcp, int *udp) {
         *tcp = offset >= anchor && offset <= anchor + 2U;
     } else if (strcmp(test_case_name, "redp2p_deregister") == 0) {
         *tcp = offset >= 60U && offset <= 62U;
-    } else if (strcmp(test_case_name, "redp2p_list_publishers") == 0) {
+    } else if (strcmp(test_case_name, "redp2p_idx_query_publishers") == 0) {
         *tcp = offset >= 80U && offset <= 84U;
     } else if (strcmp(test_case_name, "redp2p_heartbeat") == 0) {
         *tcp = offset >= 100U && offset <= 102U;
@@ -2610,7 +2610,7 @@ static DWORD WINAPI test_index_main(void *arg) {
     test_index_t *index;
 
     index = (test_index_t *)arg;
-    index->result = redp2p_serve_index(index->ctx, NULL, index->port);
+    index->result = redp2p_idx_run(index->ctx, NULL, index->port);
     return 0;
 }
 
@@ -2623,13 +2623,13 @@ static DWORD WINAPI test_publisher_main(void *arg) {
     test_publisher_t *publisher;
 
     publisher = (test_publisher_t *)arg;
-    redp2p_set_protocol(publisher->ctx, publisher->protocol);
-    redp2p_set_port(publisher->ctx, publisher->bind_port);
-    if (publisher->pass != NULL) redp2p_set_pass(publisher->ctx, publisher->pass);
+    redp2p_pub_set_protocol(publisher->ctx, publisher->protocol);
+    redp2p_set_local_port(publisher->ctx, publisher->bind_port);
+    if (publisher->pass != NULL) redp2p_set_registration_pass(publisher->ctx, publisher->pass);
     if (publisher->state_dir != NULL)
         redp2p_set_state_dir(publisher->ctx, publisher->state_dir);
     atomic_store(&publisher->result,
-        redp2p_wait(publisher->ctx, publisher->host, publisher->index_port,
+        redp2p_pub_run(publisher->ctx, publisher->host, publisher->index_port,
             publisher->id, publisher->bind_port));
     return 0;
 }
@@ -2643,10 +2643,10 @@ static DWORD WINAPI test_consumer_main(void *arg) {
     test_consumer_t *consumer;
 
     consumer = (test_consumer_t *)arg;
-    redp2p_set_protocol(consumer->ctx, consumer->protocol);
-    redp2p_set_port(consumer->ctx, consumer->bind_port);
+    redp2p_pub_set_protocol(consumer->ctx, consumer->protocol);
+    redp2p_set_local_port(consumer->ctx, consumer->bind_port);
     atomic_store(&consumer->result,
-        redp2p_connect(consumer->ctx, consumer->host, consumer->index_port,
+        redp2p_con_run(consumer->ctx, consumer->host, consumer->index_port,
             consumer->self_id, consumer->target_id, consumer->bind_port));
     return 0;
 }
@@ -2700,7 +2700,7 @@ static void *test_index_main(void *arg) {
     test_index_t *index;
 
     index = (test_index_t *)arg;
-    index->result = redp2p_serve_index(index->ctx, NULL, index->port);
+    index->result = redp2p_idx_run(index->ctx, NULL, index->port);
     return NULL;
 }
 
@@ -2713,13 +2713,13 @@ static void *test_publisher_main(void *arg) {
     test_publisher_t *publisher;
 
     publisher = (test_publisher_t *)arg;
-    redp2p_set_protocol(publisher->ctx, publisher->protocol);
-    redp2p_set_port(publisher->ctx, publisher->bind_port);
-    if (publisher->pass != NULL) redp2p_set_pass(publisher->ctx, publisher->pass);
+    redp2p_pub_set_protocol(publisher->ctx, publisher->protocol);
+    redp2p_set_local_port(publisher->ctx, publisher->bind_port);
+    if (publisher->pass != NULL) redp2p_set_registration_pass(publisher->ctx, publisher->pass);
     if (publisher->state_dir != NULL)
         redp2p_set_state_dir(publisher->ctx, publisher->state_dir);
     atomic_store(&publisher->result,
-        redp2p_wait(publisher->ctx, publisher->host, publisher->index_port,
+        redp2p_pub_run(publisher->ctx, publisher->host, publisher->index_port,
             publisher->id, publisher->bind_port));
     return NULL;
 }
@@ -2733,10 +2733,10 @@ static void *test_consumer_main(void *arg) {
     test_consumer_t *consumer;
 
     consumer = (test_consumer_t *)arg;
-    redp2p_set_protocol(consumer->ctx, consumer->protocol);
-    redp2p_set_port(consumer->ctx, consumer->bind_port);
+    redp2p_pub_set_protocol(consumer->ctx, consumer->protocol);
+    redp2p_set_local_port(consumer->ctx, consumer->bind_port);
     atomic_store(&consumer->result,
-        redp2p_connect(consumer->ctx, consumer->host, consumer->index_port,
+        redp2p_con_run(consumer->ctx, consumer->host, consumer->index_port,
             consumer->self_id, consumer->target_id, consumer->bind_port));
     return NULL;
 }
@@ -2830,7 +2830,7 @@ static int test_index_start(test_index_t *index, unsigned short port) {
     memset(index, 0, sizeof(*index));
     index->port = port;
     index->result = 999;
-    if (redp2p_open(&index->ctx) != REDP2P_OK) return 1;
+    if (redp2p_context_create(&index->ctx) != REDP2P_OK) return 1;
     if (test_thread_start(&index->thread, test_index_main, index) != 0) return 1;
     return test_wait_port(port, 1) ? 0 : 1;
 }
@@ -2852,12 +2852,12 @@ static int test_index_start_configured(test_index_t *index,
     memset(index, 0, sizeof(*index));
     index->port = port;
     index->result = 999;
-    if (redp2p_open(&index->ctx) != REDP2P_OK) return 1;
-    if (redp2p_set_seats(index->ctx, seats) != REDP2P_OK) return 1;
-    if (vip != NULL && redp2p_set_vip(index->ctx, vip, err,
+    if (redp2p_context_create(&index->ctx) != REDP2P_OK) return 1;
+    if (redp2p_idx_set_capacity(index->ctx, seats) != REDP2P_OK) return 1;
+    if (vip != NULL && redp2p_idx_set_vips(index->ctx, vip, err,
         sizeof(err)) != REDP2P_OK)
         return 1;
-    if (pass != NULL && redp2p_set_pass(index->ctx, pass) != REDP2P_OK) return 1;
+    if (pass != NULL && redp2p_set_registration_pass(index->ctx, pass) != REDP2P_OK) return 1;
     if (test_thread_start(&index->thread, test_index_main, index) != 0) return 1;
     return test_wait_port(port, 1) ? 0 : 1;
 }
@@ -2868,10 +2868,10 @@ static int test_index_start_configured(test_index_t *index,
  * @return 0 on success.
  */
 static int test_index_stop(test_index_t *index) {
-    if (index->ctx != NULL) redp2p_stop(index->ctx);
+    if (index->ctx != NULL) redp2p_context_request_stop(index->ctx);
     test_port_open(index->port);
     test_thread_join(index->thread);
-    if (index->ctx != NULL) redp2p_close(index->ctx);
+    if (index->ctx != NULL) redp2p_context_destroy(index->ctx);
     index->ctx = NULL;
     return 0;
 }
@@ -2894,7 +2894,7 @@ unsigned short index_port, unsigned short bind_port)
     publisher->bind_port = bind_port;
     publisher->protocol = REDP2P_PROTO_TCP;
     atomic_init(&publisher->result, 999);
-    if (redp2p_open(&publisher->ctx) != REDP2P_OK) return 1;
+    if (redp2p_context_create(&publisher->ctx) != REDP2P_OK) return 1;
     if (test_thread_start(&publisher->thread, test_publisher_main,
         publisher) != 0) return 1;
     return test_wait_publisher_ready(publisher);
@@ -2921,7 +2921,7 @@ static int test_publisher_start_pass(test_publisher_t *publisher,
     publisher->protocol = REDP2P_PROTO_TCP;
     publisher->pass = pass;
     atomic_init(&publisher->result, 999);
-    if (redp2p_open(&publisher->ctx) != REDP2P_OK) return 1;
+    if (redp2p_context_create(&publisher->ctx) != REDP2P_OK) return 1;
     if (test_thread_start(&publisher->thread, test_publisher_main,
         publisher) != 0)
         return 1;
@@ -2951,7 +2951,7 @@ static int test_publisher_start_state(test_publisher_t *publisher,
     publisher->pass = pass;
     publisher->state_dir = state_dir;
     atomic_init(&publisher->result, 999);
-    if (redp2p_open(&publisher->ctx) != REDP2P_OK) return 1;
+    if (redp2p_context_create(&publisher->ctx) != REDP2P_OK) return 1;
     if (test_thread_start(&publisher->thread, test_publisher_main,
         publisher) != 0)
         return 1;
@@ -2964,9 +2964,9 @@ static int test_publisher_start_state(test_publisher_t *publisher,
  * @return 0 on success.
  */
 static int test_publisher_stop(test_publisher_t *publisher) {
-    if (publisher->ctx != NULL) redp2p_stop(publisher->ctx);
+    if (publisher->ctx != NULL) redp2p_context_request_stop(publisher->ctx);
     test_thread_join(publisher->thread);
-    if (publisher->ctx != NULL) redp2p_close(publisher->ctx);
+    if (publisher->ctx != NULL) redp2p_context_destroy(publisher->ctx);
     publisher->ctx = NULL;
     return 0;
 }
@@ -2980,7 +2980,7 @@ static int test_publisher_finish(test_publisher_t *publisher) {
     int result;
 
     result = test_thread_join(publisher->thread);
-    if (publisher->ctx != NULL) redp2p_close(publisher->ctx);
+    if (publisher->ctx != NULL) redp2p_context_destroy(publisher->ctx);
     publisher->ctx = NULL;
     return result;
 }
@@ -3017,7 +3017,7 @@ static int test_udp_publisher_start(test_publisher_t *publisher,
     publisher->bind_port = bind_port;
     publisher->protocol = REDP2P_PROTO_UDP;
     atomic_init(&publisher->result, 999);
-    if (redp2p_open(&publisher->ctx) != REDP2P_OK) return 1;
+    if (redp2p_context_create(&publisher->ctx) != REDP2P_OK) return 1;
     if (test_thread_start(&publisher->thread, test_publisher_main,
         publisher) != 0)
         return 1;
@@ -3040,7 +3040,7 @@ static int test_udp_consumer_start(test_consumer_t *consumer,
     consumer->bind_port = bind_port;
     consumer->protocol = REDP2P_PROTO_UDP;
     atomic_init(&consumer->result, 999);
-    if (redp2p_open(&consumer->ctx) != REDP2P_OK) return 1;
+    if (redp2p_context_create(&consumer->ctx) != REDP2P_OK) return 1;
     if (test_thread_start(&consumer->thread, test_consumer_main,
         consumer) != 0)
         return 1;
@@ -3055,7 +3055,7 @@ static int test_consumer_stop(test_consumer_t *consumer) {
     struct sockaddr_in addr;
     test_socket_t fd;
 
-    if (consumer->ctx != NULL) redp2p_stop(consumer->ctx);
+    if (consumer->ctx != NULL) redp2p_context_request_stop(consumer->ctx);
     fd = socket(AF_INET, consumer->protocol == REDP2P_PROTO_TCP ?
         SOCK_STREAM : SOCK_DGRAM, 0);
     if (fd != TEST_SOCKET_INVALID) {
@@ -3071,7 +3071,7 @@ static int test_consumer_stop(test_consumer_t *consumer) {
         test_socket_close(fd);
     }
     test_thread_join(consumer->thread);
-    if (consumer->ctx != NULL) redp2p_close(consumer->ctx);
+    if (consumer->ctx != NULL) redp2p_context_destroy(consumer->ctx);
     consumer->ctx = NULL;
     return 0;
 }
@@ -3315,7 +3315,7 @@ static int test_tcp_publisher_start(test_publisher_t *publisher,
     publisher->bind_port = bind_port;
     publisher->protocol = REDP2P_PROTO_TCP;
     atomic_init(&publisher->result, 999);
-    if (redp2p_open(&publisher->ctx) != REDP2P_OK) return 1;
+    if (redp2p_context_create(&publisher->ctx) != REDP2P_OK) return 1;
     if (test_thread_start(&publisher->thread, test_publisher_main,
         publisher) != 0)
         return 1;
@@ -3338,7 +3338,7 @@ static int test_tcp_consumer_start(test_consumer_t *consumer,
     consumer->bind_port = bind_port;
     consumer->protocol = REDP2P_PROTO_TCP;
     atomic_init(&consumer->result, 999);
-    if (redp2p_open(&consumer->ctx) != REDP2P_OK) return 1;
+    if (redp2p_context_create(&consumer->ctx) != REDP2P_OK) return 1;
     if (test_thread_start(&consumer->thread, test_consumer_main,
         consumer) != 0)
         return 1;
@@ -3932,10 +3932,10 @@ static int case_kc_redp2p_open(void) {
 
     fail = 0;
     ctx = NULL;
-    fail += expect_int("open NULL", REDP2P_ERROR, redp2p_open(NULL));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+    fail += expect_int("open NULL", REDP2P_ERROR, redp2p_context_create(NULL));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_true("context is set", ctx != NULL);
-    if (ctx != NULL) redp2p_close(ctx);
+    if (ctx != NULL) redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -3951,9 +3951,9 @@ static int case_kc_redp2p_close(void) {
     int fail;
 
     fail = 0;
-    fail += expect_int("close NULL", REDP2P_ERROR, redp2p_close(NULL));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-    fail += expect_int("close context", REDP2P_OK, redp2p_close(ctx));
+    fail += expect_int("close NULL", REDP2P_ERROR, redp2p_context_destroy(NULL));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    fail += expect_int("close context", REDP2P_OK, redp2p_context_destroy(ctx));
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -3969,14 +3969,14 @@ static int case_kc_redp2p_stop(void) {
     int fail;
 
     fail = 0;
-    fail += expect_int("stop NULL", REDP2P_EINVAL, redp2p_stop(NULL));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+    fail += expect_int("stop NULL", REDP2P_EINVAL, redp2p_context_request_stop(NULL));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_true("stop initially clear", !redp2p_stop_requested(ctx));
-    fail += expect_int("stop context", REDP2P_OK, redp2p_stop(ctx));
+    fail += expect_int("stop context", REDP2P_OK, redp2p_context_request_stop(ctx));
     fail += expect_true("stop requested", redp2p_stop_requested(ctx));
-    fail += expect_int("stop context twice", REDP2P_OK, redp2p_stop(ctx));
+    fail += expect_int("stop context twice", REDP2P_OK, redp2p_context_request_stop(ctx));
     fail += expect_true("stop remains requested", redp2p_stop_requested(ctx));
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -4131,7 +4131,7 @@ static int test_punch_rate_limits(unsigned short port)
     fail += expect_int("start rate index", 0,
         test_index_start_configured(&index, port, 4, NULL, NULL));
     if (fail) return fail;
-    redp2p_set_max_consumers_per_publisher(index.ctx, 64);
+    redp2p_idx_set_max_consumers(index.ctx, 64);
     fail += expect_int("register rate target", 0,
         test_register_publisher(port, "rateone", secret, 41100));
     fail += expect_int("register isolated rate target", 0,
@@ -4221,15 +4221,15 @@ static int case_kc_redp2p_serve_index(void) {
         "%s/vip-takeover", test_home_path);
     port = (unsigned short)(test_port_base() + 1U);
     fail += expect_int("serve NULL", REDP2P_EINVAL,
-        redp2p_serve_index(NULL, TEST_HOST, port));
+        redp2p_idx_run(NULL, TEST_HOST, port));
     fail += expect_int("open stopped index context", REDP2P_OK,
-        redp2p_open(&stopped));
+        redp2p_context_create(&stopped));
     fail += expect_int("zero per-publisher consumer window restores default", REDP2P_OK,
-        redp2p_set_max_consumers_per_publisher(stopped, 0));
+        redp2p_idx_set_max_consumers(stopped, 0));
     fail += expect_int("stop index before entry", REDP2P_OK,
-        redp2p_stop(stopped));
+        redp2p_context_request_stop(stopped));
     fail += expect_int("serve honors prior stop", REDP2P_OK,
-        redp2p_serve_index(stopped, TEST_HOST, port));
+        redp2p_idx_run(stopped, TEST_HOST, port));
     fail += expect_true("prior-stopped index did not listen",
         !test_port_open(port));
     memset(&index, 0, sizeof(index));
@@ -4570,13 +4570,13 @@ static int case_kc_redp2p_serve_index(void) {
     fail += expect_int("shorten pending-call TTL for expiry index", 0,
         test_setenv("REDP2P_PENDING_CALL_TTL_S", "2"));
     fail += expect_int("open expiry index", REDP2P_OK,
-        redp2p_open(&index.ctx));
+        redp2p_context_create(&index.ctx));
     fail += expect_int("set bounded per-publisher limit", REDP2P_OK,
-        redp2p_set_max_consumers_per_publisher(index.ctx, 4));
+        redp2p_idx_set_max_consumers(index.ctx, 4));
     if (fail != 0 ||
         test_thread_start(&index.thread, test_index_main, &index) != 0)
     {
-        redp2p_close(index.ctx);
+        redp2p_context_destroy(index.ctx);
         test_setenv("REDP2P_PENDING_CALL_TTL_S", NULL);
         case_result(1, name, detail);
         return 1;
@@ -4756,16 +4756,16 @@ static int case_kc_redp2p_wait(void) {
     fail = 0;
     base = (unsigned short)(test_port_base() + 20U);
     fail += expect_int("wait NULL", REDP2P_EINVAL,
-        redp2p_wait(NULL, TEST_HOST, base, "pub", (unsigned short)(base + 1U)));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-    fail += expect_int("stop wait before entry", REDP2P_OK, redp2p_stop(ctx));
+        redp2p_pub_run(NULL, TEST_HOST, base, "pub", (unsigned short)(base + 1U)));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    fail += expect_int("stop wait before entry", REDP2P_OK, redp2p_context_request_stop(ctx));
     fail += expect_int("wait honors prior stop", REDP2P_OK,
-        redp2p_wait(ctx, TEST_HOST, base, "pub",
+        redp2p_pub_run(ctx, TEST_HOST, base, "pub",
             (unsigned short)(base + 1U)));
     fail += expect_true("wait stop consumed", !redp2p_stop_requested(ctx));
     fail += expect_int("wait without index", REDP2P_ENET,
-        redp2p_wait(ctx, TEST_HOST, base, "pub", (unsigned short)(base + 1U)));
-    redp2p_close(ctx);
+        redp2p_pub_run(ctx, TEST_HOST, base, "pub", (unsigned short)(base + 1U)));
+    redp2p_context_destroy(ctx);
     if (test_index_start(&index, (unsigned short)(base + 2U)) != 0) return 1;
     if (test_publisher_start(&publisher, "waitpub", (unsigned short)(base + 2U),
         (unsigned short)(base + 3U)) != 0) return 1;
@@ -4802,39 +4802,39 @@ static int case_kc_redp2p_connect(void) {
     fail = 0;
     base = (unsigned short)(test_port_base() + 40U);
     fail += expect_int("connect NULL", REDP2P_EINVAL,
-        redp2p_connect(NULL, TEST_HOST, base, "client", "missing",
+        redp2p_con_run(NULL, TEST_HOST, base, "client", "missing",
             (unsigned short)(base + 1U)));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-    redp2p_set_port(ctx, (unsigned short)(base + 1U));
-    fail += expect_int("stop connect before entry", REDP2P_OK, redp2p_stop(ctx));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    redp2p_set_local_port(ctx, (unsigned short)(base + 1U));
+    fail += expect_int("stop connect before entry", REDP2P_OK, redp2p_context_request_stop(ctx));
     fail += expect_int("connect honors prior stop", REDP2P_OK,
-        redp2p_connect(ctx, TEST_HOST, base, "client", "missing",
+        redp2p_con_run(ctx, TEST_HOST, base, "client", "missing",
             (unsigned short)(base + 1U)));
     fail += expect_true("connect stop consumed", !redp2p_stop_requested(ctx));
-    redp2p_set_port(ctx, (unsigned short)(base + 1U));
+    redp2p_set_local_port(ctx, (unsigned short)(base + 1U));
     fail += expect_int("connect without index", REDP2P_ENET,
-        redp2p_connect(ctx, TEST_HOST, base, "client", "missing",
+        redp2p_con_run(ctx, TEST_HOST, base, "client", "missing",
             (unsigned short)(base + 1U)));
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     if (test_index_start(&index, (unsigned short)(base + 2U)) != 0) return 1;
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-    redp2p_set_port(ctx, (unsigned short)(base + 3U));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    redp2p_set_local_port(ctx, (unsigned short)(base + 3U));
     fail += expect_int("connect missing target", REDP2P_ENOENT,
-        redp2p_connect(ctx, TEST_HOST, (unsigned short)(base + 2U), "client",
+        redp2p_con_run(ctx, TEST_HOST, (unsigned short)(base + 2U), "client",
             "missing", (unsigned short)(base + 3U)));
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     fail += expect_int("start occupied-listener publisher", 0,
         test_publisher_start(&publisher, "occupied",
             (unsigned short)(base + 2U), (unsigned short)(base + 6U)));
     fail += expect_int("occupy consumer listener", 0,
         test_tcp_echo_start(&occupied, (unsigned short)(base + 7U)));
     fail += expect_int("open occupied-listener context", REDP2P_OK,
-        redp2p_open(&ctx));
-    redp2p_set_port(ctx, (unsigned short)(base + 7U));
+        redp2p_context_create(&ctx));
+    redp2p_set_local_port(ctx, (unsigned short)(base + 7U));
     fail += expect_int("occupied consumer listener category", REDP2P_ENET,
-        redp2p_connect(ctx, TEST_HOST, (unsigned short)(base + 2U), "client",
+        redp2p_con_run(ctx, TEST_HOST, (unsigned short)(base + 2U), "client",
             "occupied", (unsigned short)(base + 7U)));
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     test_tcp_echo_stop(&occupied);
     test_publisher_stop(&publisher);
     test_index_stop(&index);
@@ -4842,17 +4842,17 @@ static int case_kc_redp2p_connect(void) {
         (unsigned short)(base + 4U));
     fail += expect_int("start incomplete index response", 0, stub_started);
     if (stub_started == 0) {
-        fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-        redp2p_set_port(ctx, (unsigned short)(base + 5U));
+        fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+        redp2p_set_local_port(ctx, (unsigned short)(base + 5U));
         fail += expect_int("reject closed index response", REDP2P_ENET,
-            redp2p_connect(ctx, TEST_HOST, (unsigned short)(base + 4U),
+            redp2p_con_run(ctx, TEST_HOST, (unsigned short)(base + 4U),
                 "client", "missing", (unsigned short)(base + 5U)));
         fail += expect_int("reject malformed index status line", REDP2P_EPROTO,
-            redp2p_connect(ctx, TEST_HOST, (unsigned short)(base + 4U),
+            redp2p_con_run(ctx, TEST_HOST, (unsigned short)(base + 4U),
                 "client", "missing", (unsigned short)(base + 5U)));
         fail += expect_true("malformed status line detail",
             strstr(redp2p_get_error(ctx), "index status line") != NULL);
-        redp2p_close(ctx);
+        redp2p_context_destroy(ctx);
         fail += expect_int("stop incomplete index response", 0,
             test_control_stub_stop(&stub));
     }
@@ -5181,7 +5181,7 @@ static int case_kc_redp2p_deregister(void) {
     old_umask = umask(000);
 #endif
     base = (unsigned short)(test_port_base() + 60U);
-    fail += expect_int("open client", REDP2P_OK, redp2p_open(&client));
+    fail += expect_int("open client", REDP2P_OK, redp2p_context_create(&client));
     if (!client) goto cleanup;
     fail += expect_int("deregister NULL context", REDP2P_EINVAL,
         redp2p_deregister(NULL, TEST_HOST, base, "absent"));
@@ -5379,7 +5379,7 @@ static int case_kc_redp2p_deregister(void) {
     publisher_started = 0;
     memset(&publishers, 0, sizeof(publishers));
     fail += expect_int("list after save rollback", REDP2P_OK,
-        redp2p_list_publishers(client, TEST_HOST,
+        redp2p_idx_query_publishers(client, TEST_HOST,
             (unsigned short)(base + 1U), test_on_publisher, &publishers));
     fail += expect_true("save failure registration rolled back",
         !test_has_publisher(&publishers, "nosave"));
@@ -5391,7 +5391,7 @@ cleanup:
     if (first_publisher_started) test_publisher_stop(&first_publisher);
     if (second_index_started) test_index_stop(&second_index);
     if (first_index_started) test_index_stop(&first_index);
-    if (client) redp2p_close(client);
+    if (client) redp2p_context_destroy(client);
 #ifndef _WIN32
     umask(old_umask);
 #endif
@@ -5502,7 +5502,7 @@ static int case_kc_redp2p_lost_response(void) {
     publisher.protocol = REDP2P_PROTO_TCP;
     atomic_init(&publisher.result, 999);
     fail += expect_int("open lost-response publisher", REDP2P_OK,
-        redp2p_open(&publisher.ctx));
+        redp2p_context_create(&publisher.ctx));
     if (fail != 0) goto cleanup;
     fail += expect_int("start lost-response publisher", 0,
         test_thread_start(&publisher.thread, test_publisher_main, &publisher));
@@ -5550,7 +5550,7 @@ static int case_kc_redp2p_lost_response(void) {
 
 cleanup:
     if (publisher_started) test_publisher_stop(&publisher);
-    else if (publisher.ctx != NULL) redp2p_close(publisher.ctx);
+    else if (publisher.ctx != NULL) redp2p_context_destroy(publisher.ctx);
     test_setenv("REDP2P_HEARTBEAT_S", NULL);
     if (stub_started)
         fail += expect_int("stop publisher control stub", 0,
@@ -5677,14 +5677,14 @@ static int case_kc_redp2p_ttl_expiry(void) {
             int result;
 
             wrong_ctx = NULL;
-            result = redp2p_open(&wrong_ctx);
+            result = redp2p_context_create(&wrong_ctx);
             if (result == REDP2P_OK) {
-                redp2p_set_protocol(wrong_ctx, REDP2P_PROTO_TCP);
-                redp2p_set_port(wrong_ctx, 41007);
+                redp2p_pub_set_protocol(wrong_ctx, REDP2P_PROTO_TCP);
+                redp2p_set_local_port(wrong_ctx, 41007);
                 redp2p_set_state_dir(wrong_ctx, state_dir);
-                result = redp2p_wait(wrong_ctx, TEST_HOST, port, "ttlpub",
+                result = redp2p_pub_run(wrong_ctx, TEST_HOST, port, "ttlpub",
                     41007);
-                redp2p_close(wrong_ctx);
+                redp2p_context_destroy(wrong_ctx);
             }
             _exit(result == REDP2P_EAUTH ? 0 : 1);
         }
@@ -5844,15 +5844,15 @@ static int case_kc_redp2p_list_publishers(void) {
     snprintf(foreign_state_dir, sizeof(foreign_state_dir),
         "%s/duplicate-takeover", test_home_path);
     fail += expect_int("list NULL ctx", REDP2P_EINVAL,
-        redp2p_list_publishers(NULL, TEST_HOST, base, test_on_publisher, NULL));
-    fail += expect_int("open client", REDP2P_OK, redp2p_open(&client));
+        redp2p_idx_query_publishers(NULL, TEST_HOST, base, test_on_publisher, NULL));
+    fail += expect_int("open client", REDP2P_OK, redp2p_context_create(&client));
     fail += expect_int("list NULL host", REDP2P_EINVAL,
-        redp2p_list_publishers(client, NULL, base, test_on_publisher, NULL));
+        redp2p_idx_query_publishers(client, NULL, base, test_on_publisher, NULL));
     fail += expect_int("list NULL callback", REDP2P_EINVAL,
-        redp2p_list_publishers(client, TEST_HOST, base, NULL, NULL));
+        redp2p_idx_query_publishers(client, TEST_HOST, base, NULL, NULL));
     fail += expect_int("list without index", REDP2P_ENET,
-        redp2p_list_publishers(client, TEST_HOST, base, test_on_publisher, NULL));
-    redp2p_close(client);
+        redp2p_idx_query_publishers(client, TEST_HOST, base, test_on_publisher, NULL));
+    redp2p_context_destroy(client);
     if (test_index_start(&index, (unsigned short)(base + 1U)) != 0) return 1;
 #ifndef _WIN32
     if (REDP2P_TEST_CLI[0])
@@ -5862,16 +5862,16 @@ static int case_kc_redp2p_list_publishers(void) {
     if (test_publisher_start(&publisher, "listed", (unsigned short)(base + 1U),
         (unsigned short)(base + 2U)) != 0) return 1;
     memset(&publishers, 0, sizeof(publishers));
-    fail += expect_int("open client", REDP2P_OK, redp2p_open(&client));
+    fail += expect_int("open client", REDP2P_OK, redp2p_context_create(&client));
     fail += expect_int("seed stale list detail", REDP2P_EINVAL,
-        redp2p_set_protocol(client, 7));
+        redp2p_pub_set_protocol(client, 7));
     fail += expect_int("list publishers", REDP2P_OK,
-        redp2p_list_publishers(client, TEST_HOST, (unsigned short)(base + 1U),
+        redp2p_idx_query_publishers(client, TEST_HOST, (unsigned short)(base + 1U),
             test_on_publisher, &publishers));
     fail += expect_true("publisher listed", test_has_publisher(&publishers, "listed"));
     fail += expect_string("successful list clears detail", "",
         redp2p_get_error(client));
-    redp2p_close(client);
+    redp2p_context_destroy(client);
 #ifdef _WIN32
     fail += expect_true("CLI publisher listing skipped on Windows", 1);
 #else
@@ -5914,13 +5914,13 @@ static int case_kc_redp2p_list_publishers(void) {
             duplicate_port));
     memset(&publishers, 0, sizeof(publishers));
     fail += expect_int("open duplicate list client", REDP2P_OK,
-        redp2p_open(&client));
+        redp2p_context_create(&client));
     fail += expect_int("list after old duplicate disconnect", REDP2P_OK,
-        redp2p_list_publishers(client, TEST_HOST,
+        redp2p_idx_query_publishers(client, TEST_HOST,
             (unsigned short)(base + 1U), test_on_publisher, &publishers));
     fail += expect_true("original duplicate publisher remains active",
         test_has_publisher(&publishers, "duplicate"));
-    redp2p_close(client);
+    redp2p_context_destroy(client);
     test_publisher_stop(&publisher);
     fail += expect_int("start released duplicate publisher", 0,
         test_publisher_start(&replacement, "duplicate",
@@ -5955,17 +5955,17 @@ static int case_kc_redp2p_get_error(void) {
 
     fail = 0;
     fail += expect_string("NULL ctx empty", "", redp2p_get_error(NULL));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_string("cleared default", "", redp2p_get_error(ctx));
     fail += expect_int("invalid protocol category", REDP2P_EINVAL,
-        redp2p_set_protocol(ctx, 7));
+        redp2p_pub_set_protocol(ctx, 7));
     fail += expect_string("captured detail",
         "protocol must be REDP2P_PROTO_TCP or REDP2P_PROTO_UDP",
         redp2p_get_error(ctx));
     fail += expect_int("valid protocol", REDP2P_OK,
-        redp2p_set_protocol(ctx, REDP2P_PROTO_TCP));
+        redp2p_pub_set_protocol(ctx, REDP2P_PROTO_TCP));
     fail += expect_string("success clears detail", "", redp2p_get_error(ctx));
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -5982,14 +5982,14 @@ static int case_kc_redp2p_set_seats(void) {
     size_t max_peer_count;
 
     fail = 0;
-    fail += expect_int("set seats NULL", REDP2P_EINVAL, redp2p_set_seats(NULL, 1));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+    fail += expect_int("set seats NULL", REDP2P_EINVAL, redp2p_idx_set_capacity(NULL, 1));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     max_peer_count = SIZE_MAX / sizeof(redp2p_peer_t);
-    fail += expect_int("set zero seats", REDP2P_OK, redp2p_set_seats(ctx, 0));
-    fail += expect_int("set seats positive", REDP2P_OK, redp2p_set_seats(ctx, 2));
+    fail += expect_int("set zero seats", REDP2P_OK, redp2p_idx_set_capacity(ctx, 0));
+    fail += expect_int("set seats positive", REDP2P_OK, redp2p_idx_set_capacity(ctx, 2));
     fail += expect_int("reject allocation count overflow", REDP2P_EINVAL,
-        redp2p_set_seats(ctx, max_peer_count + 1));
-    redp2p_close(ctx);
+        redp2p_idx_set_capacity(ctx, max_peer_count + 1));
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6006,15 +6006,15 @@ static int case_kc_redp2p_set_max_consumers_per_publisher(void) {
 
     fail = 0;
     fail += expect_int("set max consumers NULL", REDP2P_EINVAL,
-        redp2p_set_max_consumers_per_publisher(NULL, 1));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+        redp2p_idx_set_max_consumers(NULL, 1));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_int("set zero consumers restores default", REDP2P_OK,
-        redp2p_set_max_consumers_per_publisher(ctx, 0));
+        redp2p_idx_set_max_consumers(ctx, 0));
     fail += expect_int("set consumers positive", REDP2P_OK,
-        redp2p_set_max_consumers_per_publisher(ctx, 8));
+        redp2p_idx_set_max_consumers(ctx, 8));
     fail += expect_int("set consumers large value", REDP2P_OK,
-        redp2p_set_max_consumers_per_publisher(ctx, (size_t)2097152));
-    redp2p_close(ctx);
+        redp2p_idx_set_max_consumers(ctx, (size_t)2097152));
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6030,11 +6030,11 @@ static int case_kc_redp2p_set_pow(void) {
     int fail;
 
     fail = 0;
-    fail += expect_int("set pow NULL", REDP2P_EINVAL, redp2p_set_pow(NULL, 1));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-    fail += expect_int("set pow positive", REDP2P_OK, redp2p_set_pow(ctx, 2));
-    fail += expect_int("set pow negative", REDP2P_EINVAL, redp2p_set_pow(ctx, -1));
-    redp2p_close(ctx);
+    fail += expect_int("set pow NULL", REDP2P_EINVAL, redp2p_idx_set_pow(NULL, 1));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    fail += expect_int("set pow positive", REDP2P_OK, redp2p_idx_set_pow(ctx, 2));
+    fail += expect_int("set pow negative", REDP2P_EINVAL, redp2p_idx_set_pow(ctx, -1));
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6050,11 +6050,11 @@ static int case_kc_redp2p_set_port(void) {
     int fail;
 
     fail = 0;
-    fail += expect_int("set port NULL", REDP2P_EINVAL, redp2p_set_port(NULL, 1));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-    fail += expect_int("set port value", REDP2P_OK, redp2p_set_port(ctx, 12345));
-    fail += expect_int("set port zero", REDP2P_EINVAL, redp2p_set_port(ctx, 0));
-    redp2p_close(ctx);
+    fail += expect_int("set port NULL", REDP2P_EINVAL, redp2p_set_local_port(NULL, 1));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    fail += expect_int("set port value", REDP2P_OK, redp2p_set_local_port(ctx, 12345));
+    fail += expect_int("set port zero", REDP2P_EINVAL, redp2p_set_local_port(ctx, 0));
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6071,13 +6071,13 @@ static int case_kc_redp2p_set_protocol(void) {
 
     fail = 0;
     fail += expect_int("set protocol NULL", REDP2P_EINVAL,
-        redp2p_set_protocol(NULL, REDP2P_PROTO_TCP));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-    fail += expect_int("set TCP", REDP2P_OK, redp2p_set_protocol(ctx, REDP2P_PROTO_TCP));
-    fail += expect_int("set UDP", REDP2P_OK, redp2p_set_protocol(ctx, REDP2P_PROTO_UDP));
+        redp2p_pub_set_protocol(NULL, REDP2P_PROTO_TCP));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    fail += expect_int("set TCP", REDP2P_OK, redp2p_pub_set_protocol(ctx, REDP2P_PROTO_TCP));
+    fail += expect_int("set UDP", REDP2P_OK, redp2p_pub_set_protocol(ctx, REDP2P_PROTO_UDP));
     fail += expect_int("set invalid protocol", REDP2P_EINVAL,
-        redp2p_set_protocol(ctx, 99));
-    redp2p_close(ctx);
+        redp2p_pub_set_protocol(ctx, 99));
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6094,16 +6094,16 @@ static int case_kc_redp2p_set_pass(void) {
 
     fail = 0;
     fail += expect_int("set pass NULL ctx", REDP2P_EINVAL,
-        redp2p_set_pass(NULL, "x"));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
-    fail += expect_int("set pass", REDP2P_OK, redp2p_set_pass(ctx, "secret"));
-    fail += expect_int("clear pass", REDP2P_OK, redp2p_set_pass(ctx, ""));
-    fail += expect_int("set NULL pass", REDP2P_EINVAL, redp2p_set_pass(ctx, NULL));
+        redp2p_set_registration_pass(NULL, "x"));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    fail += expect_int("set pass", REDP2P_OK, redp2p_set_registration_pass(ctx, "secret"));
+    fail += expect_int("clear pass", REDP2P_OK, redp2p_set_registration_pass(ctx, ""));
+    fail += expect_int("set NULL pass", REDP2P_EINVAL, redp2p_set_registration_pass(ctx, NULL));
     fail += expect_int("set symbolic pass", REDP2P_OK,
-        redp2p_set_pass(ctx, "bad`pass"));
+        redp2p_set_registration_pass(ctx, "bad`pass"));
     fail += expect_int("set whitespace pass", REDP2P_EINVAL,
-        redp2p_set_pass(ctx, "bad pass"));
-    redp2p_close(ctx);
+        redp2p_set_registration_pass(ctx, "bad pass"));
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6121,25 +6121,25 @@ static int case_kc_redp2p_set_vip(void) {
 
     fail = 0;
     fail += expect_int("set vip NULL ctx", REDP2P_ERROR,
-        redp2p_set_vip(NULL, "vip pass", err, sizeof(err)));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+        redp2p_idx_set_vips(NULL, "vip pass", err, sizeof(err)));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_int("set vip pair", REDP2P_OK,
-        redp2p_set_vip(ctx, "vip pass", err, sizeof(err)));
+        redp2p_idx_set_vips(ctx, "vip pass", err, sizeof(err)));
     fail += expect_int("clear vip NULL", REDP2P_OK,
-        redp2p_set_vip(ctx, NULL, err, sizeof(err)));
+        redp2p_idx_set_vips(ctx, NULL, err, sizeof(err)));
     fail += expect_int("clear vip empty", REDP2P_OK,
-        redp2p_set_vip(ctx, "", err, sizeof(err)));
+        redp2p_idx_set_vips(ctx, "", err, sizeof(err)));
     fail += expect_int("reject odd vip tokens", REDP2P_ERROR,
-        redp2p_set_vip(ctx, "vip", err, sizeof(err)));
+        redp2p_idx_set_vips(ctx, "vip", err, sizeof(err)));
     fail += expect_int("reject bad vip id", REDP2P_ERROR,
-        redp2p_set_vip(ctx, "bad:id pass", err, sizeof(err)));
+        redp2p_idx_set_vips(ctx, "bad:id pass", err, sizeof(err)));
     fail += expect_int("accept symbolic vip pass", REDP2P_OK,
-        redp2p_set_vip(ctx, "other bad`pass", err, sizeof(err)));
+        redp2p_idx_set_vips(ctx, "other bad`pass", err, sizeof(err)));
     fail += expect_int("reject whitespace vip pass", REDP2P_ERROR,
-        redp2p_set_vip(ctx, "third bad pass", err, sizeof(err)));
+        redp2p_idx_set_vips(ctx, "third bad pass", err, sizeof(err)));
     fail += expect_int("reject duplicate vip", REDP2P_ERROR,
-        redp2p_set_vip(ctx, "vip pass vip other", err, sizeof(err)));
-    redp2p_close(ctx);
+        redp2p_idx_set_vips(ctx, "vip pass vip other", err, sizeof(err)));
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6157,10 +6157,10 @@ static int case_kc_redp2p_set_sweep(void) {
     fail = 0;
     fail += expect_int("set sweep NULL", REDP2P_EINVAL,
         redp2p_set_sweep(NULL, 1));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_int("set sweep positive", REDP2P_OK, redp2p_set_sweep(ctx, 10));
     fail += expect_int("set sweep zero", REDP2P_OK, redp2p_set_sweep(ctx, 0));
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6177,16 +6177,16 @@ static int case_kc_redp2p_set_stun_url(void) {
 
     fail = 0;
     fail += expect_int("set stun NULL ctx", REDP2P_EINVAL,
-        redp2p_set_stun_url(NULL, "stun:example.com:3478"));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+        redp2p_set_stun_server(NULL, "stun:example.com:3478"));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_int("set stun", REDP2P_OK,
-        redp2p_set_stun_url(ctx, "stun:example.com:3478"));
+        redp2p_set_stun_server(ctx, "stun:example.com:3478"));
     fail += expect_int("seed stun detail", REDP2P_EINVAL,
-        redp2p_set_protocol(ctx, 7));
-    fail += expect_int("clear stun", REDP2P_OK, redp2p_set_stun_url(ctx, NULL));
+        redp2p_pub_set_protocol(ctx, 7));
+    fail += expect_int("clear stun", REDP2P_OK, redp2p_set_stun_server(ctx, NULL));
     fail += expect_string("successful stun update clears detail", "",
         redp2p_get_error(ctx));
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6204,16 +6204,16 @@ static int case_kc_redp2p_set_stream_faults(void) {
     fail = 0;
     fail += expect_int("set stream faults NULL", REDP2P_EINVAL,
         redp2p_set_stream_faults(NULL, 1, 1));
-    fail += expect_int("open context", REDP2P_OK, redp2p_open(&ctx));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
     fail += expect_int("seed stream fault detail", REDP2P_EINVAL,
-        redp2p_set_protocol(ctx, 7));
+        redp2p_pub_set_protocol(ctx, 7));
     fail += expect_int("set stream faults", REDP2P_OK,
         redp2p_set_stream_faults(ctx, 7, 11));
     fail += expect_string("stream fault success clears detail", "",
         redp2p_get_error(ctx));
     fail += expect_int("reject negative stream faults", REDP2P_EINVAL,
         redp2p_set_stream_faults(ctx, -1, 0));
-    redp2p_close(ctx);
+    redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -6236,7 +6236,7 @@ static int case_kc_redp2p_set_state_dir(void) {
 
     fail = 0;
 
-    fail += expect_int("open ctx", REDP2P_OK, redp2p_open(&ctx));
+    fail += expect_int("open ctx", REDP2P_OK, redp2p_context_create(&ctx));
     if (ctx) {
         fail += expect_int("set_state_dir NULL ctx", REDP2P_EINVAL,
             redp2p_set_state_dir(NULL, "/tmp"));
@@ -6260,7 +6260,7 @@ static int case_kc_redp2p_set_state_dir(void) {
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-        redp2p_close(ctx);
+        redp2p_context_destroy(ctx);
     }
 
     base = (unsigned short)(test_port_base() + 320U);
