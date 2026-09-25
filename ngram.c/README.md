@@ -1,220 +1,272 @@
 # ngram.c - Sliding-window n-gram traversal
 
-`ngram.c` is a minimalist C library and CLI for descending sliding-window n-gram traversal of text. It enables semantic analysis by emitting token spans and executing commands for each chunk, designed as a composable native primitive for the KaisarCode ecosystem.
-
----
+\`ngram.c\` is a small stateless C library and CLI for descending sliding-window traversal over byte-delimited text tokens. The reusable library emits borrowed spans through a synchronous callback. The CLI can additionally run one command per emitted span.
 
 ## CLI
 
-Traverse text and emit n-gram chunks based on token window constraints.
+Traverse positional text:
 
-### Examples
-
-Basic n-gram extraction (default 1-10 tokens):
-
-```bash
+\`\`\`bash
 ./bin/x86_64/linux/ngram "The quick brown fox"
-```
+\`\`\`
 
-Extraction with custom window size and separators:
+Read the complete input from stdin:
 
-```bash
-./bin/x86_64/linux/ngram "The quick brown fox" --max 3 --min 2 --sep " ,"
-```
-
-Execute a command for each chunk and close span on stdout:
-
-```bash
-./bin/x86_64/linux/ngram "The quick brown fox" --cmd "grep fox"
-```
-
-Standard input processing:
-
-```bash
+\`\`\`bash
 echo "The quick brown fox" | ./bin/x86_64/linux/ngram
-```
+\`\`\`
 
----
+Override traversal bounds or separator bytes:
 
-### Parameters
+\`\`\`bash
+./bin/x86_64/linux/ngram --max 3 --min 2 --sep " ," "The quick brown fox"
+\`\`\`
+
+Run one command for each emitted span:
+
+\`\`\`bash
+./bin/x86_64/linux/ngram --cmd "grep fox" "The quick brown fox"
+\`\`\`
+
+The CLI contract is unchanged:
 
 | Flag | Description |
 | :--- | :--- |
-| `--max, -max <n>` | Maximum tokens per block |
-| `--min, -min <n>` | Minimum tokens per block |
-| `--sep, -sep <s>` | Custom separator characters |
-| `--cmd, -cmd <cmd>` | Execute command for each chunk |
-| `--help, -h` | Show help and usage |
-| `--version, -v` | Show version |
+| \`--max\`, \`-max <n>\` | Maximum tokens per block |
+| \`--min\`, \`-min <n>\` | Minimum tokens per block |
+| \`--sep\`, \`-sep <s>\` | Custom separator characters |
+| \`--cmd\`, \`-cmd <cmd>\` | Execute command for each chunk |
+| \`--help\`, \`-h\` | Show help and usage |
+| \`--version\`, \`-v\` | Show version |
 
----
-
-### Output
-
-Chunks are printed to stdout, one per line:
-
-```
-The quick brown fox
-The quick brown
-quick brown fox
-The quick
-quick brown
-brown fox
-```
+With \`--cmd\`, each chunk is printed before command evaluation. The command is parsed into argv and executed directly without a shell. The chunk plus a newline is written to the child stdin. Any child stdout closes that span; child exit status alone does not close it. Command plumbing failure makes the CLI fail.
 
 ## Public API
 
-The library is stateless and reusable. Input and separator strings are caller-owned and borrowed; chunks reference byte offsets in the original input during the synchronous traversal only.
+The library is stateless and reentrant. Traversal state belongs to one call.
 
-```c
+\`\`\`c
 #include "libngram.h"
 
-int my_visitor(const kc_ngram_chunk_t *chunk, void *userdata) {
-    printf("%.*s\n", (int)(chunk->byte_end - chunk->byte_start), chunk->input + chunk->byte_start);
-    return 0; // 0 continue, 1 close this span, negative abort
+#define KC_NGRAM_OK      0
+#define KC_NGRAM_ERROR  -1
+#define KC_NGRAM_EABORT -2
+
+typedef struct {
+    const char *data;
+    size_t data_size;
+    size_t token_start;
+    size_t token_count;
+} kc_ngram_chunk_t;
+
+typedef struct {
+    const size_t *max_tokens;
+    const size_t *min_tokens;
+    const char *separators;
+} kc_ngram_options_t;
+
+typedef int (*kc_ngram_visit_fn)(
+    const kc_ngram_chunk_t *chunk,
+    void *userdata
+);
+
+int kc_ngram_traverse(
+    const char *input,
+    const kc_ngram_options_t *options,
+    kc_ngram_visit_fn visit,
+    void *userdata
+);
+
+uint64_t kc_ngram_version(void);
+\`\`\`
+
+A normal C call can override only the options it needs:
+
+\`\`\`c
+static int visit(const kc_ngram_chunk_t *chunk, void *userdata) {
+    (void)userdata;
+
+    printf("%.*s\n", (int)chunk->data_size, chunk->data);
+
+    return 0;
 }
 
-kc_ngram_options_t options = kc_ngram_options_default();
-options.max_tokens = 3;
+size_t max_tokens = 3;
+kc_ngram_options_t options = {0};
 
-size_t out_count;
-int rc = kc_ngram_execute("The quick brown fox", &options, my_visitor, NULL, &out_count);
-if (rc != KC_NGRAM_OK) {
-    // handle error (KC_NGRAM_ERROR) or visitor abort (KC_NGRAM_EABORT)
-}
-```
+options.max_tokens = &max_tokens;
 
-### `kc_ngram_options_default()`
+int rc = kc_ngram_traverse(
+    "The quick brown fox",
+    &options,
+    visit,
+    NULL
+);
+\`\`\`
 
-Returns a `kc_ngram_options_t` by value with the built-in defaults: `max_tokens = 10`, `min_tokens = 1`, and `separators = " \t\r\n"` (borrowed, byte-oriented). Configure fields before calling `kc_ngram_execute`.
+### Options and defaults
 
-### `kc_ngram_execute(input, options, visit, userdata, out_count)`
+Options are independently optional. The library owns the default values; bindings do not duplicate them.
 
-```c
-int kc_ngram_execute(const char *input, const kc_ngram_options_t *options,
-    kc_ngram_visit_fn visit, void *userdata, size_t *out_count);
-```
+| Option | Omitted value | Explicit behavior |
+| :--- | :--- | :--- |
+| \`max_tokens\` | \`10\` | \`0\` means use all available tokens; otherwise the maximum window size |
+| \`min_tokens\` | \`1\` | Must be at least \`1\` |
+| \`separators\` | \`" \t\r\n"\` | Byte set used to delimit tokens; an empty string means no separator bytes |
 
-Descending sliding-window traversal over byte-delimited tokens. Emitted chunks borrow `input` and reference its byte offsets: `byte_start`/`byte_end` delimit the chunk in the input, `start`/`end` are the 0-based inclusive token indexes, and `size` is the number of tokens. Separators are byte-oriented.
+Passing \`options == NULL\` omits every option. Inside a non-NULL options value, a NULL optional field is also omitted. A non-NULL pointer is explicit and interpreted literally, so a pointer to \`max_tokens == 0\` is distinct from an omitted \`max_tokens\`.
 
-- Returns `KC_NGRAM_OK`, or `KC_NGRAM_ERROR`, or `KC_NGRAM_EABORT` when a visitor aborts traversal (the aborting chunk is not counted).
-- Stores the number of emitted chunks in `*out_count`.
-- Empty input returns `KC_NGRAM_OK` with `*out_count == 0`; the visitor is not called.
-- `max_tokens == 0` uses all available tokens.
-- `min_tokens == 0` is not a valid configuration; use `kc_ngram_options_default()`.
+There is no public \`options_default()\` function. Default policy stays inside the library.
 
-### Visitor return values
+### Traversal
 
-- `0` - keep traversal open.
-- `1` - close this span; contained (shorter) windows are skipped. The closing chunk counts as emitted.
-- negative - abort traversal with `KC_NGRAM_EABORT`; the aborting chunk is not counted.
+\`kc_ngram_traverse()\` tokenizes the input using separator bytes, then visits windows from largest to smallest. Windows of the same size are visited left to right.
 
-Status codes are `KC_NGRAM_OK` (0), `KC_NGRAM_ERROR` (-1), and `KC_NGRAM_EABORT` (-2).
+Each \`kc_ngram_chunk_t\` describes the original input span:
 
-`kc_ngram_version()` returns the library version as an unsigned 64-bit integer.
+- \`data\` is a borrowed pointer to the first byte of the first token in the window;
+- \`data_size\` is the exact byte span through the last byte of the last token, including separator bytes between tokens;
+- \`token_start\` is the zero-based index of the first token;
+- \`token_count\` is the number of tokens in the window.
 
----
+The callback runs synchronously and is never retained. \`chunk\`, \`chunk->data\`, the input, the options, and \`userdata\` are borrowed only for the duration implied by the call. The library does not allocate an owned chunk value for the caller.
+
+Visitor return semantics are deliberately numeric:
+
+\`\`\`text
+0   continue traversal
+1   close this span
+<0  abort traversal
+\`\`\`
+
+Returning \`1\` suppresses later candidate windows fully contained in that closed span. Returning a negative value stops traversal and makes \`kc_ngram_traverse()\` return \`KC_NGRAM_EABORT\`.
+
+No additional public callback constants or namespace properties are defined.
+
+Empty input is valid and returns \`KC_NGRAM_OK\` without invoking the callback.
+
+### Scripting projection
+
+The public header remains the canonical ABI. Generated cdef output preserves the exact public identifiers, including \`max_tokens\`, \`min_tokens\`, \`token_start\`, and \`token_count\`.
+
+A JavaScript bridge can expose the same capability mechanically:
+
+\`\`\`js
+ngram.traverse(
+    "uno dos tres cuatro",
+    {
+        max_tokens: 3,
+        min_tokens: 2
+    },
+    chunk => {
+        console.log(chunk.data);
+        console.log(chunk.token_start);
+        console.log(chunk.token_count);
+
+        return 0;
+    }
+);
+\`\`\`
+
+Omitted properties map to omitted C option fields, so defaults remain native-library policy:
+
+\`\`\`js
+ngram.traverse(
+    "uno dos tres",
+    {},
+    chunk => {
+        console.log(chunk.data);
+        return 0;
+    }
+);
+\`\`\`
+
+The equivalent Lua capability shape keeps the same public field names:
+
+\`\`\`lua
+ngram.traverse(
+    "uno dos tres cuatro",
+    {
+        max_tokens = 3,
+        min_tokens = 2
+    },
+    function(chunk)
+        print(chunk.data)
+        print(chunk.token_start)
+        print(chunk.token_count)
+
+        return 0
+    end
+)
+\`\`\`
+
+These examples describe the mechanical scripting projection of the public ABI. They do not add callback constants, camelCase field aliases, default-merging logic, or additional capability semantics.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+Compiled artifacts are generated under \`bin/{arch}/{platform}/\`.
 
-```bash
+\`\`\`bash
 make
-```
+\`\`\`
 
-### Tests
+Build all configured targets:
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile only test executables, link dynamically against the generated shared library, and run through CTest.
+\`\`\`bash
+make all
+\`\`\`
 
-```bash
+## Tests
+
+Build the project artifacts before running the portable contract suite:
+
+\`\`\`bash
 make
 make test
-```
+\`\`\`
 
-To run the common `test` target in Windows-through-Wine mode:
+Windows-through-Wine validation:
 
-```bash
+\`\`\`bash
 make x86_64/windows
 make test wine
-```
+\`\`\`
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+The native and Wine suites contain the reusable public-API cases plus exactly one grouped \`kc_ngram_cli\` case. That CLI case covers help/version aliases, positional and stdin input, defaults, min/max/separator flags and aliases, explicit max zero, diagnostics and exit codes, stdout-based \`--cmd\` closure, and literal argv behavior without shell evaluation.
 
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test`, `make test wine`, or `make test wasm`.
+## WebAssembly
 
-### WebAssembly (Emscripten)
+WASM applicability is required: the reusable traversal capability has no native-OS dependency.
 
-The `wasm32/wasm` target builds the reusable traversal library as a WebAssembly module using the Emscripten CMake toolchain:
+Build:
 
-```bash
+\`\`\`bash
 make wasm32/wasm
-```
+\`\`\`
 
-- Artifact: `bin/wasm32/wasm/ngram.wasm`
-- Test: `make test wasm`
-- Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the stateless reusable API (`kc_ngram_options_default`, `kc_ngram_execute`, `kc_ngram_version`) with status codes `KC_NGRAM_OK`, `KC_NGRAM_ERROR`, and `KC_NGRAM_EABORT`. Input and separator strings are caller-owned. It contains the reusable library capability, not the `ngram` CLI: `src/ngram.c` is not compiled into the module.
+Validate:
 
-`make test wasm` compiles `src/test.c` with Emscripten and runs the same public-contract tests under Node.js. It requires `bin/wasm32/wasm/ngram.wasm` and reports how to build it when it is absent.
+\`\`\`bash
+make test wasm
+\`\`\`
 
-### Multiarch Builds
+Artifact:
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+\`\`\`text
+bin/wasm32/wasm/ngram.wasm
+\`\`\`
 
-```bash
-make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make x86_64/iossim
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make aarch64/ios
-make aarch64/iossim
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
-```
+The reusable module exports:
 
----
+\`\`\`text
+kc_ngram_traverse
+kc_ngram_version
+\`\`\`
 
-## Development Requirements
+The CLI is not part of the WASM module or WASM contract test. The reusable traversal tests run under Emscripten/Node.
 
-### Build Tools
+## Platform and tooling requirements
 
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
+The project uses C11, CMake 3.14+, Ninja, and a supported C compiler. No additional system library is required for the reusable traversal capability.
 
-### System Libraries
-
-Linux:
-- No additional system libraries required.
-
-Windows (MSVC or MinGW):
-- No additional system libraries required.
-
-macOS / iOS:
-- No additional system libraries required.
-
-### Optional Cross-Compilation SDKs
-
-Required only for multiarch builds:
-
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- Emscripten SDK (`emcmake`, `emcc`, Node.js) for the `wasm32/wasm` target.
-- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
-- Android NDK (version 27.2.12479018) for Android targets.
+Optional cross-platform toolchains are required only for their respective targets: MinGW/Wine for Windows validation, Emscripten/Node for WASM, osxcross for Apple targets, and the Android NDK for Android.
