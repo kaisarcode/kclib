@@ -285,7 +285,9 @@ static int case_kc_redp2p_api(void)
     idx_options.max_consumers = 32;
 
     if (!failed) {
+        fprintf(stderr, "[contract] idx create\n");
         status = kc_redp2p_idx(&idx, &idx_options);
+        fprintf(stderr, "[contract] idx create done: %d\n", status);
         if (status != KC_REDP2P_OK || !idx) failed = 1;
     }
     if (!failed) {
@@ -301,7 +303,9 @@ static int case_kc_redp2p_api(void)
     pub_options.protocol = KC_REDP2P_TCP;
     pub_options.port = echo.port;
     if (!failed) {
+        fprintf(stderr, "[contract] pub create\n");
         status = kc_redp2p_pub(&pub, &pub_options);
+        fprintf(stderr, "[contract] pub create done: %d\n", status);
         if (status != KC_REDP2P_OK || !pub) failed = 1;
     }
 
@@ -320,10 +324,13 @@ static int case_kc_redp2p_api(void)
     con_options.index = index;
     con_options.port = con_port;
     if (!failed) {
+        fprintf(stderr, "[contract] con create\n");
         status = kc_redp2p_con(&con, &con_options);
+        fprintf(stderr, "[contract] con create done: %d\n", status);
         if (status != KC_REDP2P_OK || !con) failed = 1;
     }
     if (!failed) {
+        fprintf(stderr, "[contract] tcp roundtrip\n");
         uint64_t deadline = monotonic_ms() + 5000U;
         for (;;) {
             if (tcp_roundtrip(con_port) == 0) break;
@@ -335,10 +342,20 @@ static int case_kc_redp2p_api(void)
         }
     }
 
+    fprintf(stderr, "[contract] con close\n");
     kc_redp2p_con_close(con);
+    fprintf(stderr, "[contract] con close done\n");
+    fprintf(stderr, "[contract] pub close\n");
     kc_redp2p_pub_close(pub);
+    fprintf(stderr, "[contract] pub close done\n");
+    fprintf(stderr, "[contract] idx close\n");
     kc_redp2p_idx_close(idx);
-    if (!failed) echo_join(&echo);
+    fprintf(stderr, "[contract] idx close done\n");
+    if (!failed) {
+        fprintf(stderr, "[contract] echo join\n");
+        echo_join(&echo);
+        fprintf(stderr, "[contract] echo join done\n");
+    }
 
     if (strcmp(kc_redp2p_strerror(KC_REDP2P_OK), "OK") != 0) failed = 1;
     kc_redp2p_free(NULL);
@@ -412,6 +429,7 @@ int main(int argc, char **argv)
         return 2;
     }
     if (sockets_start() != 0) return 1;
+    fprintf(stderr, "[contract] start\n");
     if (strcmp(argv[1], "all") == 0) rc = case_all();
     else if (strcmp(argv[1], "kc_redp2p_api") == 0) {
         test_current = 0; test_total = 1; test_failed = 0;
