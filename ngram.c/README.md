@@ -2,30 +2,32 @@
 
 \`ngram.c\` is a small stateless C library and CLI for descending sliding-window traversal over byte-delimited text tokens. The reusable library emits borrowed spans through a synchronous callback. The CLI can additionally run one command per emitted span.
 
+---
+
 ## CLI
 
 Traverse positional text:
 
 \`\`\`bash
-./bin/x86_64/linux/ngram "The quick brown fox"
+ngram "The quick brown fox"
 \`\`\`
 
 Read the complete input from stdin:
 
 \`\`\`bash
-echo "The quick brown fox" | ./bin/x86_64/linux/ngram
+echo "The quick brown fox" | ngram
 \`\`\`
 
 Override traversal bounds or separator bytes:
 
 \`\`\`bash
-./bin/x86_64/linux/ngram --max 3 --min 2 --sep " ," "The quick brown fox"
+ngram --max 3 --min 2 --sep " ," "The quick brown fox"
 \`\`\`
 
 Run one command for each emitted span:
 
 \`\`\`bash
-./bin/x86_64/linux/ngram --cmd "grep fox" "The quick brown fox"
+ngram --cmd "grep fox" "The quick brown fox"
 \`\`\`
 
 The CLI contract is unchanged:
@@ -39,7 +41,7 @@ The CLI contract is unchanged:
 | \`--help\`, \`-h\` | Show help and usage |
 | \`--version\`, \`-v\` | Show version |
 
-With \`--cmd\`, each chunk is printed before command evaluation. The command is parsed into argv and executed directly without a shell. The chunk plus a newline is written to the child stdin. Any child stdout closes that span; child exit status alone does not close it. Command plumbing failure makes the CLI fail.
+---
 
 ## Public API
 
@@ -86,9 +88,9 @@ A normal C call can override only the options it needs:
 static int visit(const kc_ngram_chunk_t *chunk, void *userdata) {
     (void)userdata;
 
-    printf("%.*s\n", (int)chunk->data_size, chunk->data);
+printf("%.*s\n", (int)chunk->data_size, chunk->data);
 
-    return 0;
+return 0;
 }
 
 size_t max_tokens = 3;
@@ -105,8 +107,6 @@ int rc = kc_ngram_traverse(
 \`\`\`
 
 ### Options and defaults
-
-Options are independently optional. The library owns the default values; bindings do not duplicate them.
 
 | Option | Omitted value | Explicit behavior |
 | :--- | :--- | :--- |
@@ -145,128 +145,95 @@ No additional public callback constants or namespace properties are defined.
 
 Empty input is valid and returns \`KC_NGRAM_OK\` without invoking the callback.
 
-### Scripting projection
-
-The public header remains the canonical ABI. Generated cdef output preserves the exact public identifiers, including \`max_tokens\`, \`min_tokens\`, \`token_start\`, and \`token_count\`.
-
-A JavaScript bridge can expose the same capability mechanically:
-
-\`\`\`js
-ngram.traverse(
-    "uno dos tres cuatro",
-    {
-        max_tokens: 3,
-        min_tokens: 2
-    },
-    chunk => {
-        console.log(chunk.data);
-        console.log(chunk.token_start);
-        console.log(chunk.token_count);
-
-        return 0;
-    }
-);
-\`\`\`
-
-Omitted properties map to omitted C option fields, so defaults remain native-library policy:
-
-\`\`\`js
-ngram.traverse(
-    "uno dos tres",
-    {},
-    chunk => {
-        console.log(chunk.data);
-        return 0;
-    }
-);
-\`\`\`
-
-The equivalent Lua capability shape keeps the same public field names:
-
-\`\`\`lua
-ngram.traverse(
-    "uno dos tres cuatro",
-    {
-        max_tokens = 3,
-        min_tokens = 2
-    },
-    function(chunk)
-        print(chunk.data)
-        print(chunk.token_start)
-        print(chunk.token_count)
-
-        return 0
-    end
-)
-\`\`\`
-
-These examples describe the mechanical scripting projection of the public ABI. They do not add callback constants, camelCase field aliases, default-merging logic, or additional capability semantics.
+---
 
 ## Build
 
-Compiled artifacts are generated under \`bin/{arch}/{platform}/\`.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
-\`\`\`bash
+```bash
 make
-\`\`\`
+```
 
-Build all configured targets:
+### Tests
 
-\`\`\`bash
-make all
-\`\`\`
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
-## Tests
-
-Build the project artifacts before running the portable contract suite:
-
-\`\`\`bash
+```bash
 make
 make test
-\`\`\`
+```
 
-Windows-through-Wine validation:
+To run through Wine:
 
-\`\`\`bash
+```bash
 make x86_64/windows
 make test wine
-\`\`\`
+```
 
-The native and Wine suites contain the reusable public-API cases plus exactly one grouped \`kc_ngram_cli\` case. That CLI case covers help/version aliases, positional and stdin input, defaults, min/max/separator flags and aliases, explicit max zero, diagnostics and exit codes, stdout-based \`--cmd\` closure, and literal argv behavior without shell evaluation.
+### WebAssembly (Emscripten)
 
-## WebAssembly
-
-WASM applicability is required: the reusable traversal capability has no native-OS dependency.
-
-Build:
-
-\`\`\`bash
+```bash
 make wasm32/wasm
-\`\`\`
-
-Validate:
-
-\`\`\`bash
 make test wasm
-\`\`\`
+```
 
-Artifact:
+- Artifact: `bin/wasm32/wasm/ngram.wasm`
+- Exports: `kc_ngram_traverse`, `kc_ngram_version`
+- The module contains the reusable library only; the CLI is not compiled into
+    it.
 
-\`\`\`text
-bin/wasm32/wasm/ngram.wasm
-\`\`\`
+`wasm32/wasm` is included in `make all`.
 
-The reusable module exports:
+### Multiarch Builds
 
-\`\`\`text
-kc_ngram_traverse
-kc_ngram_version
-\`\`\`
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
 
-The CLI is not part of the WASM module or WASM contract test. The reusable traversal tests run under Emscripten/Node.
+```bash
+make all
+```
 
-## Platform and tooling requirements
+---
 
-The project uses C11, CMake 3.14+, Ninja, and a supported C compiler. No additional system library is required for the reusable traversal capability.
+## Development Requirements
 
-Optional cross-platform toolchains are required only for their respective targets: MinGW/Wine for Windows validation, Emscripten/Node for WASM, osxcross for Apple targets, and the Android NDK for Android.
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Emscripten SDK and Node.js for WebAssembly builds and tests.
+- Other cross-compilation toolchains are required only by enabled targets.
+
+---
+
+## Beta Notice
+
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
+
+---
+
+## License
+
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
