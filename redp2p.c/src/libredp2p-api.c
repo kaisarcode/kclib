@@ -58,6 +58,10 @@ struct kc_redp2p_con {
     uint16_t port;
 };
 
+/**
+ * Sleeps briefly while waiting for a public runtime to become ready.
+ * @return None.
+ */
 static void kc_redp2p_sleep_tick(void)
 {
 #ifdef _WIN32
@@ -70,6 +74,10 @@ static void kc_redp2p_sleep_tick(void)
 #endif
 }
 
+/**
+ * Returns a monotonic millisecond timestamp.
+ * @return Monotonic milliseconds.
+ */
 static uint64_t kc_redp2p_now_ms(void)
 {
 #ifdef _WIN32
@@ -83,6 +91,12 @@ static uint64_t kc_redp2p_now_ms(void)
 #endif
 }
 
+/**
+ * Parses one decimal TCP or UDP port.
+ * @param text Port text.
+ * @param out Destination port.
+ * @return 1 on success, 0 on invalid input.
+ */
 static int kc_redp2p_parse_port(const char *text, uint16_t *out)
 {
     unsigned long value;
@@ -95,6 +109,13 @@ static int kc_redp2p_parse_port(const char *text, uint16_t *out)
     return 1;
 }
 
+/**
+ * Parses an index endpoint into host and port components.
+ * @param text Index endpoint text.
+ * @param host Destination host buffer.
+ * @param port Destination port.
+ * @return 1 on success, 0 on invalid input.
+ */
 static int kc_redp2p_parse_index(const char *text, char host[256],
     uint16_t *port)
 {
@@ -132,6 +153,11 @@ static int kc_redp2p_parse_index(const char *text, char host[256],
     return 1;
 }
 
+/**
+ * Generates one internal consumer identifier.
+ * @param out Destination identifier buffer.
+ * @return 1 on success, 0 on random source failure.
+ */
 static int kc_redp2p_make_self_id(char out[KC_REDP2P_ID_MAX + 1])
 {
     static const char hex[] = "0123456789abcdef";
@@ -149,6 +175,11 @@ static int kc_redp2p_make_self_id(char out[KC_REDP2P_ID_MAX + 1])
     return 1;
 }
 
+/**
+ * Applies stable public runtime defaults independent of environment tuning.
+ * @param ctx Runtime context.
+ * @return None.
+ */
 static void kc_redp2p_public_defaults(redp2p_t *ctx)
 {
     ctx->sweep = REDP2P_SWEEP_DEFAULT;
@@ -161,6 +192,13 @@ static void kc_redp2p_public_defaults(redp2p_t *ctx)
         REDP2P_MAX_CONSUMERS_PER_PUBLISHER;
 }
 
+/**
+ * Converts structured VIP options into the private index representation.
+ * @param ctx Index context.
+ * @param vips VIP entries.
+ * @param count VIP entry count.
+ * @return REDP2P_OK on success or an error code.
+ */
 static int kc_redp2p_apply_vips(redp2p_t *ctx,
     const kc_redp2p_vip_t *vips, size_t count)
 {
@@ -205,6 +243,11 @@ static int kc_redp2p_apply_vips(redp2p_t *ctx,
     }
 }
 
+/**
+ * Waits until one worker reports readiness or a bounded failure.
+ * @param runtime Public runtime wrapper.
+ * @return REDP2P_OK on readiness or an error code.
+ */
 static int kc_redp2p_runtime_wait_ready(kc_redp2p_runtime_t *runtime)
 {
     uint64_t deadline;
@@ -223,6 +266,11 @@ static int kc_redp2p_runtime_wait_ready(kc_redp2p_runtime_t *runtime)
     return runtime->result == REDP2P_OK ? REDP2P_ERROR : runtime->result;
 }
 
+/**
+ * Joins one started public runtime worker.
+ * @param runtime Public runtime wrapper.
+ * @return None.
+ */
 static void kc_redp2p_runtime_join(kc_redp2p_runtime_t *runtime)
 {
     if (!runtime || !runtime->thread_started) return;
@@ -236,6 +284,11 @@ static void kc_redp2p_runtime_join(kc_redp2p_runtime_t *runtime)
     runtime->thread_started = 0;
 }
 
+/**
+ * Stops, joins, and destroys one public runtime.
+ * @param runtime Public runtime wrapper.
+ * @return None.
+ */
 static void kc_redp2p_runtime_close(kc_redp2p_runtime_t *runtime)
 {
     if (!runtime) return;
@@ -248,8 +301,18 @@ static void kc_redp2p_runtime_close(kc_redp2p_runtime_t *runtime)
 }
 
 #ifdef _WIN32
+/**
+ * Runs one public index worker thread.
+ * @param arg Index handle.
+ * @return Platform thread result.
+ */
 static DWORD WINAPI kc_redp2p_idx_worker(LPVOID arg)
 #else
+/**
+ * Runs one public index worker thread.
+ * @param arg Index handle.
+ * @return NULL after the worker exits.
+ */
 static void *kc_redp2p_idx_worker(void *arg)
 #endif
 {
@@ -265,8 +328,18 @@ static void *kc_redp2p_idx_worker(void *arg)
 }
 
 #ifdef _WIN32
+/**
+ * Runs one public publisher worker thread.
+ * @param arg Publisher handle.
+ * @return Platform thread result.
+ */
 static DWORD WINAPI kc_redp2p_pub_worker(LPVOID arg)
 #else
+/**
+ * Runs one public publisher worker thread.
+ * @param arg Publisher handle.
+ * @return NULL after the worker exits.
+ */
 static void *kc_redp2p_pub_worker(void *arg)
 #endif
 {
@@ -282,8 +355,18 @@ static void *kc_redp2p_pub_worker(void *arg)
 }
 
 #ifdef _WIN32
+/**
+ * Runs one public consumer worker thread.
+ * @param arg Consumer handle.
+ * @return Platform thread result.
+ */
 static DWORD WINAPI kc_redp2p_con_worker(LPVOID arg)
 #else
+/**
+ * Runs one public consumer worker thread.
+ * @param arg Consumer handle.
+ * @return NULL after the worker exits.
+ */
 static void *kc_redp2p_con_worker(void *arg)
 #endif
 {
@@ -298,6 +381,11 @@ static void *kc_redp2p_con_worker(void *arg)
 #endif
 }
 
+/**
+ * Starts the index worker thread.
+ * @param idx Index handle.
+ * @return REDP2P_OK on success or an error code.
+ */
 static int kc_redp2p_thread_start_idx(kc_redp2p_idx_t *idx)
 {
 #ifdef _WIN32
@@ -312,6 +400,11 @@ static int kc_redp2p_thread_start_idx(kc_redp2p_idx_t *idx)
     return REDP2P_OK;
 }
 
+/**
+ * Starts the publisher worker thread.
+ * @param pub Publisher handle.
+ * @return REDP2P_OK on success or an error code.
+ */
 static int kc_redp2p_thread_start_pub(kc_redp2p_pub_t *pub)
 {
 #ifdef _WIN32
@@ -326,6 +419,11 @@ static int kc_redp2p_thread_start_pub(kc_redp2p_pub_t *pub)
     return REDP2P_OK;
 }
 
+/**
+ * Starts the consumer worker thread.
+ * @param con Consumer handle.
+ * @return REDP2P_OK on success or an error code.
+ */
 static int kc_redp2p_thread_start_con(kc_redp2p_con_t *con)
 {
 #ifdef _WIN32
@@ -340,6 +438,12 @@ static int kc_redp2p_thread_start_con(kc_redp2p_con_t *con)
     return REDP2P_OK;
 }
 
+/**
+ * Starts an index runtime from public options.
+ * @param out Destination index handle.
+ * @param options Optional index options.
+ * @return KC_REDP2P_OK on success or a public status code.
+ */
 int kc_redp2p_idx(kc_redp2p_idx_t **out,
     const kc_redp2p_idx_options_t *options)
 {
@@ -407,6 +511,12 @@ fail:
     return status;
 }
 
+/**
+ * Starts publication of one local service.
+ * @param out Destination publisher handle.
+ * @param options Publisher options.
+ * @return KC_REDP2P_OK on success or a public status code.
+ */
 int kc_redp2p_pub(kc_redp2p_pub_t **out,
     const kc_redp2p_pub_options_t *options)
 {
@@ -465,6 +575,12 @@ fail_no_ctx:
     return status;
 }
 
+/**
+ * Starts one local consumer tunnel.
+ * @param out Destination consumer handle.
+ * @param options Consumer options.
+ * @return KC_REDP2P_OK on success or a public status code.
+ */
 int kc_redp2p_con(kc_redp2p_con_t **out,
     const kc_redp2p_con_options_t *options)
 {
@@ -515,6 +631,13 @@ fail_no_ctx:
     return status;
 }
 
+/**
+ * Returns a snapshot of fresh publisher identifiers from one index runtime.
+ * @param idx Index handle.
+ * @param out_entries Destination allocated entry array.
+ * @param out_count Destination entry count.
+ * @return KC_REDP2P_OK on success or a public status code.
+ */
 int kc_redp2p_idx_list(kc_redp2p_idx_t *idx,
     kc_redp2p_idx_entry_t **out_entries, size_t *out_count)
 {
@@ -567,6 +690,11 @@ int kc_redp2p_idx_list(kc_redp2p_idx_t *idx,
     return KC_REDP2P_OK;
 }
 
+/**
+ * Stops and releases one index runtime.
+ * @param idx Index handle.
+ * @return None.
+ */
 void kc_redp2p_idx_close(kc_redp2p_idx_t *idx)
 {
     if (!idx) return;
@@ -574,6 +702,11 @@ void kc_redp2p_idx_close(kc_redp2p_idx_t *idx)
     free(idx);
 }
 
+/**
+ * Stops and releases one publisher runtime.
+ * @param pub Publisher handle.
+ * @return None.
+ */
 void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
 {
     if (!pub) return;
@@ -581,6 +714,11 @@ void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
     free(pub);
 }
 
+/**
+ * Stops and releases one consumer runtime.
+ * @param con Consumer handle.
+ * @return None.
+ */
 void kc_redp2p_con_close(kc_redp2p_con_t *con)
 {
     if (!con) return;
@@ -588,11 +726,21 @@ void kc_redp2p_con_close(kc_redp2p_con_t *con)
     free(con);
 }
 
+/**
+ * Releases memory returned by the public API.
+ * @param ptr Allocated memory.
+ * @return None.
+ */
 void kc_redp2p_free(void *ptr)
 {
     free(ptr);
 }
 
+/**
+ * Maps one public status code to a stable description.
+ * @param status Public status code.
+ * @return Stable static description.
+ */
 const char *kc_redp2p_strerror(int status)
 {
     switch (status) {
@@ -612,6 +760,10 @@ const char *kc_redp2p_strerror(int status)
     }
 }
 
+/**
+ * Returns the build version of the public library.
+ * @return Build version value.
+ */
 uint64_t kc_redp2p_version(void)
 {
     return redp2p_version();
