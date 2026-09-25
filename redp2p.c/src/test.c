@@ -14,6 +14,7 @@
 #endif
 
 #include "libredp2p.h"
+#include "libredp2p-core.h"
 #include "monocypher.h"
 
 #include <stdio.h>
@@ -6422,6 +6423,39 @@ static int case_kc_redp2p_heartbeat(void) {
 }
 
 /**
+ * Verifies publisher TTL expiration directly against the private index engine.
+ * This keeps protocol expiry coverage independent from CLI configuration.
+ */
+static int case_redp2p_protocol_ttl(void)
+{
+    test_index_t index;
+    unsigned short port;
+    int fail = 0;
+
+    memset(&index, 0, sizeof(index));
+    port = (unsigned short)(test_port_base() + 390U);
+    fail += expect_int("start TTL index", 0, test_index_start(&index, port));
+    if (fail == 0) {
+        redp2p_lock(index.ctx);
+        index.ctx->etimeout_sec = 1;
+        redp2p_unlock(index.ctx);
+        fail += expect_int("register TTL publisher", 0,
+            test_register_publisher(port, "ttlcheck", "0123456789abcdef",
+                (unsigned short)(port + 1U)));
+        test_sleep_ms(2200U);
+        fail += expect_int("expired publisher disappears", 0,
+            test_http_request(port,
+                "{\"op\":\"lookup\",\"id\":\"ttlcheck\"}",
+                strlen("{\"op\":\"lookup\",\"id\":\"ttlcheck\"}"),
+                404, "\"error\":\"not_found\""));
+    }
+    test_index_stop(&index);
+    case_result(fail, "redp2p_protocol_ttl",
+        "index expires stale publisher records by TTL");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Runs all test cases in a single process.
  * @return 0 on success, nonzero on failure.
  */
@@ -6439,7 +6473,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_redp2p_wait);
     run_case(&rc, case_kc_redp2p_connect);
     run_case(&rc, case_kc_redp2p_heartbeat);
-    run_case(&rc, case_kc_redp2p_ttl_expiry);
+    run_case(&rc, case_redp2p_protocol_ttl);
     run_case(&rc, case_kc_redp2p_udp_tunnel);
     run_case(&rc, case_kc_redp2p_tcp_stream);
     run_case(&rc, case_kc_redp2p_deregister);
@@ -6465,7 +6499,7 @@ static int dispatch_case(const char *name) {
     if (strcmp(name, "kc_redp2p_wait") == 0) return case_kc_redp2p_wait();
     if (strcmp(name, "kc_redp2p_connect") == 0) return case_kc_redp2p_connect();
     if (strcmp(name, "kc_redp2p_heartbeat") == 0) return case_kc_redp2p_heartbeat();
-    if (strcmp(name, "kc_redp2p_ttl_expiry") == 0) return case_kc_redp2p_ttl_expiry();
+    if (strcmp(name, "kc_redp2p_ttl_expiry") == 0) return case_redp2p_protocol_ttl();
     if (strcmp(name, "kc_redp2p_udp_tunnel") == 0) return case_kc_redp2p_udp_tunnel();
     if (strcmp(name, "kc_redp2p_tcp_stream") == 0) return case_kc_redp2p_tcp_stream();
     if (strcmp(name, "kc_redp2p_deregister") == 0) return case_kc_redp2p_deregister();
