@@ -350,6 +350,7 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
         free(idx);
         return status;
     }
+    kc_redp2p_public_defaults(idx->runtime.ctx);
     if (options) {
         if (options->seats) {
             status = redp2p_set_seats(idx->runtime.ctx, *options->seats);
@@ -412,6 +413,7 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
 
     status = redp2p_open(&pub->runtime.ctx);
     if (status != REDP2P_OK) goto fail_no_ctx;
+    kc_redp2p_public_defaults(pub->runtime.ctx);
     status = redp2p_set_protocol(pub->runtime.ctx, options->protocol);
     if (status != REDP2P_OK) goto fail;
     status = redp2p_set_port(pub->runtime.ctx, options->port);
@@ -467,6 +469,7 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
 
     status = redp2p_open(&con->runtime.ctx);
     if (status != REDP2P_OK) goto fail_no_ctx;
+    kc_redp2p_public_defaults(con->runtime.ctx);
     status = redp2p_set_port(con->runtime.ctx, options->port);
     if (status != REDP2P_OK) goto fail;
     if (options->stun) {
