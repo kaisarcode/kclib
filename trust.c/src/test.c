@@ -23,6 +23,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <wchar.h>
 #else
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -403,91 +404,138 @@ typedef struct {
 } test_cli_result_t;
 
 #ifdef _WIN32
+static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
+    size_t n = wcslen(cmd);
+    size_t len = wcslen(arg);
+    int quote = len == 0U || wcschr(arg, L' ') != NULL ||
+        wcschr(arg, L'\t') != NULL || wcschr(arg, L'"') != NULL;
+    if (n > 0U) {
+        if (n + 1U >= cap) return 1;
+        cmd[n++] = L' ';
+    }
+    if (quote) {
+        if (n + 1U >= cap) return 1;
+        cmd[n++] = L'"';
+        for (size_t i = 0; i < len; i++) {
+            if (arg[i] == L'"') {
+                if (n + 1U >= cap) return 1;
+                cmd[n++] = L'\\';
+            }
+            if (n + 1U >= cap) return 1;
+            cmd[n++] = arg[i];
+        }
+        if (n + 1U >= cap) return 1;
+        cmd[n++] = L'"';
+    } else {
+        if (n + len >= cap) return 1;
+        memcpy(cmd + n, arg, len * sizeof(wchar_t));
+        n += len;
+    }
+    cmd[n] = L'\0';
+    return 0;
+}
+
+static int test_cli_to_wide(const char *in, wchar_t *out, size_t cap) {
+    return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
+}
+
 static int test_cli_run(char *const argv[], const void *input,
     size_t input_size, test_cli_result_t *result) {
+    wchar_t exe[4096];
+    wchar_t cmd[32768];
+    wchar_t wide[4096];
+    HANDLE in_pipe[2];
+    HANDLE out_pipe[2];
+    HANDLE err_pipe[2];
     SECURITY_ATTRIBUTES sa;
-    HANDLE child_in_read = NULL, child_in_write = NULL;
-    HANDLE child_out_read = NULL, child_out_write = NULL;
-    HANDLE child_err_read = NULL, child_err_write = NULL;
-    STARTUPINFOA si;
+    STARTUPINFOW si;
     PROCESS_INFORMATION pi;
-    char command[32768] = {0};
-    size_t pos = 0;
-    DWORD wrote;
-    DWORD got;
-    DWORD code = 1;
+    DWORD exit_code = 1;
+    DWORD written = 0;
+    DWORD got = 0;
+    size_t err_size = 0;
 
     memset(result, 0, sizeof(*result));
-    memset(&sa, 0, sizeof(sa));
+    if (test_cli_to_wide(TRUST_TEST_CLI, exe,
+        sizeof(exe) / sizeof(exe[0])) != 0) return 1;
+
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = TRUE;
-    if (!CreatePipe(&child_in_read, &child_in_write, &sa, 0) ||
-        !CreatePipe(&child_out_read, &child_out_write, &sa, 0) ||
-        !CreatePipe(&child_err_read, &child_err_write, &sa, 0)) goto fail;
-    SetHandleInformation(child_in_write, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(child_out_read, HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(child_err_read, HANDLE_FLAG_INHERIT, 0);
-
-    for (int i = 0; argv[i]; i++) {
-        size_t len = strlen(argv[i]);
-        if (pos + len + 4 >= sizeof(command)) goto fail;
-        if (i) command[pos++] = ' ';
-        command[pos++] = '"';
-        memcpy(command + pos, argv[i], len);
-        pos += len;
-        command[pos++] = '"';
+    sa.lpSecurityDescriptor = NULL;
+    if (!CreatePipe(&in_pipe[0], &in_pipe[1], &sa, 0)) return 1;
+    if (!CreatePipe(&out_pipe[0], &out_pipe[1], &sa, 0)) {
+        CloseHandle(in_pipe[0]); CloseHandle(in_pipe[1]); return 1;
     }
-    command[pos] = '\0';
+    if (!CreatePipe(&err_pipe[0], &err_pipe[1], &sa, 0)) {
+        CloseHandle(in_pipe[0]); CloseHandle(in_pipe[1]);
+        CloseHandle(out_pipe[0]); CloseHandle(out_pipe[1]); return 1;
+    }
+    SetHandleInformation(in_pipe[1], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(out_pipe[0], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(err_pipe[0], HANDLE_FLAG_INHERIT, 0);
 
     memset(&si, 0, sizeof(si));
     memset(&pi, 0, sizeof(pi));
     si.cb = sizeof(si);
     si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = child_in_read;
-    si.hStdOutput = child_out_write;
-    si.hStdError = child_err_write;
-    if (!CreateProcessA(NULL, command, NULL, NULL, TRUE, 0, NULL, NULL,
-        &si, &pi)) goto fail;
-    CloseHandle(child_in_read); child_in_read = NULL;
-    CloseHandle(child_out_write); child_out_write = NULL;
-    CloseHandle(child_err_write); child_err_write = NULL;
+    si.hStdInput = in_pipe[0];
+    si.hStdOutput = out_pipe[1];
+    si.hStdError = err_pipe[1];
 
-    if (input_size && !WriteFile(child_in_write, input, (DWORD)input_size,
-        &wrote, NULL)) goto child_fail;
-    CloseHandle(child_in_write); child_in_write = NULL;
+    cmd[0] = L'\0';
+    if (test_cli_append_arg(cmd, sizeof(cmd) / sizeof(cmd[0]), exe)) goto fail;
+    for (int i = 1; argv[i]; i++) {
+        if (test_cli_to_wide(argv[i], wide,
+            sizeof(wide) / sizeof(wide[0])) != 0 ||
+            test_cli_append_arg(cmd, sizeof(cmd) / sizeof(cmd[0]), wide))
+            goto fail;
+    }
+
+    if (!CreateProcessW(exe, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
+        goto fail;
+
+    CloseHandle(in_pipe[0]); in_pipe[0] = NULL;
+    CloseHandle(out_pipe[1]); out_pipe[1] = NULL;
+    CloseHandle(err_pipe[1]); err_pipe[1] = NULL;
+
+    if (input_size > 0U) {
+        if (input_size > 0xFFFFFFFFU ||
+            !WriteFile(in_pipe[1], input, (DWORD)input_size, &written, NULL) ||
+            written != (DWORD)input_size) {
+            TerminateProcess(pi.hProcess, 1);
+        }
+    }
+    CloseHandle(in_pipe[1]); in_pipe[1] = NULL;
 
     while (result->out_size < sizeof(result->out) &&
-        ReadFile(child_out_read, result->out + result->out_size,
-            (DWORD)(sizeof(result->out) - result->out_size), &got, NULL) && got)
+        ReadFile(out_pipe[0], result->out + result->out_size,
+            (DWORD)(sizeof(result->out) - result->out_size), &got, NULL) &&
+        got > 0U)
         result->out_size += got;
-    {
-        size_t err_size = 0;
-        while (err_size + 1 < sizeof(result->err) &&
-            ReadFile(child_err_read, result->err + err_size,
-                (DWORD)(sizeof(result->err) - err_size - 1), &got, NULL) && got)
-            err_size += got;
-        result->err[err_size] = '\0';
-    }
+
+    while (err_size + 1U < sizeof(result->err) &&
+        ReadFile(err_pipe[0], result->err + err_size,
+            (DWORD)(sizeof(result->err) - err_size - 1U), &got, NULL) &&
+        got > 0U)
+        err_size += got;
+    result->err[err_size] = '\0';
+
+    CloseHandle(out_pipe[0]); out_pipe[0] = NULL;
+    CloseHandle(err_pipe[0]); err_pipe[0] = NULL;
     WaitForSingleObject(pi.hProcess, INFINITE);
-    GetExitCodeProcess(pi.hProcess, &code);
-    result->status = (int)code;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    result->status = (int)exit_code;
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
-    CloseHandle(child_out_read);
-    CloseHandle(child_err_read);
     return 0;
 
-child_fail:
-    TerminateProcess(pi.hProcess, 1);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
 fail:
-    if (child_in_read) CloseHandle(child_in_read);
-    if (child_in_write) CloseHandle(child_in_write);
-    if (child_out_read) CloseHandle(child_out_read);
-    if (child_out_write) CloseHandle(child_out_write);
-    if (child_err_read) CloseHandle(child_err_read);
-    if (child_err_write) CloseHandle(child_err_write);
+    if (in_pipe[0]) CloseHandle(in_pipe[0]);
+    if (in_pipe[1]) CloseHandle(in_pipe[1]);
+    if (out_pipe[0]) CloseHandle(out_pipe[0]);
+    if (out_pipe[1]) CloseHandle(out_pipe[1]);
+    if (err_pipe[0]) CloseHandle(err_pipe[0]);
+    if (err_pipe[1]) CloseHandle(err_pipe[1]);
     return 1;
 }
 #else
