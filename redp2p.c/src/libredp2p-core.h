@@ -733,8 +733,6 @@ REDP2P_INTERNAL int redp2p_pub_run(redp2p_t *ctx, const char *index_host,
 REDP2P_INTERNAL int redp2p_con_run(redp2p_t *ctx, const char *index_host,
     unsigned short index_port, const char *self_id, const char *target_id,
     unsigned short bind_port);
-REDP2P_INTERNAL int redp2p_deregister(redp2p_t *ctx, const char *index_host,
-    unsigned short index_port, const char *id);
 REDP2P_INTERNAL int redp2p_idx_query_publishers(redp2p_t *ctx,
     const char *index_host, unsigned short index_port,
     redp2p_publisher_cb cb, void *userdata);
@@ -749,6 +747,9 @@ REDP2P_INTERNAL int redp2p_idx_set_vips(redp2p_t *ctx, const char *vip,
     char *err, size_t err_cap);
 REDP2P_INTERNAL int redp2p_set_stun_server(redp2p_t *ctx, const char *url);
 #ifdef REDP2P_TESTING
+REDP2P_INTERNAL int redp2p_test_deregister_persisted_publisher(
+    redp2p_t *ctx, const char *index_host, unsigned short index_port,
+    const char *id);
 REDP2P_INTERNAL int redp2p_test_set_stream_faults(redp2p_t *ctx,
     int drop_every, int reorder_every);
 REDP2P_INTERNAL int redp2p_test_set_state_dir(redp2p_t *ctx, const char *dir);
