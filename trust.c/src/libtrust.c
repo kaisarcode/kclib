@@ -237,6 +237,7 @@ static int kc_trust_dir_secure(const char *path) {
 static int kc_trust_mkdirs(const char *path) {
     char buf[KC_TRUST_PATH_SIZE];
     char *p;
+    struct stat st;
     if (!path || (size_t)snprintf(buf, sizeof(buf), "%s", path) >= sizeof(buf))
         return -1;
     for (p = buf + 1; *p; p++) {
@@ -247,7 +248,8 @@ static int kc_trust_mkdirs(const char *path) {
         }
     }
     if (mkdir(buf, 0700) != 0 && errno != EEXIST) return -1;
-    if (chmod(path, 0700) != 0) return -1;
+    if (lstat(path, &st) != 0 || !S_ISDIR(st.st_mode)) return -1;
+    if ((st.st_mode & 0022) != 0 && chmod(path, 0700) != 0) return -1;
     return kc_trust_dir_secure(path) ? 0 : -1;
 }
 #endif
@@ -1169,14 +1171,14 @@ int kc_trust_confirm(kc_trust_t *trust, const char *confirmation,
         goto done;
     if (kc_trust_xpsk1_read(uid, local_sk, psk,
         raw + 1 + KC_TRUST_UID_BYTES, remote_pk) != 0) goto done;
+    uid_copy = kc_trust_public_strdup(uid_text);
+    if (!uid_copy) goto done;
     if (kc_trust_peer_write(trust, uid_text, local_sk, remote_pk) != 0)
         goto done;
     if (kc_trust_pending_remove(trust, uid_text) != 0) {
         kc_trust_peer_remove(trust, uid_text);
         goto done;
     }
-    uid_copy = kc_trust_public_strdup(uid_text);
-    if (!uid_copy) goto done;
     *out_uid = uid_copy;
     uid_copy = NULL;
     rc = KC_TRUST_OK;
