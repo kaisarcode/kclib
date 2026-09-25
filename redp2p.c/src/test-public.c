@@ -135,14 +135,9 @@ static void *echo_main(void *arg)
     if (client == TEST_INVALID) {
         echo->failed = 1;
     } else {
-        for (;;) {
-            n = (int)recv(client, (char *)buf, sizeof(buf), 0);
-            if (n <= 0) break;
-            if (send(client, (const char *)buf, n, 0) != n) {
-                echo->failed = 1;
-                break;
-            }
-        }
+        n = (int)recv(client, (char *)buf, sizeof(buf), 0);
+        if (n <= 0 || send(client, (const char *)buf, n, 0) != n)
+            echo->failed = 1;
         fd_close(client);
     }
     fd_close(echo->listener);
