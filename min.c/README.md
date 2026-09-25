@@ -1,9 +1,6 @@
 # min.c - Asset Minifier
 
 ---
-
----
-
 ## CLI
 
 ### Examples
@@ -44,9 +41,6 @@ When a value argument is omitted, the CLI reads the source from stdin. When a
 value is present after the mode flag, that value is minified directly.
 
 ---
-
----
-
 ## Public API
 
 The reusable API is stateless and exposes each minification capability directly.
@@ -86,9 +80,6 @@ There is no public context, mode enum, dispatcher, or lifecycle state.
 **Text** - collapses whitespace runs to a single space and trims leading and trailing whitespace. It does not interpret comments, markup, quotes, or other syntax.
 
 ---
-
----
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
