@@ -314,34 +314,6 @@ class Redp2pIndex
     }
 
     /**
-     * Sets the pending punch call TTL in seconds.
-     *
-     * @param int $ttl TTL seconds, 1..86400.
-     * @return void
-     */
-    private function setPendingTtl(int $ttl): void
-    {
-        if ($ttl < 1 || $ttl > 86400) {
-            throw new \InvalidArgumentException('REDP2P_PENDING_CALL_TTL_S must be between 1 and 86400');
-        }
-        $this->pendingTtlS = $ttl;
-    }
-
-    /**
-     * Sets the publisher eviction TTL in seconds.
-     *
-     * @param int $ttl TTL seconds, 1..86400.
-     * @return void
-     */
-    private function setTtl(int $ttl): void
-    {
-        if ($ttl < 1 || $ttl > 86400) {
-            throw new \InvalidArgumentException('REDP2P_ETIMEOUT_SEC must be between 1 and 86400');
-        }
-        $this->ttl = $ttl;
-    }
-
-    /**
      * Applies constructor options with environment fallback.
      *
      * @param array $options Operator overrides for pass, vip, seats, pow,
