@@ -302,12 +302,8 @@ static int case_kc_redp2p_api(void)
     }
     if (!failed) {
         status = kc_redp2p_idx_list(idx, &entries, &count);
-        if (status != KC_REDP2P_OK || count != 0 || entries != NULL) {
-            fprintf(stderr,
-                "kc_redp2p_api: initial idx_list failed (status=%d count=%zu entries=%p)\n",
-                status, count, (void *)entries);
+        if (status != KC_REDP2P_OK || count != 0 || entries != NULL)
             failed = 1;
-        }
     }
 
     snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)idx_port);
@@ -324,12 +320,8 @@ static int case_kc_redp2p_api(void)
     if (!failed) {
         status = kc_redp2p_idx_list(idx, &entries, &count);
         if (status != KC_REDP2P_OK || count != 1 ||
-            !entries || strcmp(entries[0].id, "echo") != 0) {
-            fprintf(stderr,
-                "kc_redp2p_api: published idx_list failed (status=%d count=%zu id=%s)\n",
-                status, count, entries ? entries[0].id : "<null>");
+            !entries || strcmp(entries[0].id, "echo") != 0)
             failed = 1;
-        }
         kc_redp2p_free(entries);
         entries = NULL;
         count = 0;
@@ -341,16 +333,9 @@ static int case_kc_redp2p_api(void)
     con_options.port = con_port;
     if (!failed) {
         status = kc_redp2p_con(&con, &con_options);
-        if (status != KC_REDP2P_OK || !con) {
-            fprintf(stderr,
-                "kc_redp2p_api: con create failed (status=%d)\n", status);
-            failed = 1;
-        }
+        if (status != KC_REDP2P_OK || !con) failed = 1;
     }
-    if (!failed && tcp_roundtrip(con_port) != 0) {
-        fprintf(stderr, "kc_redp2p_api: tcp roundtrip failed\n");
-        failed = 1;
-    }
+    if (!failed && tcp_roundtrip(con_port) != 0) failed = 1;
 
     kc_redp2p_con_close(con);
     kc_redp2p_pub_close(pub);
