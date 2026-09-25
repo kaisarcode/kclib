@@ -12,46 +12,46 @@ confirmations, UIDs, and protected messages themselves.
 Initialize the local trust store:
 
 ```bash
-./bin/x86_64/linux/trust init
+trust init
 ```
 
 Create a one-use invitation:
 
 ```bash
-./bin/x86_64/linux/trust invite
+trust invite
 {"uid":"<invited_uid>","code":"<invitation>"}
 ```
 
 Join from an invitation:
 
 ```bash
-./bin/x86_64/linux/trust join "<invitation>"
+trust join "<invitation>"
 {"uid":"<inviter_uid>","confirmation":"<confirmation>"}
 ```
 
 Confirm the relationship:
 
 ```bash
-./bin/x86_64/linux/trust confirm "<confirmation>"
+trust confirm "<confirmation>"
 {"uid":"<invited_uid>"}
 ```
 
 Seal stdin for a trusted remote UID:
 
 ```bash
-printf "hello" | ./bin/x86_64/linux/trust seal "<remote_uid>" > message.bin
+printf "hello" | trust seal "<remote_uid>" > message.bin
 ```
 
 Unseal stdin addressed to a local UID:
 
 ```bash
-./bin/x86_64/linux/trust unseal "<local_uid>" < message.bin
+trust unseal "<local_uid>" < message.bin
 ```
 
 Revoke a trusted remote UID:
 
 ```bash
-./bin/x86_64/linux/trust revoke "<remote_uid>"
+trust revoke "<remote_uid>"
 ```
 
 ### Parameters
