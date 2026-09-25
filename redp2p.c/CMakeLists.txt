@@ -38,6 +38,7 @@ endif()
 
 # Shared library
 set(REDP2P_SOURCES
+    src/libredp2p-api.c
     src/libredp2p-core.c
     src/libredp2p-peer.c
     src/libredp2p-idx.c
