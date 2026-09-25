@@ -79,40 +79,6 @@ static int redp2p_cli_uint(const char *text, unsigned int max,
     return 1;
 }
 
-static int redp2p_cli_index(const char *text, char host[256], uint16_t *port)
-{
-    const char *colon;
-    size_t len;
-
-    if (!text || !text[0] || !host || !port) return 0;
-    *port = KC_REDP2P_PORT_DEFAULT;
-    if (text[0] == '[') {
-        const char *end = strchr(text + 1, ']');
-        if (!end || end == text + 1) return 0;
-        len = (size_t)(end - text - 1);
-        if (len >= 256) return 0;
-        memcpy(host, text + 1, len);
-        host[len] = '\0';
-        if (end[1] == '\0') return 1;
-        return end[1] == ':' && redp2p_cli_u16(end + 2, port);
-    }
-
-    colon = strrchr(text, ':');
-    if (colon && strchr(text, ':') == colon) {
-        len = (size_t)(colon - text);
-        if (len == 0 || len >= 256 || !redp2p_cli_u16(colon + 1, port))
-            return 0;
-        memcpy(host, text, len);
-        host[len] = '\0';
-        return 1;
-    }
-
-    len = strlen(text);
-    if (len == 0 || len >= 256) return 0;
-    memcpy(host, text, len + 1);
-    return 1;
-}
-
 static int redp2p_cli_spec(const char *text, char id[KC_REDP2P_ID_MAX + 1],
     char index[320])
 {
