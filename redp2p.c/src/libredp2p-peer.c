@@ -1668,17 +1668,11 @@ static int redp2p_punch_wait_response(int udp_fd, const char *session_id,
         socklen_t src_len = sizeof(src_addr);
         uint64_t now;
         int remaining_ms;
-        fd_set readfds;
-        struct timeval tv;
         int n;
 
         now = redp2p_now_ms();
         remaining_ms = (int)(wait_deadline_ms - now);
-        FD_ZERO(&readfds);
-        if (!redp2p_fdset_add(udp_fd, &readfds, NULL)) return REDP2P_ENET;
-        tv.tv_sec = remaining_ms / 1000;
-        tv.tv_usec = (remaining_ms % 1000) * 1000;
-        if (select(udp_fd + 1, &readfds, NULL, NULL, &tv) <= 0)
+        if (redp2p_wait_readable((redp2p_fd_t)udp_fd, remaining_ms) <= 0)
             return REDP2P_ETIMEOUT;
         n = recvfrom(udp_fd, recv_buf, sizeof(recv_buf) - 1, 0,
             (struct sockaddr *)&src_addr, &src_len);
