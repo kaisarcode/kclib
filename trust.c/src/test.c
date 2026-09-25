@@ -588,6 +588,13 @@ static int case_kc_trust_cli(void) {
             test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
     }
 
+    test_set_dir(".trust-test-cli-init");
+    {
+        char *args[] = { (char *)TRUST_TEST_CLI, "init", NULL };
+        fail += expect_int("CLI init runs", 0,
+            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
+    }
+
     test_set_dir(".trust-test-cli-bob");
     {
         char *args[] = { (char *)TRUST_TEST_CLI, "invite", NULL };
