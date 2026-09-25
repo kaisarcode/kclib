@@ -632,10 +632,7 @@ static void kc_ngram_help(void) {
     printf("  --sep, -sep      Custom separator characters\n");
     printf("  --cmd, -cmd <cmd>   Execute command for each chunk\n");
     printf("  -h, --help          Show help\n");
-    printf("  -v, --version       Show version\n\n");
-    printf("Notes:\n");
-    printf("  Each chunk is printed before --cmd is evaluated.\n");
-    printf("  A span closes when the command produces stdout.\n");
+    printf("  -v, --version       Show version\n");
 }
 
 /**
