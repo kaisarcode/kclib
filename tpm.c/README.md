@@ -5,9 +5,6 @@ profile from representative samples, then score any input from 0.0 (dissimilar)
 to 1.0 (very similar).
 
 ---
-
----
-
 ## CLI
 
 ### Example
@@ -93,9 +90,6 @@ A single line with the score formatted to six decimal places:
 | 1 | Error (missing map, invalid args, I/O failure, profile build error) |
 
 ---
-
----
-
 ## Public API
 
 ### Types
@@ -156,9 +150,6 @@ successfully created empty profile returns `KC_TPM_OK` with a score of
 `0.0`.
 
 ---
-
----
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
@@ -244,9 +235,6 @@ macOS / iOS:
 - No additional test dependencies required.
 
 ---
-
----
-
 ## Beta Notice
 
 This is a beta project tested only on Debian x86_64. It was created out of a
