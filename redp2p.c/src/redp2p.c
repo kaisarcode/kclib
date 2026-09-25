@@ -24,12 +24,21 @@
 
 static volatile sig_atomic_t redp2p_cli_stop = 0;
 
+/**
+ * Records a CLI termination signal.
+ * @param sig Signal number.
+ * @return None.
+ */
 static void redp2p_cli_signal(int sig)
 {
     (void)sig;
     redp2p_cli_stop = 1;
 }
 
+/**
+ * Sleeps briefly while a long-running CLI command remains active.
+ * @return None.
+ */
 static void redp2p_cli_sleep(void)
 {
 #ifdef _WIN32
@@ -39,6 +48,12 @@ static void redp2p_cli_sleep(void)
 #endif
 }
 
+/**
+ * Parses one nonzero 16-bit unsigned integer.
+ * @param text Input text.
+ * @param out Destination value.
+ * @return 1 on success, 0 on invalid input.
+ */
 static int redp2p_cli_u16(const char *text, uint16_t *out)
 {
     unsigned long value;
@@ -52,6 +67,12 @@ static int redp2p_cli_u16(const char *text, uint16_t *out)
     return 1;
 }
 
+/**
+ * Parses one nonnegative size value.
+ * @param text Input text.
+ * @param out Destination value.
+ * @return 1 on success, 0 on invalid input.
+ */
 static int redp2p_cli_size(const char *text, size_t *out)
 {
     unsigned long long value;
@@ -65,6 +86,13 @@ static int redp2p_cli_size(const char *text, size_t *out)
     return 1;
 }
 
+/**
+ * Parses one bounded unsigned integer.
+ * @param text Input text.
+ * @param max Maximum accepted value.
+ * @param out Destination value.
+ * @return 1 on success, 0 on invalid input.
+ */
 static int redp2p_cli_uint(const char *text, unsigned int max,
     unsigned int *out)
 {
@@ -79,6 +107,13 @@ static int redp2p_cli_uint(const char *text, unsigned int max,
     return 1;
 }
 
+/**
+ * Parses one publisher specification in id@index form.
+ * @param text Specification text.
+ * @param id Destination publisher identifier.
+ * @param index Destination index endpoint.
+ * @return 1 on success, 0 on invalid input.
+ */
 static int redp2p_cli_spec(const char *text, char id[KC_REDP2P_ID_MAX + 1],
     char index[320])
 {
@@ -98,6 +133,11 @@ static int redp2p_cli_spec(const char *text, char id[KC_REDP2P_ID_MAX + 1],
     return redp2p_is_valid_id(id);
 }
 
+/**
+ * Prints command usage information.
+ * @param name Program executable name.
+ * @return None.
+ */
 static void redp2p_cli_usage(const char *name)
 {
     printf("Usage: %s <command> [options]\n", name);
@@ -118,6 +158,14 @@ static void redp2p_cli_usage(const char *name)
     printf("  REDP2P_STUN           Optional STUN URL for pub/con\n");
 }
 
+/**
+ * Parses the REDP2P_VIP environment value into structured entries.
+ * @param text VIP token text.
+ * @param out Destination VIP array.
+ * @param out_count Destination VIP count.
+ * @param out_storage Destination mutable backing storage.
+ * @return 1 on success, 0 on invalid input or allocation failure.
+ */
 static int redp2p_cli_vips(const char *text, kc_redp2p_vip_t **out,
     size_t *out_count, char **out_storage)
 {
@@ -175,12 +223,23 @@ static int redp2p_cli_vips(const char *text, kc_redp2p_vip_t **out,
     return 1;
 }
 
+/**
+ * Prints one publisher identifier returned by an index list operation.
+ * @param id Publisher identifier.
+ * @param userdata Pointer to an output failure flag.
+ * @return None.
+ */
 static void redp2p_cli_print_id(const char *id, void *userdata)
 {
     int *failed = (int *)userdata;
     if (printf("%s\n", id) < 0) *failed = 1;
 }
 
+/**
+ * Lists publishers announced on one local index port.
+ * @param port Index port.
+ * @return Process exit code.
+ */
 static int redp2p_cli_list(uint16_t port)
 {
     redp2p_t *ctx = NULL;
@@ -199,6 +258,12 @@ static int redp2p_cli_list(uint16_t port)
     return failed;
 }
 
+/**
+ * Runs the idx command.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process exit code.
+ */
 static int redp2p_cli_idx(int argc, char **argv)
 {
     kc_redp2p_idx_options_t options;
@@ -302,6 +367,12 @@ static int redp2p_cli_idx(int argc, char **argv)
     return 0;
 }
 
+/**
+ * Runs the pub command.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process exit code.
+ */
 static int redp2p_cli_pub(int argc, char **argv)
 {
     kc_redp2p_pub_options_t options;
@@ -368,6 +439,12 @@ static int redp2p_cli_pub(int argc, char **argv)
     return 0;
 }
 
+/**
+ * Runs the con command.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process exit code.
+ */
 static int redp2p_cli_con(int argc, char **argv)
 {
     kc_redp2p_con_options_t options;
@@ -422,6 +499,12 @@ static int redp2p_cli_con(int argc, char **argv)
     return 0;
 }
 
+/**
+ * Runs the REDP2P command-line interface.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process exit code.
+ */
 int main(int argc, char **argv)
 {
     if (argc < 2 || strcmp(argv[1], "-h") == 0 ||
