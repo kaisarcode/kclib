@@ -24,6 +24,7 @@
 
 #ifndef _WIN32
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <sys/time.h>
 #endif
