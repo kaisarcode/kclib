@@ -70,7 +70,7 @@ cryptographic protocol.
 
 - a canonical UUIDv4 string the inviter stores for the invited endpoint;
 - an opaque Base64 invitation code suitable for a QR code, text, file, or any
-  other out-of-band transfer selected by the application.
+    other out-of-band transfer selected by the application.
 
 The invitation contains two endpoint UIDs: the UID assigned to the invited
 endpoint and a distinct UID representing the inviter from the joining side. It
