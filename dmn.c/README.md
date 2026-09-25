@@ -4,6 +4,8 @@
 
 The public API is designed around daemon identities rather than sockets or pipes. Unix Domain Sockets and Windows Named Pipes are implementation details.
 
+---
+
 ## CLI
 
 The CLI contract remains:
@@ -32,6 +34,8 @@ dmn worker --delete
 ```
 
 `KC_DMN_DIR` is an advanced process-level override for the runtime directory. Normal API and CLI callers do not need to select a directory; the platform runtime location is resolved automatically.
+
+---
 
 ## Public API
 
@@ -207,44 +211,7 @@ The returned entries and their strings live in one allocation and are released w
 uint64_t kc_dmn_version(void);
 ```
 
-## Scripting model
-
-Lua:
-
-```lua
-dmn.create("my_daemon", {
-    cmd = "/usr/bin/my_app -p 1",
-    eot = "\4"
-})
-
-local daemons = dmn.list()
-
-local daemon = dmn.open("my_daemon")
-print(daemon:get_cmd())
-print(daemon:get_eot())
-
-daemon:set_cmd("/usr/bin/my_app -p 2")
-daemon:set_eot("==END==")
-
-daemon:on("data", function(data)
-    io.write(data)
-end)
-
-local response = daemon:send_data("Some data")
-daemon:send_signal(10)
-
-local stream = daemon:stream()
-stream:write("raw bytes")
-local chunk = stream:read()
-stream:close()
-
-daemon:close()
-dmn.delete("my_daemon")
-```
-
-The binding should remain mechanical: daemon methods map directly to the public C functions, while raw streams map to `kc_dmn_stream_*`.
-
-## Runtime model
+### Runtime model
 
 Runtime state is local and temporary. On POSIX, dmn prefers `XDG_RUNTIME_DIR`, then `/run/user/<uid>`, with `/tmp` only as a fallback. Windows uses the system temporary directory. These locations are runtime state, not persistent registration storage.
 
@@ -254,22 +221,80 @@ Windows uses Named Pipes and the existing detached server process model. Platfor
 
 Registered commands are trusted local operator input and execute through the platform shell.
 
+---
+
 ## Build
+
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
-make all
 ```
 
-Tests are run through:
+### Tests
+
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
+make
 make test
+```
+
+To run through Wine:
+
+```bash
+make x86_64/windows
 make test wine
 ```
 
-WASM is not applicable to this library because the product depends on host process creation and local operating-system IPC.
+### Multiarch Builds
+
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
+
+```bash
+make all
+```
+
+---
+
+## Development Requirements
+
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Other cross-compilation toolchains are required only by enabled targets.
+
+---
+
+## Beta Notice
+
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
+
+---
 
 ## License
 
-GNU General Public License version 3 (GPLv3).
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
