@@ -160,20 +160,6 @@ int redp2p_ascii_casecmp(const char *a, const char *b) {
 }
 
 /**
- * Parses one strict environment numeric option.
- * Summary: Applies the same validation as CLI parsing.
- * @param text    Input text to parse.
- * @param min     Inclusive lower bound.
- * @param max     Inclusive upper bound.
- * @param out     Output parsed value.
- * @return 1 on valid parse within bounds, 0 otherwise.
- */
-static int redp2p_parse_env(const char *text, long min, long max, long *out) {
-    if (!text || text[0] == '\0') return 0;
-    return redp2p_parse_u(text, min, max, out);
-}
-
-/**
  * Parses one strict unsigned decimal size value.
  * @param text Input text to parse.
  * @param out Output parsed value.
@@ -1480,14 +1466,6 @@ int redp2p_context_request_stop(redp2p_t *ctx) {
 }
 
 /**
- * Checks whether one context was requested to stop.
- * @return Nonzero if a stop was requested, zero otherwise.
- */
-int redp2p_stop_requested(redp2p_t *ctx) {
-    return ctx && atomic_load(&ctx->stop_requested);
-}
-
-/**
  * Return string for status code.
  * @return Status string.
  */
@@ -1530,82 +1508,6 @@ void redp2p_set_error(redp2p_t *ctx, const char *fmt, ...) {
 const char *redp2p_get_error(redp2p_t *ctx) {
     if (!ctx) return "";
     return ctx->err_buf;
-}
-
-/**
- * Returns one caller-owned options struct with safe defaults.
- * Summary: Index port and sweep are populated; callers own the returned struct.
- * @return Default options struct.
- */
-redp2p_options_t redp2p_options_default(void) {
-    redp2p_options_t opts;
-    memset(&opts, 0, sizeof(opts));
-    opts.seats = 0;
-    opts.pow = 0;
-    opts.sweep = REDP2P_SWEEP_DEFAULT;
-    return opts;
-}
-
-/**
- * Loads REDP2P_* environment values into one options struct with strict rules.
- * Summary: Invalid numeric values are ignored and defaults are retained.
- * Initialize with redp2p_options_default and free with redp2p_options_free.
- * @param opts Options struct to populate.
- * @return None.
- */
-void redp2p_options_load_env(redp2p_options_t *opts) {
-    const char *val;
-    long num;
-    size_t seats;
-
-    if (!opts) return;
-
-    val = getenv("REDP2P_SEATS");
-    if (redp2p_parse_size(val, &seats) &&
-        seats <= SIZE_MAX / sizeof(redp2p_peer_t))
-        opts->seats = seats;
-
-    val = getenv("REDP2P_POW");
-    if (val && redp2p_parse_env(val, 0, REDP2P_POW_MAX, &num))
-        opts->pow = (int)num;
-
-    val = getenv("REDP2P_SWEEP");
-    if (val && redp2p_parse_env(val, 0, REDP2P_SWEEP_MAX, &num))
-        opts->sweep = (int)num;
-
-    val = getenv("REDP2P_PASS");
-    if (val) {
-        crypto_wipe(opts->pass, sizeof(opts->pass));
-        strncpy(opts->pass, val, REDP2P_PASS_MAX);
-        opts->pass[REDP2P_PASS_MAX] = '\0';
-    }
-
-    val = getenv("REDP2P_VIP");
-    if (val) {
-        size_t len = strlen(val);
-        if (opts->vip) crypto_wipe(opts->vip, strlen(opts->vip));
-        free(opts->vip);
-        opts->vip = (char *)malloc(len + 1);
-        if (opts->vip) memcpy(opts->vip, val, len + 1);
-    }
-
-    val = getenv("REDP2P_STUN");
-    if (val) {
-        strncpy(opts->stun_url, val, sizeof(opts->stun_url) - 1);
-        opts->stun_url[sizeof(opts->stun_url) - 1] = '\0';
-    }
-}
-
-/**
- * Options free.
- * @return None.
- */
-void redp2p_options_free(redp2p_options_t *opts) {
-    if (!opts) return;
-    crypto_wipe(opts->pass, sizeof(opts->pass));
-    if (opts->vip) crypto_wipe(opts->vip, strlen(opts->vip));
-    free(opts->vip);
-    opts->vip = NULL;
 }
 
 /**
