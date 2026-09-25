@@ -1555,9 +1555,14 @@ redp2p_publisher_runtime_t *runtime)
     return REDP2P_OK;
 }
 
+/**
+ * Reports whether one publisher socket is ready in the current poll set.
+ * @param runtime Publisher runtime.
+ * @param fd Socket descriptor.
+ * @return 1 when ready, 0 otherwise.
+ */
 static int redp2p_publisher_poll_ready(
-const redp2p_publisher_runtime_t *runtime,
-redp2p_fd_t fd)
+    const redp2p_publisher_runtime_t *runtime, redp2p_fd_t fd)
 {
     size_t i;
 
@@ -1568,8 +1573,13 @@ redp2p_fd_t fd)
     return 0;
 }
 
+/**
+ * Re-registers one publisher after index connectivity is restored.
+ * @param runtime Publisher runtime.
+ * @return REDP2P_OK on success or an error code.
+ */
 static int redp2p_publisher_reregister(
-redp2p_publisher_runtime_t *runtime)
+    redp2p_publisher_runtime_t *runtime)
 {
     redp2p_t *ctx;
     redp2p_key_paths_t paths;
