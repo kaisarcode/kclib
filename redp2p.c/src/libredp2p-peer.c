@@ -85,6 +85,7 @@ static socklen_t redp2p_sockaddr_len(const struct sockaddr_storage *addr);
  */
 static void redp2p_shutdown_write(redp2p_fd_t fd);
 
+#ifdef REDP2P_TESTING
 /**
  * Decides whether to drop one complete outgoing KCP datagram.
  * Summary: Part of the transport fault simulation mechanism. Cadences are
@@ -111,6 +112,11 @@ static int redp2p_stream_should_reorder(redp2p_t *ctx) {
     ctx->fault_reorder_counter++;
     return (ctx->fault_reorder_counter % ctx->fault_reorder_every) == 0;
 }
+
+#else
+#define redp2p_stream_should_drop(ctx) 0
+#define redp2p_stream_should_reorder(ctx) 0
+#endif
 
 /**
  * Loads one little-endian u32.
@@ -1450,6 +1456,7 @@ int redp2p_set_stun_server(redp2p_t *ctx, const char *url) {
     return REDP2P_OK;
 }
 
+#ifdef REDP2P_TESTING
 /**
  * Configures stream fault simulation for one context.
  * Summary: Impairs outgoing KCP datagrams with deterministic loss and
@@ -1464,7 +1471,7 @@ int redp2p_set_stun_server(redp2p_t *ctx, const char *url) {
  *     reordering; 0 disables reordering.
  * @return REDP2P_OK on success or REDP2P_EINVAL on invalid arguments.
  */
-int redp2p_set_stream_faults(redp2p_t *ctx,
+int redp2p_test_set_stream_faults(redp2p_t *ctx,
     int drop_every, int reorder_every)
 {
     if (!ctx || drop_every < 0 || reorder_every < 0) return REDP2P_EINVAL;
@@ -1477,6 +1484,8 @@ int redp2p_set_stream_faults(redp2p_t *ctx,
     redp2p_set_error(ctx, NULL);
     return REDP2P_OK;
 }
+
+#endif
 
 /**
  * Gather candidates.
