@@ -40,16 +40,35 @@ static int test_case_current = 0;
 
 typedef int (*case_fn)(void);
 
+/**
+ * Prints one canonical contract-test result line.
+ * @param fail Failure count.
+ * @param name Name string.
+ * @param description Case description.
+ * @return No return value.
+ */
 static void case_result(int fail, const char *name, const char *description) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, description);
 }
 
+/**
+ * Runs one contract test with counter tracking.
+ * @param rc Result accumulator.
+ * @param fn Case function.
+ * @return No return value.
+ */
 static void run_case(int *rc, case_fn fn) {
     test_case_current++;
     *rc += fn();
 }
 
+/**
+ * Checks one boolean test condition.
+ * @param name Name string.
+ * @param cond Condition to test.
+ * @return 0 on success, or 1 on failure.
+ */
 static int expect_true(const char *name, int cond) {
     if (!cond) {
         printf("[FAIL] %s\n", name);
@@ -58,6 +77,13 @@ static int expect_true(const char *name, int cond) {
     return 0;
 }
 
+/**
+ * Checks one integer test result.
+ * @param name Name string.
+ * @param expected Expected value.
+ * @param actual Actual value.
+ * @return 0 on success, or 1 on failure.
+ */
 static int expect_int(const char *name, int expected, int actual) {
     if (expected != actual) {
         printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
@@ -67,6 +93,13 @@ static int expect_int(const char *name, int expected, int actual) {
 }
 
 #ifndef __EMSCRIPTEN__
+/**
+ * Checks one string test result.
+ * @param name Name string.
+ * @param expected Expected value.
+ * @param actual Actual value.
+ * @return 0 on success, or 1 on failure.
+ */
 static int expect_str(const char *name, const char *expected,
     const char *actual) {
     if (!expected || !actual || strcmp(expected, actual) != 0) {
@@ -78,6 +111,11 @@ static int expect_str(const char *name, const char *expected,
 }
 #endif
 
+/**
+ * Sets the isolated trust state directory for a test.
+ * @param dir State directory.
+ * @return 0 on success, or a platform error code.
+ */
 static int test_set_dir(const char *dir) {
 #ifdef _WIN32
     return _putenv_s("KC_TRUST_DIR", dir);
@@ -86,11 +124,26 @@ static int test_set_dir(const char *dir) {
 #endif
 }
 
+/**
+ * Initializes one trust context at a test directory.
+ * @param dir State directory.
+ * @param out Destination output.
+ * @return 0 on success, or 1 on failure.
+ */
 static int test_init_at(const char *dir, kc_trust_t **out) {
     if (test_set_dir(dir) != 0) return 1;
     return kc_trust_init(out) == KC_TRUST_OK ? 0 : 1;
 }
 
+/**
+ * Creates one complete Bob/Alice trust relationship.
+ * @param tag Test relation tag.
+ * @param bob Destination Bob context.
+ * @param alice Destination Alice context.
+ * @param alice_uid Destination Alice UID.
+ * @param bob_uid Destination Bob UID.
+ * @return 0 on success, or 1 on failure.
+ */
 static int test_relation(const char *tag, kc_trust_t **bob,
     kc_trust_t **alice, char **alice_uid, char **bob_uid) {
     char bob_dir[256];
@@ -140,6 +193,14 @@ done:
     return rc;
 }
 
+/**
+ * Revokes and releases one test relationship.
+ * @param bob Destination Bob context.
+ * @param alice Destination Alice context.
+ * @param alice_uid Destination Alice UID.
+ * @param bob_uid Destination Bob UID.
+ * @return No return value.
+ */
 static void test_relation_close(kc_trust_t *bob, kc_trust_t *alice,
     char *alice_uid, char *bob_uid) {
     if (bob && alice_uid) kc_trust_revoke(bob, alice_uid);
@@ -150,6 +211,10 @@ static void test_relation_close(kc_trust_t *bob, kc_trust_t *alice,
     kc_trust_close(alice);
 }
 
+/**
+ * Tests kc_trust_version.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_version(void) {
     int fail = 0;
     fail += expect_true("version is nonzero", kc_trust_version() != 0);
@@ -158,6 +223,10 @@ static int case_kc_trust_version(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests kc_trust_init.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_init(void) {
     kc_trust_t *a = NULL;
     kc_trust_t *b = NULL;
@@ -175,6 +244,10 @@ static int case_kc_trust_init(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests kc_trust_invite.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_invite(void) {
     kc_trust_t *trust = NULL;
     char *alice_uid = NULL;
@@ -201,6 +274,10 @@ static int case_kc_trust_invite(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests kc_trust_join.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_join(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
@@ -241,6 +318,10 @@ static int case_kc_trust_join(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests kc_trust_confirm.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_confirm(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
@@ -260,6 +341,10 @@ static int case_kc_trust_confirm(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests kc_trust_seal.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_seal(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
@@ -288,6 +373,10 @@ static int case_kc_trust_seal(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests kc_trust_unseal.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_unseal(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
@@ -323,6 +412,10 @@ static int case_kc_trust_unseal(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests kc_trust_revoke.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_revoke(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
@@ -352,6 +445,10 @@ static int case_kc_trust_revoke(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests kc_trust_free.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_free(void) {
     kc_trust_t *trust = NULL;
     char *uid = NULL;
@@ -373,6 +470,10 @@ static int case_kc_trust_free(void) {
     return fail ? 1 : 0;
 }
 
+/**
+ * Tests the complete directional trust protocol.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_protocol(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
@@ -433,6 +534,13 @@ typedef struct {
 } test_cli_result_t;
 
 #ifdef _WIN32
+/**
+ * Appends one quoted argument to a Windows command line.
+ * @param cmd Function parameter.
+ * @param cap Buffer capacity.
+ * @param arg Function parameter.
+ * @return 0 on success, or 1 on failure.
+ */
 static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     size_t n = wcslen(cmd);
     size_t len = wcslen(arg);
@@ -464,10 +572,25 @@ static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     return 0;
 }
 
+/**
+ * Converts UTF-8 text to a Windows wide string.
+ * @param in Input bytes.
+ * @param out Destination output.
+ * @param cap Buffer capacity.
+ * @return 0 on success, or 1 on failure.
+ */
 static int test_cli_to_wide(const char *in, wchar_t *out, size_t cap) {
     return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
 }
 
+/**
+ * Runs the trust CLI and captures its process streams.
+ * @param argv Argument vector.
+ * @param input Input bytes.
+ * @param input_size Input byte count.
+ * @param result Captured process result.
+ * @return 0 on success, or 1 on harness failure.
+ */
 static int test_cli_run(char *const argv[], const void *input,
     size_t input_size, test_cli_result_t *result) {
     wchar_t exe[4096];
@@ -568,6 +691,14 @@ fail:
     return 1;
 }
 #else
+/**
+ * Runs the trust CLI and captures its process streams.
+ * @param argv Argument vector.
+ * @param input Input bytes.
+ * @param input_size Input byte count.
+ * @param result Captured process result.
+ * @return 0 on success, or 1 on harness failure.
+ */
 static int test_cli_run(char *const argv[], const void *input,
     size_t input_size, test_cli_result_t *result) {
     int in_pipe[2], out_pipe[2], err_pipe[2];
@@ -618,6 +749,14 @@ static int test_cli_run(char *const argv[], const void *input,
 }
 #endif
 
+/**
+ * Extracts one compact JSON string field.
+ * @param result Captured process result.
+ * @param name Name string.
+ * @param out Destination output.
+ * @param cap Buffer capacity.
+ * @return 0 on success, or 1 on failure.
+ */
 static int test_json_field(const test_cli_result_t *result,
     const char *name, char *out, size_t cap) {
     char needle[128];
@@ -641,6 +780,10 @@ static int test_json_field(const test_cli_result_t *result,
     return 0;
 }
 
+/**
+ * Tests all trust CLI commands as one grouped case.
+ * @return 0 on success, or 1 on failure.
+ */
 static int case_kc_trust_cli(void) {
     test_cli_result_t r;
     char code[512];
@@ -748,6 +891,10 @@ static int case_kc_trust_cli(void) {
 }
 #endif
 
+/**
+ * Runs all trust contract test cases.
+ * @return 0 when all cases pass, or a failure count.
+ */
 static int case_all(void) {
     int rc = 0;
 #ifdef __EMSCRIPTEN__
@@ -774,6 +921,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Runs one selected trust contract test case.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return 0 on success, 1 on test failure, or 2 on usage error.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
