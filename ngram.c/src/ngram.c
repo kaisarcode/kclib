@@ -90,15 +90,11 @@ static void kc_ngram_free_args(kc_ngram_arg_list_t *args) {
  * @return Span length in bytes.
  */
 static size_t kc_ngram_chunk_length(const kc_ngram_chunk_t *chunk) {
-    if (
-        chunk == NULL ||
-        chunk->input == NULL ||
-        chunk->byte_end < chunk->byte_start
-    ) {
+    if (chunk == NULL || chunk->data == NULL) {
         return 0U;
     }
 
-    return chunk->byte_end - chunk->byte_start;
+    return chunk->data_size;
 }
 
 /**
@@ -107,11 +103,11 @@ static size_t kc_ngram_chunk_length(const kc_ngram_chunk_t *chunk) {
  * @return Pointer to the first byte of the span, or NULL on invalid input.
  */
 static const char *kc_ngram_chunk_data(const kc_ngram_chunk_t *chunk) {
-    if (chunk == NULL || chunk->input == NULL) {
+    if (chunk == NULL) {
         return NULL;
     }
 
-    return chunk->input + chunk->byte_start;
+    return chunk->data;
 }
 
 /**
@@ -1120,18 +1116,20 @@ static int kc_ngram_cli_version(void) {
  * @return Exit status.
  */
 int main(int argc, char **argv) {
-    kc_ngram_options_t options = kc_ngram_options_default();
+    kc_ngram_options_t options = {0};
     kc_ngram_cli_context_t context;
     const char *text;
     char *stdin_text;
-    size_t emitted;
+    size_t max_tokens;
+    size_t min_tokens;
     int result;
     int i;
 
     context.command = NULL;
     text = NULL;
     stdin_text = NULL;
-    emitted = 0U;
+    max_tokens = 0U;
+    min_tokens = 0U;
     result = 0;
 
     for (i = 1; i < argc; i++) {
@@ -1161,11 +1159,12 @@ int main(int argc, char **argv) {
                 goto cleanup;
             }
 
-            if (!kc_ngram_parse_sizet(argv[i + 1], &options.max_tokens)) {
+            if (!kc_ngram_parse_sizet(argv[i + 1], &max_tokens)) {
                 result = kc_ngram_fail_usage("Invalid value for --max.");
                 goto cleanup;
             }
 
+            options.max_tokens = &max_tokens;
             i++;
             continue;
         }
@@ -1180,13 +1179,14 @@ int main(int argc, char **argv) {
             }
 
             if (
-                !kc_ngram_parse_sizet(argv[i + 1], &options.min_tokens) ||
-                options.min_tokens == 0U
+                !kc_ngram_parse_sizet(argv[i + 1], &min_tokens) ||
+                min_tokens == 0U
             ) {
                 result = kc_ngram_fail_usage("Invalid value for --min.");
                 goto cleanup;
             }
 
+            options.min_tokens = &min_tokens;
             i++;
             continue;
         }
@@ -1245,12 +1245,11 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    result = kc_ngram_execute(
+    result = kc_ngram_traverse(
         text,
         &options,
         kc_ngram_cli_visitor,
-        &context,
-        &emitted
+        &context
     );
     if (result < 0) {
         result = 1;
