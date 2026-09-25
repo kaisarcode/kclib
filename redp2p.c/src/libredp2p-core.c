@@ -1297,6 +1297,46 @@ int redp2p_open(redp2p_t **out) {
     ctx->heartbeat_s = REDP2P_HEARTBEAT_S;
     ctx->punch_poll_ms = REDP2P_PUNCH_POLL_MS;
     ctx->pending_ttl_s = REDP2P_PENDING_CALL_TTL_S;
+    {
+        const char *env = getenv("REDP2P_PRUNE_INTERVAL_S");
+        if (env) {
+            long v = 0;
+            if (redp2p_parse_u(env, 1, 3600, &v))
+                ctx->prune_interval_s = (unsigned long)v;
+        }
+        env = getenv("REDP2P_ETIMEOUT_SEC");
+        if (env) {
+            long v = 0;
+            if (redp2p_parse_u(env, 1, 86400, &v))
+                ctx->etimeout_sec = (unsigned long)v;
+        }
+        env = getenv("REDP2P_HEARTBEAT_S");
+        if (env) {
+            long v = 0;
+            if (redp2p_parse_u(env, 1, 3600, &v))
+                ctx->heartbeat_s = (unsigned long)v;
+        }
+        env = getenv("REDP2P_PUNCH_POLL_MS");
+        if (env) {
+            long v = 0;
+            if (redp2p_parse_u(env, 10, 60000, &v))
+                ctx->punch_poll_ms = (unsigned long)v;
+        }
+        env = getenv("REDP2P_PENDING_CALL_TTL_S");
+        if (env) {
+            long v = 0;
+            if (redp2p_parse_u(env, 1, 86400, &v))
+                ctx->pending_ttl_s = (unsigned long)v;
+        }
+        env = getenv("REDP2P_MAX_CONSUMERS_PER_PUBLISHER");
+        {
+            size_t window = 0;
+
+            if (redp2p_parse_size(env, &window))
+                ctx->max_consumers_per_publisher = window == 0
+                    ? REDP2P_MAX_PENDING_CALLS_PER_PUBLISHER : window;
+        }
+    }
     ctx->stop_requested = 0;
     ctx->ready_state = 0;
     ctx->ready_status = REDP2P_ERROR;
