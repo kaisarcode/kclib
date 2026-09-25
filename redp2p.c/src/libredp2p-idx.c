@@ -50,8 +50,10 @@ struct redp2p_rate_source {
 typedef struct {
     redp2p_t *ctx;
     redp2p_fd_t listener_fd;
-    fd_set readable_fds;
-    int max_fd;
+    redp2p_fd_t wake_read_fd;
+    redp2p_fd_t wake_write_fd;
+    redp2p_pollfd_t pollfds[REDP2P_MAX_CONNECTIONS + 2];
+    size_t poll_count;
     int platform_initialized;
     uint64_t last_prune;
 } redp2p_index_runtime_t;
@@ -2204,6 +2206,8 @@ static int redp2p_index_runtime_initialize(
     memset(runtime, 0, sizeof(*runtime));
     runtime->ctx = ctx;
     runtime->listener_fd = REDP2P_FD_INVALID;
+    runtime->wake_read_fd = REDP2P_FD_INVALID;
+    runtime->wake_write_fd = REDP2P_FD_INVALID;
     runtime->last_prune = redp2p_now_s();
     if (redp2p_platform_init() != 0) {
         redp2p_set_error(ctx, "index: platform init failed");
@@ -2261,6 +2265,16 @@ static int redp2p_index_runtime_initialize(
         return REDP2P_ENET;
     }
     redp2p_set_nonblock(runtime->listener_fd);
+    result = redp2p_wake_open(ctx, &runtime->wake_read_fd,
+        &runtime->wake_write_fd);
+    if (result != REDP2P_OK) {
+        REDP2P_FD_CLOSE(runtime->listener_fd);
+        runtime->listener_fd = REDP2P_FD_INVALID;
+        redp2p_platform_cleanup();
+        runtime->platform_initialized = 0;
+        redp2p_set_error(ctx, "index: wakeup socket setup failed");
+        return result;
+    }
     return REDP2P_OK;
 }
 
@@ -2269,46 +2283,53 @@ static int redp2p_index_runtime_initialize(
  * @param runtime Initialized index runtime.
  * @return REDP2P_OK when ready, or REDP2P_ENET on failure.
  */
-static int redp2p_index_prepare_fdset(redp2p_index_runtime_t *runtime) {
+static int redp2p_index_prepare_poll(redp2p_index_runtime_t *runtime)
+{
     redp2p_t *ctx;
     int i;
 
     ctx = runtime->ctx;
-    FD_ZERO(&runtime->readable_fds);
-    runtime->max_fd = -1;
-    if (!redp2p_fdset_add(runtime->listener_fd, &runtime->readable_fds,
-        &runtime->max_fd))
-    {
-        redp2p_set_error(ctx,
-            "index: listener cannot be represented by fd_set");
-        return REDP2P_ENET;
-    }
+    runtime->poll_count = 0;
+    runtime->pollfds[runtime->poll_count].fd = runtime->listener_fd;
+    runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+    runtime->pollfds[runtime->poll_count].revents = 0;
+    runtime->poll_count++;
+    runtime->pollfds[runtime->poll_count].fd = runtime->wake_read_fd;
+    runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+    runtime->pollfds[runtime->poll_count].revents = 0;
+    runtime->poll_count++;
+
     redp2p_lock(ctx);
     redp2p_pending_call_evict_stale(ctx);
-    for (i = ctx->n_conns - 1; i >= 0; i--) {
-        if (!redp2p_fdset_add(ctx->conns[i].fd, &runtime->readable_fds,
-            &runtime->max_fd))
-        {
-            redp2p_set_error(ctx,
-                "index: client descriptor cannot be represented by fd_set");
-            redp2p_index_conn_remove(ctx, i);
-        }
+    for (i = 0; i < ctx->n_conns; i++) {
+        if (runtime->poll_count >= REDP2P_MAX_CONNECTIONS + 2) break;
+        runtime->pollfds[runtime->poll_count].fd = ctx->conns[i].fd;
+        runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
+        runtime->pollfds[runtime->poll_count].revents = 0;
+        runtime->poll_count++;
     }
     redp2p_unlock(ctx);
     return REDP2P_OK;
 }
 
-/**
- * Accepts at most one ready index client and transfers descriptor ownership.
- * @param runtime Initialized index runtime with a selected listener.
- * @return None.
- */
+static int redp2p_index_poll_ready(const redp2p_index_runtime_t *runtime,
+    redp2p_fd_t fd)
+{
+    size_t i;
+
+    for (i = 0; i < runtime->poll_count; i++) {
+        if (runtime->pollfds[i].fd == fd)
+            return redp2p_poll_readable(&runtime->pollfds[i]);
+    }
+    return 0;
+}
+
 static void redp2p_index_accept_connection(redp2p_index_runtime_t *runtime) {
     struct sockaddr_storage client_address;
     socklen_t client_address_length;
     redp2p_fd_t client_fd;
 
-    if (!FD_ISSET(runtime->listener_fd, &runtime->readable_fds)) return;
+    if (!redp2p_index_poll_ready(runtime, runtime->listener_fd)) return;
     client_address_length = sizeof(client_address);
     client_fd = accept(runtime->listener_fd,
         (struct sockaddr *)&client_address, &client_address_length);
@@ -2346,7 +2367,7 @@ static void redp2p_index_process_connections(redp2p_index_runtime_t *runtime) {
             redp2p_unlock(ctx);
             continue;
         }
-        if (!FD_ISSET(ctx->conns[i].fd, &runtime->readable_fds)) continue;
+        if (!redp2p_index_poll_ready(runtime, ctx->conns[i].fd)) continue;
         nread = redp2p_sock_read(ctx->conns[i].fd,
             ctx->conns[i].buf + ctx->conns[i].buf_len,
             (int)sizeof(ctx->conns[i].buf) - 1 - ctx->conns[i].buf_len);
@@ -2390,48 +2411,44 @@ static void redp2p_index_process_connections(redp2p_index_runtime_t *runtime) {
  * @param runtime Initialized index runtime.
  * @return REDP2P_OK on requested stop, or REDP2P_ENET on fd-set failure.
  */
-static int redp2p_index_event_loop(redp2p_index_runtime_t *runtime) {
-    struct timeval timeout;
+static int redp2p_index_event_loop(redp2p_index_runtime_t *runtime)
+{
     int ready_count;
     int result;
 
     for (;;) {
-        if (runtime->ctx->stop_requested) {
-            break;
-        }
-        result = redp2p_index_prepare_fdset(runtime);
+        if (runtime->ctx->stop_requested) break;
+        result = redp2p_index_prepare_poll(runtime);
         if (result != REDP2P_OK) return result;
-        timeout.tv_sec = 1;
-        timeout.tv_usec = 0;
-        ready_count = select(runtime->max_fd + 1, &runtime->readable_fds,
-            NULL, NULL, &timeout);
+        ready_count = redp2p_poll_wait(runtime->pollfds, runtime->poll_count,
+            1000);
         if (ready_count < 0) {
             if (runtime->ctx->stop_requested) break;
             continue;
         }
-        if (ready_count == 0) {
-            uint64_t now = redp2p_now_s();
+        if (redp2p_index_poll_ready(runtime, runtime->wake_read_fd))
+            redp2p_wake_drain(runtime->wake_read_fd);
+        if (runtime->ctx->stop_requested) break;
 
-            FD_ZERO(&runtime->readable_fds);
-            redp2p_index_process_connections(runtime);
-            if (now - runtime->last_prune >= runtime->ctx->prune_interval_s) {
-                redp2p_lock(runtime->ctx);
-                redp2p_evict_stale(runtime->ctx);
-                redp2p_unlock(runtime->ctx);
-                runtime->last_prune = now;
-            }
-            continue;
-        }
-        redp2p_index_accept_connection(runtime);
+        if (ready_count > 0)
+            redp2p_index_accept_connection(runtime);
         redp2p_index_process_connections(runtime);
+
+        if (redp2p_now_s() - runtime->last_prune >=
+            runtime->ctx->prune_interval_s)
+        {
+            redp2p_lock(runtime->ctx);
+            redp2p_evict_stale(runtime->ctx);
+            redp2p_unlock(runtime->ctx);
+            runtime->last_prune = redp2p_now_s();
+        }
     }
     return REDP2P_OK;
 }
 
 /**
- * Releases all index-owned connections, listener, and platform state.
- * @param runtime Initialized index runtime.
- * @return None.
+ * Releases all index-owned connections, listener, wakeup sockets, and platform
+ * state.
  */
 static void redp2p_index_runtime_cleanup(redp2p_index_runtime_t *runtime) {
     int i;
@@ -2443,6 +2460,10 @@ static void redp2p_index_runtime_cleanup(redp2p_index_runtime_t *runtime) {
     if (!REDP2P_ISERR(runtime->listener_fd))
         REDP2P_FD_CLOSE(runtime->listener_fd);
     runtime->listener_fd = REDP2P_FD_INVALID;
+    redp2p_wake_close(runtime->ctx, runtime->wake_read_fd,
+        runtime->wake_write_fd);
+    runtime->wake_read_fd = REDP2P_FD_INVALID;
+    runtime->wake_write_fd = REDP2P_FD_INVALID;
     if (runtime->platform_initialized) redp2p_platform_cleanup();
     runtime->platform_initialized = 0;
     atomic_store(&runtime->ctx->stop_requested, 0);
