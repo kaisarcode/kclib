@@ -140,6 +140,10 @@ static redp2p_fd_t redp2p_connect_local_tcp(unsigned short port) {
         REDP2P_FD_CLOSE(fd);
         return REDP2P_FD_INVALID;
     }
+    if (redp2p_set_nonblock(fd) != 0) {
+        REDP2P_FD_CLOSE(fd);
+        return REDP2P_FD_INVALID;
+    }
     return fd;
 }
 
@@ -1855,7 +1859,10 @@ redp2p_publisher_runtime_t *runtime)
     for (i = 0; i < runtime->session_count; i++) {
         if (!runtime->owned_sessions[i].active) continue;
         if (runtime->owned_sessions[i].is_tcp) {
-            if (redp2p_stream_tick(runtime->borrowed_ctx,
+            if (redp2p_stream_flush_tcp(runtime->borrowed_ctx,
+                &runtime->owned_sessions[i].stream,
+                runtime->owned_sessions[i].backend_fd) != 0 ||
+                redp2p_stream_tick(runtime->borrowed_ctx,
                 &runtime->owned_sessions[i].stream) != 0)
             {
                 redp2p_stream_fail(runtime->borrowed_ctx,
