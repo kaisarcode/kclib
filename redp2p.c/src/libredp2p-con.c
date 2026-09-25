@@ -453,18 +453,18 @@ int *should_run)
         atomic_store(&runtime->ctx->stop_requested, 0);
         return REDP2P_OK;
     }
-    if (redp2p_resolve_port(runtime->ctx, bind_port, &effective_port) != REDP2P_OK) {
+    if (redp2p_resolve_port(runtime->ctx, bind_port, &effective_port) !=
+        REDP2P_OK)
+    {
         redp2p_set_error(runtime->ctx, "connect: conflicting local ports");
         return REDP2P_EINVAL;
     }
     if (effective_port == 0 || !runtime->index_host || !runtime->self_id ||
         !runtime->target_id || !redp2p_is_valid_id(runtime->self_id) ||
-        !redp2p_is_valid_id(runtime->target_id) || runtime->index_port == 0 ||
-        (runtime->ctx->proto != REDP2P_PROTO_TCP &&
-        runtime->ctx->proto != REDP2P_PROTO_UDP))
+        !redp2p_is_valid_id(runtime->target_id) || runtime->index_port == 0)
     {
         redp2p_set_error(runtime->ctx,
-            "connect: invalid index, identity, protocol, or local port");
+            "connect: invalid index, identity, or local port");
         return REDP2P_EINVAL;
     }
     runtime->ctx->bind_port = effective_port;
@@ -475,44 +475,25 @@ int *should_run)
     runtime->platform_initialized = 1;
     runtime->udp_any_host = redp2p_host_is_ipv6_literal(runtime->index_host) ?
         "::" : "0.0.0.0";
-
-    if (runtime->ctx->proto == REDP2P_PROTO_UDP) {
-        runtime->local_fd = redp2p_create_socket("127.0.0.1",
-            runtime->ctx->bind_port);
-        if (REDP2P_ISERR(runtime->local_fd)) {
-            redp2p_set_error(runtime->ctx, "connect: local UDP bind failed");
-            return REDP2P_ENET;
-        }
-    } else {
-        runtime->local_fd = redp2p_create_socket(runtime->udp_any_host, 0);
-        if (REDP2P_ISERR(runtime->local_fd)) {
-            redp2p_set_error(runtime->ctx,
-                "connect: peer UDP socket setup failed");
-            return REDP2P_ENET;
-        }
-        runtime->tcp_listen_fd = redp2p_create_tcp_listener("127.0.0.1",
-            runtime->ctx->bind_port);
-        if (REDP2P_ISERR(runtime->tcp_listen_fd)) {
-            redp2p_set_error(runtime->ctx,
-                "connect: local TCP bind/listen failed");
-            return REDP2P_ENET;
-        }
-    }
     *should_run = 1;
     return REDP2P_OK;
 }
 
 /**
- * Resolves the target publisher and stores its candidates.
+ * Resolves the target publisher, learns its announced protocol, and stores
+ * its candidates.
  * @param runtime Initialized consumer runtime.
  * @return REDP2P_OK on success, or the existing lookup error code.
  */
-static int redp2p_consumer_initial_lookup(redp2p_consumer_runtime_t *runtime) {
+static int redp2p_consumer_initial_lookup(redp2p_consumer_runtime_t *runtime)
+{
     redp2p_t *ctx;
     JSON_Value *request;
     JSON_Value *response;
     JSON_Object *obj;
     JSON_Object *out;
+    double proto_number;
+    int proto;
     int result;
 
     ctx = runtime->ctx;
@@ -535,7 +516,7 @@ static int redp2p_consumer_initial_lookup(redp2p_consumer_runtime_t *runtime) {
     }
     out = json_value_get_object(response);
     runtime->n_peer_candidates = 0;
-    if (!out ||
+    if (!out || !json_object_has_value_of_type(out, "proto", JSONNumber) ||
         !redp2p_parse_candidates(out, "candidates",
             runtime->peer_candidates, &runtime->n_peer_candidates))
     {
@@ -543,8 +524,50 @@ static int redp2p_consumer_initial_lookup(redp2p_consumer_runtime_t *runtime) {
         redp2p_set_error(ctx, "connect: malformed lookup response");
         return REDP2P_EPROTO;
     }
+    proto_number = json_object_get_number(out, "proto");
+    proto = (int)proto_number;
+    if ((double)proto != proto_number ||
+        (proto != REDP2P_PROTO_TCP && proto != REDP2P_PROTO_UDP))
+    {
+        json_value_free(response);
+        redp2p_set_error(ctx, "connect: invalid publisher protocol");
+        return REDP2P_EPROTO;
+    }
+    ctx->proto = proto;
     json_value_free(response);
     redp2p_set_error(ctx, NULL);
+    return REDP2P_OK;
+}
+
+/**
+ * Opens the application-facing local port after the publisher protocol is
+ * learned from the index.
+ */
+static int redp2p_consumer_open_local(redp2p_consumer_runtime_t *runtime)
+{
+    if (runtime->ctx->proto == REDP2P_PROTO_UDP) {
+        runtime->local_fd = redp2p_create_socket("127.0.0.1",
+            runtime->ctx->bind_port);
+        if (REDP2P_ISERR(runtime->local_fd)) {
+            redp2p_set_error(runtime->ctx, "connect: local UDP bind failed");
+            return REDP2P_ENET;
+        }
+        return REDP2P_OK;
+    }
+
+    runtime->local_fd = redp2p_create_socket(runtime->udp_any_host, 0);
+    if (REDP2P_ISERR(runtime->local_fd)) {
+        redp2p_set_error(runtime->ctx,
+            "connect: peer UDP socket setup failed");
+        return REDP2P_ENET;
+    }
+    runtime->tcp_listen_fd = redp2p_create_tcp_listener("127.0.0.1",
+        runtime->ctx->bind_port);
+    if (REDP2P_ISERR(runtime->tcp_listen_fd)) {
+        redp2p_set_error(runtime->ctx,
+            "connect: local TCP bind/listen failed");
+        return REDP2P_ENET;
+    }
     return REDP2P_OK;
 }
 
@@ -958,13 +981,22 @@ unsigned short bind_port)
     result = redp2p_consumer_runtime_init(&runtime, ctx, index_host, index_port,
         self_id, target_id, bind_port, &should_run);
     if (result != REDP2P_OK || !should_run) {
+        atomic_store(&ctx->ready_status, result);
+        atomic_store(&ctx->ready_state, result == REDP2P_OK ? 1 : -1);
         redp2p_consumer_runtime_cleanup(&runtime, 0);
         return result;
     }
     result = redp2p_consumer_initial_lookup(&runtime);
+    if (result == REDP2P_OK)
+        result = redp2p_consumer_open_local(&runtime);
     if (result == REDP2P_OK) {
+        atomic_store(&ctx->ready_status, REDP2P_OK);
+        atomic_store(&ctx->ready_state, 1);
         loop_ran = 1;
         result = redp2p_consumer_loop(&runtime);
+    } else {
+        atomic_store(&ctx->ready_status, result);
+        atomic_store(&ctx->ready_state, -1);
     }
     redp2p_consumer_runtime_cleanup(&runtime, loop_ran);
     return result;
