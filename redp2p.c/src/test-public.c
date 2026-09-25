@@ -102,7 +102,7 @@ static uint16_t reserve_port(void)
     if (fd == TEST_INVALID) return 0;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     addr.sin_port = 0;
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
         len = sizeof(addr);
@@ -166,7 +166,7 @@ static int echo_start(echo_t *echo)
         (const char *)&one, sizeof(one));
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     addr.sin_port = 0;
     if (bind(echo->listener, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
         listen(echo->listener, 4) != 0)
@@ -227,7 +227,7 @@ static int tcp_roundtrip(uint16_t port)
 #endif
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(0x7f000001UL);
     addr.sin_port = htons(port);
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         fd_close(fd);
