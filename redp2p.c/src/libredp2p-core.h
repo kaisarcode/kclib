@@ -220,12 +220,14 @@ struct redp2p {
     pthread_mutex_t mutex;
 #endif
     char stun_url[512];
+#ifdef REDP2P_TESTING
     char state_dir[REDP2P_STATE_DIR_MAX + 1];
-    char err_buf[256];
     int fault_drop_every;
     int fault_reorder_every;
     int fault_drop_counter;
     int fault_reorder_counter;
+#endif
+    char err_buf[256];
     unsigned long prune_interval_s;
     unsigned long etimeout_sec;
     unsigned long heartbeat_s;
@@ -746,8 +748,10 @@ REDP2P_INTERNAL int redp2p_set_registration_pass(redp2p_t *ctx, const char *pass
 REDP2P_INTERNAL int redp2p_idx_set_vips(redp2p_t *ctx, const char *vip,
     char *err, size_t err_cap);
 REDP2P_INTERNAL int redp2p_set_stun_server(redp2p_t *ctx, const char *url);
-REDP2P_INTERNAL int redp2p_set_stream_faults(redp2p_t *ctx,
+#ifdef REDP2P_TESTING
+REDP2P_INTERNAL int redp2p_test_set_stream_faults(redp2p_t *ctx,
     int drop_every, int reorder_every);
-REDP2P_INTERNAL int redp2p_set_state_dir(redp2p_t *ctx, const char *dir);
+REDP2P_INTERNAL int redp2p_test_set_state_dir(redp2p_t *ctx, const char *dir);
+#endif
 
 #endif
