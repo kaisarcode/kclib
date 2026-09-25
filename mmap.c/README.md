@@ -4,25 +4,10 @@
 path is valid and starts with no value. The current value can be replaced in
 memory, persisted explicitly, or deleted together with its backing file.
 
-The public model is designed to project naturally to JavaScript and Lua:
-
-```js
-const mm = mmap(file);
-
-mm.get();              // value, or null when the file did not exist
-mm.set("A");
-mm.set(mm.get() + "B");
-mm.save();
-
-mm.set(null);
-mm.save();             // deletes the file and invalidates mm
-
-// equivalent shorthand on a valid instance:
-// mm.del();
-```
-
 After `del()`, any operation other than final cleanup is an error. Reopening the
 same path creates a new valid instance whose `get()` returns `null`.
+
+---
 
 ---
 
@@ -35,33 +20,33 @@ The CLI is a one-shot adapter over the same file/value operations.
 Read a saved value:
 
 ```bash
-./bin/x86_64/linux/mmap file.bin --get
+mmap file.bin --get
 ```
 
 Set and save a direct value:
 
 ```bash
-./bin/x86_64/linux/mmap file.bin --set "value"
+mmap file.bin --set "value"
 ```
 
 Set and save exact bytes from stdin:
 
 ```bash
-cat input.bin | ./bin/x86_64/linux/mmap file.bin --set
+cat input.bin | mmap file.bin --set
 ```
 
 Delete the backing file:
 
 ```bash
-./bin/x86_64/linux/mmap file.bin --del
+mmap file.bin --del
 ```
 
 Short operation flags are also accepted:
 
 ```bash
-./bin/x86_64/linux/mmap file.bin -get
-./bin/x86_64/linux/mmap file.bin -set "value"
-./bin/x86_64/linux/mmap file.bin -del
+mmap file.bin -get
+mmap file.bin -set "value"
+mmap file.bin -del
 ```
 
 ### Parameters
@@ -73,6 +58,8 @@ Short operation flags are also accepted:
 | `mmap <path> -del\|--del` | Delete the backing file |
 | `mmap -h\|--help` | Show help and usage |
 | `mmap -v\|--version` | Show version |
+
+---
 
 ---
 
@@ -88,19 +75,19 @@ size_t size = 0;
 if (kc_mmap_open(&mm, "file.bin") == KC_MMAP_OK) {
     int rc = kc_mmap_get(mm, &data, &size);
 
-    if (rc == KC_MMAP_NOT_FOUND) {
+if (rc == KC_MMAP_NOT_FOUND) {
         /* no current value */
     }
 
-    if (kc_mmap_set(mm, "A", 1U) == KC_MMAP_OK) {
+if (kc_mmap_set(mm, "A", 1U) == KC_MMAP_OK) {
         kc_mmap_get(mm, &data, &size);
 
-        if (kc_mmap_save(mm) == KC_MMAP_OK) {
+if (kc_mmap_save(mm) == KC_MMAP_OK) {
             /* file.bin now contains one byte: A */
         }
     }
 
-    kc_mmap_close(mm);
+kc_mmap_close(mm);
 }
 ```
 
@@ -123,9 +110,6 @@ if (kc_mmap_open(&mm, "file.bin") == KC_MMAP_OK) {
 - `kc_mmap_close()` releases the instance and accepts `NULL`.
 - `kc_mmap_version()` returns the generated build version.
 
-The size argument is part of the binary C bridge, not a user-facing property of
-the JS/Lua model. A binding can map the result mechanically:
-
 ```text
 KC_MMAP_NOT_FOUND      -> null
 KC_MMAP_OK + 0 bytes   -> "" / zero-byte value
@@ -138,9 +122,18 @@ A `get()` pointer is borrowed from the instance. It remains valid until
 
 ---
 
+### Storage
+
+mmap.c does not choose a storage directory. The backing file is exactly the
+path passed to `kc_mmap_open()`. `kc_mmap_save()` writes that file and
+`kc_mmap_del()` removes it.
+
+---
+
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
@@ -148,66 +141,42 @@ make
 
 ### Tests
 
-Build the project artifacts first, then run the native contract suite:
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
 make
 make test
 ```
 
-Run the Windows contract suite through Wine after building Windows artifacts:
+To run through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-The reusable contract cases cover `open`, `get`, `set`, `save`, `del`,
-`close`, and `version`. Native and Wine runs additionally exercise the
-shipped CLI as one grouped contract.
-
-Build the WebAssembly artifact with:
+### WebAssembly (Emscripten)
 
 ```bash
 make wasm32/wasm
-```
-
-Run the reusable API contract through Emscripten and Node.js with:
-
-```bash
 make test wasm
 ```
 
-The WebAssembly build uses Emscripten filesystem semantics. The CLI is not part
-of the WebAssembly contract.
+- Artifact: `bin/wasm32/wasm/mmap.wasm`
+- Exports: `kc_mmap_open`, `kc_mmap_set`, `kc_mmap_del`, `kc_mmap_close`, `kc_mmap_get`, `kc_mmap_save`, `kc_mmap_version`
+- The module contains the reusable library only; the CLI is not compiled into
+    it.
+
+`wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
 
 ```bash
 make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make x86_64/iossim
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make aarch64/ios
-make aarch64/iossim
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
 ```
 
 ---
@@ -221,6 +190,15 @@ make loongarch64/linux
 - `ninja`
 - `gcc` or `clang` (C11 compatible)
 
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Emscripten SDK and Node.js for WebAssembly builds and tests.
+- Other cross-compilation toolchains are required only by enabled targets.
+
 ### System Libraries
 
 Linux:
@@ -233,22 +211,19 @@ Windows (MSVC or MinGW):
 macOS / iOS:
 - No additional system libraries required.
 
-### Optional Cross-Compilation SDKs
-
-Required only for multiarch builds:
-
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
-- Android NDK (version 27.2.12479018) for Android targets.
-
 ---
 
 ## Beta Notice
 
-This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support. You are free to test it, use it, and modify it as you please.
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
 
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Please note that I do not accept pull requests; the goal is to avoid long-term dependency on platforms like GitHub, and I do not maintain fixed infrastructure to guarantee long-term stability for these projects.
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
 
 ---
 
