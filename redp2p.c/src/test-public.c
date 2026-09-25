@@ -26,7 +26,9 @@ typedef int test_socklen_t;
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 typedef int test_fd_t;
 typedef pthread_t test_thread_t;
@@ -55,7 +57,11 @@ static void sleep_ms(unsigned int ms)
 #ifdef _WIN32
     Sleep(ms);
 #else
-    usleep(ms * 1000U);
+    struct timespec ts;
+
+    ts.tv_sec = (time_t)(ms / 1000U);
+    ts.tv_nsec = (long)(ms % 1000U) * 1000000L;
+    nanosleep(&ts, NULL);
 #endif
 }
 
