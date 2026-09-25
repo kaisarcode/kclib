@@ -15,6 +15,82 @@
 #include <errno.h>
 #include <stdatomic.h>
 
+#include <time.h>
+
+typedef struct redp2p redp2p_t;
+
+#define REDP2P_OK       KC_REDP2P_OK
+#define REDP2P_ERROR    KC_REDP2P_ERROR
+#define REDP2P_ENET     KC_REDP2P_ENET
+#define REDP2P_ENOENT   KC_REDP2P_ENOENT
+#define REDP2P_ETIMEOUT KC_REDP2P_ETIMEOUT
+#define REDP2P_EFULL    KC_REDP2P_EFULL
+#define REDP2P_EINVAL   KC_REDP2P_EINVAL
+#define REDP2P_EPROTO   KC_REDP2P_EPROTO
+#define REDP2P_EAUTH    KC_REDP2P_EAUTH
+#define REDP2P_EVERSION KC_REDP2P_EVERSION
+#define REDP2P_EPUNCH   KC_REDP2P_EPUNCH
+#define REDP2P_EEXIST   KC_REDP2P_EEXIST
+
+#define REDP2P_ID_MAX KC_REDP2P_ID_MAX
+#define REDP2P_PORT_DEFAULT KC_REDP2P_PORT_DEFAULT
+#define REDP2P_PROTO_TCP KC_REDP2P_TCP
+#define REDP2P_PROTO_UDP KC_REDP2P_UDP
+
+#define REDP2P_ADDR_MAX 47
+#define REDP2P_BUF 4096
+#define REDP2P_HEARTBEAT_S 15
+#define REDP2P_KEY_SZ 16
+#define REDP2P_KEY_STR_SZ 33
+#define REDP2P_PASS_MAX 255
+#define REDP2P_STATE_DIR_MAX 511
+#define REDP2P_UDP_PAYLOAD_MAX 1412
+#define REDP2P_PEER_CANDIDATES_MAX 8
+#define REDP2P_PUNCH_POLL_MAX 4
+#define REDP2P_MAX_PENDING_CALLS_GLOBAL 4096
+#define REDP2P_MAX_PENDING_CALLS_PER_PUBLISHER 32
+#define REDP2P_MAX_CONSUMERS_PER_PUBLISHER REDP2P_MAX_PENDING_CALLS_PER_PUBLISHER
+
+#define REDP2P_STUN_MAGIC 0x2112A442
+#define REDP2P_STUN_ATTR_MAPPED_ADDR     0x0001
+#define REDP2P_STUN_ATTR_XOR_MAPPED_ADDR 0x0020
+#define REDP2P_STUN_BINDING      0x0001
+#define REDP2P_STUN_BINDING_RESP 0x0101
+
+typedef struct redp2p_options {
+    size_t seats;
+    int pow;
+    char pass[REDP2P_PASS_MAX + 1];
+    char *vip;
+    int sweep;
+    char stun_url[256];
+} redp2p_options_t;
+
+typedef enum {
+    REDP2P_CAND_HOST = 1,
+    REDP2P_CAND_OBSERVED
+} redp2p_candidate_type_t;
+
+typedef struct {
+    redp2p_candidate_type_t type;
+    char addr[REDP2P_ADDR_MAX + 1];
+    unsigned short port;
+    unsigned int priority;
+} redp2p_candidate_t;
+
+typedef struct {
+    char id[REDP2P_ID_MAX + 1];
+    char key[REDP2P_KEY_STR_SZ];
+    uint64_t sequence;
+    uint64_t last_seen;
+    int proto;
+    unsigned short udp_port;
+    redp2p_candidate_t candidates[REDP2P_PEER_CANDIDATES_MAX];
+    int n_candidates;
+} redp2p_peer_t;
+
+typedef void (*redp2p_publisher_cb)(const char *id, void *userdata);
+
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
@@ -163,6 +239,8 @@ struct redp2p {
     int n_pending_calls;
     size_t max_consumers_per_publisher;
     _Atomic int stop_requested;
+    _Atomic int ready_state;
+    _Atomic int ready_status;
 };
 
 /**
@@ -613,5 +691,46 @@ REDP2P_INTERNAL int redp2p_parse_candidates(JSON_Object *obj, const char *field,
  */
 REDP2P_INTERNAL void redp2p_append_candidates(JSON_Object *obj,
     const char *field, const redp2p_candidate_t *cands, int n);
+
+/* Legacy protocol/runtime entry points retained only for the private engine. */
+REDP2P_INTERNAL redp2p_options_t redp2p_options_default(void);
+REDP2P_INTERNAL void redp2p_options_load_env(redp2p_options_t *opts);
+REDP2P_INTERNAL void redp2p_options_free(redp2p_options_t *opts);
+REDP2P_INTERNAL int redp2p_open(redp2p_t **out);
+REDP2P_INTERNAL int redp2p_close(redp2p_t *ctx);
+REDP2P_INTERNAL int redp2p_stop(redp2p_t *ctx);
+REDP2P_INTERNAL int redp2p_stop_requested(redp2p_t *ctx);
+REDP2P_INTERNAL uint64_t redp2p_version(void);
+REDP2P_INTERNAL const char *redp2p_strerror(int code);
+REDP2P_INTERNAL const char *redp2p_get_error(redp2p_t *ctx);
+REDP2P_INTERNAL int redp2p_is_valid_id(const char *id);
+REDP2P_INTERNAL int redp2p_is_valid_pass_token(const char *pass);
+REDP2P_INTERNAL int redp2p_serve_index(redp2p_t *ctx, const char *host,
+    unsigned short port);
+REDP2P_INTERNAL int redp2p_wait(redp2p_t *ctx, const char *index_host,
+    unsigned short index_port, const char *self_id, unsigned short bind_port);
+REDP2P_INTERNAL int redp2p_connect(redp2p_t *ctx, const char *index_host,
+    unsigned short index_port, const char *self_id, const char *target_id,
+    unsigned short bind_port);
+REDP2P_INTERNAL int redp2p_deregister(redp2p_t *ctx, const char *index_host,
+    unsigned short index_port, const char *id);
+REDP2P_INTERNAL int redp2p_list_publishers(redp2p_t *ctx,
+    const char *index_host, unsigned short index_port,
+    redp2p_publisher_cb cb, void *userdata);
+REDP2P_INTERNAL int redp2p_set_seats(redp2p_t *ctx, size_t seats);
+REDP2P_INTERNAL int redp2p_set_max_consumers_per_publisher(redp2p_t *ctx,
+    size_t n);
+REDP2P_INTERNAL int redp2p_set_pow(redp2p_t *ctx, int bits);
+REDP2P_INTERNAL int redp2p_set_port(redp2p_t *ctx, unsigned short port);
+REDP2P_INTERNAL int redp2p_set_protocol(redp2p_t *ctx, int proto);
+REDP2P_INTERNAL int redp2p_set_pass(redp2p_t *ctx, const char *pass);
+REDP2P_INTERNAL int redp2p_set_vip(redp2p_t *ctx, const char *vip,
+    char *err, size_t err_cap);
+REDP2P_INTERNAL int redp2p_set_sweep(redp2p_t *ctx, int sweep);
+REDP2P_INTERNAL int redp2p_set_stun_url(redp2p_t *ctx, const char *url);
+REDP2P_INTERNAL int redp2p_set_stream_faults(redp2p_t *ctx,
+    int drop_every, int reorder_every);
+REDP2P_INTERNAL int redp2p_set_state_dir(redp2p_t *ctx, const char *dir);
+REDP2P_INTERNAL uint16_t redp2p_get_bind_port(redp2p_t *ctx);
 
 #endif
