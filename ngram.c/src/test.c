@@ -131,6 +131,7 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
+#ifndef __EMSCRIPTEN__
 static int expect_str(const char *name, const char *expected, const char *actual) {
     if (strcmp(expected, actual) != 0) {
         printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected, actual);
@@ -138,6 +139,7 @@ static int expect_str(const char *name, const char *expected, const char *actual
     }
     return 0;
 }
+#endif
 
 static int expect_pair(
     const char *name,
@@ -850,6 +852,9 @@ static int run_cli_expect(
 ) {
     char out[8192];
     char err[4096];
+#ifdef _WIN32
+    char native_expected[8192];
+#endif
     int status = 0;
     int fail = 0;
 
@@ -871,7 +876,21 @@ static int run_cli_expect(
 
     fail += expect_int(check, expected_status, status);
     if (expected_out != NULL) {
+#ifdef _WIN32
+        size_t src = 0U;
+        size_t dst = 0U;
+
+        while (expected_out[src] != '\0' && dst + 2U < sizeof(native_expected)) {
+            if (expected_out[src] == '\n') {
+                native_expected[dst++] = '\r';
+            }
+            native_expected[dst++] = expected_out[src++];
+        }
+        native_expected[dst] = '\0';
+        fail += expect_str(check, native_expected, out);
+#else
         fail += expect_str(check, expected_out, out);
+#endif
     }
     return fail;
 }
