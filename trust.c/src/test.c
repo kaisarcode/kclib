@@ -90,39 +90,43 @@ static int test_init_at(const char *dir, kc_trust_t **out) {
 }
 
 static int test_relation(const char *tag, kc_trust_t **bob,
-    kc_trust_t **alice, char **uid) {
+    kc_trust_t **alice, char **alice_uid, char **bob_uid) {
     char bob_dir[256];
     char alice_dir[256];
     char *invite_uid = NULL;
     char *code = NULL;
-    char *alice_uid = NULL;
+    char *joined_uid = NULL;
     char *confirmation = NULL;
     char *confirmed_uid = NULL;
     int rc = 1;
 
     *bob = NULL;
     *alice = NULL;
-    *uid = NULL;
+    *alice_uid = NULL;
+    *bob_uid = NULL;
     snprintf(bob_dir, sizeof(bob_dir), ".trust-test-%s-bob", tag);
     snprintf(alice_dir, sizeof(alice_dir), ".trust-test-%s-alice", tag);
 
     if (test_init_at(bob_dir, bob) != 0 ||
         test_init_at(alice_dir, alice) != 0) goto done;
     if (kc_trust_invite(*bob, &invite_uid, &code) != KC_TRUST_OK) goto done;
-    if (kc_trust_join(*alice, code, &alice_uid,
+    if (kc_trust_join(*alice, code, &joined_uid,
         &confirmation) != KC_TRUST_OK) goto done;
     if (kc_trust_confirm(*bob, confirmation,
         &confirmed_uid) != KC_TRUST_OK) goto done;
-    if (strcmp(invite_uid, alice_uid) != 0 ||
-        strcmp(invite_uid, confirmed_uid) != 0) goto done;
-    *uid = invite_uid;
+    if (strcmp(invite_uid, confirmed_uid) != 0 ||
+        strcmp(invite_uid, joined_uid) == 0) goto done;
+
+    *alice_uid = invite_uid;
     invite_uid = NULL;
+    *bob_uid = joined_uid;
+    joined_uid = NULL;
     rc = 0;
 
 done:
     kc_trust_free(invite_uid);
     kc_trust_free(code);
-    kc_trust_free(alice_uid);
+    kc_trust_free(joined_uid);
     kc_trust_free(confirmation);
     kc_trust_free(confirmed_uid);
     if (rc != 0) {
@@ -135,12 +139,11 @@ done:
 }
 
 static void test_relation_close(kc_trust_t *bob, kc_trust_t *alice,
-    char *uid) {
-    if (uid) {
-        if (bob) kc_trust_revoke(bob, uid);
-        if (alice) kc_trust_revoke(alice, uid);
-    }
-    kc_trust_free(uid);
+    char *alice_uid, char *bob_uid) {
+    if (bob && alice_uid) kc_trust_revoke(bob, alice_uid);
+    if (alice && bob_uid) kc_trust_revoke(alice, bob_uid);
+    kc_trust_free(alice_uid);
+    kc_trust_free(bob_uid);
     kc_trust_close(bob);
     kc_trust_close(alice);
 }
@@ -172,7 +175,8 @@ static int case_kc_trust_init(void) {
 
 static int case_kc_trust_invite(void) {
     kc_trust_t *trust = NULL;
-    char *uid = NULL;
+    char *alice_uid = NULL;
+    char *bob_uid = NULL;
     char *code = NULL;
     int fail = 0;
     fail += expect_int("init succeeds", 0,
@@ -198,7 +202,8 @@ static int case_kc_trust_invite(void) {
 static int case_kc_trust_join(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
-    char *uid = NULL;
+    char *alice_uid = NULL;
+    char *bob_uid = NULL;
     char *code = NULL;
     char *joined_uid = NULL;
     char *confirmation = NULL;
@@ -237,16 +242,17 @@ static int case_kc_trust_join(void) {
 static int case_kc_trust_confirm(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
-    char *uid = NULL;
+    char *alice_uid = NULL;
+    char *bob_uid = NULL;
     int fail = 0;
     fail += expect_int("relationship establishes", 0,
-        test_relation("confirm", &bob, &alice, &uid));
-    fail += expect_true("confirmed uid returned", uid != NULL);
-    if (uid && bob)
-        fail += expect_int("confirmation consumed pending invite",
-            KC_TRUST_ERROR, kc_trust_revoke(bob,
-                "00000000-0000-4000-8000-000000000000"));
-    test_relation_close(bob, alice, uid);
+        test_relation("confirm", &bob, &alice, &alice_uid, &bob_uid));
+    fail += expect_true("alice uid returned", alice_uid != NULL);
+    fail += expect_true("bob uid returned", bob_uid != NULL);
+    if (alice_uid && bob_uid)
+        fail += expect_true("endpoint uids are distinct",
+            strcmp(alice_uid, bob_uid) != 0);
+    test_relation_close(bob, alice, alice_uid, bob_uid);
     case_result(fail, "kc_trust_confirm",
         "validates one-use confirmation and establishes the binding");
     return fail ? 1 : 0;
@@ -255,25 +261,26 @@ static int case_kc_trust_confirm(void) {
 static int case_kc_trust_seal(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
-    char *uid = NULL;
+    char *alice_uid = NULL;
+    char *bob_uid = NULL;
     void *data = NULL;
     size_t size = 0;
     int fail = 0;
     fail += expect_int("relationship establishes", 0,
-        test_relation("seal", &bob, &alice, &uid));
-    if (bob && uid) {
+        test_relation("seal", &bob, &alice, &alice_uid, &bob_uid));
+    if (bob && alice_uid) {
         fail += expect_int("seal succeeds", KC_TRUST_OK,
-            kc_trust_seal(bob, uid, "hello", 5, &data, &size));
+            kc_trust_seal(bob, alice_uid, "hello", 5, &data, &size));
         fail += expect_true("seal returns protected blob", data && size > 5);
         kc_trust_free(data);
         data = NULL;
         size = 0;
         fail += expect_int("seal enforces max message", KC_TRUST_ERROR,
-            kc_trust_seal(bob, uid, "x", KC_TRUST_MAX_MESSAGE + 1,
+            kc_trust_seal(bob, alice_uid, "x", KC_TRUST_MAX_MESSAGE + 1,
                 &data, &size));
     }
     kc_trust_free(data);
-    test_relation_close(bob, alice, uid);
+    test_relation_close(bob, alice, alice_uid, bob_uid);
     case_result(fail, "kc_trust_seal",
         "protects bytes for an established scoped identity");
     return fail ? 1 : 0;
@@ -282,7 +289,8 @@ static int case_kc_trust_seal(void) {
 static int case_kc_trust_unseal(void) {
     kc_trust_t *bob = NULL;
     kc_trust_t *alice = NULL;
-    char *uid = NULL;
+    char *alice_uid = NULL;
+    char *bob_uid = NULL;
     void *data = NULL;
     size_t data_size = 0;
     void *message = NULL;
@@ -290,14 +298,14 @@ static int case_kc_trust_unseal(void) {
     static const unsigned char binary[] = {0, 1, 2, 0, 255};
     int fail = 0;
     fail += expect_int("relationship establishes", 0,
-        test_relation("unseal", &bob, &alice, &uid));
+        test_relation("unseal", &bob, &alice, &alice_uid, &bob_uid));
     if (bob && alice && uid) {
         fail += expect_int("bob seals", KC_TRUST_OK,
-            kc_trust_seal(bob, uid, binary, sizeof(binary),
+            kc_trust_seal(bob, alice_uid, binary, sizeof(binary),
                 &data, &data_size));
         if (data) {
             fail += expect_int("alice unseals", KC_TRUST_OK,
-                kc_trust_unseal(alice, uid, data, data_size,
+                kc_trust_unseal(alice, alice_uid, data, data_size,
                     &message, &message_size));
             fail += expect_true("binary length preserved",
                 message_size == sizeof(binary));
@@ -307,7 +315,7 @@ static int case_kc_trust_unseal(void) {
     }
     kc_trust_free(data);
     kc_trust_free(message);
-    test_relation_close(bob, alice, uid);
+    test_relation_close(bob, alice, alice_uid, bob_uid);
     case_result(fail, "kc_trust_unseal",
         "authenticates and restores binary plaintext");
     return fail ? 1 : 0;
@@ -321,18 +329,19 @@ static int case_kc_trust_revoke(void) {
     size_t data_size = 0;
     int fail = 0;
     fail += expect_int("relationship establishes", 0,
-        test_relation("revoke", &bob, &alice, &uid));
-    if (bob && uid) {
+        test_relation("revoke", &bob, &alice, &alice_uid, &bob_uid));
+    if (bob && alice_uid) {
         fail += expect_int("revoke succeeds", KC_TRUST_OK,
-            kc_trust_revoke(bob, uid));
+            kc_trust_revoke(bob, alice_uid));
         fail += expect_int("seal after revoke fails", KC_TRUST_ERROR,
-            kc_trust_seal(bob, uid, "x", 1, &data, &data_size));
+            kc_trust_seal(bob, alice_uid, "x", 1, &data, &data_size));
         fail += expect_int("second revoke reports missing", KC_TRUST_ERROR,
-            kc_trust_revoke(bob, uid));
+            kc_trust_revoke(bob, alice_uid));
     }
     kc_trust_free(data);
-    if (alice && uid) kc_trust_revoke(alice, uid);
-    kc_trust_free(uid);
+    if (alice && bob_uid) kc_trust_revoke(alice, bob_uid);
+    kc_trust_free(alice_uid);
+    kc_trust_free(bob_uid);
     kc_trust_close(bob);
     kc_trust_close(alice);
     case_result(fail, "kc_trust_revoke",
@@ -371,25 +380,40 @@ static int case_kc_trust_protocol(void) {
     size_t message_size = 0;
     int fail = 0;
     fail += expect_int("relationship establishes", 0,
-        test_relation("protocol", &bob, &alice, &uid));
+        test_relation("protocol", &bob, &alice, &alice_uid, &bob_uid));
     if (bob && alice && uid) {
         fail += expect_int("seal succeeds", KC_TRUST_OK,
-            kc_trust_seal(bob, uid, "authenticated", 13,
+            kc_trust_seal(bob, alice_uid, "authenticated", 13,
                 &data, &data_size));
         if (data && data_size > 0) {
             ((unsigned char *)data)[data_size - 1] ^= 1;
             fail += expect_int("tampered blob rejected", KC_TRUST_ERROR,
-                kc_trust_unseal(alice, uid, data, data_size,
+                kc_trust_unseal(alice, alice_uid, data, data_size,
                     &message, &message_size));
             ((unsigned char *)data)[data_size - 1] ^= 1;
             fail += expect_int("valid blob remains valid", KC_TRUST_OK,
-                kc_trust_unseal(alice, uid, data, data_size,
+                kc_trust_unseal(alice, alice_uid, data, data_size,
                     &message, &message_size));
+            kc_trust_free(message);
+            message = NULL;
+            message_size = 0;
+        }
+        kc_trust_free(data);
+        data = NULL;
+        data_size = 0;
+        fail += expect_int("alice seals reverse direction", KC_TRUST_OK,
+            kc_trust_seal(alice, bob_uid, "reply", 5, &data, &data_size));
+        if (data) {
+            fail += expect_int("bob unseals on its local uid", KC_TRUST_OK,
+                kc_trust_unseal(bob, bob_uid, data, data_size,
+                    &message, &message_size));
+            fail += expect_true("reverse plaintext matches",
+                message_size == 5 && memcmp(message, "reply", 5) == 0);
         }
     }
     kc_trust_free(data);
     kc_trust_free(message);
-    test_relation_close(bob, alice, uid);
+    test_relation_close(bob, alice, alice_uid, bob_uid);
     case_result(fail, "kc_trust_protocol",
         "binds UID, identity, and ciphertext authentication without replay policy");
     return fail ? 1 : 0;
