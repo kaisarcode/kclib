@@ -555,8 +555,10 @@ static int redp2p_consumer_initial_lookup(redp2p_consumer_runtime_t *runtime)
 }
 
 /**
- * Opens the application-facing local port after the publisher protocol is
- * learned from the index.
+ * Opens the application-facing local port after learning the publisher
+ * protocol from the index.
+ * @param runtime Consumer runtime.
+ * @return REDP2P_OK on success or an error code.
  */
 static int redp2p_consumer_open_local(redp2p_consumer_runtime_t *runtime)
 {
@@ -656,9 +658,14 @@ redp2p_consumer_runtime_t *runtime)
     return REDP2P_OK;
 }
 
+/**
+ * Reports whether one consumer socket is ready in the current poll set.
+ * @param runtime Consumer runtime.
+ * @param fd Socket descriptor.
+ * @return 1 when ready, 0 otherwise.
+ */
 static int redp2p_consumer_poll_ready(
-const redp2p_consumer_runtime_t *runtime,
-redp2p_fd_t fd)
+    const redp2p_consumer_runtime_t *runtime, redp2p_fd_t fd)
 {
     size_t i;
 
@@ -669,8 +676,13 @@ redp2p_fd_t fd)
     return 0;
 }
 
+/**
+ * Accepts one local TCP client and starts its tunnel session.
+ * @param runtime Consumer runtime.
+ * @return REDP2P_OK on success or an error code.
+ */
 static int redp2p_consumer_tcp_accept(
-redp2p_consumer_runtime_t *runtime)
+    redp2p_consumer_runtime_t *runtime)
 {
     unsigned char session_bin[REDP2P_SESSION_ID_SZ];
     char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1];
