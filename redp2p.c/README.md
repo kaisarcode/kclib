@@ -214,7 +214,7 @@ For `kc_redp2p_idx_options_t`:
 - `pass == NULL` or an empty string leaves global registration admission open.
 - VIP entries reserve IDs and may provide per-ID admission passwords.
 - `max_consumers == 0` uses the protocol safety default of 32 pending
-  consumers per publisher.
+    consumers per publisher.
 
 For `kc_redp2p_pub_options_t`, `id`, `index`, `protocol`, and
 `port` are required. `protocol` is `KC_REDP2P_TCP` or
