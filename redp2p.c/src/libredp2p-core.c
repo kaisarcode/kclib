@@ -1200,11 +1200,15 @@ int redp2p_sock_read(redp2p_fd_t fd, char *buf, int len) {
  * Sock write.
  * @return 0 on success, -1 on error.
  */
-static int redp2p_sock_write(redp2p_fd_t fd, const char *buf, int len) {
+int redp2p_sock_write(redp2p_fd_t fd, const char *buf, int len) {
 #ifdef _WIN32
     return send(fd, buf, len, 0);
 #else
-    return (int)write(fd, buf, (size_t)len);
+#  ifdef MSG_NOSIGNAL
+    return (int)send(fd, buf, (size_t)len, MSG_NOSIGNAL);
+#  else
+    return (int)send(fd, buf, (size_t)len, 0);
+#  endif
 #endif
 }
 
