@@ -126,7 +126,7 @@ if(REDP2P_BUILD_TESTS)
         set(REDP2P_TEST_SHARED_TARGET redp2p_test_shared)
     endif()
 
-    add_executable(redp2p_contract_test src/test.c)
+    add_executable(redp2p_contract_test src/test-public.c)
     target_include_directories(redp2p_contract_test PRIVATE src lib/monocypher)
     target_link_libraries(redp2p_contract_test PRIVATE ${REDP2P_TEST_SHARED_TARGET})
     if(REDP2P_TEST_CLI)
@@ -140,12 +140,23 @@ if(REDP2P_BUILD_TESTS)
         REDP2P_TEST_CLI="${REDP2P_TEST_CLI_TARGET_PATH}"
     )
 
+    add_executable(redp2p_protocol_test src/test.c ${REDP2P_SOURCES})
+    target_include_directories(redp2p_protocol_test PRIVATE
+        src lib/monocypher lib/kcp lib/parson
+    )
+    target_compile_definitions(redp2p_protocol_test PRIVATE
+        REDP2P_TEST_CLI=""
+    )
+
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(redp2p_contract_test PRIVATE pthread m)
+        target_link_libraries(redp2p_protocol_test PRIVATE pthread m)
     elseif(MINGW)
         target_link_libraries(redp2p_contract_test PRIVATE ws2_32 bcrypt)
+        target_link_libraries(redp2p_protocol_test PRIVATE ws2_32 bcrypt)
     elseif(MSVC)
         target_link_libraries(redp2p_contract_test PRIVATE ws2_32 bcrypt)
+        target_link_libraries(redp2p_protocol_test PRIVATE ws2_32 bcrypt)
     endif()
 
     add_custom_command(TARGET redp2p_contract_test POST_BUILD
