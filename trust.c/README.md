@@ -32,13 +32,14 @@ const bob = trust.init();
 const invitation = bob.invite();
 
 // Bob gives invitation.code to Alice out of band.
-// Bob stores invitation.uid as the application UID for this scope.
+// Bob stores invitation.uid as aliceUid.
 
 // Alice's machine
 const alice = trust.init();
 const joined = alice.join(invitationCode);
 
-// Alice stores joined.uid as the application UID for Bob.
+// Alice stores joined.uid as bobUid.
+// aliceUid and bobUid are different endpoint UIDs.
 // The application sends joined.confirmation back to Bob by any transport.
 
 // Bob's machine
@@ -65,20 +66,22 @@ cryptographic protocol.
 
 \`invite()\` creates a one-use invitation. It returns:
 
-- a canonical UUIDv4 string used by the application as the scope UID;
+- a canonical UUIDv4 string the inviter stores for the invited endpoint;
 - an opaque Base64 invitation code suitable for a QR code, text, file, or any
   other out-of-band transfer selected by the application.
 
-The invitation contains the scope UID, a 32-byte one-use PSK, and the inviter's
-static public key. The inviter persists the matching local static secret and
-PSK as pending state.
+The invitation contains two endpoint UIDs: the UID assigned to the invited
+endpoint and a distinct UID representing the inviter from the joining side. It
+also contains a 32-byte one-use PSK and the inviter's scoped static public key.
+The inviter persists the matching local UID, static secret, and PSK as pending
+state.
 
 \`join(code)\` is performed on the invited endpoint. It:
 
-- imports the UID and inviter public key;
+- imports its assigned local UID, the inviter UID, and inviter public key;
 - generates a static key pair scoped to this relationship;
-- persists the local static secret plus the inviter public key;
-- returns the same UID and one opaque Base64 confirmation.
+- persists its local UID/static secret plus the inviter public key;
+- returns the inviter UID and one opaque Base64 confirmation.
 
 The confirmation is generated with:
 
@@ -86,14 +89,16 @@ The confirmation is generated with:
 Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b
 \`\`\`
 
-The scope UID is mixed into the Noise prologue. The \`Xpsk1\` pattern lets the
+Both endpoint UIDs, in initiator/responder order, are mixed into the Noise
+prologue. The \`Xpsk1\` pattern lets the
 joining endpoint transmit its static public key to the inviter while proving
 knowledge of the one-use PSK.
 
 \`confirm(confirmation)\` identifies the matching pending invitation from the
-confirmation UID, verifies the Noise message and PSK, records the joiner's
-static public key, destroys the pending invitation secret, and returns the
-confirmed UID.
+invited endpoint UID, verifies both endpoint UIDs plus the Noise message and
+PSK, records the joiner's static public key, destroys the pending invitation
+secret, and returns the invited endpoint UID originally produced by
+`invite()`.
 
 A confirmation is deterministic from the application's point of view: a valid
 confirmation establishes the relationship; an invalid confirmation is rejected.
@@ -130,8 +135,8 @@ limit.
 \`seal()\` and \`unseal()\` are blob transforms only:
 
 \`\`\`text
-plaintext + UID -> protected blob
-protected blob + UID -> plaintext
+plaintext + remote UID -> protected blob
+protected blob + local UID -> plaintext
 \`\`\`
 
 They do not send or receive anything.
@@ -189,7 +194,8 @@ with \`APPDATA\` as fallback.
 \`KC_TRUST_DIR\` is an advanced process-level override for contract tests and
 controlled deployments. It is not a normal API argument.
 
-State is split internally into pending invitations and established peers.
+State is split internally into pending invitations, remote-UID relationship
+records, and local-UID indexes used by `unseal()`.
 Secret-bearing files are written as private per-user files on POSIX. Existing
 trust directories must resolve as real directories rather than symlinked final
 paths and must not be group/world writable.
