@@ -156,6 +156,7 @@ if(REDP2P_BUILD_TESTS)
     )
     target_compile_definitions(redp2p_protocol_test PRIVATE
         REDP2P_TEST_CLI=""
+        REDP2P_TESTING=1
     )
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
