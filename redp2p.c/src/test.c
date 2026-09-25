@@ -1,8 +1,8 @@
 /**
  * redp2p.c - libredp2p public API contract tests.
- * Summary: Exercises the libredp2p public contract through 15 grouped
- * functional and integration cases (API validation, registration, index
- * serving, session lifecycle, and peer transport).
+ * Summary: Exercises the libredp2p contract through 16 grouped functional
+ * and integration cases covering the public capability API, CLI, protocol,
+ * index lifecycle, registration, and peer transport.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -24,6 +24,8 @@
 #include <stdatomic.h>
 
 #ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
 #include <process.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -1242,6 +1244,8 @@ static void test_port_requirement(unsigned int offset, int *tcp, int *udp) {
     {
         anchor = 400U;
         *tcp = offset >= anchor && offset <= anchor + 2U;
+    } else if (strcmp(test_case_name, "kc_redp2p_api") == 0) {
+        *tcp = offset >= 410U && offset <= 412U;
     } else if (strcmp(test_case_name, "redp2p_test_deregister_persisted_publisher") == 0) {
         *tcp = offset >= 60U && offset <= 62U;
     } else if (strcmp(test_case_name, "redp2p_idx_query_publishers") == 0) {
@@ -5977,12 +5981,257 @@ static int case_redp2p_protocol_ttl(void)
 }
 
 /**
+ * Resolves one routable local IPv4 address without sending traffic.
+ * @param out Destination address text.
+ * @return 0 on success, 1 when no local unicast route is available.
+ */
+static int test_local_unicast_ipv4(char out[INET_ADDRSTRLEN])
+{
+    test_socket_t fd;
+    struct sockaddr_in target;
+    struct sockaddr_in local;
+    test_socklen_t len;
+
+    if (!out) return 1;
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd == TEST_SOCKET_INVALID) return 1;
+
+    memset(&target, 0, sizeof(target));
+    target.sin_family = AF_INET;
+    target.sin_port = htons(53);
+    if (inet_pton(AF_INET, "8.8.8.8", &target.sin_addr) != 1 ||
+        connect(fd, (const struct sockaddr *)&target, sizeof(target)) != 0)
+    {
+        test_socket_close(fd);
+        return 1;
+    }
+
+    memset(&local, 0, sizeof(local));
+    len = sizeof(local);
+    if (getsockname(fd, (struct sockaddr *)&local, &len) != 0 ||
+        ((const unsigned char *)&local.sin_addr)[0] == 127 ||
+        !inet_ntop(AF_INET, &local.sin_addr, out, INET_ADDRSTRLEN))
+    {
+        test_socket_close(fd);
+        return 1;
+    }
+
+    test_socket_close(fd);
+    return 0;
+}
+
+/**
+ * Runs one CLI command while discarding stdout and stderr.
+ * @param argv Command argument vector.
+ * @return Process exit code, or 255 on runner failure.
+ */
+static int test_cli_run_silent(char *const argv[])
+{
+    if (!REDP2P_TEST_CLI[0]) return 0;
+#ifdef _WIN32
+    int null_fd;
+    int saved_stdout;
+    int saved_stderr;
+    int status;
+
+    fflush(stdout);
+    fflush(stderr);
+    null_fd = _open("NUL", _O_WRONLY);
+    if (null_fd < 0) return 255;
+    saved_stdout = _dup(_fileno(stdout));
+    saved_stderr = _dup(_fileno(stderr));
+    if (saved_stdout < 0 || saved_stderr < 0 ||
+        _dup2(null_fd, _fileno(stdout)) != 0 ||
+        _dup2(null_fd, _fileno(stderr)) != 0)
+    {
+        if (saved_stdout >= 0) _close(saved_stdout);
+        if (saved_stderr >= 0) _close(saved_stderr);
+        _close(null_fd);
+        return 255;
+    }
+    status = (int)_spawnv(_P_WAIT, REDP2P_TEST_CLI,
+        (const char * const *)argv);
+    _dup2(saved_stdout, _fileno(stdout));
+    _dup2(saved_stderr, _fileno(stderr));
+    _close(saved_stdout);
+    _close(saved_stderr);
+    _close(null_fd);
+    return status;
+#else
+    pid_t pid;
+    int status;
+
+    pid = fork();
+    if (pid == 0) {
+        int null_fd = open("/dev/null", O_WRONLY);
+
+        if (null_fd < 0) _exit(127);
+        if (dup2(null_fd, STDOUT_FILENO) < 0 ||
+            dup2(null_fd, STDERR_FILENO) < 0)
+            _exit(127);
+        if (null_fd > STDERR_FILENO) close(null_fd);
+        execv(REDP2P_TEST_CLI, argv);
+        _exit(127);
+    }
+    if (pid < 0 || waitpid(pid, &status, 0) != pid) return 255;
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 255;
+#endif
+}
+
+/**
+ * Exercises the normalized public idx/pub/con capability API end to end.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_redp2p_api(void)
+{
+    const char *name = "kc_redp2p_api";
+    const char *detail =
+        "idx/pub/con create a tunnel without exposing coordination plumbing";
+    const unsigned char payload[] = "redp2p-public-api";
+    kc_redp2p_idx_t *idx;
+    kc_redp2p_pub_t *pub;
+    kc_redp2p_con_t *con;
+    kc_redp2p_idx_entry_t *entries;
+    kc_redp2p_idx_options_t idx_options;
+    kc_redp2p_pub_options_t pub_options;
+    kc_redp2p_con_options_t con_options;
+    test_tcp_echo_t echo;
+    char index[320];
+    char local_ip[INET_ADDRSTRLEN];
+    unsigned short base;
+    unsigned short idx_port;
+    unsigned short backend_port;
+    unsigned short con_port;
+    size_t count;
+    int echo_started;
+    int fail;
+    int status;
+
+    idx = NULL;
+    pub = NULL;
+    con = NULL;
+    entries = NULL;
+    count = 0;
+    echo_started = 0;
+    fail = 0;
+    base = test_port_base();
+    idx_port = (unsigned short)(base + 410U);
+    backend_port = (unsigned short)(base + 411U);
+    con_port = (unsigned short)(base + 412U);
+
+    fail += expect_int("resolve local unicast", 0,
+        test_local_unicast_ipv4(local_ip));
+    fail += expect_int("start public API echo", 0,
+        test_tcp_echo_start(&echo, backend_port));
+    if (fail == 0) echo_started = 1;
+
+    memset(&idx_options, 0, sizeof(idx_options));
+    idx_options.host = local_ip;
+    idx_options.port = idx_port;
+    idx_options.max_consumers = 32;
+    if (fail == 0) {
+        status = kc_redp2p_idx(&idx, &idx_options);
+        fail += expect_int("public idx create", KC_REDP2P_OK, status);
+        fail += expect_true("public idx handle", idx != NULL);
+    }
+    if (fail == 0) {
+        status = kc_redp2p_idx_list(idx, &entries, &count);
+        fail += expect_int("public empty list", KC_REDP2P_OK, status);
+        fail += expect_true("public empty list count", count == 0);
+        fail += expect_true("public empty list pointer", entries == NULL);
+    }
+
+    snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)idx_port);
+    memset(&pub_options, 0, sizeof(pub_options));
+    pub_options.id = "echo";
+    pub_options.index = index;
+    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.port = backend_port;
+    if (fail == 0) {
+        status = kc_redp2p_pub(&pub, &pub_options);
+        fail += expect_int("public pub create", KC_REDP2P_OK, status);
+        fail += expect_true("public pub handle", pub != NULL);
+    }
+    if (fail == 0) {
+        status = kc_redp2p_idx_list(idx, &entries, &count);
+        fail += expect_int("public populated list", KC_REDP2P_OK, status);
+        fail += expect_true("public populated list count", count == 1);
+        fail += expect_true("public populated list id",
+            entries != NULL && strcmp(entries[0].id, "echo") == 0);
+        kc_redp2p_free(entries);
+        entries = NULL;
+        count = 0;
+    }
+
+    memset(&con_options, 0, sizeof(con_options));
+    con_options.id = "echo";
+    con_options.index = index;
+    con_options.port = con_port;
+    if (fail == 0) {
+        status = kc_redp2p_con(&con, &con_options);
+        fail += expect_int("public con create", KC_REDP2P_OK, status);
+        fail += expect_true("public con handle", con != NULL);
+    }
+    if (fail == 0) {
+        fail += expect_int("public TCP roundtrip", (int)sizeof(payload),
+            test_tcp_roundtrip(con_port, payload, sizeof(payload)));
+    }
+
+    kc_redp2p_con_close(con);
+    kc_redp2p_pub_close(pub);
+    kc_redp2p_idx_close(idx);
+    if (echo_started) test_tcp_echo_stop(&echo);
+
+    fail += expect_string("public strerror OK", "OK",
+        kc_redp2p_strerror(KC_REDP2P_OK));
+    kc_redp2p_free(NULL);
+    kc_redp2p_con_close(NULL);
+    kc_redp2p_pub_close(NULL);
+    kc_redp2p_idx_close(NULL);
+
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Exercises the normalized CLI surface without leaking child output.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_redp2p_cli(void)
+{
+    const char *name = "kc_redp2p_cli";
+    const char *detail =
+        "CLI exposes idx/pub/con and rejects consumer protocol plumbing";
+    char *help[] = { (char *)REDP2P_TEST_CLI, (char *)"--help", NULL };
+    char *version[] = { (char *)REDP2P_TEST_CLI, (char *)"--version", NULL };
+    char *old_con[] = {
+        (char *)REDP2P_TEST_CLI,
+        (char *)"con",
+        (char *)"x@127.0.0.1:1",
+        (char *)"--tcp",
+        (char *)"9000",
+        NULL
+    };
+    int fail;
+
+    fail = 0;
+    if (REDP2P_TEST_CLI[0]) {
+        fail += expect_int("CLI help", 0, test_cli_run_silent(help));
+        fail += expect_int("CLI version", 0, test_cli_run_silent(version));
+        fail += expect_true("CLI rejects old con protocol syntax",
+            test_cli_run_silent(old_con) != 0);
+    }
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Runs all test cases in a single process.
  * @return 0 on success, nonzero on failure.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 14;
+    test_case_total = 16;
     test_case_current = 0;
     run_case(&rc, case_kc_redp2p_validation);
     run_case(&rc, case_kc_redp2p_register);
@@ -5998,6 +6247,8 @@ static int case_all(void) {
     run_case(&rc, case_kc_redp2p_tcp_stream);
     run_case(&rc, case_redp2p_persisted_deregister);
     run_case(&rc, case_kc_redp2p_list_publishers);
+    run_case(&rc, case_kc_redp2p_api);
+    run_case(&rc, case_kc_redp2p_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -6023,6 +6274,8 @@ static int dispatch_case(const char *name) {
     if (strcmp(name, "kc_redp2p_tcp_stream") == 0) return case_kc_redp2p_tcp_stream();
     if (strcmp(name, "redp2p_persisted_deregister") == 0) return case_redp2p_persisted_deregister();
     if (strcmp(name, "kc_redp2p_list_publishers") == 0) return case_kc_redp2p_list_publishers();
+    if (strcmp(name, "kc_redp2p_api") == 0) return case_kc_redp2p_api();
+    if (strcmp(name, "kc_redp2p_cli") == 0) return case_kc_redp2p_cli();
     fprintf(stderr, "unknown test case: %s\n", name);
     return 2;
 }
