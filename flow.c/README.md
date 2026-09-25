@@ -10,6 +10,8 @@ independent and do not merge.
 
 ---
 
+---
+
 ## CLI
 
 The `flow` command executes one workflow file, accepts optional input from
@@ -23,19 +25,19 @@ overrides remain local to that runtime and are never written back to disk.
 Execute one flow file:
 
 ```bash
-./bin/x86_64/linux/flow file.flow
+flow file.flow
 ```
 
 Execute one explicit entry:
 
 ```bash
-./bin/x86_64/linux/flow file.flow --link build
+flow file.flow --link build
 ```
 
 Pipe input through standard input:
 
 ```bash
-printf "input" | ./bin/x86_64/linux/flow file.flow
+printf "input" | flow file.flow
 ```
 
 Write a minimal flow file:
@@ -49,9 +51,9 @@ node.upper.exec=tr '[:lower:]' '[:upper:]'
 Write the minimal flow file above to a local `file.flow` and run it:
 
 ```bash
-./bin/x86_64/linux/flow file.flow
-./bin/x86_64/linux/flow file.flow --link build
-printf "input" | ./bin/x86_64/linux/flow file.flow
+flow file.flow
+flow file.flow --link build
+printf "input" | flow file.flow
 ```
 
 The progression above illustrates a small static-site request pipeline: a
@@ -192,7 +194,7 @@ labels, tooltips, inspectors, or documentation.
 Overlay one effective flow document:
 
 ```bash
-./bin/x86_64/linux/flow file.flow \
+flow file.flow \
     --unset flow.link \
     --set flow.link=server \
     --set node.server.exec='printf "%s" "<flow.message>"'
@@ -204,10 +206,10 @@ operations are accepted (further ones fail with "too many overlays").
 Run the illustrated pipeline against a local `file.flow`:
 
 ```bash
-./bin/x86_64/linux/flow file.flow --set flow.link=request
-./bin/x86_64/linux/flow file.flow --set flow.path=/
-./bin/x86_64/linux/flow file.flow --set flow.path=/missing
-printf "Hello" | ./bin/x86_64/linux/flow file.flow --link page
+flow file.flow --set flow.link=request
+flow file.flow --set flow.path=/
+flow file.flow --set flow.path=/missing
+printf "Hello" | flow file.flow --link page
 ```
 
 ---
@@ -223,6 +225,8 @@ printf "Hello" | ./bin/x86_64/linux/flow file.flow --link page
 
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
+
+---
 
 ---
 
@@ -274,31 +278,9 @@ A cooperative stop belongs to one run, not to the opened flow.
 step finishes normally; before another step begins, the run observes the stop
 request and completes with `KC_FLOW_ESTOP`.
 
-A natural JavaScript projection is:
-
-```js
-const f = flow.open("file.flow");
-
-f.set("flow.hello", "Hello");
-
-const run = f.run({
-    input: "input data"
-});
-
-setTimeout(() => {
-    run.stop();
-}, 5000);
-
-const output = await run;
-```
-
-The C ABI remains handle-based; JavaScript or Lua bindings may project those
-handles into natural objects. Native close functions remain lifecycle plumbing
-that bindings can integrate with their normal finalizers.
-
 ---
 
-## Lifecycle
+### Lifecycle
 
 - `kc_flow_open()` opens one existing flow file and copies its path.
 - `kc_flow_set()` and `kc_flow_unset()` append ordered temporary overrides to the opened flow.
@@ -318,9 +300,20 @@ WebAssembly is not a supported target. Executing local commands and child
 flows through native process facilities is the core capability of `flow.c`,
 so a WASM build would not provide the same runtime contract.
 
+### Visualization
+
+`flow.c` is a strict execution engine dedicated to running system command workflows.
+For rendering visual graph representations of `.flow` documents, you can check the
+[fldot](https://github.com/kaisarcode/fldot) conversion tool.
+
+---
+
+---
+
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
@@ -328,64 +321,29 @@ make
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile the test executable, link dynamically against the generated shared library, and run directly.
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
 make
 make test
 ```
 
-To run the common `test` target in Windows-through-Wine mode:
+To run through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
-
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`. The normal suite includes one grouped CLI contract case covering the shipped command interface.
-
-WebAssembly is not a supported target. Executing local commands and child
-flows through native process facilities is the core capability of `flow.c`,
-so a WASM build would not provide the same runtime contract.
-
 ### Multiarch Builds
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
 
 ```bash
 make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make x86_64/iossim
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make aarch64/ios
-make aarch64/iossim
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
 ```
-
----
-
-## Visualization
-
-`flow.c` is a strict execution engine dedicated to running system command workflows.
-For rendering visual graph representations of `.flow` documents, you can check the
-[fldot](https://github.com/kaisarcode/fldot) conversion tool.
 
 ---
 
@@ -398,6 +356,14 @@ For rendering visual graph representations of `.flow` documents, you can check t
 - `ninja`
 - `gcc` or `clang` (C11 compatible)
 
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Other cross-compilation toolchains are required only by enabled targets.
+
 ### System Libraries
 
 Linux:
@@ -409,22 +375,19 @@ Windows (MSVC or MinGW):
 macOS / iOS:
 - No additional system libraries required.
 
-### Optional Cross-Compilation SDKs
-
-Required only for multiarch builds:
-
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
-- Android NDK (version 27.2.12479018) for Android targets.
-
 ---
 
 ## Beta Notice
 
-This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support. You are free to test it, use it, and modify it as you please.
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
 
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Please note that I do not accept pull requests; the goal is to avoid long-term dependency on platforms like GitHub, and I do not maintain fixed infrastructure to guarantee long-term stability for these projects.
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
 
 ---
 
