@@ -2135,7 +2135,7 @@ int reset_stop)
  * Registers a publisher, serves sessions, and tears registration down.
  * @return 0 on success, or a negative error code on failure.
  */
-int redp2p_wait(
+int redp2p_pub_run(
     redp2p_t *ctx,
     const char *index_host,
     unsigned short index_port,
