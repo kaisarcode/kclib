@@ -104,6 +104,41 @@ static void sockets_stop(void)
 #endif
 }
 
+static int local_unicast_ipv4(char out[INET_ADDRSTRLEN])
+{
+    test_fd_t fd;
+    struct sockaddr_in target;
+    struct sockaddr_in local;
+    test_socklen_t len;
+
+    if (!out) return 1;
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd == TEST_INVALID) return 1;
+
+    memset(&target, 0, sizeof(target));
+    target.sin_family = AF_INET;
+    target.sin_port = htons(53);
+    if (inet_pton(AF_INET, "8.8.8.8", &target.sin_addr) != 1 ||
+        connect(fd, (struct sockaddr *)&target, sizeof(target)) != 0)
+    {
+        fd_close(fd);
+        return 1;
+    }
+
+    len = sizeof(local);
+    memset(&local, 0, sizeof(local));
+    if (getsockname(fd, (struct sockaddr *)&local, &len) != 0 ||
+        local.sin_addr.s_addr == htonl(0x7f000001UL) ||
+        !inet_ntop(AF_INET, &local.sin_addr, out, INET_ADDRSTRLEN))
+    {
+        fd_close(fd);
+        return 1;
+    }
+
+    fd_close(fd);
+    return 0;
+}
+
 static uint16_t reserve_port(void)
 {
     test_fd_t fd;
@@ -268,6 +303,7 @@ static int case_kc_redp2p_api(void)
     kc_redp2p_con_options_t con_options;
     echo_t echo;
     char index[320];
+    char local_ip[INET_ADDRSTRLEN];
     uint16_t idx_port;
     uint16_t con_port;
     size_t count = 0;
@@ -276,18 +312,18 @@ static int case_kc_redp2p_api(void)
 
     idx_port = reserve_port();
     con_port = reserve_port();
-    if (!idx_port || !con_port || echo_start(&echo) != 0) failed = 1;
+    if (local_unicast_ipv4(local_ip) != 0 || !idx_port || !con_port ||
+        echo_start(&echo) != 0)
+        failed = 1;
 
     memset(&idx_options, 0, sizeof(idx_options));
-    idx_options.host = "127.0.0.1";
+    idx_options.host = local_ip;
     idx_options.port = idx_port;
     idx_options.pow = 0;
     idx_options.max_consumers = 32;
 
     if (!failed) {
-        fprintf(stderr, "[contract] idx create\n");
         status = kc_redp2p_idx(&idx, &idx_options);
-        fprintf(stderr, "[contract] idx create done: %d\n", status);
         if (status != KC_REDP2P_OK || !idx) failed = 1;
     }
     if (!failed) {
@@ -296,16 +332,14 @@ static int case_kc_redp2p_api(void)
             failed = 1;
     }
 
-    snprintf(index, sizeof(index), "127.0.0.1:%u", (unsigned)idx_port);
+    snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)idx_port);
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "echo";
     pub_options.index = index;
     pub_options.protocol = KC_REDP2P_TCP;
     pub_options.port = echo.port;
     if (!failed) {
-        fprintf(stderr, "[contract] pub create\n");
         status = kc_redp2p_pub(&pub, &pub_options);
-        fprintf(stderr, "[contract] pub create done: %d\n", status);
         if (status != KC_REDP2P_OK || !pub) failed = 1;
     }
 
@@ -324,13 +358,10 @@ static int case_kc_redp2p_api(void)
     con_options.index = index;
     con_options.port = con_port;
     if (!failed) {
-        fprintf(stderr, "[contract] con create\n");
         status = kc_redp2p_con(&con, &con_options);
-        fprintf(stderr, "[contract] con create done: %d\n", status);
         if (status != KC_REDP2P_OK || !con) failed = 1;
     }
     if (!failed) {
-        fprintf(stderr, "[contract] tcp roundtrip\n");
         uint64_t deadline = monotonic_ms() + 5000U;
         for (;;) {
             if (tcp_roundtrip(con_port) == 0) break;
@@ -342,20 +373,10 @@ static int case_kc_redp2p_api(void)
         }
     }
 
-    fprintf(stderr, "[contract] con close\n");
     kc_redp2p_con_close(con);
-    fprintf(stderr, "[contract] con close done\n");
-    fprintf(stderr, "[contract] pub close\n");
     kc_redp2p_pub_close(pub);
-    fprintf(stderr, "[contract] pub close done\n");
-    fprintf(stderr, "[contract] idx close\n");
     kc_redp2p_idx_close(idx);
-    fprintf(stderr, "[contract] idx close done\n");
-    if (!failed) {
-        fprintf(stderr, "[contract] echo join\n");
-        echo_join(&echo);
-        fprintf(stderr, "[contract] echo join done\n");
-    }
+    if (!failed) echo_join(&echo);
 
     if (strcmp(kc_redp2p_strerror(KC_REDP2P_OK), "OK") != 0) failed = 1;
     kc_redp2p_free(NULL);
@@ -429,7 +450,6 @@ int main(int argc, char **argv)
         return 2;
     }
     if (sockets_start() != 0) return 1;
-    fprintf(stderr, "[contract] start\n");
     if (strcmp(argv[1], "all") == 0) rc = case_all();
     else if (strcmp(argv[1], "kc_redp2p_api") == 0) {
         test_current = 0; test_total = 1; test_failed = 0;
