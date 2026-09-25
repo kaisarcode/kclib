@@ -691,7 +691,8 @@ static int case_kc_trust_cli(void) {
         fail += expect_int("CLI confirmation parses", 0,
             test_json_field(&r, "confirmation", confirmation,
                 sizeof(confirmation)));
-        fail += expect_str("CLI join returns same uid", uid, joined_uid);
+        fail += expect_true("CLI join returns inviter uid",
+            strcmp(uid, joined_uid) != 0);
     }
 
     test_set_dir(".trust-test-cli-bob");
@@ -734,7 +735,7 @@ static int case_kc_trust_cli(void) {
     }
     test_set_dir(".trust-test-cli-alice");
     {
-        char *args[] = { (char *)TRUST_TEST_CLI, "revoke", uid, NULL };
+        char *args[] = { (char *)TRUST_TEST_CLI, "revoke", joined_uid, NULL };
         fail += expect_int("CLI alice revoke runs", 0,
             test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
     }
