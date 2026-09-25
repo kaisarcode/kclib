@@ -1090,7 +1090,7 @@ static int case_kc_ngram_cli(void) {
         fail += expect_int(
             "CLI unknown argument exits 1",
             1,
-            test_cli_run_input(unknown, NULL, 0U, out, sizeof(out), err, sizeof(err), &status) ? 0 : status
+            test_cli_run_input(unknown, NULL, 0U, out, sizeof(out), err, sizeof(err), &status) ? 1 : status
         );
         fail += expect_true("CLI unknown argument diagnostic", strstr(err, "Unknown argument.") != NULL);
         fail += expect_true("CLI unknown argument prints help", strstr(out, "Usage:") != NULL);
@@ -1098,21 +1098,21 @@ static int case_kc_ngram_cli(void) {
         fail += expect_int(
             "CLI missing max exits 1",
             1,
-            test_cli_run_input(missing_max, NULL, 0U, out, sizeof(out), err, sizeof(err), &status) ? 0 : status
+            test_cli_run_input(missing_max, NULL, 0U, out, sizeof(out), err, sizeof(err), &status) ? 1 : status
         );
         fail += expect_true("CLI missing max diagnostic", strstr(err, "Missing value for --max.") != NULL);
 
         fail += expect_int(
             "CLI min zero exits 1",
             1,
-            test_cli_run_input(bad_min, NULL, 0U, out, sizeof(out), err, sizeof(err), &status) ? 0 : status
+            test_cli_run_input(bad_min, NULL, 0U, out, sizeof(out), err, sizeof(err), &status) ? 1 : status
         );
         fail += expect_true("CLI min zero diagnostic", strstr(err, "Invalid value for --min.") != NULL);
 
         fail += expect_int(
             "CLI too many positional arguments exits 1",
             1,
-            test_cli_run_input(too_many, NULL, 0U, out, sizeof(out), err, sizeof(err), &status) ? 0 : status
+            test_cli_run_input(too_many, NULL, 0U, out, sizeof(out), err, sizeof(err), &status) ? 1 : status
         );
         fail += expect_true("CLI too many diagnostic", strstr(err, "Too many positional arguments.") != NULL);
     }
@@ -1126,13 +1126,13 @@ static int case_all(void) {
     int rc = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 8;
+    test_case_total = 9;
 #else
     int cli_enabled = KC_NGRAM_TEST_CLI[0] != '\0';
 #ifdef _WIN32
     cli_enabled = 1;
 #endif
-    test_case_total = cli_enabled ? 9 : 8;
+    test_case_total = cli_enabled ? 10 : 9;
 #endif
 
     test_case_current = 0;
