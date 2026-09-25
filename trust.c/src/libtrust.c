@@ -1113,42 +1113,58 @@ int kc_trust_init(kc_trust_t **out) {
 }
 
 int kc_trust_invite(kc_trust_t *trust, char **out_uid, char **out_code) {
-    unsigned char uid[KC_TRUST_UID_BYTES];
+    unsigned char remote_uid[KC_TRUST_UID_BYTES];
+    unsigned char local_uid[KC_TRUST_UID_BYTES];
     unsigned char sk[KC_TRUST_SK_SIZE];
     unsigned char pk[KC_TRUST_PK_SIZE];
     unsigned char psk[KC_TRUST_PSK_SIZE];
     unsigned char raw[KC_TRUST_INVITE_RAW_SIZE];
-    char uid_text[KC_TRUST_UID_SIZE + 1];
+    char remote_uid_text[KC_TRUST_UID_SIZE + 1];
+    char local_uid_text[KC_TRUST_UID_SIZE + 1];
     char *uid_copy = NULL;
     char *code = NULL;
     int rc = KC_TRUST_ERROR;
+
     if (out_uid) *out_uid = NULL;
     if (out_code) *out_code = NULL;
     if (!trust || !out_uid || !out_code) return KC_TRUST_ERROR;
-    if (kc_trust_uid_new(uid, uid_text) != 0 ||
+
+    if (kc_trust_uid_new(remote_uid, remote_uid_text) != 0 ||
+        kc_trust_uid_new(local_uid, local_uid_text) != 0 ||
         kc_trust_read_random(sk, sizeof(sk)) != 0 ||
-        kc_trust_read_random(psk, sizeof(psk)) != 0) goto done;
+        kc_trust_read_random(psk, sizeof(psk)) != 0)
+        goto done;
+
     crypto_x25519_public_key(pk, sk);
+
     raw[0] = KC_TRUST_INVITE_VERSION;
-    memcpy(raw + 1, uid, sizeof(uid));
-    memcpy(raw + 1 + KC_TRUST_UID_BYTES, pk, sizeof(pk));
-    memcpy(raw + 1 + KC_TRUST_UID_BYTES + KC_TRUST_PK_SIZE, psk, sizeof(psk));
-    if (kc_trust_pending_write(trust, uid_text, sk, psk) != 0) goto done;
-    uid_copy = kc_trust_public_strdup(uid_text);
+    memcpy(raw + 1, remote_uid, KC_TRUST_UID_BYTES);
+    memcpy(raw + 1 + KC_TRUST_UID_BYTES, local_uid, KC_TRUST_UID_BYTES);
+    memcpy(raw + 1 + (2 * KC_TRUST_UID_BYTES), pk, KC_TRUST_PK_SIZE);
+    memcpy(raw + 1 + (2 * KC_TRUST_UID_BYTES) + KC_TRUST_PK_SIZE,
+        psk, KC_TRUST_PSK_SIZE);
+
+    if (kc_trust_pending_write(trust, remote_uid_text, local_uid, sk, psk) != 0)
+        goto done;
+
+    uid_copy = kc_trust_public_strdup(remote_uid_text);
     code = kc_trust_base64_encode(raw, sizeof(raw));
     if (!uid_copy || !code) {
-        kc_trust_pending_remove(trust, uid_text);
+        kc_trust_pending_remove(trust, remote_uid_text);
         goto done;
     }
+
     *out_uid = uid_copy;
     *out_code = code;
     uid_copy = NULL;
     code = NULL;
     rc = KC_TRUST_OK;
+
 done:
     kc_trust_free(uid_copy);
     kc_trust_free(code);
-    crypto_wipe(uid, sizeof(uid));
+    crypto_wipe(remote_uid, sizeof(remote_uid));
+    crypto_wipe(local_uid, sizeof(local_uid));
     crypto_wipe(sk, sizeof(sk));
     crypto_wipe(pk, sizeof(pk));
     crypto_wipe(psk, sizeof(psk));
@@ -1160,53 +1176,83 @@ int kc_trust_join(kc_trust_t *trust, const char *code,
     char **out_uid, char **out_confirmation) {
     unsigned char *raw = NULL;
     size_t raw_size = 0;
-    unsigned char uid[KC_TRUST_UID_BYTES];
+    unsigned char local_uid[KC_TRUST_UID_BYTES];
+    unsigned char remote_uid[KC_TRUST_UID_BYTES];
     unsigned char remote_pk[KC_TRUST_PK_SIZE];
     unsigned char psk[KC_TRUST_PSK_SIZE];
     unsigned char local_sk[KC_TRUST_SK_SIZE];
     unsigned char confirmation[KC_TRUST_CONFIRM_RAW_SIZE];
-    char uid_text[KC_TRUST_UID_SIZE + 1];
+    char local_uid_text[KC_TRUST_UID_SIZE + 1];
+    char remote_uid_text[KC_TRUST_UID_SIZE + 1];
     char *uid_copy = NULL;
     char *confirmation_text = NULL;
+    int peer_written = 0;
+    int local_written = 0;
     int rc = KC_TRUST_ERROR;
+
     if (out_uid) *out_uid = NULL;
     if (out_confirmation) *out_confirmation = NULL;
     if (!trust || !code || !out_uid || !out_confirmation)
         return KC_TRUST_ERROR;
+
     raw = kc_trust_base64_decode(code, &raw_size);
     if (!raw || raw_size != KC_TRUST_INVITE_RAW_SIZE ||
-        raw[0] != KC_TRUST_INVITE_VERSION) goto done;
-    memcpy(uid, raw + 1, sizeof(uid));
-    memcpy(remote_pk, raw + 1 + KC_TRUST_UID_BYTES, sizeof(remote_pk));
-    memcpy(psk, raw + 1 + KC_TRUST_UID_BYTES + KC_TRUST_PK_SIZE, sizeof(psk));
-    if (kc_trust_uid_format(uid, uid_text) != 0 ||
-        kc_trust_read_random(local_sk, sizeof(local_sk)) != 0) goto done;
-    confirmation[0] = KC_TRUST_INVITE_VERSION;
-    memcpy(confirmation + 1, uid, sizeof(uid));
-    if (kc_trust_xpsk1_write(uid, local_sk, remote_pk, psk,
-        confirmation + 1 + KC_TRUST_UID_BYTES) != 0) goto done;
-    if (kc_trust_peer_write(trust, uid_text, local_sk, remote_pk) != 0)
+        raw[0] != KC_TRUST_INVITE_VERSION)
         goto done;
-    uid_copy = kc_trust_public_strdup(uid_text);
+
+    memcpy(local_uid, raw + 1, KC_TRUST_UID_BYTES);
+    memcpy(remote_uid, raw + 1 + KC_TRUST_UID_BYTES, KC_TRUST_UID_BYTES);
+    memcpy(remote_pk, raw + 1 + (2 * KC_TRUST_UID_BYTES), KC_TRUST_PK_SIZE);
+    memcpy(psk, raw + 1 + (2 * KC_TRUST_UID_BYTES) + KC_TRUST_PK_SIZE,
+        KC_TRUST_PSK_SIZE);
+
+    if (kc_trust_uid_format(local_uid, local_uid_text) != 0 ||
+        kc_trust_uid_format(remote_uid, remote_uid_text) != 0 ||
+        kc_trust_read_random(local_sk, sizeof(local_sk)) != 0)
+        goto done;
+
+    confirmation[0] = KC_TRUST_INVITE_VERSION;
+    memcpy(confirmation + 1, local_uid, KC_TRUST_UID_BYTES);
+    memcpy(confirmation + 1 + KC_TRUST_UID_BYTES,
+        remote_uid, KC_TRUST_UID_BYTES);
+
+    if (kc_trust_xpsk1_write(local_uid, remote_uid, local_sk, remote_pk, psk,
+        confirmation + 1 + (2 * KC_TRUST_UID_BYTES)) != 0)
+        goto done;
+
+    uid_copy = kc_trust_public_strdup(remote_uid_text);
     confirmation_text = kc_trust_base64_encode(confirmation,
         sizeof(confirmation));
-    if (!uid_copy || !confirmation_text) {
-        kc_trust_peer_remove(trust, uid_text);
+    if (!uid_copy || !confirmation_text) goto done;
+
+    if (kc_trust_peer_write(trust, remote_uid_text, local_uid,
+        local_sk, remote_pk) != 0)
         goto done;
-    }
+    peer_written = 1;
+
+    if (kc_trust_local_write(trust, local_uid_text, remote_uid) != 0)
+        goto done;
+    local_written = 1;
+
     *out_uid = uid_copy;
     *out_confirmation = confirmation_text;
     uid_copy = NULL;
     confirmation_text = NULL;
     rc = KC_TRUST_OK;
+
 done:
+    if (rc != KC_TRUST_OK) {
+        if (local_written) kc_trust_local_remove(trust, local_uid_text);
+        if (peer_written) kc_trust_peer_remove(trust, remote_uid_text);
+    }
     if (raw) {
         crypto_wipe(raw, raw_size ? raw_size : 1);
         free(raw);
     }
     kc_trust_free(uid_copy);
     kc_trust_free(confirmation_text);
-    crypto_wipe(uid, sizeof(uid));
+    crypto_wipe(local_uid, sizeof(local_uid));
+    crypto_wipe(remote_uid, sizeof(remote_uid));
     crypto_wipe(remote_pk, sizeof(remote_pk));
     crypto_wipe(psk, sizeof(psk));
     crypto_wipe(local_sk, sizeof(local_sk));
@@ -1218,42 +1264,73 @@ int kc_trust_confirm(kc_trust_t *trust, const char *confirmation,
     char **out_uid) {
     unsigned char *raw = NULL;
     size_t raw_size = 0;
-    unsigned char uid[KC_TRUST_UID_BYTES];
+    unsigned char remote_uid[KC_TRUST_UID_BYTES];
+    unsigned char local_uid[KC_TRUST_UID_BYTES];
+    unsigned char pending_local_uid[KC_TRUST_UID_BYTES];
     unsigned char local_sk[KC_TRUST_SK_SIZE];
     unsigned char psk[KC_TRUST_PSK_SIZE];
     unsigned char remote_pk[KC_TRUST_PK_SIZE];
-    char uid_text[KC_TRUST_UID_SIZE + 1];
+    char remote_uid_text[KC_TRUST_UID_SIZE + 1];
+    char local_uid_text[KC_TRUST_UID_SIZE + 1];
     char *uid_copy = NULL;
+    int peer_written = 0;
+    int local_written = 0;
     int rc = KC_TRUST_ERROR;
+
     if (out_uid) *out_uid = NULL;
     if (!trust || !confirmation || !out_uid) return KC_TRUST_ERROR;
+
     raw = kc_trust_base64_decode(confirmation, &raw_size);
     if (!raw || raw_size != KC_TRUST_CONFIRM_RAW_SIZE ||
-        raw[0] != KC_TRUST_INVITE_VERSION) goto done;
-    memcpy(uid, raw + 1, sizeof(uid));
-    if (kc_trust_uid_format(uid, uid_text) != 0 ||
-        kc_trust_pending_read(trust, uid_text, local_sk, psk) != 0)
+        raw[0] != KC_TRUST_INVITE_VERSION)
         goto done;
-    if (kc_trust_xpsk1_read(uid, local_sk, psk,
-        raw + 1 + KC_TRUST_UID_BYTES, remote_pk) != 0) goto done;
-    uid_copy = kc_trust_public_strdup(uid_text);
+
+    memcpy(remote_uid, raw + 1, KC_TRUST_UID_BYTES);
+    memcpy(local_uid, raw + 1 + KC_TRUST_UID_BYTES, KC_TRUST_UID_BYTES);
+
+    if (kc_trust_uid_format(remote_uid, remote_uid_text) != 0 ||
+        kc_trust_uid_format(local_uid, local_uid_text) != 0 ||
+        kc_trust_pending_read(trust, remote_uid_text, pending_local_uid,
+            local_sk, psk) != 0 ||
+        memcmp(local_uid, pending_local_uid, KC_TRUST_UID_BYTES) != 0)
+        goto done;
+
+    if (kc_trust_xpsk1_read(remote_uid, local_uid, local_sk, psk,
+        raw + 1 + (2 * KC_TRUST_UID_BYTES), remote_pk) != 0)
+        goto done;
+
+    uid_copy = kc_trust_public_strdup(remote_uid_text);
     if (!uid_copy) goto done;
-    if (kc_trust_peer_write(trust, uid_text, local_sk, remote_pk) != 0)
+
+    if (kc_trust_peer_write(trust, remote_uid_text, local_uid,
+        local_sk, remote_pk) != 0)
         goto done;
-    if (kc_trust_pending_remove(trust, uid_text) != 0) {
-        kc_trust_peer_remove(trust, uid_text);
+    peer_written = 1;
+
+    if (kc_trust_local_write(trust, local_uid_text, remote_uid) != 0)
         goto done;
-    }
+    local_written = 1;
+
+    if (kc_trust_pending_remove(trust, remote_uid_text) != 0)
+        goto done;
+
     *out_uid = uid_copy;
     uid_copy = NULL;
     rc = KC_TRUST_OK;
+
 done:
+    if (rc != KC_TRUST_OK) {
+        if (local_written) kc_trust_local_remove(trust, local_uid_text);
+        if (peer_written) kc_trust_peer_remove(trust, remote_uid_text);
+    }
     if (raw) {
         crypto_wipe(raw, raw_size ? raw_size : 1);
         free(raw);
     }
     kc_trust_free(uid_copy);
-    crypto_wipe(uid, sizeof(uid));
+    crypto_wipe(remote_uid, sizeof(remote_uid));
+    crypto_wipe(local_uid, sizeof(local_uid));
+    crypto_wipe(pending_local_uid, sizeof(pending_local_uid));
     crypto_wipe(local_sk, sizeof(local_sk));
     crypto_wipe(psk, sizeof(psk));
     crypto_wipe(remote_pk, sizeof(remote_pk));
@@ -1263,32 +1340,41 @@ done:
 int kc_trust_seal(kc_trust_t *trust, const char *uid,
     const void *message, size_t message_size,
     void **out_data, size_t *out_size) {
-    unsigned char uid_bytes[KC_TRUST_UID_BYTES];
+    unsigned char remote_uid[KC_TRUST_UID_BYTES];
+    unsigned char local_uid[KC_TRUST_UID_BYTES];
     unsigned char local_sk[KC_TRUST_SK_SIZE];
     unsigned char remote_pk[KC_TRUST_PK_SIZE];
     unsigned char *data = NULL;
     size_t data_size;
     int rc = KC_TRUST_ERROR;
+
     if (out_data) *out_data = NULL;
     if (out_size) *out_size = 0;
     if (!trust || !uid || !out_data || !out_size ||
         (message_size && !message) || message_size > KC_TRUST_MAX_MESSAGE)
         return KC_TRUST_ERROR;
-    if (kc_trust_uid_parse(uid, uid_bytes) != 0 ||
-        kc_trust_peer_read(trust, uid, local_sk, remote_pk) != 0)
+
+    if (kc_trust_uid_parse(uid, remote_uid) != 0 ||
+        kc_trust_peer_read(trust, uid, local_uid, local_sk, remote_pk) != 0)
         goto done;
+
     data_size = kc_trust_payload_size(message_size);
     data = (unsigned char *)kc_trust_alloc(data_size);
     if (!data) goto done;
-    if (kc_trust_k_write(uid_bytes, local_sk, remote_pk,
-        (const unsigned char *)message, message_size, data) != 0) goto done;
+
+    if (kc_trust_k_write(local_uid, remote_uid, local_sk, remote_pk,
+        (const unsigned char *)message, message_size, data) != 0)
+        goto done;
+
     *out_data = data;
     *out_size = data_size;
     data = NULL;
     rc = KC_TRUST_OK;
+
 done:
     kc_trust_free(data);
-    crypto_wipe(uid_bytes, sizeof(uid_bytes));
+    crypto_wipe(remote_uid, sizeof(remote_uid));
+    crypto_wipe(local_uid, sizeof(local_uid));
     crypto_wipe(local_sk, sizeof(local_sk));
     crypto_wipe(remote_pk, sizeof(remote_pk));
     return rc;
@@ -1297,46 +1383,76 @@ done:
 int kc_trust_unseal(kc_trust_t *trust, const char *uid,
     const void *data, size_t data_size,
     void **out_message, size_t *out_message_size) {
-    unsigned char uid_bytes[KC_TRUST_UID_BYTES];
+    unsigned char local_uid[KC_TRUST_UID_BYTES];
+    unsigned char remote_uid[KC_TRUST_UID_BYTES];
+    unsigned char stored_local_uid[KC_TRUST_UID_BYTES];
     unsigned char local_sk[KC_TRUST_SK_SIZE];
     unsigned char remote_pk[KC_TRUST_PK_SIZE];
+    char remote_uid_text[KC_TRUST_UID_SIZE + 1];
     unsigned char *message = NULL;
     size_t message_size = 0;
     int rc = KC_TRUST_ERROR;
+
     if (out_message) *out_message = NULL;
     if (out_message_size) *out_message_size = 0;
     if (!trust || !uid || !data || !out_message || !out_message_size)
         return KC_TRUST_ERROR;
-    if (kc_trust_uid_parse(uid, uid_bytes) != 0 ||
-        kc_trust_peer_read(trust, uid, local_sk, remote_pk) != 0)
+
+    if (kc_trust_uid_parse(uid, local_uid) != 0 ||
+        kc_trust_local_read(trust, uid, remote_uid) != 0 ||
+        kc_trust_uid_format(remote_uid, remote_uid_text) != 0 ||
+        kc_trust_peer_read(trust, remote_uid_text, stored_local_uid,
+            local_sk, remote_pk) != 0 ||
+        memcmp(local_uid, stored_local_uid, KC_TRUST_UID_BYTES) != 0)
         goto done;
-    if (kc_trust_k_read(uid_bytes, local_sk, remote_pk,
+
+    if (kc_trust_k_read(remote_uid, local_uid, local_sk, remote_pk,
         (const unsigned char *)data, data_size,
-        &message, &message_size) != 0) goto done;
+        &message, &message_size) != 0)
+        goto done;
+
     *out_message = message;
     *out_message_size = message_size;
     message = NULL;
     rc = KC_TRUST_OK;
+
 done:
     kc_trust_free(message);
-    crypto_wipe(uid_bytes, sizeof(uid_bytes));
+    crypto_wipe(local_uid, sizeof(local_uid));
+    crypto_wipe(remote_uid, sizeof(remote_uid));
+    crypto_wipe(stored_local_uid, sizeof(stored_local_uid));
     crypto_wipe(local_sk, sizeof(local_sk));
     crypto_wipe(remote_pk, sizeof(remote_pk));
     return rc;
 }
 
 int kc_trust_revoke(kc_trust_t *trust, const char *uid) {
-    char peer_path[KC_TRUST_PATH_SIZE];
-    char pending_path[KC_TRUST_PATH_SIZE];
+    unsigned char remote_uid[KC_TRUST_UID_BYTES];
+    unsigned char local_uid[KC_TRUST_UID_BYTES];
+    unsigned char local_sk[KC_TRUST_SK_SIZE];
+    unsigned char remote_pk[KC_TRUST_PK_SIZE];
+    unsigned char psk[KC_TRUST_PSK_SIZE];
+    char local_uid_text[KC_TRUST_UID_SIZE + 1];
     int removed = 0;
-    if (!trust || !uid ||
-        kc_trust_record_path(trust, "peers", uid, peer_path) != 0 ||
-        kc_trust_record_path(trust, "pending", uid, pending_path) != 0)
+
+    if (!trust || !uid || kc_trust_uid_parse(uid, remote_uid) != 0)
         return KC_TRUST_ERROR;
-    if (kc_trust_file_exists(peer_path) && kc_trust_peer_remove(trust, uid) == 0)
-        removed = 1;
-    if (kc_trust_file_exists(pending_path) &&
-        kc_trust_pending_remove(trust, uid) == 0) removed = 1;
+
+    if (kc_trust_peer_read(trust, uid, local_uid, local_sk, remote_pk) == 0) {
+        if (kc_trust_uid_format(local_uid, local_uid_text) == 0)
+            kc_trust_local_remove(trust, local_uid_text);
+        if (kc_trust_peer_remove(trust, uid) == 0) removed = 1;
+    }
+
+    if (kc_trust_pending_read(trust, uid, local_uid, local_sk, psk) == 0) {
+        if (kc_trust_pending_remove(trust, uid) == 0) removed = 1;
+    }
+
+    crypto_wipe(remote_uid, sizeof(remote_uid));
+    crypto_wipe(local_uid, sizeof(local_uid));
+    crypto_wipe(local_sk, sizeof(local_sk));
+    crypto_wipe(remote_pk, sizeof(remote_pk));
+    crypto_wipe(psk, sizeof(psk));
     return removed ? KC_TRUST_OK : KC_TRUST_ERROR;
 }
 
