@@ -2,8 +2,8 @@
 
 Persistent scoped trust and authenticated message protection.
 
-trust.c creates trust relationships between endpoints and uses those
-relationships to protect arbitrary binary messages. It does not send or
+trust.c creates trust relationships between endpoints and uses the Noise
+Protocol Framework to protect arbitrary binary messages. It does not send or
 receive data. The application can move invitations, confirmations, UIDs, and
 protected messages through any transport.
 
