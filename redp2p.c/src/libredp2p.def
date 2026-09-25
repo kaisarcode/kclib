@@ -1,0 +1,11 @@
+EXPORTS
+    kc_redp2p_idx
+    kc_redp2p_pub
+    kc_redp2p_con
+    kc_redp2p_idx_list
+    kc_redp2p_idx_close
+    kc_redp2p_pub_close
+    kc_redp2p_con_close
+    kc_redp2p_free
+    kc_redp2p_strerror
+    kc_redp2p_version
