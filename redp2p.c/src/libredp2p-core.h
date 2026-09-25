@@ -99,6 +99,8 @@ typedef void (*redp2p_publisher_cb)(const char *id, void *userdata);
 #  include <ws2tcpip.h>
 #  include <windows.h>
 typedef SOCKET redp2p_fd_t;
+typedef WSAPOLLFD redp2p_pollfd_t;
+#  define REDP2P_POLLIN POLLRDNORM
 #  define REDP2P_FD_INVALID  INVALID_SOCKET
 #  define REDP2P_FD_CLOSE(f) closesocket(f)
 #  define REDP2P_ISERR(f)    ((f) == INVALID_SOCKET)
@@ -107,11 +109,14 @@ typedef SOCKET redp2p_fd_t;
 #else
 #  include <sys/select.h>
 #  include <sys/socket.h>
+#  include <poll.h>
 #  include <netinet/in.h>
 #  include <unistd.h>
 #  include <pthread.h>
 #  include <sys/types.h>
 typedef int redp2p_fd_t;
+typedef struct pollfd redp2p_pollfd_t;
+#  define REDP2P_POLLIN POLLIN
 #  define REDP2P_FD_INVALID  (-1)
 #  define REDP2P_FD_CLOSE(f) close(f)
 #  define REDP2P_ISERR(f)    ((f) < 0)
@@ -240,6 +245,7 @@ struct redp2p {
     int n_pending_calls;
     size_t max_consumers_per_publisher;
     _Atomic int stop_requested;
+    redp2p_fd_t wake_write_fd;
     _Atomic int ready_state;
     _Atomic int ready_status;
 };
@@ -515,6 +521,35 @@ REDP2P_INTERNAL void redp2p_platform_cleanup(void);
  * @return 0 on success, -1 on error.
  */
 REDP2P_INTERNAL int redp2p_set_nonblock(redp2p_fd_t fd);
+
+/**
+ * Waits for socket readiness without FD_SETSIZE limits.
+ * @return Ready descriptor count, 0 on timeout, or -1 on error.
+ */
+REDP2P_INTERNAL int redp2p_poll_wait(redp2p_pollfd_t *fds, size_t count,
+    int timeout_ms);
+
+/**
+ * Reports whether one poll entry should be processed as readable.
+ */
+REDP2P_INTERNAL int redp2p_poll_readable(const redp2p_pollfd_t *fd);
+
+/**
+ * Creates the internal socket wakeup pair used by a running idx/pub/con loop.
+ */
+REDP2P_INTERNAL int redp2p_wake_open(redp2p_t *ctx,
+    redp2p_fd_t *read_fd, redp2p_fd_t *write_fd);
+
+/**
+ * Drains pending wake bytes from a nonblocking wake socket.
+ */
+REDP2P_INTERNAL void redp2p_wake_drain(redp2p_fd_t read_fd);
+
+/**
+ * Detaches and closes one internal wakeup pair.
+ */
+REDP2P_INTERNAL void redp2p_wake_close(redp2p_t *ctx,
+    redp2p_fd_t read_fd, redp2p_fd_t write_fd);
 
 /**
  * Returns the UDP or TCP port from a stored socket address.
