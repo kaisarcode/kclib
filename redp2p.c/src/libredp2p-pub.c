@@ -2019,6 +2019,10 @@ redp2p_publisher_runtime_t *runtime)
 
 /**
  * Loads one persisted publisher session and proves its current ownership.
+ * @param runtime Initialized publisher runtime.
+ * @return REDP2P_OK on resumed session, REDP2P_ENOENT when no state exists,
+ *         or a negative error code.
+ */
 static int redp2p_publisher_resume_session(
 redp2p_publisher_runtime_t *runtime)
 {
