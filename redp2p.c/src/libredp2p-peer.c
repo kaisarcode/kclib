@@ -1395,8 +1395,6 @@ static int redp2p_stun_binding(redp2p_t *ctx, int udp_fd,
     socklen_t from_len;
     struct sockaddr_storage srv;
     socklen_t srv_len;
-    fd_set rfds;
-    struct timeval tv;
     int off, rl, n, mt, ao, al;
     size_t sl;
 
@@ -1432,10 +1430,7 @@ static int redp2p_stun_binding(redp2p_t *ctx, int udp_fd,
     if (sendto(udp_fd, (const char *)tx, (size_t)off, 0,
         (const struct sockaddr *)&srv, srv_len) < 0) return -1;
 
-    FD_ZERO(&rfds);
-    if (!redp2p_fdset_add(udp_fd, &rfds, NULL)) return -1;
-    tv.tv_sec = 3; tv.tv_usec = 0;
-    n = select(udp_fd + 1, &rfds, NULL, NULL, &tv);
+    n = redp2p_wait_readable((redp2p_fd_t)udp_fd, 3000);
     if (n <= 0) return -1;
     from_len = sizeof(from);
     rl = (int)recvfrom(udp_fd, (char *)rx, sizeof(rx), 0,
