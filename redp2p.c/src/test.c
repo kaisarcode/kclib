@@ -3761,150 +3761,6 @@ static int test_has_publisher(test_publishers_t *publishers, const char *id) {
 }
 
 /**
- * Tests kc_redp2p_options_default.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_redp2p_options_default(void) {
-    redp2p_options_t opts;
-    const char *name = "kc_redp2p_options_default";
-    const char *detail = "default options leave seats unrestricted";
-    int fail;
-
-    fail = 0;
-    opts = redp2p_options_default();
-    fail += expect_size("default seats are unrestricted", 0, opts.seats);
-    fail += expect_int("default pow", 0, opts.pow);
-    fail += expect_int("default sweep", 20, opts.sweep);
-    fail += expect_true("default vip is NULL", opts.vip == NULL);
-    fail += expect_true("default pass is empty", opts.pass[0] == '\0');
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_redp2p_options_load_env.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_redp2p_options_load_env(void) {
-    redp2p_options_t opts;
-    const char *name = "kc_redp2p_options_load_env";
-    const char *detail = "options load from environment";
-    int fail;
-
-    fail = 0;
-    opts = redp2p_options_default();
-    test_setenv("REDP2P_SEATS", "7");
-    test_setenv("REDP2P_POW", "3");
-    test_setenv("REDP2P_PASS", "secret");
-    test_setenv("REDP2P_VIP", "vip vip-pass");
-    test_setenv("REDP2P_SWEEP", "9");
-    test_setenv("REDP2P_STUN", "stun:example.com:3478");
-    redp2p_options_load_env(&opts);
-    fail += expect_size("env seats", 7, opts.seats);
-    fail += expect_int("env pow", 3, opts.pow);
-    fail += expect_string("env pass", "secret", opts.pass);
-    fail += expect_string("env vip", "vip vip-pass", opts.vip);
-    fail += expect_int("env sweep", 9, opts.sweep);
-    fail += expect_string("env stun", "stun:example.com:3478", opts.stun_url);
-    redp2p_options_load_env(NULL);
-    redp2p_options_free(&opts);
-    test_setenv("REDP2P_SEATS", NULL);
-    test_setenv("REDP2P_POW", NULL);
-    test_setenv("REDP2P_PASS", NULL);
-    test_setenv("REDP2P_VIP", NULL);
-    test_setenv("REDP2P_SWEEP", NULL);
-    test_setenv("REDP2P_STUN", NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_redp2p_options_load_env strict rejection.
- * Summary: Invalid numeric environment values are ignored and keep defaults.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_redp2p_options_load_env_invalid(void) {
-    static const char *invalid[] = {
-        "+1", "-1", " 1", "1 ", "1x", ""
-    };
-    char allocation_overflow[64];
-    char numeric_overflow[64];
-    redp2p_options_t opts;
-    const char *name = "kc_redp2p_options_load_env_invalid";
-    const char *detail = "options load rejects invalid env values";
-    int fail;
-    size_t i;
-    size_t max_peer_count;
-
-    fail = 0;
-    for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
-        opts = redp2p_options_default();
-        test_setenv("REDP2P_SEATS", invalid[i]);
-        test_setenv("REDP2P_POW", invalid[i]);
-        test_setenv("REDP2P_SWEEP", invalid[i]);
-        redp2p_options_load_env(&opts);
-        fail += expect_size("invalid seats kept default", 0,
-            opts.seats);
-        fail += expect_int("invalid pow kept default", 0, opts.pow);
-        fail += expect_int("invalid sweep kept default", 20, opts.sweep);
-        redp2p_options_free(&opts);
-    }
-    max_peer_count = SIZE_MAX / sizeof(redp2p_peer_t);
-    snprintf(allocation_overflow, sizeof(allocation_overflow), "%zu",
-        max_peer_count + 1);
-    snprintf(numeric_overflow, sizeof(numeric_overflow), "%zu0", SIZE_MAX);
-    opts = redp2p_options_default();
-    test_setenv("REDP2P_SEATS", allocation_overflow);
-    redp2p_options_load_env(&opts);
-    fail += expect_size("allocation-overflow seats kept default", 0,
-        opts.seats);
-    redp2p_options_free(&opts);
-    opts = redp2p_options_default();
-    test_setenv("REDP2P_SEATS", numeric_overflow);
-    redp2p_options_load_env(&opts);
-    fail += expect_size("numeric-overflow seats kept default", 0, opts.seats);
-    redp2p_options_free(&opts);
-    opts = redp2p_options_default();
-    test_setenv("REDP2P_SEATS", "0");
-    test_setenv("REDP2P_POW", "0");
-    test_setenv("REDP2P_SWEEP", "0");
-    redp2p_options_load_env(&opts);
-    fail += expect_size("zero seats accepted", 0, opts.seats);
-    fail += expect_int("zero pow accepted", 0, opts.pow);
-    fail += expect_int("zero sweep accepted", 0, opts.sweep);
-    redp2p_options_free(&opts);
-    test_setenv("REDP2P_SEATS", NULL);
-    test_setenv("REDP2P_POW", NULL);
-    test_setenv("REDP2P_SWEEP", NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_redp2p_options_free.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_redp2p_options_free(void) {
-    redp2p_options_t opts;
-    const char *name = "kc_redp2p_options_free";
-    const char *detail = "options free clears vip allocation";
-    int fail;
-
-    fail = 0;
-    opts = redp2p_options_default();
-    test_setenv("REDP2P_VIP", "one pass");
-    redp2p_options_load_env(&opts);
-    fail += expect_true("vip allocated", opts.vip != NULL);
-    redp2p_options_free(&opts);
-    fail += expect_true("vip cleared", opts.vip == NULL);
-    redp2p_options_free(&opts);
-    redp2p_options_free(NULL);
-    test_setenv("REDP2P_VIP", NULL);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_redp2p_candidate_type_values.
  * @return 0 on success, 1 on failure.
  */
@@ -3971,11 +3827,11 @@ static int case_kc_redp2p_stop(void) {
     fail = 0;
     fail += expect_int("stop NULL", REDP2P_EINVAL, redp2p_context_request_stop(NULL));
     fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
-    fail += expect_true("stop initially clear", !redp2p_stop_requested(ctx));
+    fail += expect_true("stop initially clear", !redp2p_is_stop_requested(ctx));
     fail += expect_int("stop context", REDP2P_OK, redp2p_context_request_stop(ctx));
-    fail += expect_true("stop requested", redp2p_stop_requested(ctx));
+    fail += expect_true("stop requested", redp2p_is_stop_requested(ctx));
     fail += expect_int("stop context twice", REDP2P_OK, redp2p_context_request_stop(ctx));
-    fail += expect_true("stop remains requested", redp2p_stop_requested(ctx));
+    fail += expect_true("stop remains requested", redp2p_is_stop_requested(ctx));
     redp2p_context_destroy(ctx);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -4762,7 +4618,7 @@ static int case_kc_redp2p_wait(void) {
     fail += expect_int("wait honors prior stop", REDP2P_OK,
         redp2p_pub_run(ctx, TEST_HOST, base, "pub",
             (unsigned short)(base + 1U)));
-    fail += expect_true("wait stop consumed", !redp2p_stop_requested(ctx));
+    fail += expect_true("wait stop consumed", !redp2p_is_stop_requested(ctx));
     fail += expect_int("wait without index", REDP2P_ENET,
         redp2p_pub_run(ctx, TEST_HOST, base, "pub", (unsigned short)(base + 1U)));
     redp2p_context_destroy(ctx);
@@ -4810,7 +4666,7 @@ static int case_kc_redp2p_connect(void) {
     fail += expect_int("connect honors prior stop", REDP2P_OK,
         redp2p_con_run(ctx, TEST_HOST, base, "client", "missing",
             (unsigned short)(base + 1U)));
-    fail += expect_true("connect stop consumed", !redp2p_stop_requested(ctx));
+    fail += expect_true("connect stop consumed", !redp2p_is_stop_requested(ctx));
     redp2p_set_local_port(ctx, (unsigned short)(base + 1U));
     fail += expect_int("connect without index", REDP2P_ENET,
         redp2p_con_run(ctx, TEST_HOST, base, "client", "missing",
@@ -6145,27 +6001,6 @@ static int case_kc_redp2p_set_vip(void) {
 }
 
 /**
- * Tests kc_redp2p_set_sweep.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_redp2p_set_sweep(void) {
-    redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_sweep";
-    const char *detail = "set sweep configures sweep interval";
-    int fail;
-
-    fail = 0;
-    fail += expect_int("set sweep NULL", REDP2P_EINVAL,
-        redp2p_set_sweep(NULL, 1));
-    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
-    fail += expect_int("set sweep positive", REDP2P_OK, redp2p_set_sweep(ctx, 10));
-    fail += expect_int("set sweep zero", REDP2P_OK, redp2p_set_sweep(ctx, 0));
-    redp2p_context_destroy(ctx);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Tests kc_redp2p_set_stun_url.
  * @return 0 on success, 1 on failure.
  */
@@ -6303,25 +6138,6 @@ static int case_kc_redp2p_set_state_dir(void) {
 }
 
 /**
- * Groups the options contract cases into one top-level case.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_redp2p_options(void) {
-    int fail = 0;
-    int grouped = test_grouped;
-
-    test_grouped = 1;
-    fail += case_kc_redp2p_options_default();
-    fail += case_kc_redp2p_options_load_env();
-    fail += case_kc_redp2p_options_load_env_invalid();
-    fail += case_kc_redp2p_options_free();
-    test_grouped = grouped;
-    case_result(fail, "kc_redp2p_options",
-        "options default, environment loading, and free");
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Groups the stateless query and validation API cases into one top-level case.
  * @return 0 on success, 1 on failure.
  */
@@ -6376,7 +6192,6 @@ static int case_kc_redp2p_setters(void) {
     fail += case_kc_redp2p_set_protocol();
     fail += case_kc_redp2p_set_pass();
     fail += case_kc_redp2p_set_vip();
-    fail += case_kc_redp2p_set_sweep();
     fail += case_kc_redp2p_set_stun_url();
     fail += case_kc_redp2p_set_stream_faults();
     test_grouped = grouped;
@@ -6461,9 +6276,8 @@ static int case_redp2p_protocol_ttl(void)
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 15;
+    test_case_total = 14;
     test_case_current = 0;
-    run_case(&rc, case_kc_redp2p_options);
     run_case(&rc, case_kc_redp2p_validation);
     run_case(&rc, case_kc_redp2p_register);
     run_case(&rc, case_kc_redp2p_context);
@@ -6489,7 +6303,6 @@ static int case_all(void) {
  */
 static int dispatch_case(const char *name) {
     if (strcmp(name, "all") == 0) return case_all();
-    if (strcmp(name, "kc_redp2p_options") == 0) return case_kc_redp2p_options();
     if (strcmp(name, "kc_redp2p_validation") == 0) return case_kc_redp2p_validation();
     if (strcmp(name, "kc_redp2p_register") == 0) return case_kc_redp2p_register();
     if (strcmp(name, "kc_redp2p_context") == 0) return case_kc_redp2p_context();
