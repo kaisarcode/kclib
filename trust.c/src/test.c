@@ -422,6 +422,223 @@ static int case_kc_trust_protocol(void) {
     return fail ? 1 : 0;
 }
 
+#ifndef __EMSCRIPTEN__
+typedef struct {
+    unsigned char out[16384];
+    size_t out_size;
+    char err[4096];
+    int status;
+} test_cli_result_t;
+
+#ifdef _WIN32
+static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
+    size_t n = wcslen(cmd);
+    size_t len = wcslen(arg);
+    int quote = len == 0U || wcschr(arg, L' ') != NULL ||
+        wcschr(arg, L'\t') != NULL || wcschr(arg, L'"') != NULL;
+    if (n > 0U) {
+        if (n + 1U >= cap) return 1;
+        cmd[n++] = L' ';
+    }
+    if (quote) {
+        if (n + 1U >= cap) return 1;
+        cmd[n++] = L'"';
+        for (size_t i = 0; i < len; i++) {
+            if (arg[i] == L'"') {
+                if (n + 1U >= cap) return 1;
+                cmd[n++] = L'\\';
+            }
+            if (n + 1U >= cap) return 1;
+            cmd[n++] = arg[i];
+        }
+        if (n + 1U >= cap) return 1;
+        cmd[n++] = L'"';
+    } else {
+        if (n + len >= cap) return 1;
+        memcpy(cmd + n, arg, len * sizeof(wchar_t));
+        n += len;
+    }
+    cmd[n] = L'\0';
+    return 0;
+}
+
+static int test_cli_to_wide(const char *in, wchar_t *out, size_t cap) {
+    return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
+}
+
+static int test_cli_run(char *const argv[], const void *input,
+    size_t input_size, test_cli_result_t *result) {
+    wchar_t exe[4096];
+    wchar_t cmd[32768];
+    wchar_t wide[4096];
+    HANDLE in_pipe[2];
+    HANDLE out_pipe[2];
+    HANDLE err_pipe[2];
+    SECURITY_ATTRIBUTES sa;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    DWORD exit_code = 1;
+    DWORD written = 0;
+    DWORD got = 0;
+    size_t err_size = 0;
+
+    memset(result, 0, sizeof(*result));
+    if (test_cli_to_wide(TRUST_TEST_CLI, exe,
+        sizeof(exe) / sizeof(exe[0])) != 0) return 1;
+
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+    if (!CreatePipe(&in_pipe[0], &in_pipe[1], &sa, 0)) return 1;
+    if (!CreatePipe(&out_pipe[0], &out_pipe[1], &sa, 0)) {
+        CloseHandle(in_pipe[0]); CloseHandle(in_pipe[1]); return 1;
+    }
+    if (!CreatePipe(&err_pipe[0], &err_pipe[1], &sa, 0)) {
+        CloseHandle(in_pipe[0]); CloseHandle(in_pipe[1]);
+        CloseHandle(out_pipe[0]); CloseHandle(out_pipe[1]); return 1;
+    }
+    SetHandleInformation(in_pipe[1], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(out_pipe[0], HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(err_pipe[0], HANDLE_FLAG_INHERIT, 0);
+
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = in_pipe[0];
+    si.hStdOutput = out_pipe[1];
+    si.hStdError = err_pipe[1];
+
+    cmd[0] = L'\0';
+    if (test_cli_append_arg(cmd, sizeof(cmd) / sizeof(cmd[0]), exe)) goto fail;
+    for (int i = 1; argv[i]; i++) {
+        if (test_cli_to_wide(argv[i], wide,
+            sizeof(wide) / sizeof(wide[0])) != 0 ||
+            test_cli_append_arg(cmd, sizeof(cmd) / sizeof(cmd[0]), wide))
+            goto fail;
+    }
+
+    if (!CreateProcessW(exe, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
+        goto fail;
+
+    CloseHandle(in_pipe[0]); in_pipe[0] = NULL;
+    CloseHandle(out_pipe[1]); out_pipe[1] = NULL;
+    CloseHandle(err_pipe[1]); err_pipe[1] = NULL;
+
+    if (input_size > 0U) {
+        if (input_size > 0xFFFFFFFFU ||
+            !WriteFile(in_pipe[1], input, (DWORD)input_size, &written, NULL) ||
+            written != (DWORD)input_size) {
+            TerminateProcess(pi.hProcess, 1);
+        }
+    }
+    CloseHandle(in_pipe[1]); in_pipe[1] = NULL;
+
+    while (result->out_size < sizeof(result->out) &&
+        ReadFile(out_pipe[0], result->out + result->out_size,
+            (DWORD)(sizeof(result->out) - result->out_size), &got, NULL) &&
+        got > 0U)
+        result->out_size += got;
+
+    while (err_size + 1U < sizeof(result->err) &&
+        ReadFile(err_pipe[0], result->err + err_size,
+            (DWORD)(sizeof(result->err) - err_size - 1U), &got, NULL) &&
+        got > 0U)
+        err_size += got;
+    result->err[err_size] = '\0';
+
+    CloseHandle(out_pipe[0]); out_pipe[0] = NULL;
+    CloseHandle(err_pipe[0]); err_pipe[0] = NULL;
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    result->status = (int)exit_code;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return 0;
+
+fail:
+    if (in_pipe[0]) CloseHandle(in_pipe[0]);
+    if (in_pipe[1]) CloseHandle(in_pipe[1]);
+    if (out_pipe[0]) CloseHandle(out_pipe[0]);
+    if (out_pipe[1]) CloseHandle(out_pipe[1]);
+    if (err_pipe[0]) CloseHandle(err_pipe[0]);
+    if (err_pipe[1]) CloseHandle(err_pipe[1]);
+    return 1;
+}
+#else
+static int test_cli_run(char *const argv[], const void *input,
+    size_t input_size, test_cli_result_t *result) {
+    int in_pipe[2], out_pipe[2], err_pipe[2];
+    pid_t pid;
+    int status;
+    ssize_t n;
+    size_t done = 0;
+    memset(result, 0, sizeof(*result));
+    if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0 || pipe(err_pipe) != 0)
+        return 1;
+    pid = fork();
+    if (pid < 0) return 1;
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        dup2(err_pipe[1], STDERR_FILENO);
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
+        close(err_pipe[0]); close(err_pipe[1]);
+        execv(argv[0], argv);
+        _exit(127);
+    }
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+    while (done < input_size) {
+        n = write(in_pipe[1], (const unsigned char *)input + done,
+            input_size - done);
+        if (n <= 0) break;
+        done += (size_t)n;
+    }
+    close(in_pipe[1]);
+    while (result->out_size < sizeof(result->out) &&
+        (n = read(out_pipe[0], result->out + result->out_size,
+            sizeof(result->out) - result->out_size)) > 0)
+        result->out_size += (size_t)n;
+    close(out_pipe[0]);
+    done = 0;
+    while (done + 1 < sizeof(result->err) &&
+        (n = read(err_pipe[0], result->err + done,
+            sizeof(result->err) - done - 1)) > 0)
+        done += (size_t)n;
+    result->err[done] = '\0';
+    close(err_pipe[0]);
+    if (waitpid(pid, &status, 0) < 0) return 1;
+    result->status = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    return 0;
+}
+#endif
+
+static int test_json_field(const test_cli_result_t *result,
+    const char *name, char *out, size_t cap) {
+    char needle[128];
+    char text[16385];
+    char *start;
+    char *end;
+    size_t n;
+    if (result->out_size >= sizeof(text)) return 1;
+    memcpy(text, result->out, result->out_size);
+    text[result->out_size] = '\0';
+    snprintf(needle, sizeof(needle), "\"%s\":\"", name);
+    start = strstr(text, needle);
+    if (!start) return 1;
+    start += strlen(needle);
+    end = strchr(start, '"');
+    if (!end) return 1;
+    n = (size_t)(end - start);
+    if (n + 1 > cap) return 1;
+    memcpy(out, start, n);
+    out[n] = '\0';
+    return 0;
+}
+
 static int case_kc_trust_cli(void) {
     test_cli_result_t r;
     char code[512];
