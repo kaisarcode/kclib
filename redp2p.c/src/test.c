@@ -2107,22 +2107,6 @@ static void run_case(int *rc, case_fn fn) {
 
 #ifndef _WIN32
 /**
- * Redirects one test child standard error stream to the null device.
- * @return None.
- */
-static void test_cli_silence_stderr(void) {
-    int fd_null;
-
-    fd_null = open("/dev/null", O_WRONLY);
-    if (fd_null < 0) return;
-    if (dup2(fd_null, STDERR_FILENO) < 0) {
-        close(fd_null);
-        return;
-    }
-    close(fd_null);
-}
-
-/**
  * Runs the REDP2P CLI and captures stdout.
  * @param argv Command argument vector.
  * @param output Destination output buffer.
