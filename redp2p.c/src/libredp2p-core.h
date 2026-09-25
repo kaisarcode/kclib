@@ -57,7 +57,6 @@ typedef struct redp2p redp2p_t;
 #define REDP2P_STUN_BINDING      0x0001
 #define REDP2P_STUN_BINDING_RESP 0x0101
 
-
 typedef enum {
     REDP2P_CAND_HOST = 1,
     REDP2P_CAND_OBSERVED
@@ -524,22 +523,34 @@ REDP2P_INTERNAL int redp2p_poll_wait(redp2p_pollfd_t *fds, size_t count,
 
 /**
  * Reports whether one poll entry should be processed as readable.
+ * @param fd Poll descriptor.
+ * @return 1 when readable or closed, 0 otherwise.
  */
 REDP2P_INTERNAL int redp2p_poll_readable(const redp2p_pollfd_t *fd);
 
 /**
- * Creates the internal socket wakeup pair used by a running idx/pub/con loop.
+ * Creates the socket wakeup pair used by a running idx/pub/con loop.
+ * @param ctx Runtime context.
+ * @param read_fd Destination read socket.
+ * @param write_fd Destination write socket.
+ * @return REDP2P_OK on success or an error code.
  */
 REDP2P_INTERNAL int redp2p_wake_open(redp2p_t *ctx,
     redp2p_fd_t *read_fd, redp2p_fd_t *write_fd);
 
 /**
  * Drains pending wake bytes from a nonblocking wake socket.
+ * @param read_fd Wake read socket.
+ * @return None.
  */
 REDP2P_INTERNAL void redp2p_wake_drain(redp2p_fd_t read_fd);
 
 /**
- * Detaches and closes one internal wakeup pair.
+ * Detaches and closes one wakeup pair.
+ * @param ctx Runtime context.
+ * @param read_fd Wake read socket.
+ * @param write_fd Wake write socket.
+ * @return None.
  */
 REDP2P_INTERNAL void redp2p_wake_close(redp2p_t *ctx,
     redp2p_fd_t read_fd, redp2p_fd_t write_fd);
@@ -584,7 +595,10 @@ REDP2P_INTERNAL int redp2p_candidate_dest_allowed(int family, const void *host,
 REDP2P_INTERNAL int redp2p_sock_read(redp2p_fd_t fd, char *buf, int len);
 
 /**
- * Writes one socket chunk without raising SIGPIPE where the platform supports it.
+ * Writes one socket chunk without raising SIGPIPE where supported.
+ * @param fd Socket descriptor.
+ * @param buf Source bytes.
+ * @param len Source byte count.
  * @return Bytes written, or -1 on error.
  */
 REDP2P_INTERNAL int redp2p_sock_write(redp2p_fd_t fd, const char *buf, int len);
@@ -717,7 +731,6 @@ REDP2P_INTERNAL int redp2p_parse_candidates(JSON_Object *obj, const char *field,
 REDP2P_INTERNAL void redp2p_append_candidates(JSON_Object *obj,
     const char *field, const redp2p_candidate_t *cands, int n);
 
-/* Private protocol/runtime entry points used by the REDP2P engine. */
 REDP2P_INTERNAL int redp2p_context_create(redp2p_t **out);
 REDP2P_INTERNAL int redp2p_context_destroy(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_context_request_stop(redp2p_t *ctx);
