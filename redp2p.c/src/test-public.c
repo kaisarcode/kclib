@@ -65,6 +65,19 @@ static void sleep_ms(unsigned int ms)
 #endif
 }
 
+static uint64_t monotonic_ms(void)
+{
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000U +
+        (uint64_t)(ts.tv_nsec / 1000000L);
+#endif
+}
+
 static void fd_close(test_fd_t fd)
 {
 #ifdef _WIN32
@@ -205,7 +218,7 @@ static int tcp_roundtrip(uint16_t port)
     if (fd == TEST_INVALID) return 1;
 #ifdef _WIN32
     {
-        DWORD timeout = 2000;
+        DWORD timeout = 200;
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout,
             sizeof(timeout));
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout,
@@ -214,8 +227,8 @@ static int tcp_roundtrip(uint16_t port)
 #else
     {
         struct timeval timeout;
-        timeout.tv_sec = 2;
-        timeout.tv_usec = 0;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 200000;
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
     }
@@ -311,9 +324,13 @@ static int case_kc_redp2p_api(void)
         if (status != KC_REDP2P_OK || !con) failed = 1;
     }
     if (!failed) {
-        for (unsigned int elapsed = 0; elapsed < 5000; elapsed += 50) {
+        uint64_t deadline = monotonic_ms() + 5000U;
+        for (;;) {
             if (tcp_roundtrip(con_port) == 0) break;
-            if (elapsed + 50 >= 5000) failed = 1;
+            if (monotonic_ms() >= deadline) {
+                failed = 1;
+                break;
+            }
             sleep_ms(50);
         }
     }
