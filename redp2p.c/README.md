@@ -124,51 +124,6 @@ uint64_t kc_redp2p_version(void);
 
 The public ABI intentionally does not expose registration, heartbeat, lookup, punching, candidates, KCP state, session keys, control sequences, or transport I/O.
 
-## Lua and JavaScript binding shape
-
-Bindings should project the same capability model without exposing coordination
-operations.
-
-Lua:
-
-```lua
-local redp2p = require("redp2p")
-
-local idx, err = redp2p.idx({
-    port = 9876,
-    seats = 128,
-    pow = 16
-})
-
-local pub, err = redp2p.pub({
-    id = "web",
-    index = "idx.example.com:9876",
-    protocol = redp2p.TCP,
-    port = 8080
-})
-
-local con, err = redp2p.con({
-    id = "web",
-    index = "idx.example.com:9876",
-    port = 9000
-})
-
-local entries = idx:list()
-
-con:close()
-pub:close()
-idx:close()
-```
-
-JavaScript should expose the same objects and options. Binding machinery may adapt
-calling convention, ownership, or asynchronous host integration, but it must not
-introduce public `lookup`, `heartbeat`, `punch`, session, candidate, or data
-I/O concepts.
-
-The application uses the resulting local port with its own networking code or a
-separate process. REDP2P does not provide `onData`, `read`, `write`, or
-application-stream callbacks.
-
 ## Options
 
 ### idx
