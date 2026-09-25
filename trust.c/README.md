@@ -1,12 +1,12 @@
 # trust.c - Portable scoped trust and message cryptography
 
-\`trust.c\` establishes small, persistent trust relationships and protects
+`trust.c` establishes small, persistent trust relationships and protects
 messages between the two established endpoints. It deliberately does not
 implement networking.
 
-The library is intended to compose with transports such as \`redp2p\`,
-\`netl.c\`, \`nets.c\`, \`http.c\`, pipes, files, or application-specific
-message delivery. A transport moves blobs; \`trust.c\` decides whether a blob
+The library is intended to compose with transports such as `redp2p`,
+`netl.c`, `nets.c`, `http.c`, pipes, files, or application-specific
+message delivery. A transport moves blobs; `trust.c` decides whether a blob
 belongs to an established cryptographic identity and encrypts or decrypts its
 contents.
 
@@ -14,19 +14,19 @@ contents.
 
 The public model is intentionally small:
 
-\`\`\`text
+```text
 init
 invite -> join -> confirm
 seal <-> unseal
 revoke
-\`\`\`
+```
 
 All Noise handshake machinery, static and ephemeral keys, PSKs, transcript
 hashes, nonces, and persistent key files are internal implementation details.
 
 A typical application flow is:
 
-\`\`\`javascript
+```javascript
 // Bob's machine
 const bob = trust.init();
 const invitation = bob.invite();
@@ -47,24 +47,26 @@ const aliceUid = bob.confirm(confirmation);
 
 // Later:
 const protectedMessage = bob.seal(aliceUid, "Hello Alice!");
-\`\`\`
+```
 
-Alice receives the surrounding application's UID and protected blob:
+Alice receives the surrounding application's destination UID and protected blob:
 
-\`\`\`javascript
+```javascript
 const plaintext = alice.unseal(request.uid, request.message);
-\`\`\`
+```
 
-The UID is an application-visible UUIDv4 identifying one scoped trust
-relationship. Both endpoints use the same UID bytes; each application is free
-to label or associate that UID with its own domain objects.
+Each endpoint has its own UUIDv4 inside the scoped relationship. Bob stores the
+UID assigned to Alice; Alice stores the distinct UID assigned to Bob.
+`seal(uid, ...)` receives the remote endpoint UID. The application transports
+the recipient's local UID beside the protected blob, and that recipient passes
+its local UID to `unseal(uid, ...)`.
 
-No human or application name such as \`"alice"\` participates in the
+No human or application name such as `"alice"` participates in the
 cryptographic protocol.
 
 ## Trust establishment
 
-\`invite()\` creates a one-use invitation. It returns:
+`invite()` creates a one-use invitation. It returns:
 
 - a canonical UUIDv4 string the inviter stores for the invited endpoint;
 - an opaque Base64 invitation code suitable for a QR code, text, file, or any
@@ -76,7 +78,7 @@ also contains a 32-byte one-use PSK and the inviter's scoped static public key.
 The inviter persists the matching local UID, static secret, and PSK as pending
 state.
 
-\`join(code)\` is performed on the invited endpoint. It:
+`join(code)` is performed on the invited endpoint. It:
 
 - imports its assigned local UID, the inviter UID, and inviter public key;
 - generates a static key pair scoped to this relationship;
@@ -85,16 +87,16 @@ state.
 
 The confirmation is generated with:
 
-\`\`\`text
+```text
 Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b
-\`\`\`
+```
 
 Both endpoint UIDs, in initiator/responder order, are mixed into the Noise
-prologue. The \`Xpsk1\` pattern lets the
+prologue. The `Xpsk1` pattern lets the
 joining endpoint transmit its static public key to the inviter while proving
 knowledge of the one-use PSK.
 
-\`confirm(confirmation)\` identifies the matching pending invitation from the
+`confirm(confirmation)` identifies the matching pending invitation from the
 invited endpoint UID, verifies both endpoint UIDs plus the Noise message and
 PSK, records the joiner's static public key, destroys the pending invitation
 secret, and returns the invited endpoint UID originally produced by
@@ -108,42 +110,44 @@ The Noise protocol specification is at <https://noiseprotocol.org/noise.html>.
 
 ## Messages
 
-After confirmation, each endpoint persists, for that UID:
+After confirmation, each endpoint persists one directional relationship:
 
-\`\`\`text
+```text
+local UID
+remote UID
 local static secret key
 remote static public key
-\`\`\`
+```
 
-\`seal(uid, message)\` and \`unseal(uid, protected)\` use:
+`seal(uid, message)` and `unseal(uid, protected)` use:
 
-\`\`\`text
+```text
 Noise_K_25519_ChaChaPoly_BLAKE2b
-\`\`\`
+```
 
-The Noise \`K\` one-way pattern is appropriate because both static public keys
+The Noise `K` one-way pattern is appropriate because both static public keys
 are already known after trust establishment. Every protected blob starts a
-fresh one-way Noise handshake with a fresh ephemeral key. The scope UID is
-mixed into the Noise prologue.
+fresh one-way Noise handshake with a fresh ephemeral key. The sender UID and
+recipient UID, in that order, form the Noise prologue.
 
-The handshake itself carries an empty payload. After \`Split()\`, the first
-one-way transport \`CipherState\` protects an encrypted logical length followed
+The handshake itself carries an empty payload. After `Split()`, the first
+one-way transport `CipherState` protects an encrypted logical length followed
 by bounded Noise transport records. This allows one logical message up to
 64 MiB while every individual Noise message remains within Noise's 65535-byte
 limit.
 
-\`seal()\` and \`unseal()\` are blob transforms only:
+`seal()` and `unseal()` are blob transforms only:
 
-\`\`\`text
+```text
 plaintext + remote UID -> protected blob
 protected blob + local UID -> plaintext
-\`\`\`
+```
 
 They do not send or receive anything.
 
 ## Responsibility boundary
 
-\`trust.c\` provides:
+`trust.c` provides:
 
 - scoped cryptographic identity;
 - one-use out-of-band trust invitations;
@@ -152,7 +156,7 @@ They do not send or receive anything.
 - local persistence of cryptographic relationship state;
 - explicit revocation.
 
-\`trust.c\` does **not** provide or inspect:
+`trust.c` does **not** provide or inspect:
 
 - TCP, UDP, KCP, HTTP, WebSocket, or any other transport;
 - hosts, ports, listeners, connections, requests, or responses;
@@ -161,7 +165,7 @@ They do not send or receive anything.
 - a clock or temporal validity policy.
 
 If a caller supplies the same valid protected blob repeatedly,
-\`kc_trust_unseal()\` may authenticate and decrypt it repeatedly. Replay policy
+`kc_trust_unseal()` may authenticate and decrypt it repeatedly. Replay policy
 belongs to the composing protocol, such as the counters already maintained by a
 transport.
 
@@ -169,29 +173,29 @@ transport.
 
 Normal callers never select a storage directory.
 
-\`kc_trust_init()\` follows the repository's per-user data convention:
+`kc_trust_init()` follows the repository's per-user data convention:
 
-On POSIX, when \`XDG_DATA_HOME\` is set:
+On POSIX, when `XDG_DATA_HOME` is set:
 
-\`\`\`text
+```text
 $XDG_DATA_HOME/kaisarcode/trust.c
-\`\`\`
+```
 
 otherwise:
 
-\`\`\`text
+```text
 $HOME/.local/share/kaisarcode/trust.c
-\`\`\`
+```
 
 On Windows the corresponding per-user application-data directory is used:
 
-\`\`\`text
+```text
 %LOCALAPPDATA%\kaisarcode\trust.c
-\`\`\`
+```
 
-with \`APPDATA\` as fallback.
+with `APPDATA` as fallback.
 
-\`KC_TRUST_DIR\` is an advanced process-level override for contract tests and
+`KC_TRUST_DIR` is an advanced process-level override for contract tests and
 controlled deployments. It is not a normal API argument.
 
 State is split internally into pending invitations, remote-UID relationship
@@ -200,12 +204,12 @@ Secret-bearing files are written as private per-user files on POSIX. Existing
 trust directories must resolve as real directories rather than symlinked final
 paths and must not be group/world writable.
 
-The file format is private to \`trust.c\`. Applications persist only their own
+The file format is private to `trust.c`. Applications persist only their own
 UID associations; they do not store or manipulate trust keys.
 
 ## Public C API
 
-\`\`\`c
+```c
 typedef struct kc_trust kc_trust_t;
 
 #define KC_TRUST_OK 0
@@ -262,17 +266,17 @@ int kc_trust_revoke(
 
 void kc_trust_close(kc_trust_t *trust);
 void kc_trust_free(void *ptr);
-\`\`\`
+```
 
-Strings and blobs returned through \`out_*\` are owned by the caller and are
-released with \`kc_trust_free()\`. The context is released with
-\`kc_trust_close()\`.
+Strings and blobs returned through `out_*` are owned by the caller and are
+released with `kc_trust_free()`. The context is released with
+`kc_trust_close()`.
 
 ## CLI
 
 The CLI exposes the same semantic operations:
 
-\`\`\`text
+```text
 trust init
 trust invite
 trust join <code>
@@ -280,15 +284,15 @@ trust confirm <confirmation>
 trust seal <uid>
 trust unseal <uid>
 trust revoke <uid>
-\`\`\`
+```
 
-\`invite\`, \`join\`, and \`confirm\` print compact JSON containing their
+`invite`, `join`, and `confirm` print compact JSON containing their
 application-visible UID and portable code/confirmation.
 
-\`seal\` reads plaintext bytes from stdin and writes only the protected binary
+`seal` reads plaintext bytes from stdin and writes only the protected binary
 blob to stdout.
 
-\`unseal\` reads a protected binary blob from stdin and writes only plaintext
+`unseal` reads a protected binary blob from stdin and writes only plaintext
 bytes to stdout.
 
 The application is responsible for transporting those values between the two
@@ -298,13 +302,13 @@ machines.
 
 The protocol profile is fixed:
 
-\`\`\`text
+```text
 Trust establishment:
     Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b
 
 Established messages:
     Noise_K_25519_ChaChaPoly_BLAKE2b
-\`\`\`
+```
 
 The implementation uses the vendored Monocypher sources for X25519,
 ChaCha20-Poly1305, BLAKE2b, constant-time comparison, and secret wiping.
@@ -313,9 +317,9 @@ command dependency.
 
 Platform entropy comes from:
 
-- \`BCryptGenRandom\` on Windows;
-- \`getentropy()\` under Emscripten;
-- \`/dev/urandom\` on other POSIX targets.
+- `BCryptGenRandom` on Windows;
+- `getentropy()` under Emscripten;
+- `/dev/urandom` on other POSIX targets.
 
 Low-order X25519 results are rejected.
 
@@ -324,11 +328,11 @@ Low-order X25519 results are rejected.
 The reusable API is built for Emscripten. Noise and cryptographic operations
 are identical to native builds. State uses the filesystem visible to the
 Emscripten runtime; durable browser persistence, when desired, is supplied by
-the host's filesystem integration rather than by \`trust.c\`.
+the host's filesystem integration rather than by `trust.c`.
 
 The WASM module exports:
 
-\`\`\`text
+```text
 _kc_trust_init
 _kc_trust_invite
 _kc_trust_join
@@ -339,18 +343,18 @@ _kc_trust_revoke
 _kc_trust_close
 _kc_trust_free
 _kc_trust_version
-\`\`\`
+```
 
 The native CLI is not compiled into the WASM reusable contract tests.
 
 ## Build and test
 
-\`\`\`sh
+```sh
 make all
 make test
 make test wine
 make test wasm
-\`\`\`
+```
 
 Native and Wine contract runs exercise the reusable API plus exactly one
-grouped \`kc_trust_cli\` case. WASM exercises the reusable API only.
+grouped `kc_trust_cli` case. WASM exercises the reusable API only.
