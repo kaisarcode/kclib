@@ -14,6 +14,8 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
 #include <process.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -24,6 +26,7 @@ typedef int test_socklen_t;
 #define TEST_INVALID INVALID_SOCKET
 #else
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -357,11 +360,44 @@ static int run_cli(char *const argv[])
 {
     if (!REDP2P_TEST_CLI[0]) return 0;
 #ifdef _WIN32
-    return (int)_spawnv(_P_WAIT, REDP2P_TEST_CLI, (const char * const *)argv);
+    int null_fd;
+    int saved_stdout;
+    int saved_stderr;
+    int status;
+
+    fflush(stdout);
+    fflush(stderr);
+    null_fd = _open("NUL", _O_WRONLY);
+    if (null_fd < 0) return 255;
+    saved_stdout = _dup(_fileno(stdout));
+    saved_stderr = _dup(_fileno(stderr));
+    if (saved_stdout < 0 || saved_stderr < 0 ||
+        _dup2(null_fd, _fileno(stdout)) != 0 ||
+        _dup2(null_fd, _fileno(stderr)) != 0)
+    {
+        if (saved_stdout >= 0) _close(saved_stdout);
+        if (saved_stderr >= 0) _close(saved_stderr);
+        _close(null_fd);
+        return 255;
+    }
+    status = (int)_spawnv(_P_WAIT, REDP2P_TEST_CLI,
+        (const char * const *)argv);
+    _dup2(saved_stdout, _fileno(stdout));
+    _dup2(saved_stderr, _fileno(stderr));
+    _close(saved_stdout);
+    _close(saved_stderr);
+    _close(null_fd);
+    return status;
 #else
     pid_t pid = fork();
     int status;
     if (pid == 0) {
+        int null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd < 0) _exit(127);
+        if (dup2(null_fd, STDOUT_FILENO) < 0 ||
+            dup2(null_fd, STDERR_FILENO) < 0)
+            _exit(127);
+        if (null_fd > STDERR_FILENO) close(null_fd);
         execv(REDP2P_TEST_CLI, argv);
         _exit(127);
     }
