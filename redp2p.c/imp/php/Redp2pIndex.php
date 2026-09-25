@@ -209,7 +209,7 @@ class Redp2pIndex
      * @param string $pass Shared password, or an empty string for none.
      * @return void
      */
-    public function setPass(string $pass): void
+    private function setPass(string $pass): void
     {
         if ($pass !== '' && !$this->isValidPassToken($pass)) {
             throw new \InvalidArgumentException('REDP2P_PASS contains invalid bytes');
@@ -225,7 +225,7 @@ class Redp2pIndex
      *   string.
      * @return void
      */
-    public function setVips($vips): void
+    private function setVips($vips): void
     {
         $map = [];
         if (is_string($vips)) {
@@ -272,7 +272,7 @@ class Redp2pIndex
      *   when explicitly configured; leaving seats unset means no limit.
      * @return void
      */
-    public function setSeats(int $seats): void
+    private function setSeats(int $seats): void
     {
         if ($seats < 0) {
             throw new \InvalidArgumentException('REDP2P_SEATS must be zero or positive');
@@ -289,7 +289,7 @@ class Redp2pIndex
      * @param int $max Consumers waiting for one publisher; 0 restores default.
      * @return void
      */
-    public function setMaxConsumersPerPublisher(int $max): void
+    private function setMaxConsumersPerPublisher(int $max): void
     {
         if ($max < 0) {
             throw new \InvalidArgumentException(
@@ -305,7 +305,7 @@ class Redp2pIndex
      * @param int $bits Difficulty target, 0..32.
      * @return void
      */
-    public function setPow(int $bits): void
+    private function setPow(int $bits): void
     {
         if ($bits < 0 || $bits > 32) {
             throw new \InvalidArgumentException('REDP2P_POW must be between 0 and 32');
@@ -319,7 +319,7 @@ class Redp2pIndex
      * @param int $ttl TTL seconds, 1..86400.
      * @return void
      */
-    public function setPendingTtl(int $ttl): void
+    private function setPendingTtl(int $ttl): void
     {
         if ($ttl < 1 || $ttl > 86400) {
             throw new \InvalidArgumentException('REDP2P_PENDING_CALL_TTL_S must be between 1 and 86400');
@@ -333,7 +333,7 @@ class Redp2pIndex
      * @param int $ttl TTL seconds, 1..86400.
      * @return void
      */
-    public function setTtl(int $ttl): void
+    private function setTtl(int $ttl): void
     {
         if ($ttl < 1 || $ttl > 86400) {
             throw new \InvalidArgumentException('REDP2P_ETIMEOUT_SEC must be between 1 and 86400');
@@ -621,13 +621,19 @@ class Redp2pIndex
      *     body: string
      * }
      */
-    private function handleList(): array
+    public function list(): array
     {
         $cutoff = time() - $this->ttl;
-        $st = $this->db->prepare('SELECT id FROM redp2p_publishers WHERE last_seen >= ?');
+        $st = $this->db->prepare(
+            'SELECT id FROM redp2p_publishers WHERE last_seen >= ?'
+        );
         $st->execute([$cutoff]);
-        $ids = $st->fetchAll(PDO::FETCH_COLUMN);
-        return $this->jsonOk(['ids' => array_map('strval', $ids)], false);
+        return array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    private function handleList(): array
+    {
+        return $this->jsonOk(['ids' => $this->list()], false);
     }
 
     /**
