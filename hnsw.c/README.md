@@ -3,9 +3,6 @@
 A minimalist C library and CLI for fixed-dimension vector indexing with Approximate Nearest Neighbor search using a Hierarchical Navigable Small World (HNSW) graph.
 
 ---
-
----
-
 ## CLI
 
 Run a nearest neighbor search over a vector dataset.
@@ -81,9 +78,6 @@ Results are printed as:
 ```
 
 ---
-
----
-
 ## Public API
 
 The index is a persistent in-memory object. The only required configuration is the vector dimension. Metric and tuning values have library defaults.
@@ -174,9 +168,6 @@ d(a, b) = sum((a[i] - b[i])^2)
 Note: no square root is applied. Rankings are identical to Euclidean distance.
 
 ---
-
----
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
