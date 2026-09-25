@@ -1068,6 +1068,13 @@ int redp2p_set_nonblock(redp2p_fd_t fd) {
 #endif
 }
 
+/**
+ * Waits for activity on a bounded poll descriptor array.
+ * @param fds Poll descriptor array.
+ * @param count Descriptor count.
+ * @param timeout_ms Maximum wait in milliseconds.
+ * @return Ready descriptor count, 0 on timeout, or -1 on failure.
+ */
 int redp2p_poll_wait(redp2p_pollfd_t *fds, size_t count, int timeout_ms)
 {
     if (!fds || count == 0) return 0;
@@ -1079,6 +1086,11 @@ int redp2p_poll_wait(redp2p_pollfd_t *fds, size_t count, int timeout_ms)
 #endif
 }
 
+/**
+ * Reports whether one poll descriptor should be processed as readable.
+ * @param fd Poll descriptor.
+ * @return 1 when readable or closed, 0 otherwise.
+ */
 int redp2p_poll_readable(const redp2p_pollfd_t *fd)
 {
     if (!fd) return 0;
@@ -1089,6 +1101,13 @@ int redp2p_poll_readable(const redp2p_pollfd_t *fd)
 #endif
 }
 
+/**
+ * Creates the socket wakeup pair used by one runtime loop.
+ * @param ctx Runtime context.
+ * @param read_fd Destination read socket.
+ * @param write_fd Destination write socket.
+ * @return REDP2P_OK on success or an error code.
+ */
 int redp2p_wake_open(redp2p_t *ctx, redp2p_fd_t *read_fd,
     redp2p_fd_t *write_fd)
 {
@@ -1132,6 +1151,11 @@ int redp2p_wake_open(redp2p_t *ctx, redp2p_fd_t *read_fd,
     return REDP2P_OK;
 }
 
+/**
+ * Drains all pending bytes from a nonblocking wake socket.
+ * @param read_fd Wake read socket.
+ * @return None.
+ */
 void redp2p_wake_drain(redp2p_fd_t read_fd)
 {
     char buf[32];
@@ -1140,6 +1164,13 @@ void redp2p_wake_drain(redp2p_fd_t read_fd)
     while (recv(read_fd, buf, sizeof(buf), 0) > 0) {}
 }
 
+/**
+ * Detaches and closes one runtime wakeup socket pair.
+ * @param ctx Runtime context.
+ * @param read_fd Wake read socket.
+ * @param write_fd Wake write socket.
+ * @return None.
+ */
 void redp2p_wake_close(redp2p_t *ctx, redp2p_fd_t read_fd,
     redp2p_fd_t write_fd)
 {
