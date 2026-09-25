@@ -1081,6 +1081,91 @@ int redp2p_set_nonblock(redp2p_fd_t fd) {
 #endif
 }
 
+int redp2p_poll_wait(redp2p_pollfd_t *fds, size_t count, int timeout_ms)
+{
+    if (!fds || count == 0) return 0;
+#ifdef _WIN32
+    if (count > ULONG_MAX) return -1;
+    return WSAPoll(fds, (ULONG)count, timeout_ms);
+#else
+    return poll(fds, (nfds_t)count, timeout_ms);
+#endif
+}
+
+int redp2p_poll_readable(const redp2p_pollfd_t *fd)
+{
+    if (!fd) return 0;
+#ifdef _WIN32
+    return (fd->revents & (POLLRDNORM | POLLERR | POLLHUP | POLLNVAL)) != 0;
+#else
+    return (fd->revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL)) != 0;
+#endif
+}
+
+int redp2p_wake_open(redp2p_t *ctx, redp2p_fd_t *read_fd,
+    redp2p_fd_t *write_fd)
+{
+    struct sockaddr_in addr;
+    socklen_t addr_len;
+    redp2p_fd_t rfd;
+    redp2p_fd_t wfd;
+
+    if (!ctx || !read_fd || !write_fd) return REDP2P_EINVAL;
+    *read_fd = REDP2P_FD_INVALID;
+    *write_fd = REDP2P_FD_INVALID;
+    rfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (REDP2P_ISERR(rfd)) return REDP2P_ENET;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    if (bind(rfd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        REDP2P_FD_CLOSE(rfd);
+        return REDP2P_ENET;
+    }
+    addr_len = sizeof(addr);
+    if (getsockname(rfd, (struct sockaddr *)&addr, &addr_len) != 0) {
+        REDP2P_FD_CLOSE(rfd);
+        return REDP2P_ENET;
+    }
+    wfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (REDP2P_ISERR(wfd) ||
+        connect(wfd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        redp2p_set_nonblock(rfd) != 0 || redp2p_set_nonblock(wfd) != 0)
+    {
+        if (!REDP2P_ISERR(wfd)) REDP2P_FD_CLOSE(wfd);
+        REDP2P_FD_CLOSE(rfd);
+        return REDP2P_ENET;
+    }
+    redp2p_lock(ctx);
+    ctx->wake_write_fd = wfd;
+    redp2p_unlock(ctx);
+    *read_fd = rfd;
+    *write_fd = wfd;
+    return REDP2P_OK;
+}
+
+void redp2p_wake_drain(redp2p_fd_t read_fd)
+{
+    char buf[32];
+
+    if (REDP2P_ISERR(read_fd)) return;
+    while (recv(read_fd, buf, sizeof(buf), 0) > 0) {}
+}
+
+void redp2p_wake_close(redp2p_t *ctx, redp2p_fd_t read_fd,
+    redp2p_fd_t write_fd)
+{
+    if (ctx) {
+        redp2p_lock(ctx);
+        if (ctx->wake_write_fd == write_fd)
+            ctx->wake_write_fd = REDP2P_FD_INVALID;
+        redp2p_unlock(ctx);
+    }
+    if (!REDP2P_ISERR(read_fd)) REDP2P_FD_CLOSE(read_fd);
+    if (!REDP2P_ISERR(write_fd)) REDP2P_FD_CLOSE(write_fd);
+}
+
 /**
  * Returns the UDP or TCP port from a stored socket address.
  * @param addr Stored socket address.
@@ -1342,6 +1427,7 @@ int redp2p_open(redp2p_t **out) {
         }
     }
     ctx->stop_requested = 0;
+    ctx->wake_write_fd = REDP2P_FD_INVALID;
     ctx->ready_state = 0;
     ctx->ready_status = REDP2P_ERROR;
     if (redp2p_fill_random(ctx->challenge_key,
@@ -1401,8 +1487,16 @@ int redp2p_close(redp2p_t *ctx) {
  * @return 0 on success, -1 on error.
  */
 int redp2p_stop(redp2p_t *ctx) {
+    redp2p_fd_t wake_fd;
+    const char byte = 1;
+
     if (!ctx) return REDP2P_EINVAL;
     atomic_store(&ctx->stop_requested, 1);
+    redp2p_lock(ctx);
+    wake_fd = ctx->wake_write_fd;
+    if (!REDP2P_ISERR(wake_fd))
+        send(wake_fd, &byte, 1, 0);
+    redp2p_unlock(ctx);
     return REDP2P_OK;
 }
 
