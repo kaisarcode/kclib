@@ -1,16 +1,13 @@
 # trust.c - Portable scoped trust and message cryptography
 
 `trust.c` manages persistent cryptographic trust on the local machine. It
-establishes scoped identities and protects messages, but it does not implement
-networking or any other transport.
+establishes scoped identities and protects messages.
 
-The library can be composed with any transport or application-specific
-message delivery mechanism.
+It does not implement networking or any other transport, and that is part
+of the intended scope of this library. The library must be composed with
+any transport or application-specific message delivery mechanism.
 
 ## Local model
-
-There is no Bob object, Alice object, connection object, or session object in
-the public model.
 
 Each machine initializes its own local trust state:
 
@@ -21,8 +18,6 @@ trust.init()
 That shorthand represents the local library instance used by a binding. In C,
 `kc_trust_init()` returns an opaque `kc_trust_t *` handle to the local
 persistent store, and that handle is passed to the remaining C functions.
-
-Bob and Alice are only roles used below to explain two different machines.
 
 The public semantic surface is:
 
