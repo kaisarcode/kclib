@@ -239,6 +239,7 @@ static int redp2p_cli_idx(int argc, char **argv)
     kc_redp2p_idx_t *idx = NULL;
     kc_redp2p_vip_t *vips = NULL;
     char *vip_storage = NULL;
+    size_t vip_storage_len = 0;
     size_t seats_value = 0;
     const size_t *seats = NULL;
     size_t max_consumers = 0;
@@ -304,7 +305,9 @@ static int redp2p_cli_idx(int argc, char **argv)
     options.pow = pow;
     options.pass = getenv("REDP2P_PASS");
     options.max_consumers = max_consumers;
-    if (!redp2p_cli_vips(getenv("REDP2P_VIP"), &vips,
+    value = getenv("REDP2P_VIP");
+    if (value) vip_storage_len = strlen(value) + 1;
+    if (!redp2p_cli_vips(value, &vips,
         &options.vip_count, &vip_storage))
     {
         fprintf(stderr, "redp2p: invalid REDP2P_VIP\n");
@@ -315,7 +318,7 @@ static int redp2p_cli_idx(int argc, char **argv)
     status = kc_redp2p_idx(&idx, &options);
     free(vips);
     if (vip_storage) {
-        memset(vip_storage, 0, strlen(vip_storage));
+        memset(vip_storage, 0, vip_storage_len);
         free(vip_storage);
     }
     if (status != KC_REDP2P_OK) {
