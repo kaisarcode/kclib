@@ -4,6 +4,8 @@
 
 ---
 
+---
+
 ## CLI
 
 ### Examples
@@ -47,6 +49,8 @@ When supplied, the text argument takes precedence over stdin.
 
 ---
 
+---
+
 ## Public API
 
 ```c
@@ -66,15 +70,18 @@ kc_b64_free(decoded);
 
 ---
 
-## Lifecycle
+### Lifecycle
 
 - `kc_b64_encode()` returns caller-owned encoded output that must be released with `kc_b64_free()`.
 - `kc_b64_decode()` accepts strict RFC 4648 input with canonical padding, returns caller-owned decoded output, and resets `out_size` to `0` on failure when the size pointer is valid. Empty input is valid and returns an owned zero-length result.
 - `kc_b64_free()` releases memory returned by the b64 library.
 
+---
+
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
 make
@@ -82,58 +89,42 @@ make
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first, then run tests. Reusable contract tests are grouped by public symbol: `kc_b64_encode`, `kc_b64_decode`, `kc_b64_free`, and `kc_b64_version`. Native and Wine runs add one grouped `kc_b64_cli` case.
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
 make
 make test
 ```
 
-To run the common `test` target in Windows-through-Wine mode:
+To run through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
-To run the four reusable library contract tests under Emscripten/Node (native CLI is not compiled or executed):
+### WebAssembly (Emscripten)
 
 ```bash
 make wasm32/wasm
 make test wasm
 ```
 
-The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+- Artifact: `bin/wasm32/wasm/b64.wasm`
+- Exports: `kc_b64_version`, `kc_b64_encode`, `kc_b64_decode`, `kc_b64_free`
+- The module contains the reusable library only; the CLI is not compiled into
+    it.
 
-Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test`, `make test wine`, or `make test wasm`.
+`wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
 
 ```bash
 make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make x86_64/iossim
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make aarch64/ios
-make aarch64/iossim
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
 ```
 
 ---
@@ -147,6 +138,15 @@ make loongarch64/linux
 - `ninja`
 - `gcc` or `clang` (C11 compatible)
 
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Emscripten SDK and Node.js for WebAssembly builds and tests.
+- Other cross-compilation toolchains are required only by enabled targets.
+
 ### System Libraries
 
 Linux:
@@ -158,26 +158,25 @@ Windows (MSVC or MinGW):
 macOS / iOS:
 - No additional system libraries required.
 
-### Optional Cross-Compilation SDKs
-
-Required only for multiarch builds:
-
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
-- Android NDK (version 27.2.12479018) for Android targets.
-
 ### Test Dependencies
 
 - `ctest` (included with cmake)
 
 ---
 
+---
+
 ## Beta Notice
 
-This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support. You are free to test it, use it, and modify it as you please.
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
 
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Please note that I do not accept pull requests; the goal is to avoid long-term dependency on platforms like GitHub, and I do not maintain fixed infrastructure to guarantee long-term stability for these projects.
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
 
 ---
 
