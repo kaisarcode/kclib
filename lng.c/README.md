@@ -4,6 +4,8 @@
 
 ---
 
+---
+
 ## CLI
 
 Detect the language of text provided as an argument or via standard input.
@@ -13,19 +15,19 @@ Detect the language of text provided as an argument or via standard input.
 Single language detection:
 
 ```bash
-./bin/x86_64/linux/lng "Hello world"
+lng "Hello world"
 ```
 
 Ranked detection with threshold and limit:
 
 ```bash
-./bin/x86_64/linux/lng "Hello world" -l 3 -t 0.1
+lng "Hello world" -l 3 -t 0.1
 ```
 
 Standard input processing (one-shot):
 
 ```bash
-printf 'hola mundo' | ./bin/x86_64/linux/lng
+printf 'hola mundo' | lng
 ```
 
 EOF terminates the one-shot request and the process exits.
@@ -57,6 +59,8 @@ es: 0.0400
 ```
 
 Defaults are threshold `0.001` and limit `1`. Limit `1` prints only the code; larger limits print `code: score` with four decimal places. Empty input produces no output.
+
+---
 
 ---
 
@@ -122,44 +126,34 @@ if (kc_lng_detect(
 kc_lng_free(results);
 ```
 
-A natural scripting binding can expose the same stateless capability directly:
-
-```js
-const results = lng.detect(text, { limit: 3 });
-```
-
-The binding maps JavaScript property presence mechanically to nullable option
-pointers. Omitted properties become NULL, so bindings do not duplicate default
-values. The bridge otherwise only adapts C array ownership and strings
-mechanically; it does not need a context, lifecycle object, setters, callbacks,
-or semantic wrapper.
-
-## Lifecycle
+### Lifecycle
 
 No explicit initialization required. Internal profiles are initialized automatically on first detection, exactly once, in a thread-safe manner. Once initialized, profile state remains read-only and safe for concurrent detection without additional synchronization. Results are sorted by descending heuristic score. Scores remain heuristic ranking values, not probabilities or confidence percentages.
 
 ---
 
+---
+
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host architecture running the build.
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
 
 ```bash
-make clean && make
+make
 ```
 
-Run the portable contract tests after building:
+### Tests
+
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
+make
 make test
 ```
 
-Native tests execute five reusable public-API cases plus one grouped
-`kc_lng_cli` case covering the shipped CLI contract: argument and stdin input,
-default and ranked output, threshold and limit handling, diagnostics, help,
-version, and exit status.
-
-When Windows artifacts are available and Wine is installed:
+To run through Wine:
 
 ```bash
 make x86_64/windows
@@ -168,52 +162,25 @@ make test wine
 
 ### WebAssembly (Emscripten)
 
-The `wasm32/wasm` target builds the reusable language-detection library as a WebAssembly module using the Emscripten CMake toolchain:
-
 ```bash
 make wasm32/wasm
+make test wasm
 ```
 
 - Artifact: `bin/wasm32/wasm/lng.wasm`
-- Test: `make test wasm`
-- Requirement: Emscripten SDK/toolchain with `emcmake`, `emcc`, and Node.js on `PATH` (for example, `source emsdk_env.sh`).
-- The module exports the public `kc_lng_*` API with the normalized options-based detect signature, ownership, lifecycle, and status codes. It contains the reusable library capability, not the `lng` CLI: `src/lng.c` is not compiled into the module.
-
-`make test wasm` compiles `src/test.c` with Emscripten and runs the five reusable
-public-API contract cases under Node.js. Native and Wine runs additionally execute
-the grouped `kc_lng_cli` case; host process-spawning code is excluded from the
-WASM test build. It requires `bin/wasm32/wasm/lng.wasm` and reports how to build
-it when it is absent.
+- Exports: `kc_lng_free`, `kc_lng_detect`, `kc_lng_version`
+- The module contains the reusable library only; the CLI is not compiled into
+    it.
 
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
 
 ```bash
 make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make x86_64/iossim
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make aarch64/ios
-make aarch64/iossim
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
 ```
 
 ---
@@ -227,6 +194,15 @@ make loongarch64/linux
 - `ninja`
 - `gcc` or `clang` (C11 compatible)
 
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Emscripten SDK and Node.js for WebAssembly builds and tests.
+- Other cross-compilation toolchains are required only by enabled targets.
+
 ### System Libraries
 
 Linux:
@@ -239,12 +215,24 @@ Windows (MSVC or MinGW):
 macOS / iOS:
 - No additional system libraries required.
 
-### Optional Cross-Compilation SDKs
+---
 
-Required only for multiarch builds:
+## Beta Notice
 
-- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
-- `wine` for running Windows tests on Linux.
-- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
-- Android NDK (version 27.2.12479018) for Android targets.
-- Emscripten SDK for `wasm32/wasm` builds and `make test wasm`.
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
+
+---
+
+## License
+
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
