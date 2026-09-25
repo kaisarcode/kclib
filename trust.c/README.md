@@ -303,11 +303,11 @@ make test wasm
 
 - Artifact: `bin/wasm32/wasm/trust.wasm`
 - Exports: `kc_trust_init`, `kc_trust_invite`, `kc_trust_join`,
-  `kc_trust_confirm`, `kc_trust_seal`, `kc_trust_unseal`,
-  `kc_trust_revoke`, `kc_trust_close`, `kc_trust_free`,
-  `kc_trust_version`
+    `kc_trust_confirm`, `kc_trust_seal`, `kc_trust_unseal`,
+    `kc_trust_revoke`, `kc_trust_close`, `kc_trust_free`,
+    `kc_trust_version`
 - The module contains the reusable library only; the CLI is not compiled into
-  it.
+    it.
 
 `wasm32/wasm` is included in `make all`.
 
