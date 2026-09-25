@@ -1,296 +1,62 @@
-# trust.c - Portable scoped trust and message cryptography
+# trust.c
 
-`trust.c` manages persistent cryptographic trust on the local machine. It
-establishes scoped identities and protects messages.
+Persistent scoped trust and authenticated message protection.
 
-It does not implement networking or any other transport, and that is part
-of the intended scope of this library. The library must be composed with
-any transport or application-specific message delivery mechanism.
+trust.c creates trust relationships between endpoints and uses those
+relationships to protect arbitrary binary messages. It does not send or
+receive data. The application can move invitations, confirmations, UIDs, and
+protected messages through any transport.
 
-## Local model
+## Public model
 
-Each machine initializes its own local trust state:
+Each process opens its local trust state once:
 
-```javascript
-trust.init()
+```c
+kc_trust_t *trust = NULL;
+
+if (kc_trust_init(&trust) != KC_TRUST_OK) {
+    return 1;
+}
 ```
 
-That shorthand represents the local library instance used by a binding. In C,
-`kc_trust_init()` returns an opaque `kc_trust_t *` handle to the local
-persistent store, and that handle is passed to the remaining C functions.
-
-The public semantic surface is:
+The public operations are:
 
 ```text
-init
-invite
-join
-confirm
-seal
-unseal
-revoke
+invite / join / confirm = establish trust
+seal / unseal           = protect and recover messages
+revoke                  = remove local trust
+close                   = release the local handle
 ```
 
-Noise handshakes, static keys, ephemeral keys, PSKs, transcript hashes, files,
-and persistence details remain internal to `trust.c`.
+A trust relationship has two endpoint UIDs.
 
-## Establishing trust
-
-Assume Bob wants to trust Alice.
-
-On Bob's machine:
-
-```javascript
-trust.init()
-
-invite = trust.invite()
-alice_uid = invite.uid
-code = invite.code
-```
-
-Bob gives `code` to Alice through an out-of-band mechanism such as a QR code.
-
-`alice_uid` identifies Alice. Bob keeps that UID and will later use it when
-sending messages to Alice.
-
-On Alice's machine:
-
-```javascript
-trust.init()
-
-joined = trust.join(code)
-bob_uid = joined.uid
-confirmation = joined.confirmation
-```
-
-`bob_uid` identifies Bob. Alice keeps that UID and will later use it when
-sending messages to Bob.
-
-The application transports `confirmation` back to Bob using any mechanism it
-chooses.
-
-Back on Bob's machine:
-
-```javascript
-confirmed_uid = trust.confirm(confirmation)
-
-// confirmed_uid == alice_uid
-```
-
-At this point the relationship is established.
-
-The two endpoint UIDs are different:
+For a relationship between Bob and Alice:
 
 ```text
-alice_uid != bob_uid
+alice_uid identifies Alice
+bob_uid   identifies Bob
 ```
 
-Their meaning is directional only from the caller's point of view:
+The same UID changes perspective depending on which machine is using it:
 
 ```text
 alice_uid
-    Bob:   remote UID
-    Alice: local UID
+    remote on Bob
+    local on Alice
 
 bob_uid
-    Alice: remote UID
-    Bob:   local UID
+    remote on Alice
+    local on Bob
 ```
 
-No human-readable name such as `"alice"` or `"bob"` participates in the
-cryptographic protocol.
+Applications can associate these UIDs with their own users, devices, scopes,
+or other domain objects. trust.c does not define human-readable identities.
 
-## Sending a message
-
-After trust is established, Bob sends a message to Alice like this:
-
-```javascript
-// Bob
-enc = trust.seal(alice_uid, message)
-
-// The application transports:
-request.uid = alice_uid
-request.message = enc
-```
-
-Alice receives that application envelope:
-
-```javascript
-// Alice
-dec = trust.unseal(request.uid, request.message)
-```
-
-Here `request.uid` is `alice_uid`.
-
-The same UID is therefore used in two different roles:
-
-```text
-Bob:
-    seal(remote_uid, plaintext)
-
-Alice:
-    unseal(local_uid, ciphertext)
-```
-
-The reverse direction is symmetric:
-
-```javascript
-// Alice
-enc = trust.seal(bob_uid, reply)
-
-request.uid = bob_uid
-request.message = enc
-
-// Bob
-dec = trust.unseal(request.uid, request.message)
-```
-
-`seal()` and `unseal()` only transform bytes. They do not send or receive
-anything.
-
-## Revocation
-
-`revoke(uid)` receives the remote UID known by the local application.
-
-Bob revokes Alice with:
-
-```javascript
-trust.revoke(alice_uid)
-```
-
-Alice revokes Bob with:
-
-```javascript
-trust.revoke(bob_uid)
-```
-
-Revocation is an explicit local administrative action. A failed
-`unseal()` does not automatically revoke anything.
-
-## Responsibility boundary
-
-`trust.c` provides:
-
-- scoped cryptographic identity;
-- one-use out-of-band invitations;
-- confirmation of an invited endpoint;
-- authenticated encryption for established relationships;
-- persistent local relationship state;
-- explicit local revocation.
-
-`trust.c` does not provide or inspect:
-
-- TCP, UDP, KCP, HTTP, WebSocket, or another transport;
-- hosts, ports, listeners, requests, or responses;
-- message ordering;
-- retries or timeouts;
-- counters or sequence numbers;
-- replay windows;
-- clocks or temporal validity;
-- human usernames or application identities.
-
-If the caller supplies the same valid protected blob more than once,
-`kc_trust_unseal()` may successfully decrypt it more than once.
-
-Replay policy belongs to the protocol or transport that has temporal context,
-without involving `trust.c`.
-
-## Persistent state
-
-Normal callers do not choose a storage directory.
-
-`kc_trust_init()` resolves the local per-user data directory and ensures the
-trust store exists.
-
-On POSIX, when `XDG_DATA_HOME` is set:
-
-```text
-$XDG_DATA_HOME/kaisarcode/trust.c
-```
-
-Otherwise:
-
-```text
-$HOME/.local/share/kaisarcode/trust.c
-```
-
-On Windows:
-
-```text
-%LOCALAPPDATA%\kaisarcode\trust.c
-```
-
-`APPDATA` is used as fallback.
-
-`KC_TRUST_DIR` is an advanced process-level override used for tests and
-controlled deployments. It is not a normal API argument.
-
-The current implementation keeps relationship credentials scoped to each
-relationship. They are generated internally by `invite()` and `join()` and
-persisted by `trust.c`.
-
-Applications do not read, write, or transport private keys.
-
-`kc_trust_close()` releases only the in-memory C context. It does not delete
-the persistent trust store.
-
-## Invitation semantics
-
-`kc_trust_invite()` creates a pending one-use relationship and returns:
-
-```text
-uid   = UID assigned to the invited endpoint
-code  = opaque Base64 invitation
-```
-
-For Bob inviting Alice, the returned UID is `alice_uid`.
-
-The invitation code contains the protocol data required by Alice, including
-both endpoint UIDs, Bob's scoped public key, and a one-use invitation secret.
-
-`kc_trust_join()` consumes that code on Alice's machine and returns:
-
-```text
-uid           = UID assigned to the inviter
-confirmation  = opaque Base64 confirmation
-```
-
-For Alice joining Bob, the returned UID is `bob_uid`.
-
-`kc_trust_confirm()` consumes the confirmation on Bob's machine. On success,
-it establishes the pending relationship, destroys the one-use invitation
-secret, and returns the same `alice_uid` originally returned by
-`kc_trust_invite()`.
-
-The application is responsible only for moving `code` and `confirmation`
-between the machines.
-
-## Message semantics
-
-`kc_trust_seal()` receives a remote UID:
-
-```text
-seal(remote_uid, plaintext) -> protected blob
-```
-
-The application transports the protected blob together with that UID.
-
-On the receiving endpoint, that same UID is local:
-
-```text
-unseal(local_uid, protected blob) -> plaintext
-```
-
-A UID is therefore an endpoint identifier within one scoped relationship, not
-a connection identifier, request identifier, username, or transport address.
-
-Messages may contain arbitrary binary data up to `KC_TRUST_MAX_MESSAGE`.
-
-## Public C API
-
-The real reusable C API is:
+## C API
 
 ```c
+#include "libtrust.h"
+
 typedef struct kc_trust kc_trust_t;
 
 #define KC_TRUST_OK 0
@@ -349,138 +115,250 @@ void kc_trust_close(kc_trust_t *trust);
 void kc_trust_free(void *ptr);
 ```
 
-The `kc_trust_t *` parameter is the local C context returned by
-`kc_trust_init()`. It is plumbing required by the C ABI, not a peer object or
-network session.
+Strings and buffers returned through `out_*` are owned by the caller and
+must be released with `kc_trust_free()`.
 
-`kc_trust_free()` releases strings and blobs allocated by `trust.c`.
+`kc_trust_close()` releases the local handle. It does not remove persistent
+trust relationships.
 
-The operation-specific UID rules are:
+## Establishing trust
+
+One endpoint creates an invitation:
+
+```c
+char *alice_uid = NULL;
+char *code = NULL;
+
+if (kc_trust_invite(trust, &alice_uid, &code) != KC_TRUST_OK) {
+    return 1;
+}
+```
+
+The application sends `code` to the other endpoint out of band.
+
+The invited endpoint joins:
+
+```c
+char *bob_uid = NULL;
+char *confirmation = NULL;
+
+if (kc_trust_join(
+    trust,
+    code,
+    &bob_uid,
+    &confirmation
+) != KC_TRUST_OK) {
+    return 1;
+}
+```
+
+The application sends `confirmation` back to the endpoint that created the
+invitation.
+
+That endpoint confirms it:
+
+```c
+char *confirmed_uid = NULL;
+
+if (kc_trust_confirm(
+    trust,
+    confirmation,
+    &confirmed_uid
+) != KC_TRUST_OK) {
+    return 1;
+}
+```
+
+`confirmed_uid` is the same endpoint UID originally returned by
+`kc_trust_invite()`:
 
 ```text
-kc_trust_invite
-    returns the invited endpoint UID
-
-kc_trust_join
-    returns the inviter UID
-
-kc_trust_confirm
-    returns the invited endpoint UID
-
-kc_trust_seal
-    receives a remote UID
-
-kc_trust_unseal
-    receives the local destination UID from the application envelope
-
-kc_trust_revoke
-    receives a remote UID
+confirmed_uid == alice_uid
 ```
+
+The UID returned by `kc_trust_join()` identifies the other endpoint:
+
+```text
+alice_uid != bob_uid
+```
+
+After confirmation, both sides can protect messages in either direction.
+
+## Messages
+
+To send a message to a trusted endpoint, call `kc_trust_seal()` with that
+endpoint's UID.
+
+For Bob sending to Alice:
+
+```c
+void *protected = NULL;
+size_t protected_size = 0;
+
+if (kc_trust_seal(
+    trust,
+    alice_uid,
+    message,
+    message_size,
+    &protected,
+    &protected_size
+) != KC_TRUST_OK) {
+    return 1;
+}
+```
+
+The application transports:
+
+```text
+uid     = alice_uid
+message = protected
+```
+
+On Alice's machine, that UID is local. Alice opens the message with the UID
+received beside it:
+
+```c
+void *message = NULL;
+size_t message_size = 0;
+
+if (kc_trust_unseal(
+    trust,
+    request_uid,
+    protected,
+    protected_size,
+    &message,
+    &message_size
+) != KC_TRUST_OK) {
+    return 1;
+}
+```
+
+For the reverse direction, Alice seals with `bob_uid` and Bob unseals with
+that same UID.
+
+`kc_trust_seal()` and `kc_trust_unseal()` do not perform transport,
+ordering, retries, timeouts, replay detection, or request lifecycle handling.
+Those concerns belong to the surrounding application or protocol.
+
+A valid protected message may therefore be successfully passed to
+`kc_trust_unseal()` more than once.
+
+Messages may contain arbitrary binary data up to `KC_TRUST_MAX_MESSAGE`.
+
+## Revocation
+
+`kc_trust_revoke()` receives the remote UID known by the local endpoint.
+
+Bob revokes Alice with `alice_uid`:
+
+```c
+kc_trust_revoke(trust, alice_uid);
+```
+
+Alice revokes Bob with `bob_uid`:
+
+```c
+kc_trust_revoke(trust, bob_uid);
+```
+
+Revocation is local. A failed `kc_trust_unseal()` does not revoke a
+relationship automatically.
+
+## Persistent state
+
+Normal callers do not select a storage directory.
+
+On XDG environments, trust.c uses:
+
+```text
+$XDG_DATA_HOME/kaisarcode/trust.c
+```
+
+When `XDG_DATA_HOME` is not set:
+
+```text
+$HOME/.local/share/kaisarcode/trust.c
+```
+
+On Windows, trust.c uses the corresponding per-user application-data
+directory under:
+
+```text
+kaisarcode\trust.c
+```
+
+`KC_TRUST_DIR` is an advanced process-level override for tests and controlled
+deployments.
 
 ## CLI
 
-The CLI exposes the same semantics:
-
 ```text
-trust init
-trust invite
-trust join <code>
-trust confirm <confirmation>
-trust seal <remote_uid>
-trust unseal <local_uid>
-trust revoke <remote_uid>
+Usage: trust <command> [arguments]
+
+Commands:
+    init
+    invite
+    join <code>
+    confirm <confirmation>
+    seal <remote_uid>
+    unseal <local_uid>
+    revoke <remote_uid>
 ```
 
-`trust invite` prints:
+`invite` prints:
 
 ```json
 {"uid":"<invited_uid>","code":"<invitation>"}
 ```
 
-`trust join <code>` prints:
+`join <code>` prints:
 
 ```json
 {"uid":"<inviter_uid>","confirmation":"<confirmation>"}
 ```
 
-`trust confirm <confirmation>` prints:
+`confirm <confirmation>` prints:
 
 ```json
 {"uid":"<invited_uid>"}
 ```
 
-`trust seal <remote_uid>` reads plaintext bytes from stdin and writes only
-the protected binary blob to stdout.
+`seal <remote_uid>` reads plaintext bytes from stdin and writes the protected
+binary message to stdout.
 
-`trust unseal <local_uid>` reads a protected binary blob from stdin and
-writes only plaintext bytes to stdout.
+`unseal <local_uid>` reads a protected binary message from stdin and writes
+the plaintext bytes to stdout.
 
-The CLI does not transport the UID, invitation, confirmation, ciphertext, or
-plaintext anywhere. The caller is responsible for doing that.
+The CLI does not transport any of these values.
 
-## Cryptographic profile
+## Build
 
-Trust establishment uses:
-
-```text
-Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b
+```bash
+make
 ```
 
-Established messages use:
+Build all configured targets:
 
-```text
-Noise_K_25519_ChaChaPoly_BLAKE2b
-```
-
-For both protocols, the two directional endpoint UIDs form the Noise prologue
-in initiator/responder order.
-
-The implementation uses the vendored Monocypher sources for X25519,
-ChaCha20-Poly1305, BLAKE2b, constant-time comparison, and secret wiping.
-
-There is no OpenSSL, OpenSSH, GPG, libsodium runtime, daemon, or system crypto
-command dependency.
-
-Platform entropy comes from:
-
-- `BCryptGenRandom` on Windows;
-- `getentropy()` under Emscripten;
-- `/dev/urandom` on other POSIX targets.
-
-Low-order X25519 shared secrets are rejected.
-
-## WASM
-
-The reusable API is built for Emscripten.
-
-The WASM module exports:
-
-```text
-_kc_trust_init
-_kc_trust_invite
-_kc_trust_join
-_kc_trust_confirm
-_kc_trust_seal
-_kc_trust_unseal
-_kc_trust_revoke
-_kc_trust_close
-_kc_trust_free
-_kc_trust_version
-```
-
-The reusable WASM contract contains no CLI process machinery.
-
-The filesystem visible to the Emscripten runtime is used for local state.
-Durability in a browser depends on the host filesystem integration.
-
-## Build and test
-
-```sh
+```bash
 make all
+```
+
+## Tests
+
+Native contract tests:
+
+```bash
 make test
+```
+
+Windows validation through Wine:
+
+```bash
 make test wine
+```
+
+WebAssembly validation:
+
+```bash
 make test wasm
 ```
-
-Native and Wine contract runs exercise the reusable API plus one grouped
-`kc_trust_cli` case. WASM exercises the reusable API only.
