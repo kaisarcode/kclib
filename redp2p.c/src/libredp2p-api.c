@@ -134,6 +134,17 @@ static int kc_redp2p_make_self_id(char out[KC_REDP2P_ID_MAX + 1])
     return 1;
 }
 
+static void kc_redp2p_public_defaults(redp2p_t *ctx)
+{
+    ctx->prune_interval_s = 60;
+    ctx->etimeout_sec = 120;
+    ctx->heartbeat_s = 15;
+    ctx->punch_poll_ms = 500;
+    ctx->pending_ttl_s = 30;
+    ctx->max_consumers_per_publisher =
+        REDP2P_MAX_CONSUMERS_PER_PUBLISHER;
+}
+
 static int kc_redp2p_apply_vips(redp2p_t *ctx,
     const kc_redp2p_vip_t *vips, size_t count)
 {
