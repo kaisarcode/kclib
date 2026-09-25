@@ -22,6 +22,7 @@
 
 #include <math.h>
 #include <stdarg.h>
+#include <limits.h>
 
 #ifdef _WIN32
 #include <bcrypt.h>
