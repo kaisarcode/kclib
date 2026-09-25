@@ -406,6 +406,7 @@ void redp2p_stream_fail(redp2p_t *ctx, redp2p_stream_state_t *st) {
  *
  * Partial and would-block writes stay in the stream state. This bounds work
  * per session and prevents one slow local socket from blocking the event loop.
+ * @return 0 on success, -1 on stream or socket failure.
  */
 int redp2p_stream_flush_tcp(redp2p_t *ctx, redp2p_stream_state_t *st,
     redp2p_fd_t tcp_fd)
@@ -974,7 +975,16 @@ static int redp2p_wait_readable(redp2p_fd_t fd, int timeout_ms)
     return redp2p_poll_readable(&pollfd) ? 1 : -1;
 }
 
-static int redp2p_tcp_readline(redp2p_fd_t fd, char *buf, int cap, int timeout_sec) {
+/**
+ * Reads one CRLF-terminated TCP line with a bounded timeout.
+ * @param fd Socket descriptor.
+ * @param buf Destination buffer.
+ * @param cap Destination capacity.
+ * @param timeout_sec Maximum wait in seconds.
+ * @return Line length, 0 on close, or -1 on failure.
+ */
+static int redp2p_tcp_readline(redp2p_fd_t fd, char *buf, int cap,
+    int timeout_sec) {
     int total = 0;
     int n;
     char byte;
