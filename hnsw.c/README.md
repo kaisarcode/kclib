@@ -121,7 +121,6 @@ kc_hnsw_free(results);
 | `build_effort` | Work spent building a higher-quality search graph | `64` |
 | `search_effort` | Work spent finding better matches during a search | `64` |
 
-
 For example, to override only search effort:
 
 ```c
