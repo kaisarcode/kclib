@@ -149,6 +149,10 @@ static void redp2p_cli_usage(const char *name)
     printf("  pub <id>@<index[:port]> --udp <port> [--stun <url>]\n");
     printf("  con <id>@<index[:port]> <local-port> [--stun <url>]\n");
     printf("\n");
+    printf("Options:\n");
+    printf("  -h, --help      Show this help\n");
+    printf("  -v, --version   Show version\n");
+    printf("\n");
     printf("Environment:\n");
     printf("  REDP2P_SEATS          Index publisher capacity; unset means unlimited\n");
     printf("  REDP2P_POW            Index registration PoW bits (0..32)\n");
