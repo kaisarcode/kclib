@@ -15,13 +15,15 @@ REMOVED=0
 
 # Creates symlinks for every project binary in the destination bin directory.
 # @param proj_dir Projects directory.
+# @param legacy_dir Legacy projects directory.
 # @param bin_dir Destination directory.
 # @param excluded Space-separated project names to skip.
 # @return 0 on success.
 link_projects() {
     local proj_dir="$1"
-    local bin_dir="$2"
-    local excluded="$3"
+    local legacy_dir="$2"
+    local bin_dir="$3"
+    local excluded="$4"
     local project_dir project_name name source_file target existing
 
     for project_dir in "$proj_dir"/*/; do
@@ -44,7 +46,7 @@ link_projects() {
         if [ -L "$target" ]; then
             existing=$(readlink "$target")
             case "$existing" in
-                "$proj_dir"/*)
+                "$proj_dir"/*|"$legacy_dir"/*)
                     rm -f "$target"
                     ln -s "$source_file" "$target"
                     REPLACED=$((REPLACED + 1))
@@ -71,11 +73,13 @@ link_projects() {
 
 # Removes managed symlinks whose project is no longer linked.
 # @param proj_dir Projects directory.
+# @param legacy_dir Legacy projects directory.
 # @param bin_dir Destination directory.
 # @return 0 on success.
 cleanup_stale() {
     local proj_dir="$1"
-    local bin_dir="$2"
+    local legacy_dir="$2"
+    local bin_dir="$3"
     local link name target
 
     for link in "$bin_dir"/*; do
@@ -83,7 +87,7 @@ cleanup_stale() {
         name=$(basename "$link")
         target=$(readlink "$link")
         case "$target" in
-            "$proj_dir"/*) ;;
+            "$proj_dir"/*|"$legacy_dir"/*) ;;
             *) continue ;;
         esac
         if [[ " $LINKED_NAMES " != *" $name "* ]]; then
@@ -99,11 +103,12 @@ cleanup_stale() {
 # Runs the link and cleanup steps and reports a summary.
 # @return 0 on success.
 main() {
-    local script_dir root_dir proj_dir bin_dir excluded
+    local script_dir root_dir proj_dir legacy_dir bin_dir excluded
 
     script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     root_dir=$(dirname "$script_dir")
     proj_dir="$root_dir/proj"
+    legacy_dir="$root_dir/repo"
     bin_dir="${1:-$HOME/bin}"
     excluded="libr.c"
 
@@ -113,10 +118,10 @@ main() {
         mkdir -p "$bin_dir"
     fi
 
-    link_projects "$proj_dir" "$bin_dir" "$excluded"
+    link_projects "$proj_dir" "$legacy_dir" "$bin_dir" "$excluded"
 
     echo "Removing stale kclib links in $bin_dir"
-    cleanup_stale "$proj_dir" "$bin_dir"
+    cleanup_stale "$proj_dir" "$legacy_dir" "$bin_dir"
 
     echo "Done. created=$CREATED replaced=$REPLACED skipped=$SKIPPED removed=$REMOVED"
 }
