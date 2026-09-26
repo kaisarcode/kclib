@@ -3,6 +3,10 @@ project(netl C)
 
 set(CMAKE_C_STANDARD 11)
 
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+endif()
+
 if(NOT DEFINED NETL_BUILD_VERSION)
     set(NETL_BUILD_VERSION 0)
 endif()
@@ -50,11 +54,16 @@ if(NOT NETL_TEST_EXTERNAL_ARTIFACTS)
 
     if(WIN32)
         target_link_libraries(netl ws2_32)
+    else()
+        target_link_libraries(netl Threads::Threads)
     endif()
 
     add_library(netl_static STATIC ${NETL_SOURCES})
     set_target_properties(netl_static PROPERTIES OUTPUT_NAME "netl")
     target_include_directories(netl_static PRIVATE src)
+    if(NOT WIN32)
+        target_link_libraries(netl_static Threads::Threads)
+    endif()
 
     add_library(netl_shared SHARED ${NETL_SOURCES})
     set_target_properties(netl_shared PROPERTIES OUTPUT_NAME "netl")
@@ -63,6 +72,8 @@ if(NOT NETL_TEST_EXTERNAL_ARTIFACTS)
 
     if(WIN32)
         target_link_libraries(netl_shared ws2_32)
+    else()
+        target_link_libraries(netl_shared Threads::Threads)
     endif()
 endif()
 
