@@ -1,6 +1,6 @@
 # dmn.c - Local Daemon Manager
 
-`dmn.c` creates named local daemons, opens them for interaction, exchanges binary data, exposes raw streams when needed, lists registrations, sends platform signals, and deletes daemons.
+`dmn.c` creates persistent named local daemons, keeps their processes resident, exchanges EOT-delimited requests and responses, lists registrations, sends platform signals, and deletes daemons.
 
 `dmn.c` manages persistent named local daemons and their command exchanges.
 
@@ -41,7 +41,6 @@ dmn worker --delete
 
 ```c
 typedef struct kc_dmn kc_dmn_t;
-typedef struct kc_dmn_stream kc_dmn_stream_t;
 
 typedef struct {
     const char *cmd;
@@ -51,18 +50,10 @@ typedef struct {
 
 typedef struct {
     const char *name;
-    const char *endpoint;
 } kc_dmn_entry_t;
-
-typedef void (*kc_dmn_handler_t)(
-    const void *data,
-    size_t size,
-    void *userdata
-);
 
 #define KC_DMN_OK          0
 #define KC_DMN_NOT_FOUND   1
-#define KC_DMN_EOF         2
 #define KC_DMN_ERROR      -1
 ```
 
@@ -86,13 +77,13 @@ int kc_dmn_delete(
 );
 ```
 
-`kc_dmn_create()` creates or replaces a named daemon. `options->cmd` is required. The default response terminator is byte `0x04`.
+`kc_dmn_create()` creates or replaces a named persistent daemon.
+`options->cmd` is required. The default EOT marker is byte `0x04`.
 
-`kc_dmn_open()` creates a local handle bound to a daemon name and uses the automatically resolved runtime directory.
+`kc_dmn_open()` creates a local handle bound to the daemon identity and its
+persistent configuration. Closing that handle does not stop the daemon.
 
-`kc_dmn_close()` releases only the local handle. It does not delete the daemon.
-
-`kc_dmn_delete()` stops and removes the named daemon from the active runtime directory.
+`kc_dmn_delete()` stops and removes the named daemon.
 
 ### Configuration
 
@@ -112,22 +103,15 @@ const void *kc_dmn_get_eot(
 );
 ```
 
-Each mutable public property has a matching getter.
+`set_cmd` replaces the command while preserving the daemon identity.
 
-`set_cmd` replaces the running daemon command.
+The EOT marker frames complete exchanges with the resident process.
+`set_eot` changes that marker and `get_eot` returns the configured value.
+Passing `NULL, 0` to `set_eot` restores the default byte `0x04`.
 
-`set_eot` changes the response-cycle marker. With no custom value, the default marker is byte `0x04`.
-
-### Data events and complete exchanges
+### Request and response
 
 ```c
-int kc_dmn_on(
-    kc_dmn_t *dmn,
-    const char *event,
-    kc_dmn_handler_t handler,
-    void *userdata
-);
-
 int kc_dmn_send_data(
     kc_dmn_t *dmn,
     const void *data,
@@ -137,45 +121,16 @@ int kc_dmn_send_data(
 );
 ```
 
-The supported event is `"data"`. Its handler receives response chunks directly as binary data.
+`kc_dmn_send_data()` performs one complete exchange against the already
+running process:
 
-`kc_dmn_send_data()` performs one complete high-level exchange:
+1. write the request bytes;
+2. append the configured EOT marker;
+3. read until the same EOT marker terminates the response;
+4. return the complete response without that marker.
 
-1. open a daemon stream;
-2. write the supplied data;
-3. append the configured EOT;
-4. read response bytes;
-5. emit `"data"` chunks;
-6. finish when the configured EOT is received, or when the platform stream ends;
-7. return the complete response without the EOT marker.
-
-### Raw stream
-
-```c
-int kc_dmn_stream(
-    kc_dmn_t *dmn,
-    kc_dmn_stream_t **out
-);
-
-int kc_dmn_stream_write(
-    kc_dmn_stream_t *stream,
-    const void *data,
-    size_t size
-);
-
-int kc_dmn_stream_read(
-    kc_dmn_stream_t *stream,
-    void *data,
-    size_t capacity,
-    size_t *out_size
-);
-
-void kc_dmn_stream_close(kc_dmn_stream_t *stream);
-```
-
-The raw stream API does not add, remove, or interpret EOT. It exposes the daemon byte stream directly.
-
-`kc_dmn_stream_read()` returns `KC_DMN_EOF` when the stream ends.
+The daemon process remains resident after the exchange, so repeated requests do
+not restart or reload the underlying process.
 
 ### Signals
 
@@ -186,7 +141,8 @@ int kc_dmn_send_signal(
 );
 ```
 
-`signal` sends a signal request to the managed daemon.
+`kc_dmn_send_signal()` sends one platform signal request to the managed
+process.
 
 ### Listing
 
@@ -199,6 +155,9 @@ int kc_dmn_list(
 void kc_dmn_free(void *ptr);
 ```
 
+Public list entries expose daemon identity only. Runtime socket or pipe
+endpoints are transport details and are not part of the library contract.
+
 ### Version
 
 ```c
@@ -208,7 +167,8 @@ uint64_t kc_dmn_version(void);
 ### Runtime Model
 
 Created daemons continue running independently of the process that created or
-opened them. Commands can be exchanged repeatedly until the daemon is removed.
+opened them. The underlying process remains resident between EOT-delimited
+request/response exchanges until the daemon is replaced or removed.
 
 ---
 
