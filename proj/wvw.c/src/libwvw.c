@@ -5375,6 +5375,10 @@ static gboolean kc_wvw_linux_quit_loop(gpointer data){
     return G_SOURCE_REMOVE;
 }
 
+/**
+ * Stop the process-wide GTK event service during process shutdown.
+ * @return None.
+ */
 static void kc_wvw_linux_shutdown(void){
     if (!kc_wvw_gtk_thread) return;
     if (kc_wvw_gtk_context && kc_wvw_gtk_loop) {
@@ -5384,6 +5388,10 @@ static void kc_wvw_linux_shutdown(void){
     kc_wvw_gtk_thread = NULL;
 }
 
+/**
+ * Initialize the process-wide GTK event service.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
 static int kc_wvw_linux_service(void){
     if (g_once_init_enter(&kc_wvw_gtk_once)) {
         g_mutex_init(&kc_wvw_gtk_mutex);
