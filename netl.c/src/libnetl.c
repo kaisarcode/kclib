@@ -1,6 +1,6 @@
 /**
  * libnetl.c - Incoming network listener.
- * Summary: Callback-driven TCP/UDP listener with transport mechanics kept private.
+ * Summary: Callback-driven TCP/UDP listener.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -31,7 +31,8 @@ typedef CRITICAL_SECTION kc_netl_mutex_t;
 typedef HANDLE kc_netl_thread_t;
 #define KC_NETL_FD_INVALID INVALID_SOCKET
 #define KC_NETL_CLOSE(fd) closesocket(fd)
-#define KC_NETL_POLL(fds, count, timeout) WSAPoll((fds), (ULONG)(count), (timeout))
+#define KC_NETL_POLL(fds, count, timeout) \
+    WSAPoll((fds), (ULONG)(count), (timeout))
 #else
 #include <errno.h>
 #include <fcntl.h>
@@ -47,7 +48,8 @@ typedef pthread_mutex_t kc_netl_mutex_t;
 typedef pthread_t kc_netl_thread_t;
 #define KC_NETL_FD_INVALID (-1)
 #define KC_NETL_CLOSE(fd) close(fd)
-#define KC_NETL_POLL(fds, count, timeout) poll((fds), (nfds_t)(count), (timeout))
+#define KC_NETL_POLL(fds, count, timeout) \
+    poll((fds), (nfds_t)(count), (timeout))
 #endif
 
 #ifdef MSG_NOSIGNAL
@@ -169,7 +171,9 @@ static int kc_netl_nonblocking(kc_netl_fd_t fd) {
 #else
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) return KC_NETL_ENET;
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 ? KC_NETL_OK : KC_NETL_ENET;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0
+        ? KC_NETL_OK
+        : KC_NETL_ENET;
 #endif
 }
 
@@ -180,7 +184,13 @@ static int kc_netl_nonblocking(kc_netl_fd_t fd) {
 static void kc_netl_disable_sigpipe(kc_netl_fd_t fd) {
 #if !defined(_WIN32) && defined(SO_NOSIGPIPE)
     int one = 1;
-    (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, (socklen_t)sizeof(one));
+    (void)setsockopt(
+        fd,
+        SOL_SOCKET,
+        SO_NOSIGPIPE,
+        &one,
+        (socklen_t)sizeof(one)
+    );
 #else
     (void)fd;
 #endif
@@ -313,12 +323,16 @@ static int kc_netl_bind(
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = options->protocol == KC_NETL_UDP ? SOCK_DGRAM : SOCK_STREAM;
+    hints.ai_socktype = options->protocol == KC_NETL_UDP
+        ? SOCK_DGRAM
+        : SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
     snprintf(service, sizeof(service), "%u", (unsigned)options->port);
     rc = getaddrinfo(
-        options->host != NULL && options->host[0] != '\0' ? options->host : NULL,
+        options->host != NULL && options->host[0] != '\0'
+            ? options->host
+            : NULL,
         service,
         &hints,
         &result
@@ -333,9 +347,21 @@ static int kc_netl_bind(
         fd = socket(item->ai_family, item->ai_socktype, item->ai_protocol);
         if (fd == KC_NETL_FD_INVALID) continue;
 #ifdef _WIN32
-        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, (int)sizeof(one));
+        (void)setsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            (const char *)&one,
+            (int)sizeof(one)
+        );
 #else
-        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, (socklen_t)sizeof(one));
+        (void)setsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_REUSEADDR,
+            &one,
+            (socklen_t)sizeof(one)
+        );
 #endif
         if (bind(fd, item->ai_addr, (socklen_t)item->ai_addrlen) != 0) {
             KC_NETL_CLOSE(fd);
@@ -826,16 +852,25 @@ static void kc_netl_worker_run(kc_netl_t *listener) {
         listener->pollfds[0].events = POLLIN;
 
         kc_netl_lock(listener);
-        if (listener->protocol == KC_NETL_UDP && listener->udp_out_head != NULL) {
+        if (
+            listener->protocol == KC_NETL_UDP &&
+            listener->udp_out_head != NULL
+        ) {
             listener->pollfds[0].events |= POLLOUT;
         }
 
         index = 1U;
-        for (peer = listener->peers; peer != NULL && index <= count; peer = peer->next) {
+        for (
+            peer = listener->peers;
+            peer != NULL && index <= count;
+            peer = peer->next
+        ) {
             if (peer->closed || peer->taken) continue;
             listener->pollfds[index].fd = peer->fd;
             listener->pollfds[index].events = peer->closing ? 0 : POLLIN;
-            if (peer->out_head != NULL) listener->pollfds[index].events |= POLLOUT;
+            if (peer->out_head != NULL) {
+                listener->pollfds[index].events |= POLLOUT;
+            }
             listener->pollmap[index] = peer;
             index++;
         }
@@ -946,7 +981,14 @@ static int kc_netl_worker_start(kc_netl_t *listener) {
     );
     if (listener->worker == NULL) return KC_NETL_ENET;
 #else
-    if (pthread_create(&listener->worker, NULL, kc_netl_worker_entry, listener) != 0) {
+    if (
+        pthread_create(
+            &listener->worker,
+            NULL,
+            kc_netl_worker_entry,
+            listener
+        ) != 0
+    ) {
         return KC_NETL_ENET;
     }
 #endif
@@ -1009,7 +1051,7 @@ static void kc_netl_destroy(kc_netl_t *listener) {
 }
 
 /**
- * Open internal.
+ * Open listener state.
  * @return Function result.
  */
 static int kc_netl_open_internal(
