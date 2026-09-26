@@ -70,7 +70,7 @@ link_projects() {
 }
 
 # Removes managed symlinks whose project is no longer linked.
-# @param proj_dir Repository root.
+# @param proj_dir Projects directory.
 # @param bin_dir Destination directory.
 # @return 0 on success.
 cleanup_stale() {
