@@ -18,6 +18,11 @@ int kc_wvw_cli_wait(kc_wvw_t *wvw);
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Print command usage information.
+ * @param name Program executable name.
+ * @return None.
+ */
 static void kc_wvw_help(const char *name) {
     printf("Usage: %s [options]\n", name);
     printf("\n");
@@ -38,6 +43,12 @@ static void kc_wvw_help(const char *name) {
     printf("    -v, --version       Show build version\n");
 }
 
+/**
+ * Parse one decimal integer option.
+ * @param text Decimal input text.
+ * @param out_value Destination integer.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on invalid input.
+ */
 static int kc_wvw_parse_int(const char *text, int *out_value) {
     char *end;
     long value;
@@ -51,12 +62,24 @@ static int kc_wvw_parse_int(const char *text, int *out_value) {
     return KC_WVW_OK;
 }
 
+/**
+ * Load one integer environment variable when valid.
+ * @param name Environment variable name.
+ * @param value Destination integer.
+ * @return None.
+ */
 static void kc_wvw_env_int(const char *name, int *value) {
     const char *text = getenv(name);
     int parsed;
     if (text && kc_wvw_parse_int(text, &parsed) == KC_WVW_OK) *value = parsed;
 }
 
+/**
+ * Execute the command line interface through the public C API.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process status code.
+ */
 int main(int argc, char **argv) {
     kc_wvw_t *wvw = NULL;
     kc_wvw_options_t options = {0};
