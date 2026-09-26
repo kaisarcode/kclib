@@ -57,7 +57,7 @@ compute_fingerprint() {
 }
 
 # Checks whether a project is excluded from distribution.
-# @param project_name Repository name.
+# @param project_name Project name.
 # @return 0 if excluded, 1 otherwise.
 is_excluded() {
     local project_name="$1"
@@ -144,13 +144,13 @@ collect_artifacts() {
 # @return 0 on success.
 generate_manifest() {
     local dist_dir="$1"
-    local manifest_file first_repo first_binary
+    local manifest_file first_project first_binary
     local project_dir project_name project_sha_file
     local binary_path filename rel_path arch platform bin_name
     local sha256 filesize
 
     manifest_file="$dist_dir/manifest.json"
-    first_repo=true
+    first_project=true
     echo "{" > "$manifest_file"
     echo "  \"updated_at\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"," >> "$manifest_file"
     echo "  \"timestamp\": $(date -u +%s)," >> "$manifest_file"
@@ -162,8 +162,8 @@ generate_manifest() {
         project_sha_file="$project_dir/SHA256SUMS"
         : > "$project_sha_file"
 
-        if [ "$first_repo" = true ]; then
-            first_repo=false
+        if [ "$first_project" = true ]; then
+            first_project=false
         else
             echo "," >> "$manifest_file"
         fi
