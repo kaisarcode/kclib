@@ -15,6 +15,8 @@ WINE_X86_64_CXX ?= x86_64-w64-mingw32-g++
 WASM_EMCMAKE ?= emcmake
 WASM_EMCC    ?= emcc
 WASM_NODE    ?= node
+MIPSEL_CC ?= $(shell if command -v mipsel-linux-gnu-gcc-13 >/dev/null 2>&1; then printf '%s' mipsel-linux-gnu-gcc-13; else printf '%s' mipsel-linux-gnu-gcc; fi)
+MIPSEL_CXX ?= $(shell if command -v mipsel-linux-gnu-g++-13 >/dev/null 2>&1; then printf '%s' mipsel-linux-gnu-g++-13; else printf '%s' mipsel-linux-gnu-g++; fi)
 XDG_DATA_HOME ?= $(HOME)/.local/share
 OSXCROSS_ROOT ?= $(XDG_DATA_HOME)/osxcross/target
 MACOSX_DEPLOYMENT_TARGET ?= 11.0
@@ -208,6 +210,10 @@ all: \
 
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
+	@cache=$(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt && \
+	if [ -f "$cache" ] && { ! grep -Fq "CMAKE_C_COMPILER:FILEPATH=$(command -v $(3) 2>/dev/null || printf '%s' $(3))" "$cache" || ! grep -Fq "CMAKE_CXX_COMPILER:FILEPATH=$(command -v $(4) 2>/dev/null || printf '%s' $(4))" "$cache"; }; then \
+		rm -f "$cache" $(BUILD_DIR)/$(subst /,-,$(1))-linux/build.ninja && rm -rf $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeFiles; \
+	fi
 	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 			-DCMAKE_BUILD_TYPE=Release \
@@ -251,7 +257,7 @@ mips/linux:
 	$(call linux_target,mips,mips,mips-linux-gnu-gcc,mips-linux-gnu-g++)
 
 mipsel/linux:
-	$(call linux_target,mipsel,mipsel,mipsel-linux-gnu-gcc,mipsel-linux-gnu-g++,CMAKE_BUILD_PARALLEL_LEVEL=1)
+	$(call linux_target,mipsel,mipsel,$(MIPSEL_CC),$(MIPSEL_CXX),CMAKE_BUILD_PARALLEL_LEVEL=1)
 
 mips64el/linux:
 	$(call linux_target,mips64el,mips64el,mips64el-linux-gnuabi64-gcc,mips64el-linux-gnuabi64-g++)
