@@ -13,13 +13,13 @@ on macOS.
 Open a URL with the default window settings:
 
 ```bash
-./bin/x86_64/linux/wvw --url https://example.com
+wvw --url https://example.com
 ```
 
 Set the title, size, and position:
 
 ```bash
-./bin/x86_64/linux/wvw \
+wvw \
     --url https://example.com \
     --title Example \
     --width 1280 \
