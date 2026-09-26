@@ -111,6 +111,17 @@ int kc_dmn_set_eot(
 );
 
 /**
+ * Return the configured daemon EOT marker.
+ * @param dmn Daemon handle.
+ * @param out_size Optional output for the EOT byte count.
+ * @return Borrowed EOT bytes, or NULL on invalid input.
+ */
+const void *kc_dmn_get_eot(
+    const kc_dmn_t *dmn,
+    size_t *out_size
+);
+
+/**
  * Perform one complete daemon data exchange.
  * The returned response excludes the configured EOT marker.
  * @param dmn Daemon handle.
