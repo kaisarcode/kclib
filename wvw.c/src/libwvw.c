@@ -2968,6 +2968,7 @@ static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bri
 static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge);
 static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
 static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
+static void kc_wvw_request_close(kc_wvw_t *ctx);
 
 /**
  * Sets an error message on the context.
@@ -4725,6 +4726,12 @@ void kc_wvw_close(kc_wvw_t *ctx){if(!ctx)return;if(ctx->ns_webview){@autorelease
 
 
 #else
+static void kc_wvw_request_close(kc_wvw_t *ctx) {
+    if (ctx && ctx->window) {
+        gtk_widget_destroy(ctx->window);
+    }
+}
+
 /**
  * Deliver one JSON payload into the WebView bridge runtime.
  * @param ctx Window context.
