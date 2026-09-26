@@ -89,15 +89,9 @@ The public API is:
 - `kc_tpl_close()` closes the template instance.
 - `kc_tpl_version()` returns the library build version.
 
-`kc_tpl_open()` uses `"."` as the include root when options are `NULL` or
-when `options->root` is `NULL`. A non-NULL `root` is explicit and must be a
-non-empty string. The source is borrowed only for the duration of
-`kc_tpl_open()`; the instance owns its copy.
+`kc_tpl_open()` uses `"."` as the include root unless another non-empty root is configured.
 
-Variables are borrowed only for the duration of `kc_tpl_render()`. Each render
-creates a fresh root scope, so values from one render do not persist into the
-next. The returned output is caller-owned and must be released with
-`kc_tpl_free()`.
+Each render creates a fresh root scope, so values from one render do not persist into the next.
 
 ### Template Syntax
 
