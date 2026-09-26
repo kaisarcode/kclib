@@ -1,6 +1,6 @@
 /**
  * libnetl.c - Incoming network listener.
- * Summary: Multiplexed TCP connections and UDP datagrams.
+ * Summary: Callback-driven TCP/UDP listener with transport mechanics kept private.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -24,8 +24,11 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 typedef SOCKET kc_netl_fd_t;
 typedef WSAPOLLFD kc_netl_pollfd_t;
+typedef CRITICAL_SECTION kc_netl_mutex_t;
+typedef HANDLE kc_netl_thread_t;
 #define KC_NETL_FD_INVALID INVALID_SOCKET
 #define KC_NETL_CLOSE(fd) closesocket(fd)
 #define KC_NETL_POLL(fds, count, timeout) WSAPoll((fds), (ULONG)(count), (timeout))
@@ -34,11 +37,14 @@ typedef WSAPOLLFD kc_netl_pollfd_t;
 #include <fcntl.h>
 #include <netdb.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 typedef int kc_netl_fd_t;
 typedef struct pollfd kc_netl_pollfd_t;
+typedef pthread_mutex_t kc_netl_mutex_t;
+typedef pthread_t kc_netl_thread_t;
 #define KC_NETL_FD_INVALID (-1)
 #define KC_NETL_CLOSE(fd) close(fd)
 #define KC_NETL_POLL(fds, count, timeout) poll((fds), (nfds_t)(count), (timeout))
@@ -53,15 +59,31 @@ typedef struct pollfd kc_netl_pollfd_t;
 #define KC_NETL_BUFFER_SIZE 65536U
 #define KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS 128
 #define KC_NETL_HOST_SIZE 128
+#define KC_NETL_POLL_TIMEOUT_MS 25
 
-struct kc_netl_connection {
+typedef struct kc_netl_output {
+    unsigned char *data;
+    size_t size;
+    size_t offset;
+    struct sockaddr_storage address;
+    socklen_t address_size;
+    struct kc_netl_output *next;
+} kc_netl_output_t;
+
+struct kc_netl_peer {
     kc_netl_t *listener;
+    int protocol;
     kc_netl_fd_t fd;
     int closed;
-    int want_write;
+    int closing;
+    int taken;
     char host[KC_NETL_HOST_SIZE];
     unsigned short port;
-    struct kc_netl_connection *next;
+    struct sockaddr_storage address;
+    socklen_t address_size;
+    kc_netl_output_t *out_head;
+    kc_netl_output_t *out_tail;
+    struct kc_netl_peer *next;
 };
 
 struct kc_netl {
@@ -70,47 +92,48 @@ struct kc_netl {
     int platform_ready;
     int max_pending_connections;
     unsigned short port;
-    kc_netl_connection_t *connections;
-    kc_netl_connection_t *retired;
+
+    kc_netl_handler_t handler;
+    kc_netl_close_handler_t close_handler;
+    kc_netl_error_handler_t error_handler;
+    void *userdata;
+
+    kc_netl_peer_t *peers;
+    kc_netl_output_t *udp_out_head;
+    kc_netl_output_t *udp_out_tail;
+
     kc_netl_pollfd_t *pollfds;
-    kc_netl_connection_t **pollmap;
+    kc_netl_peer_t **pollmap;
     size_t poll_capacity;
-    size_t poll_offset;
-    int prefer_accept;
-    unsigned char buffer[KC_NETL_BUFFER_SIZE];
-    char peer_host[KC_NETL_HOST_SIZE];
+
+    kc_netl_mutex_t mutex;
+    int mutex_ready;
+    kc_netl_thread_t worker;
+    int worker_started;
+    int stop;
+    int failed;
+
+#ifdef KC_NETL_CLI
+    void (*cli_accept_handler)(kc_netl_peer_t *peer, void *userdata);
+    void *cli_accept_userdata;
+#endif
 };
 
-/**
- * Initialize the platform socket layer.
- * @return KC_NETL_OK on success, otherwise KC_NETL_ENET.
- */
 static int kc_netl_platform_open(void) {
 #ifdef _WIN32
     WSADATA data;
-
-    return WSAStartup(MAKEWORD(2, 2), &data) == 0
-        ? KC_NETL_OK
-        : KC_NETL_ENET;
+    return WSAStartup(MAKEWORD(2, 2), &data) == 0 ? KC_NETL_OK : KC_NETL_ENET;
 #else
     return KC_NETL_OK;
 #endif
 }
 
-/**
- * Release one platform socket-layer reference.
- * @return None.
- */
 static void kc_netl_platform_close(void) {
 #ifdef _WIN32
     WSACleanup();
 #endif
 }
 
-/**
- * Return whether the latest socket error means try again.
- * @return Nonzero for a would-block condition.
- */
 static int kc_netl_would_block(void) {
 #ifdef _WIN32
     return WSAGetLastError() == WSAEWOULDBLOCK;
@@ -119,58 +142,59 @@ static int kc_netl_would_block(void) {
 #endif
 }
 
-/**
- * Put one socket into non-blocking mode.
- * @param fd Socket descriptor.
- * @return KC_NETL_OK on success, otherwise KC_NETL_ENET.
- */
 static int kc_netl_nonblocking(kc_netl_fd_t fd) {
 #ifdef _WIN32
     u_long mode = 1UL;
-
-    return ioctlsocket(fd, FIONBIO, &mode) == 0
-        ? KC_NETL_OK
-        : KC_NETL_ENET;
+    return ioctlsocket(fd, FIONBIO, &mode) == 0 ? KC_NETL_OK : KC_NETL_ENET;
 #else
     int flags = fcntl(fd, F_GETFL, 0);
-
     if (flags < 0) return KC_NETL_ENET;
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0
-        ? KC_NETL_OK
-        : KC_NETL_ENET;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 ? KC_NETL_OK : KC_NETL_ENET;
 #endif
 }
 
-/**
- * Disable SIGPIPE for socket writes where the platform exposes the option.
- * @param fd Socket descriptor.
- * @return None.
- */
 static void kc_netl_disable_sigpipe(kc_netl_fd_t fd) {
 #if !defined(_WIN32) && defined(SO_NOSIGPIPE)
     int one = 1;
-
-    (void)setsockopt(
-        fd,
-        SOL_SOCKET,
-        SO_NOSIGPIPE,
-        &one,
-        (socklen_t)sizeof(one)
-    );
+    (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, (socklen_t)sizeof(one));
 #else
     (void)fd;
 #endif
 }
 
-/**
- * Copy one numeric peer address into host and port outputs.
- * @param addr Socket address.
- * @param addr_len Socket address size.
- * @param host Destination host buffer.
- * @param host_cap Host buffer capacity.
- * @param port Destination port.
- * @return KC_NETL_OK on success, otherwise KC_NETL_ENET.
- */
+static int kc_netl_mutex_open(kc_netl_mutex_t *mutex) {
+#ifdef _WIN32
+    InitializeCriticalSection(mutex);
+    return 0;
+#else
+    return pthread_mutex_init(mutex, NULL);
+#endif
+}
+
+static void kc_netl_mutex_close(kc_netl_mutex_t *mutex) {
+#ifdef _WIN32
+    DeleteCriticalSection(mutex);
+#else
+    (void)pthread_mutex_destroy(mutex);
+#endif
+}
+
+static void kc_netl_lock(kc_netl_t *listener) {
+#ifdef _WIN32
+    EnterCriticalSection(&listener->mutex);
+#else
+    (void)pthread_mutex_lock(&listener->mutex);
+#endif
+}
+
+static void kc_netl_unlock(kc_netl_t *listener) {
+#ifdef _WIN32
+    LeaveCriticalSection(&listener->mutex);
+#else
+    (void)pthread_mutex_unlock(&listener->mutex);
+#endif
+}
+
 static int kc_netl_peer_text(
     const struct sockaddr *addr,
     socklen_t addr_len,
@@ -179,9 +203,7 @@ static int kc_netl_peer_text(
     unsigned short *port
 ) {
     char service[16];
-    int rc;
-
-    rc = getnameinfo(
+    int rc = getnameinfo(
         addr,
         addr_len,
         host,
@@ -190,72 +212,40 @@ static int kc_netl_peer_text(
         (socklen_t)sizeof(service),
         NI_NUMERICHOST | NI_NUMERICSERV
     );
+
     if (rc != 0) return KC_NETL_ENET;
     *port = (unsigned short)strtoul(service, NULL, 10);
     return KC_NETL_OK;
 }
 
-/**
- * Free a connection retained for one CLOSE event lifetime.
- * @param listener Listener handle.
- * @return None.
- */
-static void kc_netl_free_retired(kc_netl_t *listener) {
-    kc_netl_connection_t *connection;
-
-    while (listener->retired != NULL) {
-        connection = listener->retired;
-        listener->retired = connection->next;
-        free(connection);
+static void kc_netl_output_free(kc_netl_output_t *output) {
+    while (output != NULL) {
+        kc_netl_output_t *next = output->next;
+        free(output->data);
+        free(output);
+        output = next;
     }
 }
 
-/**
- * Unlink one active connection from its listener.
- * @param connection Connection handle.
- * @return None.
- */
-static void kc_netl_unlink(kc_netl_connection_t *connection) {
-    kc_netl_connection_t **cursor;
+static kc_netl_output_t *kc_netl_output_new(
+    const void *data,
+    size_t size
+) {
+    kc_netl_output_t *output = (kc_netl_output_t *)calloc(1, sizeof(*output));
 
-    if (connection == NULL || connection->listener == NULL) return;
-    cursor = &connection->listener->connections;
-    while (*cursor != NULL) {
-        if (*cursor == connection) {
-            *cursor = connection->next;
-            connection->next = NULL;
-            return;
+    if (output == NULL) return NULL;
+    if (size != 0U) {
+        output->data = (unsigned char *)malloc(size);
+        if (output->data == NULL) {
+            free(output);
+            return NULL;
         }
-        cursor = &(*cursor)->next;
+        memcpy(output->data, data, size);
     }
+    output->size = size;
+    return output;
 }
 
-/**
- * Close one connection descriptor and unlink it.
- * @param connection Connection handle.
- * @return None.
- */
-static void kc_netl_connection_shutdown(kc_netl_connection_t *connection) {
-    if (connection == NULL || connection->closed) return;
-    connection->closed = 1;
-    if (connection->fd != KC_NETL_FD_INVALID) {
-        KC_NETL_CLOSE(connection->fd);
-        connection->fd = KC_NETL_FD_INVALID;
-    }
-    kc_netl_unlink(connection);
-    if (connection->listener != NULL) {
-        connection->next = connection->listener->retired;
-        connection->listener->retired = connection;
-    }
-}
-
-/**
- * Open and bind one non-blocking listener socket.
- * @param options Listener options.
- * @param out_fd Receives the socket.
- * @param out_port Receives the bound port.
- * @return KC_NETL_OK on success, otherwise a negative status.
- */
 static int kc_netl_bind(
     const kc_netl_options_t *options,
     kc_netl_fd_t *out_fd,
@@ -271,16 +261,12 @@ static int kc_netl_bind(
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = options->protocol == KC_NETL_UDP
-        ? SOCK_DGRAM
-        : SOCK_STREAM;
+    hints.ai_socktype = options->protocol == KC_NETL_UDP ? SOCK_DGRAM : SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
     snprintf(service, sizeof(service), "%u", (unsigned)options->port);
     rc = getaddrinfo(
-        options->host != NULL && options->host[0] != '\0'
-            ? options->host
-            : NULL,
+        options->host != NULL && options->host[0] != '\0' ? options->host : NULL,
         service,
         &hints,
         &result
@@ -295,21 +281,9 @@ static int kc_netl_bind(
         fd = socket(item->ai_family, item->ai_socktype, item->ai_protocol);
         if (fd == KC_NETL_FD_INVALID) continue;
 #ifdef _WIN32
-        (void)setsockopt(
-            fd,
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            (const char *)&one,
-            (int)sizeof(one)
-        );
+        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, (int)sizeof(one));
 #else
-        (void)setsockopt(
-            fd,
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            &one,
-            (socklen_t)sizeof(one)
-        );
+        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, (socklen_t)sizeof(one));
 #endif
         if (bind(fd, item->ai_addr, (socklen_t)item->ai_addrlen) != 0) {
             KC_NETL_CLOSE(fd);
@@ -318,9 +292,12 @@ static int kc_netl_bind(
         }
         if (
             options->protocol == KC_NETL_TCP &&
-            listen(fd, options->max_pending_connections != NULL
-                ? *options->max_pending_connections
-                : KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS) != 0
+            listen(
+                fd,
+                options->max_pending_connections != NULL
+                    ? *options->max_pending_connections
+                    : KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS
+            ) != 0
         ) {
             KC_NETL_CLOSE(fd);
             fd = KC_NETL_FD_INVALID;
@@ -333,11 +310,7 @@ static int kc_netl_bind(
             continue;
         }
         if (
-            getsockname(
-                fd,
-                (struct sockaddr *)&bound,
-                &bound_len
-            ) != 0 ||
+            getsockname(fd, (struct sockaddr *)&bound, &bound_len) != 0 ||
             kc_netl_peer_text(
                 (const struct sockaddr *)&bound,
                 bound_len,
@@ -361,91 +334,23 @@ static int kc_netl_bind(
     return KC_NETL_ENET;
 }
 
-/**
- * Open one incoming TCP or UDP listener.
- * @param out Receives the listener handle.
- * @param options Listener options.
- * @return KC_NETL_OK on success, otherwise a negative status.
- */
-int kc_netl_open(
-    kc_netl_t **out,
-    const kc_netl_options_t *options
-) {
-    kc_netl_t *listener;
-    int rc;
-
-    if (out == NULL) return KC_NETL_EINVAL;
-    *out = NULL;
-    if (
-        options == NULL ||
-        (
-            options->protocol != KC_NETL_TCP &&
-            options->protocol != KC_NETL_UDP
-        ) ||
-        (options->max_pending_connections != NULL && *options->max_pending_connections < 0)
-    ) {
-        return KC_NETL_EINVAL;
-    }
-
-    listener = (kc_netl_t *)calloc(1, sizeof(*listener));
-    if (listener == NULL) return KC_NETL_ENOMEM;
-    listener->fd = KC_NETL_FD_INVALID;
-    listener->protocol = options->protocol;
-    listener->max_pending_connections = options->max_pending_connections != NULL
-        ? *options->max_pending_connections
-        : KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS;
-
-    rc = kc_netl_platform_open();
-    if (rc != KC_NETL_OK) {
-        free(listener);
-        return rc;
-    }
-    listener->platform_ready = 1;
-
-    rc = kc_netl_bind(options, &listener->fd, &listener->port);
-    if (rc != KC_NETL_OK) {
-        kc_netl_close(listener);
-        return rc;
-    }
-
-    *out = listener;
-    return KC_NETL_OK;
-}
-
-/**
- * Count active TCP connections.
- * @param listener Listener handle.
- * @return Number of active connections.
- */
-static size_t kc_netl_connection_count(const kc_netl_t *listener) {
-    const kc_netl_connection_t *connection;
+static size_t kc_netl_peer_count(const kc_netl_t *listener) {
+    const kc_netl_peer_t *peer;
     size_t count = 0U;
 
-    for (
-        connection = listener->connections;
-        connection != NULL;
-        connection = connection->next
-    ) {
-        count++;
+    for (peer = listener->peers; peer != NULL; peer = peer->next) {
+        if (!peer->closed && !peer->taken) count++;
     }
     return count;
 }
 
-/**
- * Ensure reusable poll storage can describe every active connection.
- * @param listener Listener handle.
- * @param count Required poll entry count.
- * @return KC_NETL_OK on success, otherwise KC_NETL_ENOMEM.
- */
 static int kc_netl_poll_reserve(kc_netl_t *listener, size_t count) {
     kc_netl_pollfd_t *new_fds;
-    kc_netl_connection_t **new_map;
+    kc_netl_peer_t **new_map;
     size_t capacity;
 
     if (count <= listener->poll_capacity) return KC_NETL_OK;
-    capacity = listener->poll_capacity != 0U
-        ? listener->poll_capacity
-        : 16U;
+    capacity = listener->poll_capacity != 0U ? listener->poll_capacity : 16U;
     while (capacity < count) {
         if (capacity > ((size_t)-1) / 2U) return KC_NETL_ENOMEM;
         capacity *= 2U;
@@ -458,7 +363,7 @@ static int kc_netl_poll_reserve(kc_netl_t *listener, size_t count) {
     if (new_fds == NULL) return KC_NETL_ENOMEM;
     listener->pollfds = new_fds;
 
-    new_map = (kc_netl_connection_t **)realloc(
+    new_map = (kc_netl_peer_t **)realloc(
         listener->pollmap,
         capacity * sizeof(*new_map)
     );
@@ -468,491 +373,732 @@ static int kc_netl_poll_reserve(kc_netl_t *listener, size_t count) {
     return KC_NETL_OK;
 }
 
-/**
- * Return one accepted TCP connection event.
- * @param listener Listener handle.
- * @param event Event destination.
- * @return KC_NETL_OK, KC_NETL_EAGAIN, or KC_NETL_ENET.
- */
-static int kc_netl_accept(
+static void kc_netl_peer_detach(
     kc_netl_t *listener,
-    kc_netl_event_t *event
+    kc_netl_peer_t *peer
 ) {
-    struct sockaddr_storage peer;
-    socklen_t peer_len = (socklen_t)sizeof(peer);
-    kc_netl_connection_t *connection;
+    kc_netl_peer_t **cursor = &listener->peers;
+
+    while (*cursor != NULL) {
+        if (*cursor == peer) {
+            *cursor = peer->next;
+            peer->next = NULL;
+            return;
+        }
+        cursor = &(*cursor)->next;
+    }
+}
+
+static void kc_netl_peer_finish(
+    kc_netl_t *listener,
+    kc_netl_peer_t *peer,
+    int notify
+) {
+    kc_netl_close_handler_t handler = NULL;
+    void *userdata = NULL;
+
+    kc_netl_lock(listener);
+    if (!peer->closed) {
+        peer->closed = 1;
+        if (peer->fd != KC_NETL_FD_INVALID) {
+            KC_NETL_CLOSE(peer->fd);
+            peer->fd = KC_NETL_FD_INVALID;
+        }
+        kc_netl_peer_detach(listener, peer);
+        handler = notify ? listener->close_handler : NULL;
+        userdata = listener->userdata;
+    }
+    kc_netl_unlock(listener);
+
+    if (handler != NULL) handler(peer, userdata);
+    kc_netl_output_free(peer->out_head);
+    free(peer);
+}
+
+static void kc_netl_fail(kc_netl_t *listener, int status) {
+    kc_netl_error_handler_t handler = NULL;
+    void *userdata = NULL;
+
+    kc_netl_lock(listener);
+    if (!listener->failed) {
+        listener->failed = 1;
+        listener->stop = 1;
+        handler = listener->error_handler;
+        userdata = listener->userdata;
+    }
+    kc_netl_unlock(listener);
+
+    if (handler != NULL) handler(status, userdata);
+}
+
+static int kc_netl_accept_peer(kc_netl_t *listener) {
+    struct sockaddr_storage address;
+    socklen_t address_size = (socklen_t)sizeof(address);
+    kc_netl_peer_t *peer;
     kc_netl_fd_t fd;
 
-    fd = accept(
-        listener->fd,
-        (struct sockaddr *)&peer,
-        &peer_len
-    );
+    fd = accept(listener->fd, (struct sockaddr *)&address, &address_size);
     if (fd == KC_NETL_FD_INVALID) {
-        return kc_netl_would_block() ? KC_NETL_EAGAIN : KC_NETL_ENET;
+        return kc_netl_would_block() ? KC_NETL_OK : KC_NETL_ENET;
     }
+
     kc_netl_disable_sigpipe(fd);
     if (kc_netl_nonblocking(fd) != KC_NETL_OK) {
         KC_NETL_CLOSE(fd);
         return KC_NETL_ENET;
     }
 
-    connection = (kc_netl_connection_t *)calloc(1, sizeof(*connection));
-    if (connection == NULL) {
+    peer = (kc_netl_peer_t *)calloc(1, sizeof(*peer));
+    if (peer == NULL) {
         KC_NETL_CLOSE(fd);
         return KC_NETL_ENOMEM;
     }
 
-    connection->listener = listener;
-    connection->fd = fd;
-    connection->next = listener->connections;
-    listener->connections = connection;
+    peer->listener = listener;
+    peer->protocol = KC_NETL_TCP;
+    peer->fd = fd;
+    peer->address = address;
+    peer->address_size = address_size;
     if (
         kc_netl_peer_text(
-            (const struct sockaddr *)&peer,
-            peer_len,
-            connection->host,
-            sizeof(connection->host),
-            &connection->port
+            (const struct sockaddr *)&address,
+            address_size,
+            peer->host,
+            sizeof(peer->host),
+            &peer->port
         ) != KC_NETL_OK
     ) {
-        kc_netl_unlink(connection);
-        KC_NETL_CLOSE(connection->fd);
-        free(connection);
+        KC_NETL_CLOSE(fd);
+        free(peer);
         return KC_NETL_ENET;
     }
 
-    event->type = KC_NETL_EVENT_CONNECTION;
-    event->connection = connection;
-    event->host = connection->host;
-    event->port = connection->port;
+    kc_netl_lock(listener);
+    peer->next = listener->peers;
+    listener->peers = peer;
+    kc_netl_unlock(listener);
+
+#ifdef KC_NETL_CLI
+    if (listener->cli_accept_handler != NULL) {
+        listener->cli_accept_handler(peer, listener->cli_accept_userdata);
+    }
+#endif
+
     return KC_NETL_OK;
 }
 
-/**
- * Return one UDP datagram event.
- * @param listener Listener handle.
- * @param event Event destination.
- * @return KC_NETL_OK, KC_NETL_EAGAIN, or KC_NETL_ENET.
- */
-static int kc_netl_receive_datagram(
+static void kc_netl_receive_tcp(
     kc_netl_t *listener,
-    kc_netl_event_t *event
+    kc_netl_peer_t *peer
 ) {
-    struct sockaddr_storage peer;
-    socklen_t peer_len = (socklen_t)sizeof(peer);
+    unsigned char buffer[KC_NETL_BUFFER_SIZE];
+    int received;
+
+    received = (int)recv(
+        peer->fd,
+        (char *)buffer,
+        (int)sizeof(buffer),
+        0
+    );
+    if (received > 0) {
+        kc_netl_input_t input;
+
+        memset(&input, 0, sizeof(input));
+        input.peer = peer;
+        input.protocol = KC_NETL_TCP;
+        input.host = peer->host;
+        input.port = peer->port;
+        input.data = buffer;
+        input.data_size = (size_t)received;
+        listener->handler(&input, listener->userdata);
+        return;
+    }
+
+    if (received < 0 && kc_netl_would_block()) return;
+    kc_netl_peer_finish(listener, peer, 1);
+}
+
+static void kc_netl_receive_udp(kc_netl_t *listener) {
+    unsigned char buffer[KC_NETL_BUFFER_SIZE];
+    struct sockaddr_storage address;
+    socklen_t address_size = (socklen_t)sizeof(address);
+    kc_netl_peer_t peer;
+    kc_netl_input_t input;
     int received;
 
     received = (int)recvfrom(
         listener->fd,
-        (char *)listener->buffer,
-        (int)sizeof(listener->buffer),
+        (char *)buffer,
+        (int)sizeof(buffer),
         0,
-        (struct sockaddr *)&peer,
-        &peer_len
+        (struct sockaddr *)&address,
+        &address_size
     );
     if (received < 0) {
-        return kc_netl_would_block() ? KC_NETL_EAGAIN : KC_NETL_ENET;
+        if (!kc_netl_would_block()) kc_netl_fail(listener, KC_NETL_ENET);
+        return;
     }
+
+    memset(&peer, 0, sizeof(peer));
+    peer.listener = listener;
+    peer.protocol = KC_NETL_UDP;
+    peer.fd = listener->fd;
+    peer.address = address;
+    peer.address_size = address_size;
     if (
         kc_netl_peer_text(
-            (const struct sockaddr *)&peer,
-            peer_len,
-            listener->peer_host,
-            sizeof(listener->peer_host),
-            &event->port
+            (const struct sockaddr *)&address,
+            address_size,
+            peer.host,
+            sizeof(peer.host),
+            &peer.port
         ) != KC_NETL_OK
     ) {
-        return KC_NETL_ENET;
+        kc_netl_fail(listener, KC_NETL_ENET);
+        return;
     }
 
-    event->type = KC_NETL_EVENT_DATAGRAM;
-    event->data = listener->buffer;
-    event->data_size = (size_t)received;
-    event->host = listener->peer_host;
-    return KC_NETL_OK;
+    memset(&input, 0, sizeof(input));
+    input.peer = &peer;
+    input.protocol = KC_NETL_UDP;
+    input.host = peer.host;
+    input.port = peer.port;
+    input.data = buffer;
+    input.data_size = (size_t)received;
+    listener->handler(&input, listener->userdata);
+    peer.closed = 1;
 }
 
-/**
- * Return one data or close event for a ready TCP connection.
- * @param listener Listener handle.
- * @param connection Ready connection.
- * @param event Event destination.
- * @return KC_NETL_OK, KC_NETL_EAGAIN, or KC_NETL_ENET.
- */
-static int kc_netl_receive_connection(
+static void kc_netl_flush_tcp(
     kc_netl_t *listener,
-    kc_netl_connection_t *connection,
-    kc_netl_event_t *event
+    kc_netl_peer_t *peer
 ) {
-    int received;
+    int failed = 0;
 
-    received = (int)recv(
-        connection->fd,
-        (char *)listener->buffer,
-        (int)sizeof(listener->buffer),
-        0
-    );
-    if (received > 0) {
-        event->type = KC_NETL_EVENT_DATA;
-        event->connection = connection;
-        event->data = listener->buffer;
-        event->data_size = (size_t)received;
-        event->host = connection->host;
-        event->port = connection->port;
-        return KC_NETL_OK;
-    }
-    if (received < 0 && kc_netl_would_block()) {
-        return KC_NETL_EAGAIN;
-    }
-    if (received < 0) {
-        kc_netl_connection_shutdown(connection);
-        event->type = KC_NETL_EVENT_CLOSE;
-        event->connection = connection;
-        event->host = connection->host;
-        event->port = connection->port;
-        return KC_NETL_OK;
-    }
+    kc_netl_lock(listener);
+    while (peer->out_head != NULL && !peer->closed && !peer->closing) {
+        kc_netl_output_t *output = peer->out_head;
+        size_t remain = output->size - output->offset;
+        int amount = remain > (size_t)INT_MAX ? INT_MAX : (int)remain;
+        int sent;
 
-    kc_netl_connection_shutdown(connection);
-    event->type = KC_NETL_EVENT_CLOSE;
-    event->connection = connection;
-    event->host = connection->host;
-    event->port = connection->port;
-    return KC_NETL_OK;
+        if (amount == 0) {
+            peer->out_head = output->next;
+            if (peer->out_head == NULL) peer->out_tail = NULL;
+            free(output->data);
+            free(output);
+            continue;
+        }
+
+        sent = (int)send(
+            peer->fd,
+            (const char *)output->data + output->offset,
+            amount,
+            KC_NETL_SEND_FLAGS
+        );
+        if (sent > 0) {
+            output->offset += (size_t)sent;
+            continue;
+        }
+        if (sent < 0 && kc_netl_would_block()) break;
+        failed = 1;
+        peer->closing = 1;
+        break;
+    }
+    kc_netl_unlock(listener);
+
+    if (failed) kc_netl_peer_finish(listener, peer, 1);
 }
 
-/**
- * Wait for one listener event while all connections remain active.
- * @param listener Listener handle.
- * @param event Event destination.
- * @param timeout_ms Timeout in milliseconds.
- * @return KC_NETL_OK, KC_NETL_EAGAIN, or a negative status.
- */
-int kc_netl_poll(
-    kc_netl_t *listener,
-    kc_netl_event_t *event,
-    int timeout_ms
-) {
-    kc_netl_pollfd_t *fds;
-    kc_netl_connection_t **map;
-    kc_netl_connection_t *connection;
-    size_t count;
-    size_t index;
-    int ready;
-    int rc = KC_NETL_EAGAIN;
+static void kc_netl_flush_udp(kc_netl_t *listener) {
+    for (;;) {
+        kc_netl_output_t *output;
+        int sent;
 
-    if (listener == NULL || event == NULL || timeout_ms < -1) {
-        return KC_NETL_EINVAL;
-    }
-    memset(event, 0, sizeof(*event));
-    kc_netl_free_retired(listener);
-
-    count = listener->protocol == KC_NETL_TCP
-        ? kc_netl_connection_count(listener)
-        : 0U;
-    rc = kc_netl_poll_reserve(listener, count + 1U);
-    if (rc != KC_NETL_OK) return rc;
-    rc = KC_NETL_EAGAIN;
-
-    fds = listener->pollfds;
-    map = listener->pollmap;
-    memset(fds, 0, (count + 1U) * sizeof(*fds));
-    memset(map, 0, (count + 1U) * sizeof(*map));
-
-    fds[0].fd = listener->fd;
-    fds[0].events = POLLIN;
-    index = 1U;
-    for (
-        connection = listener->connections;
-        connection != NULL;
-        connection = connection->next
-    ) {
-        fds[index].fd = connection->fd;
-        fds[index].events = POLLIN;
-        if (connection->want_write) fds[index].events |= POLLOUT;
-        map[index] = connection;
-        index++;
-    }
-
-    ready = KC_NETL_POLL(
-        fds,
-        count + 1U,
-        timeout_ms < 0 ? -1 : timeout_ms
-    );
-    if (ready == 0) {
-        return KC_NETL_EAGAIN;
-    }
-    if (ready < 0) {
-        return KC_NETL_ENET;
-    }
-
-    if (listener->protocol == KC_NETL_UDP) {
-        if ((fds[0].revents & POLLIN) != 0) {
-            return kc_netl_receive_datagram(listener, event);
+        kc_netl_lock(listener);
+        output = listener->udp_out_head;
+        if (output == NULL) {
+            kc_netl_unlock(listener);
+            return;
         }
-        if ((fds[0].revents & (POLLERR | POLLNVAL)) != 0) {
-            return KC_NETL_ENET;
+
+        sent = (int)sendto(
+            listener->fd,
+            (const char *)output->data,
+            (int)output->size,
+            0,
+            (const struct sockaddr *)&output->address,
+            output->address_size
+        );
+
+        if (sent == (int)output->size) {
+            listener->udp_out_head = output->next;
+            if (listener->udp_out_head == NULL) listener->udp_out_tail = NULL;
+            kc_netl_unlock(listener);
+            free(output->data);
+            free(output);
+            continue;
         }
-        return KC_NETL_EAGAIN;
+
+        if (sent < 0 && kc_netl_would_block()) {
+            kc_netl_unlock(listener);
+            return;
+        }
+
+        listener->udp_out_head = output->next;
+        if (listener->udp_out_head == NULL) listener->udp_out_tail = NULL;
+        kc_netl_unlock(listener);
+        free(output->data);
+        free(output);
+        kc_netl_fail(listener, KC_NETL_ENET);
+        return;
     }
+}
 
-    if ((fds[0].revents & POLLIN) != 0 && listener->prefer_accept) {
-        rc = kc_netl_accept(listener, event);
-        if (rc == KC_NETL_OK) listener->prefer_accept = 0;
-        return rc;
-    }
+static int kc_netl_should_stop(kc_netl_t *listener) {
+    int stop;
 
-    if (count != 0U) {
-        size_t offset = listener->poll_offset % count;
-        size_t step;
+    kc_netl_lock(listener);
+    stop = listener->stop;
+    kc_netl_unlock(listener);
+    return stop;
+}
 
-        for (step = 0U; step < count; step++) {
-            index = 1U + ((offset + step) % count);
-            if (fds[index].revents == 0) continue;
+static void kc_netl_close_requested_peers(kc_netl_t *listener) {
+    for (;;) {
+        kc_netl_peer_t *peer;
+        kc_netl_peer_t *target = NULL;
 
-            connection = map[index];
-            if ((fds[index].revents & POLLIN) != 0) {
-                rc = kc_netl_receive_connection(
-                    listener,
-                    connection,
-                    event
-                );
-            } else if (
-                connection->want_write &&
-                (fds[index].revents & POLLOUT) != 0
-            ) {
-                connection->want_write = 0;
-                event->type = KC_NETL_EVENT_WRITABLE;
-                event->connection = connection;
-                event->host = connection->host;
-                event->port = connection->port;
-                rc = KC_NETL_OK;
-            } else if (
-                (fds[index].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0
-            ) {
-                kc_netl_connection_shutdown(connection);
-                event->type = KC_NETL_EVENT_CLOSE;
-                event->connection = connection;
-                event->host = connection->host;
-                event->port = connection->port;
-                rc = KC_NETL_OK;
-            }
-
-            if (rc == KC_NETL_OK) {
-                listener->poll_offset = (offset + step + 1U) % count;
-                listener->prefer_accept = 1;
+        kc_netl_lock(listener);
+        for (peer = listener->peers; peer != NULL; peer = peer->next) {
+            if (peer->closing && !peer->closed) {
+                target = peer;
                 break;
             }
         }
-    }
+        kc_netl_unlock(listener);
 
-    if (rc != KC_NETL_OK && (fds[0].revents & POLLIN) != 0) {
-        rc = kc_netl_accept(listener, event);
-        if (rc == KC_NETL_OK) listener->prefer_accept = 0;
+        if (target == NULL) return;
+        kc_netl_peer_finish(listener, target, 1);
     }
-    if (
-        rc != KC_NETL_OK &&
-        (fds[0].revents & (POLLERR | POLLNVAL)) != 0
-    ) {
-        return KC_NETL_ENET;
-    }
-    return rc;
 }
 
-/**
- * Attempt a non-blocking send on one TCP connection.
- * @param connection TCP connection.
- * @param data Bytes to send.
- * @param data_size Number of bytes requested.
- * @param out_sent Receives bytes sent.
- * @return KC_NETL_OK, KC_NETL_EAGAIN, KC_NETL_ECLOSED, or an error.
- */
-int kc_netl_send(
-    kc_netl_connection_t *connection,
-    const void *data,
-    size_t data_size,
-    size_t *out_sent
-) {
-    int sent;
+static void kc_netl_worker_run(kc_netl_t *listener) {
+    while (!kc_netl_should_stop(listener)) {
+        size_t count;
+        size_t index;
+        kc_netl_peer_t *peer;
+        int ready;
+        int rc;
 
-    if (out_sent != NULL) *out_sent = 0U;
-    if (
-        connection == NULL ||
-        out_sent == NULL ||
-        (data == NULL && data_size != 0U)
-    ) {
-        return KC_NETL_EINVAL;
-    }
-    if (connection->closed) return KC_NETL_ECLOSED;
-    if (data_size > (size_t)INT_MAX) return KC_NETL_EINVAL;
-    if (data_size == 0U) return KC_NETL_OK;
+        kc_netl_close_requested_peers(listener);
+        if (kc_netl_should_stop(listener)) break;
 
-    sent = (int)send(
-        connection->fd,
-        (const char *)data,
-        (int)data_size,
-        KC_NETL_SEND_FLAGS
-    );
-    if (sent < 0) {
-        if (kc_netl_would_block()) {
-            connection->want_write = 1;
-            return KC_NETL_EAGAIN;
+        kc_netl_lock(listener);
+        count = listener->protocol == KC_NETL_TCP
+            ? kc_netl_peer_count(listener)
+            : 0U;
+        kc_netl_unlock(listener);
+
+        rc = kc_netl_poll_reserve(listener, count + 1U);
+        if (rc != KC_NETL_OK) {
+            kc_netl_fail(listener, rc);
+            break;
         }
-        kc_netl_connection_shutdown(connection);
-        return KC_NETL_ENET;
-    }
-    *out_sent = (size_t)sent;
-    connection->want_write = (size_t)sent < data_size;
-    return KC_NETL_OK;
-}
 
-/**
- * Attempt a non-blocking UDP send to one peer.
- * @param listener UDP listener.
- * @param host Destination host or address.
- * @param port Destination port.
- * @param data Datagram bytes.
- * @param data_size Datagram size.
- * @return KC_NETL_OK, KC_NETL_EAGAIN, or an error.
- */
-int kc_netl_sendto(
-    kc_netl_t *listener,
-    const char *host,
-    unsigned short port,
-    const void *data,
-    size_t data_size
-) {
-    struct addrinfo hints;
-    struct addrinfo *result = NULL;
-    struct addrinfo *item;
-    char service[16];
-    int rc;
-    int sent;
+        memset(listener->pollfds, 0, (count + 1U) * sizeof(*listener->pollfds));
+        memset(listener->pollmap, 0, (count + 1U) * sizeof(*listener->pollmap));
+        listener->pollfds[0].fd = listener->fd;
+        listener->pollfds[0].events = POLLIN;
 
-    if (
-        listener == NULL ||
-        listener->protocol != KC_NETL_UDP ||
-        host == NULL ||
-        host[0] == '\0' ||
-        port == 0U ||
-        (data == NULL && data_size != 0U)
-    ) {
-        return KC_NETL_EINVAL;
-    }
-    if (data_size > (size_t)INT_MAX) return KC_NETL_EINVAL;
+        kc_netl_lock(listener);
+        if (listener->protocol == KC_NETL_UDP && listener->udp_out_head != NULL) {
+            listener->pollfds[0].events |= POLLOUT;
+        }
 
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_DGRAM;
-    snprintf(service, sizeof(service), "%u", (unsigned)port);
-    rc = getaddrinfo(host, service, &hints, &result);
-    if (rc != 0) return KC_NETL_ENET;
+        index = 1U;
+        for (peer = listener->peers; peer != NULL && index <= count; peer = peer->next) {
+            if (peer->closed || peer->taken) continue;
+            listener->pollfds[index].fd = peer->fd;
+            listener->pollfds[index].events = POLLIN;
+            if (peer->out_head != NULL) listener->pollfds[index].events |= POLLOUT;
+            listener->pollmap[index] = peer;
+            index++;
+        }
+        kc_netl_unlock(listener);
 
-    rc = KC_NETL_ENET;
-    for (item = result; item != NULL; item = item->ai_next) {
-        sent = (int)sendto(
-            listener->fd,
-            (const char *)data,
-            (int)data_size,
-            0,
-            item->ai_addr,
-            (socklen_t)item->ai_addrlen
+        ready = KC_NETL_POLL(
+            listener->pollfds,
+            count + 1U,
+            KC_NETL_POLL_TIMEOUT_MS
         );
-        if (sent == (int)data_size) {
-            rc = KC_NETL_OK;
+        if (ready < 0) {
+            kc_netl_fail(listener, KC_NETL_ENET);
             break;
         }
-        if (sent < 0 && kc_netl_would_block()) {
-            rc = KC_NETL_EAGAIN;
+        if (ready == 0) continue;
+
+        if (listener->protocol == KC_NETL_UDP) {
+            if ((listener->pollfds[0].revents & POLLIN) != 0) {
+                kc_netl_receive_udp(listener);
+            }
+            if ((listener->pollfds[0].revents & POLLOUT) != 0) {
+                kc_netl_flush_udp(listener);
+            }
+            if (
+                (listener->pollfds[0].revents & (POLLERR | POLLNVAL)) != 0
+            ) {
+                kc_netl_fail(listener, KC_NETL_ENET);
+            }
+            continue;
+        }
+
+        if ((listener->pollfds[0].revents & POLLIN) != 0) {
+            rc = kc_netl_accept_peer(listener);
+            if (rc != KC_NETL_OK) {
+                kc_netl_fail(listener, rc);
+                break;
+            }
+        }
+        if ((listener->pollfds[0].revents & (POLLERR | POLLNVAL)) != 0) {
+            kc_netl_fail(listener, KC_NETL_ENET);
             break;
+        }
+
+        for (index = 1U; index <= count; index++) {
+            short events = listener->pollfds[index].revents;
+            peer = listener->pollmap[index];
+            if (peer == NULL || events == 0) continue;
+
+            if ((events & POLLIN) != 0) {
+                kc_netl_receive_tcp(listener, peer);
+                continue;
+            }
+            if ((events & POLLOUT) != 0) {
+                kc_netl_flush_tcp(listener, peer);
+                continue;
+            }
+            if ((events & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
+                kc_netl_peer_finish(listener, peer, 1);
+            }
         }
     }
-
-    freeaddrinfo(result);
-    return rc;
 }
 
-/**
- * Close one TCP connection without closing its listener.
- * @param connection Connection handle.
- * @return None.
- */
-void kc_netl_connection_close(kc_netl_connection_t *connection) {
-    if (connection == NULL) return;
-    kc_netl_connection_shutdown(connection);
+#ifdef _WIN32
+static DWORD WINAPI kc_netl_worker_entry(LPVOID arg) {
+    kc_netl_worker_run((kc_netl_t *)arg);
+    return 0;
 }
-
-#ifdef KC_NETL_CLI
-/**
- * Transfer one TCP socket to the command-line process dispatcher.
- * This helper is compiled only into the netl executable and is not public ABI.
- * @param connection Connection handle.
- * @return Native socket value, or -1 for an invalid connection.
- */
-intptr_t kc_netl_cli_take_connection(kc_netl_connection_t *connection) {
-    kc_netl_fd_t fd;
-
-    if (connection == NULL || connection->closed) return (intptr_t)-1;
-    fd = connection->fd;
-    connection->fd = KC_NETL_FD_INVALID;
-    connection->closed = 1;
-    kc_netl_unlink(connection);
-    connection->next = connection->listener->retired;
-    connection->listener->retired = connection;
-    return (intptr_t)fd;
+#else
+static void *kc_netl_worker_entry(void *arg) {
+    kc_netl_worker_run((kc_netl_t *)arg);
+    return NULL;
 }
 #endif
 
-/**
- * Return the bound listener port.
- * @param listener Listener handle.
- * @return Bound port or zero.
- */
+static int kc_netl_worker_start(kc_netl_t *listener) {
+#ifdef _WIN32
+    listener->worker = CreateThread(
+        NULL,
+        0,
+        kc_netl_worker_entry,
+        listener,
+        0,
+        NULL
+    );
+    if (listener->worker == NULL) return KC_NETL_ENET;
+#else
+    if (pthread_create(&listener->worker, NULL, kc_netl_worker_entry, listener) != 0) {
+        return KC_NETL_ENET;
+    }
+#endif
+    listener->worker_started = 1;
+    return KC_NETL_OK;
+}
+
+static void kc_netl_worker_join(kc_netl_t *listener) {
+    if (!listener->worker_started) return;
+#ifdef _WIN32
+    WaitForSingleObject(listener->worker, INFINITE);
+    CloseHandle(listener->worker);
+    listener->worker = NULL;
+#else
+    (void)pthread_join(listener->worker, NULL);
+#endif
+    listener->worker_started = 0;
+}
+
+static void kc_netl_destroy(kc_netl_t *listener) {
+    kc_netl_peer_t *peer;
+
+    if (listener == NULL) return;
+
+    while (listener->peers != NULL) {
+        peer = listener->peers;
+        listener->peers = peer->next;
+        if (peer->fd != KC_NETL_FD_INVALID) KC_NETL_CLOSE(peer->fd);
+        kc_netl_output_free(peer->out_head);
+        free(peer);
+    }
+
+    kc_netl_output_free(listener->udp_out_head);
+    free(listener->pollfds);
+    free(listener->pollmap);
+
+    if (listener->fd != KC_NETL_FD_INVALID) {
+        KC_NETL_CLOSE(listener->fd);
+        listener->fd = KC_NETL_FD_INVALID;
+    }
+
+    if (listener->mutex_ready) {
+        kc_netl_mutex_close(&listener->mutex);
+        listener->mutex_ready = 0;
+    }
+    if (listener->platform_ready) {
+        kc_netl_platform_close();
+        listener->platform_ready = 0;
+    }
+
+    free(listener);
+}
+
+static int kc_netl_open_internal(
+    kc_netl_t **out,
+    const kc_netl_options_t *options,
+    kc_netl_handler_t handler,
+    kc_netl_close_handler_t close_handler,
+    kc_netl_error_handler_t error_handler,
+    void *userdata
+#ifdef KC_NETL_CLI
+    ,
+    void (*cli_accept_handler)(kc_netl_peer_t *peer, void *userdata),
+    void *cli_accept_userdata
+#endif
+) {
+    kc_netl_t *listener;
+    int rc;
+
+    if (out == NULL) return KC_NETL_EINVAL;
+    *out = NULL;
+    if (
+        options == NULL ||
+        handler == NULL ||
+        (
+            options->protocol != KC_NETL_TCP &&
+            options->protocol != KC_NETL_UDP
+        ) ||
+        (
+            options->max_pending_connections != NULL &&
+            *options->max_pending_connections < 0
+        )
+    ) {
+        return KC_NETL_EINVAL;
+    }
+
+    listener = (kc_netl_t *)calloc(1, sizeof(*listener));
+    if (listener == NULL) return KC_NETL_ENOMEM;
+    listener->fd = KC_NETL_FD_INVALID;
+    listener->protocol = options->protocol;
+    listener->max_pending_connections =
+        options->max_pending_connections != NULL
+            ? *options->max_pending_connections
+            : KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS;
+    listener->handler = handler;
+    listener->close_handler = close_handler;
+    listener->error_handler = error_handler;
+    listener->userdata = userdata;
+#ifdef KC_NETL_CLI
+    listener->cli_accept_handler = cli_accept_handler;
+    listener->cli_accept_userdata = cli_accept_userdata;
+#endif
+
+    rc = kc_netl_platform_open();
+    if (rc != KC_NETL_OK) {
+        free(listener);
+        return rc;
+    }
+    listener->platform_ready = 1;
+
+    if (kc_netl_mutex_open(&listener->mutex) != 0) {
+        kc_netl_destroy(listener);
+        return KC_NETL_ENET;
+    }
+    listener->mutex_ready = 1;
+
+    rc = kc_netl_bind(options, &listener->fd, &listener->port);
+    if (rc != KC_NETL_OK) {
+        kc_netl_destroy(listener);
+        return rc;
+    }
+
+    rc = kc_netl_worker_start(listener);
+    if (rc != KC_NETL_OK) {
+        kc_netl_destroy(listener);
+        return rc;
+    }
+
+    *out = listener;
+    return KC_NETL_OK;
+}
+
+int kc_netl_open(
+    kc_netl_t **out,
+    const kc_netl_options_t *options,
+    kc_netl_handler_t handler,
+    kc_netl_close_handler_t close_handler,
+    kc_netl_error_handler_t error_handler,
+    void *userdata
+) {
+    return kc_netl_open_internal(
+        out,
+        options,
+        handler,
+        close_handler,
+        error_handler,
+        userdata
+#ifdef KC_NETL_CLI
+        ,
+        NULL,
+        NULL
+#endif
+    );
+}
+
+int kc_netl_respond(
+    kc_netl_peer_t *peer,
+    const void *data,
+    size_t data_size
+) {
+    kc_netl_t *listener;
+    kc_netl_output_t *output;
+
+    if (
+        peer == NULL ||
+        peer->listener == NULL ||
+        (data == NULL && data_size != 0U)
+    ) {
+        return KC_NETL_EINVAL;
+    }
+
+    listener = peer->listener;
+    if (peer->protocol == KC_NETL_UDP && data_size > (size_t)INT_MAX) {
+        return KC_NETL_EINVAL;
+    }
+
+    output = kc_netl_output_new(data, data_size);
+    if (output == NULL) return KC_NETL_ENOMEM;
+
+    kc_netl_lock(listener);
+    if (peer->closed || peer->closing || peer->taken || listener->stop) {
+        kc_netl_unlock(listener);
+        kc_netl_output_free(output);
+        return KC_NETL_ECLOSED;
+    }
+
+    if (peer->protocol == KC_NETL_TCP) {
+        if (peer->out_tail != NULL) {
+            peer->out_tail->next = output;
+        } else {
+            peer->out_head = output;
+        }
+        peer->out_tail = output;
+    } else {
+        output->address = peer->address;
+        output->address_size = peer->address_size;
+        if (listener->udp_out_tail != NULL) {
+            listener->udp_out_tail->next = output;
+        } else {
+            listener->udp_out_head = output;
+        }
+        listener->udp_out_tail = output;
+    }
+    kc_netl_unlock(listener);
+
+    return KC_NETL_OK;
+}
+
+void kc_netl_peer_close(kc_netl_peer_t *peer) {
+    kc_netl_t *listener;
+
+    if (peer == NULL || peer->listener == NULL) return;
+    listener = peer->listener;
+
+    kc_netl_lock(listener);
+    if (!peer->closed) peer->closing = 1;
+    kc_netl_unlock(listener);
+}
+
 unsigned short kc_netl_port(const kc_netl_t *listener) {
     return listener != NULL ? listener->port : 0U;
 }
 
-/**
- * Close all connections and release one listener.
- * @param listener Listener handle.
- * @return None.
- */
 void kc_netl_close(kc_netl_t *listener) {
-    kc_netl_connection_t *connection;
-
     if (listener == NULL) return;
-    while (listener->connections != NULL) {
-        connection = listener->connections;
-        listener->connections = connection->next;
-        connection->next = NULL;
-        if (connection->fd != KC_NETL_FD_INVALID) {
-            KC_NETL_CLOSE(connection->fd);
-        }
-        free(connection);
-    }
-    kc_netl_free_retired(listener);
-    free(listener->pollfds);
-    free(listener->pollmap);
-    if (listener->fd != KC_NETL_FD_INVALID) {
-        KC_NETL_CLOSE(listener->fd);
-    }
-    if (listener->platform_ready) kc_netl_platform_close();
-    free(listener);
+
+    kc_netl_lock(listener);
+    listener->stop = 1;
+    kc_netl_unlock(listener);
+
+    kc_netl_worker_join(listener);
+    kc_netl_destroy(listener);
 }
 
-/**
- * Return a static message for one public status code.
- * @param status Status code.
- * @return Static error string.
- */
+#ifdef KC_NETL_CLI
+int kc_netl_cli_open(
+    kc_netl_t **out,
+    const kc_netl_options_t *options,
+    kc_netl_handler_t handler,
+    void *userdata,
+    void (*accept_handler)(kc_netl_peer_t *peer, void *userdata),
+    void *accept_userdata
+) {
+    return kc_netl_open_internal(
+        out,
+        options,
+        handler,
+        NULL,
+        NULL,
+        userdata,
+        accept_handler,
+        accept_userdata
+    );
+}
+
+intptr_t kc_netl_cli_take_peer(kc_netl_peer_t *peer) {
+    kc_netl_t *listener;
+    kc_netl_fd_t fd;
+
+    if (
+        peer == NULL ||
+        peer->listener == NULL ||
+        peer->protocol != KC_NETL_TCP
+    ) {
+        return (intptr_t)-1;
+    }
+
+    listener = peer->listener;
+    kc_netl_lock(listener);
+    if (peer->closed || peer->closing || peer->taken) {
+        kc_netl_unlock(listener);
+        return (intptr_t)-1;
+    }
+
+    fd = peer->fd;
+    peer->fd = KC_NETL_FD_INVALID;
+    peer->taken = 1;
+    peer->closing = 1;
+    kc_netl_unlock(listener);
+    return (intptr_t)fd;
+}
+#endif
+
 const char *kc_netl_strerror(int status) {
     switch (status) {
         case KC_NETL_OK: return "ok";
         case KC_NETL_EINVAL: return "invalid argument";
         case KC_NETL_ENET: return "network error";
-        case KC_NETL_EAGAIN: return "try again";
-        case KC_NETL_ECLOSED: return "connection closed";
+        case KC_NETL_ECLOSED: return "peer closed";
         case KC_NETL_ENOMEM: return "out of memory";
         default: return "unknown error";
     }
@@ -962,10 +1108,6 @@ const char *kc_netl_strerror(int status) {
 #define KC_NETL_BUILD_VERSION 0
 #endif
 
-/**
- * Return the build version generated at compile time.
- * @return Unix timestamp for the current build.
- */
 uint64_t kc_netl_version(void) {
     return (uint64_t)KC_NETL_BUILD_VERSION;
 }
