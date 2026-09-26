@@ -37,8 +37,6 @@ Hello Jane!
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
-The CLI is a thin consumer of the reusable public API. It does not implement
-separate greeting logic.
 
 ---
 
@@ -63,14 +61,11 @@ void kc_demo_free(void *ptr);
 uint64_t kc_demo_version(void);
 ```
 
-`kc_demo_greet()` returns an owned NUL-terminated string containing
-`Hello <name>!`. A `NULL` name is invalid and returns `NULL`. Successful
-results must be released with `kc_demo_free()`.
+`kc_demo_greet()` returns `Hello <name>!`.
 
-`kc_demo_free()` accepts `NULL`.
+Use `kc_demo_free()` to release the returned string.
 
-`kc_demo_version()` returns the build version generated at compile time as a
-Unix timestamp.
+`kc_demo_version()` returns the library build version.
 
 ---
 
