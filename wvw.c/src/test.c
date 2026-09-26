@@ -1,13 +1,18 @@
 /**
  * test.c - libwvw public contract tests.
  * Summary: Exercises the consumer-facing WebView API and grouped CLI behavior.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
 #include "libwvw.h"
+
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -19,8 +24,17 @@
 #define WVW_TEST_CLI ""
 #endif
 
-static int current, total, failures;
+static int current;
+static int total;
+static int failures;
 
+/**
+ * Print one test result line.
+ * @param name Public API behavior under test.
+ * @param detail Behavior verified by the case.
+ * @param ok Non-zero when the case passed.
+ * @return None.
+ */
 static void result(const char *name, const char *detail, int ok) {
     current++;
     if (!ok) failures++;
@@ -28,15 +42,23 @@ static void result(const char *name, const char *detail, int ok) {
         ok ? "PASS" : "FAIL", name, detail);
 }
 
+/**
+ * Create one temporary HTML file and return its file URL.
+ * @return Owned file URL, or NULL on failure.
+ */
 static char *test_url(void) {
-    char path[2048], url[2200];
+    char path[2048];
+    char url[2200];
     FILE *file;
 #ifdef _WIN32
     char dir[MAX_PATH];
     size_t i;
+
     if (!GetTempPathA((DWORD)sizeof(dir), dir)) return NULL;
     snprintf(path, sizeof(path), "%swvw_test.html", dir);
-    for (i = 0; path[i]; i++) if (path[i] == '\\') path[i] = '/';
+    for (i = 0; path[i]; i++) {
+        if (path[i] == '\\') path[i] = '/';
+    }
 #else
     snprintf(path, sizeof(path), "/tmp/wvw_test.html");
 #endif
@@ -52,10 +74,18 @@ static char *test_url(void) {
     return strdup(url);
 }
 
+/**
+ * Open one test WebView with fixed initial dimensions.
+ * @param out Destination WebView handle.
+ * @param url_out Destination owned URL string.
+ * @return 1 on success, 0 on failure.
+ */
 static int open_test(kc_wvw_t **out, char **url_out) {
     kc_wvw_options_t options = {0};
-    int width = 640, height = 480;
+    int width = 640;
+    int height = 480;
     char *url = test_url();
+
     if (!url) return 0;
     options.url = url;
     options.title = "wvw test";
@@ -71,6 +101,15 @@ static int open_test(kc_wvw_t **out, char **url_out) {
     return 1;
 }
 
+/**
+ * Return one fixed bridge response for contract tests.
+ * @param wvw WebView handle.
+ * @param method Method name.
+ * @param params_json Serialized parameters.
+ * @param out_result_json Destination response JSON.
+ * @param userdata Caller data.
+ * @return KC_WVW_OK.
+ */
 static int bridge_callback(
     kc_wvw_t *wvw,
     const char *method,
@@ -86,24 +125,38 @@ static int bridge_callback(
     return KC_WVW_OK;
 }
 
+/**
+ * Test kc_wvw_version.
+ * @return None.
+ */
 static void case_kc_wvw_version(void) {
     result("kc_wvw_version", "returns generated build version",
         kc_wvw_version() != 0);
 }
 
+/**
+ * Test kc_wvw_open validation and NULL-safe close.
+ * @return None.
+ */
 static void case_kc_wvw_open(void) {
     kc_wvw_t *wvw = NULL;
     kc_wvw_options_t invalid = {0};
     int ok = kc_wvw_open(NULL, &invalid) == KC_WVW_ERROR;
+
     ok &= kc_wvw_open(&wvw, &invalid) == KC_WVW_ERROR && wvw == NULL;
     kc_wvw_close(NULL);
     result("kc_wvw_open", "rejects missing URL and close accepts NULL", ok);
 }
 
+/**
+ * Test immediate navigation after open.
+ * @return None.
+ */
 static void case_kc_wvw_navigation(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
     int ok = open_test(&wvw, &url);
+
     if (ok) ok = kc_wvw_navigate(wvw, url) == KC_WVW_OK;
     kc_wvw_close(wvw);
     free(url);
@@ -111,6 +164,10 @@ static void case_kc_wvw_navigation(void) {
         "open returns an operational WebView that can navigate", ok);
 }
 
+/**
+ * Test bridge setup and native event delivery.
+ * @return None.
+ */
 static void case_kc_wvw_bridge(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
@@ -123,24 +180,34 @@ static void case_kc_wvw_bridge(void) {
         bridge.method_count = 1;
         bridge.callback = bridge_callback;
         bridge.allow_file = 1;
-        ok = kc_wvw_add_init_script(wvw, "window.__wvw_test = true;") == KC_WVW_OK &&
-             kc_wvw_enable_bridge(wvw, &bridge) == KC_WVW_OK &&
-             kc_wvw_post_bridge_event(wvw, "{\"type\":\"test\"}") == KC_WVW_OK;
+        ok =
+            kc_wvw_add_init_script(
+                wvw, "window.__wvw_test = true;") == KC_WVW_OK &&
+            kc_wvw_enable_bridge(wvw, &bridge) == KC_WVW_OK &&
+            kc_wvw_post_bridge_event(
+                wvw, "{\"type\":\"test\"}") == KC_WVW_OK;
     }
     kc_wvw_close(wvw);
     free(url);
     result("kc_wvw_bridge",
-        "init script, bridge and native event use the direct public surface", ok);
+        "init script, bridge and native event use the direct public surface",
+        ok);
 }
 
+/**
+ * Test show, hide, and visibility query behavior.
+ * @return None.
+ */
 static void case_kc_wvw_visibility(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
     int ok = open_test(&wvw, &url);
+
     if (ok) {
-        ok = kc_wvw_hide(wvw) == KC_WVW_OK &&
-             kc_wvw_is_visible(wvw) == 0 &&
-             kc_wvw_show(wvw) == KC_WVW_OK;
+        ok =
+            kc_wvw_hide(wvw) == KC_WVW_OK &&
+            kc_wvw_is_visible(wvw) == 0 &&
+            kc_wvw_show(wvw) == KC_WVW_OK;
     }
     kc_wvw_close(wvw);
     free(url);
@@ -148,15 +215,21 @@ static void case_kc_wvw_visibility(void) {
         "show and hide are actions with an explicit boolean query", ok);
 }
 
+/**
+ * Test minimize, maximize, and restore actions.
+ * @return None.
+ */
 static void case_kc_wvw_actions(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
     int ok = open_test(&wvw, &url);
+
     if (ok) {
-        ok = kc_wvw_minimize(wvw) == KC_WVW_OK &&
-             kc_wvw_restore(wvw) == KC_WVW_OK &&
-             kc_wvw_maximize(wvw) == KC_WVW_OK &&
-             kc_wvw_restore(wvw) == KC_WVW_OK;
+        ok =
+            kc_wvw_minimize(wvw) == KC_WVW_OK &&
+            kc_wvw_restore(wvw) == KC_WVW_OK &&
+            kc_wvw_maximize(wvw) == KC_WVW_OK &&
+            kc_wvw_restore(wvw) == KC_WVW_OK;
     }
     kc_wvw_close(wvw);
     free(url);
@@ -164,11 +237,16 @@ static void case_kc_wvw_actions(void) {
         "minimize, maximize and restore remain direct actions", ok);
 }
 
+/**
+ * Test title property setters and getters.
+ * @return None.
+ */
 static void case_kc_wvw_title(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
     const char *title;
     int ok = open_test(&wvw, &url);
+
     if (ok) {
         ok = kc_wvw_set_title(wvw, "changed") == KC_WVW_OK;
         title = kc_wvw_get_title(wvw);
@@ -180,15 +258,23 @@ static void case_kc_wvw_title(void) {
         "set_title and get_title expose one named property", ok);
 }
 
+/**
+ * Test size property setters and getters.
+ * @return None.
+ */
 static void case_kc_wvw_size(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int width = 0, height = 0;
+    int width = 0;
+    int height = 0;
     int ok = open_test(&wvw, &url);
+
     if (ok) {
-        ok = kc_wvw_set_size(wvw, 700, 500) == KC_WVW_OK &&
-             kc_wvw_get_size(wvw, &width, &height) == KC_WVW_OK &&
-             width == 700 && height == 500;
+        ok =
+            kc_wvw_set_size(wvw, 700, 500) == KC_WVW_OK &&
+            kc_wvw_get_size(wvw, &width, &height) == KC_WVW_OK &&
+            width == 700 &&
+            height == 500;
     }
     kc_wvw_close(wvw);
     free(url);
@@ -196,15 +282,23 @@ static void case_kc_wvw_size(void) {
         "set_size and get_size expose explicit dimensions", ok);
 }
 
+/**
+ * Test position property setters and getters.
+ * @return None.
+ */
 static void case_kc_wvw_position(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int x = 0, y = 0;
+    int x = 0;
+    int y = 0;
     int ok = open_test(&wvw, &url);
+
     if (ok) {
-        ok = kc_wvw_set_position(wvw, 120, 140) == KC_WVW_OK &&
-             kc_wvw_get_position(wvw, &x, &y) == KC_WVW_OK &&
-             x == 120 && y == 140;
+        ok =
+            kc_wvw_set_position(wvw, 120, 140) == KC_WVW_OK &&
+            kc_wvw_get_position(wvw, &x, &y) == KC_WVW_OK &&
+            x == 120 &&
+            y == 140;
     }
     kc_wvw_close(wvw);
     free(url);
@@ -212,19 +306,26 @@ static void case_kc_wvw_position(void) {
         "set_position and get_position expose explicit coordinates", ok);
 }
 
+/**
+ * Test boolean property queries.
+ * @return None.
+ */
 static void case_kc_wvw_booleans(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
     int ok = open_test(&wvw, &url);
+
     if (ok) {
         int visible = kc_wvw_is_visible(wvw);
         int minimized = kc_wvw_is_minimized(wvw);
         int maximized = kc_wvw_is_maximized(wvw);
         int fullscreen = kc_wvw_is_fullscreen(wvw);
-        ok = (visible == 0 || visible == 1) &&
-             (minimized == 0 || minimized == 1) &&
-             (maximized == 0 || maximized == 1) &&
-             (fullscreen == 0 || fullscreen == 1);
+
+        ok =
+            (visible == 0 || visible == 1) &&
+            (minimized == 0 || minimized == 1) &&
+            (maximized == 0 || maximized == 1) &&
+            (fullscreen == 0 || fullscreen == 1);
     }
     kc_wvw_close(wvw);
     free(url);
@@ -232,6 +333,12 @@ static void case_kc_wvw_booleans(void) {
         "boolean window properties use is_* queries", ok);
 }
 
+/**
+ * Run one CLI invocation and classify its process status.
+ * @param args CLI argument string.
+ * @param expect_success Non-zero when success is expected.
+ * @return 1 when the observed status matches the expectation, otherwise 0.
+ */
 static int run_cli(const char *args, int expect_success) {
     char command[2048];
     int rc;
@@ -248,8 +355,13 @@ static int run_cli(const char *args, int expect_success) {
     return expect_success ? rc == 0 : rc != 0;
 }
 
+/**
+ * Test grouped CLI behavior.
+ * @return None.
+ */
 static void case_kc_wvw_cli(void) {
     int ok = 1;
+
     ok &= run_cli("--help", 1);
     ok &= run_cli("-h", 1);
     ok &= run_cli("--version", 1);
@@ -264,6 +376,10 @@ static void case_kc_wvw_cli(void) {
         "help, version, missing URL, unknown options and invalid values", ok);
 }
 
+/**
+ * Run all public contract cases.
+ * @return None.
+ */
 static void run_all(void) {
     total = 11;
     case_kc_wvw_version();
@@ -279,6 +395,12 @@ static void run_all(void) {
     case_kc_wvw_cli();
 }
 
+/**
+ * Execute the selected test group.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process status code.
+ */
 int main(int argc, char **argv) {
     if (argc == 1 || !strcmp(argv[1], "all")) {
         run_all();
