@@ -7,10 +7,15 @@
 
 set -e
 
+# Prints command usage information.
+# @return 0 on success.
 usage() {
     echo "Usage: $0 all|NAME.c" >&2
 }
 
+# Builds one kclib project for every configured target.
+# @param project_dir Project directory.
+# @return 0 on success.
 build_project() {
     local project_dir="$1"
     local project_name
@@ -23,6 +28,8 @@ build_project() {
     )
 }
 
+# Dispatches one project build or all project builds.
+# @return 0 on success.
 main() {
     local script_dir root_dir proj_dir target project_dir
 
