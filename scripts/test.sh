@@ -1,6 +1,6 @@
 #!/bin/bash
 # kclib test tool
-# Summary: Tests one or all kclib projects with make test.
+# Summary: Tests one or all kclib projects natively and through Wine.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
 # License: GNU General Public License v3.0
@@ -20,6 +20,7 @@ test_project() {
     (
         cd "$project_dir"
         make test
+        make test wine
     )
 }
 
