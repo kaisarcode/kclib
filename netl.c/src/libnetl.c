@@ -671,7 +671,11 @@ static void kc_netl_close_requested_peers(kc_netl_t *listener) {
 
         kc_netl_lock(listener);
         for (peer = listener->peers; peer != NULL; peer = peer->next) {
-            if (peer->closing && !peer->closed) {
+            if (
+                peer->closing &&
+                !peer->closed &&
+                peer->out_head == NULL
+            ) {
                 target = peer;
                 break;
             }
@@ -720,7 +724,7 @@ static void kc_netl_worker_run(kc_netl_t *listener) {
         for (peer = listener->peers; peer != NULL && index <= count; peer = peer->next) {
             if (peer->closed || peer->taken) continue;
             listener->pollfds[index].fd = peer->fd;
-            listener->pollfds[index].events = POLLIN;
+            listener->pollfds[index].events = peer->closing ? 0 : POLLIN;
             if (peer->out_head != NULL) listener->pollfds[index].events |= POLLOUT;
             listener->pollmap[index] = peer;
             index++;
