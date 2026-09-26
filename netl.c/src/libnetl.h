@@ -79,10 +79,10 @@ typedef void (*kc_netl_error_handler_t)(
  * Open an operational TCP or UDP listener.
  * NULL or empty host binds all interfaces. Port zero requests an ephemeral
  * operating-system-selected port. NULL max_pending_connections uses the
- * internal default. The input handler is required; close/error handlers are
+ * default. The input handler is required; close/error handlers are
  * optional. Callbacks may respond, close peers, or close the listener.
  *
- * The library owns the internal worker and all transport scheduling.
+  * @return KC_NETL_OK on success, otherwise a negative status.
  */
 int kc_netl_open(
     kc_netl_t **out,
@@ -97,6 +97,7 @@ int kc_netl_open(
  * Respond to one peer.
  * The library copies the supplied bytes before returning and absorbs transport
  * buffering, partial writes, retries, and TCP/UDP-specific send mechanics.
+  * @return KC_NETL_OK on success, otherwise a negative status.
  */
 int kc_netl_respond(
     kc_netl_peer_t *peer,
@@ -109,27 +110,32 @@ int kc_netl_respond(
  * For TCP this closes that peer without affecting other peers. For a UDP peer
  * this simply prevents further response through that callback-local peer.
  * NULL and already-closed peers are accepted.
+  * @return None.
  */
 void kc_netl_peer_close(kc_netl_peer_t *peer);
 
 /**
  * Return the bound port, including an ephemeral port selected by the OS.
+  * @return Bound port, or zero for an invalid listener.
  */
 unsigned short kc_netl_port(const kc_netl_t *listener);
 
 /**
  * Stop the listener, close all TCP peers, and release it.
  * NULL is accepted. This may also be called from a netl callback.
+  * @return None.
  */
 void kc_netl_close(kc_netl_t *listener);
 
 /**
  * Return a static message for a public status code.
+  * @return Static error string.
  */
 const char *kc_netl_strerror(int status);
 
 /**
  * Return the build version generated at compile time.
+  * @return Build version.
  */
 uint64_t kc_netl_version(void);
 
