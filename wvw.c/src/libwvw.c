@@ -61,7 +61,7 @@ typedef enum {
     KC_WVW_OP_MINIMIZE, KC_WVW_OP_MAXIMIZE, KC_WVW_OP_RESTORE,
     KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE,
     KC_WVW_OP_GET_SIZE, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
-    KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN
+    KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN, KC_WVW_OP_CLOSE
 } kc_wvw_op_kind_t;
 
 typedef struct {
@@ -2920,7 +2920,7 @@ typedef enum {
     KC_WVW_OP_MINIMIZE, KC_WVW_OP_MAXIMIZE, KC_WVW_OP_RESTORE,
     KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE,
     KC_WVW_OP_GET_SIZE, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
-    KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN
+    KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN, KC_WVW_OP_CLOSE
 } kc_wvw_op_kind_t;
 
 typedef struct {
@@ -5089,8 +5089,6 @@ static int kc_wvw_dispatch_op(kc_wvw_t *ctx,kc_wvw_op_t *op){kc_wvw_linux_call_t
 typedef struct {kc_wvw_t *ctx;GMutex mutex;GCond cond;int done,result;} kc_wvw_linux_init_t;
 static gboolean kc_wvw_linux_open_cb(gpointer data){kc_wvw_linux_init_t *call=(kc_wvw_linux_init_t *)data;int rc=kc_wvw_linux_create_window(call->ctx);if(rc==KC_WVW_OK)rc=kc_wvw_navigate_impl(call->ctx,call->ctx->opts.url);g_mutex_lock(&call->mutex);call->result=rc;call->done=1;g_cond_signal(&call->cond);g_mutex_unlock(&call->mutex);return G_SOURCE_REMOVE;}
 static int kc_wvw_linux_open_dispatch(kc_wvw_t *ctx){kc_wvw_linux_init_t call;GSource *source;memset(&call,0,sizeof(call));call.ctx=ctx;g_mutex_init(&call.mutex);g_cond_init(&call.cond);g_mutex_lock(&call.mutex);source=g_idle_source_new();g_source_set_callback(source,kc_wvw_linux_open_cb,&call,NULL);g_source_attach(source,ctx->context);g_source_unref(source);while(!call.done)g_cond_wait(&call.cond,&call.mutex);g_mutex_unlock(&call.mutex);g_cond_clear(&call.cond);g_mutex_clear(&call.mutex);return call.result;}
-static gboolean kc_wvw_linux_close_cb(gpointer data){kc_wvw_request_close((kc_wvw_t *)data);return G_SOURCE_REMOVE;}
-static void kc_wvw_linux_close_dispatch(kc_wvw_t *ctx){GSource *source;if(!ctx||!ctx->context)return;source=g_idle_source_new();g_source_set_callback(source,kc_wvw_linux_close_cb,ctx,NULL);g_source_attach(source,ctx->context);g_source_unref(source);g_mutex_lock(&ctx->mutex);while(!ctx->closed)g_cond_wait(&ctx->cond,&ctx->mutex);g_mutex_unlock(&ctx->mutex);}
 int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options)return KC_WVW_ERROR;ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);return KC_WVW_ERROR;}g_mutex_init(&ctx->mutex);g_cond_init(&ctx->cond);if(kc_wvw_linux_service()!=KC_WVW_OK){kc_wvw_set_error(ctx,"GTK initialization failed");*out=ctx;return KC_WVW_ERROR;}ctx->context=kc_wvw_gtk_context;ctx->thread=kc_wvw_gtk_thread;*out=ctx;if(kc_wvw_linux_open_dispatch(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");return KC_WVW_ERROR;}ctx->running=1;return KC_WVW_OK;}
 
 
@@ -5099,7 +5097,20 @@ int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){kc_wvw_t *ctx;if
 
 
 int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx)return KC_WVW_ERROR;g_mutex_lock(&ctx->mutex);while(!ctx->closed)g_cond_wait(&ctx->cond,&ctx->mutex);g_mutex_unlock(&ctx->mutex);return KC_WVW_OK;}
-void kc_wvw_close(kc_wvw_t *ctx){if(!ctx)return;if(!ctx->closed)kc_wvw_linux_close_dispatch(ctx);kc_wvw_bridge_state_free(&ctx->bridge);kc_wvw_config_free(&ctx->opts);g_cond_clear(&ctx->cond);g_mutex_clear(&ctx->mutex);free(ctx);}
+void kc_wvw_close(kc_wvw_t *ctx) {
+    kc_wvw_op_t op = {0};
+
+    if (!ctx) return;
+    if (!ctx->closed) {
+        op.kind = KC_WVW_OP_CLOSE;
+        (void)kc_wvw_dispatch_op(ctx, &op);
+    }
+    kc_wvw_bridge_state_free(&ctx->bridge);
+    kc_wvw_config_free(&ctx->opts);
+    g_cond_clear(&ctx->cond);
+    g_mutex_clear(&ctx->mutex);
+    free(ctx);
+}
 
 
 
@@ -5347,6 +5358,9 @@ static int kc_wvw_execute_op(kc_wvw_t *ctx,kc_wvw_op_t *op){
     case KC_WVW_OP_IS_VISIBLE:case KC_WVW_OP_IS_MINIMIZED:case KC_WVW_OP_IS_MAXIMIZED:case KC_WVW_OP_IS_FULLSCREEN:
         if(kc_wvw_get_state_impl(ctx,&state)!=KC_WVW_OK)return KC_WVW_ERROR;
         op->a=op->kind==KC_WVW_OP_IS_VISIBLE?state.visible:op->kind==KC_WVW_OP_IS_MINIMIZED?state.minimized:op->kind==KC_WVW_OP_IS_MAXIMIZED?state.maximized:state.fullscreen;return KC_WVW_OK;
+    case KC_WVW_OP_CLOSE:
+        kc_wvw_request_close(ctx);
+        return KC_WVW_OK;
     default:return KC_WVW_ERROR;}
 }
 int kc_wvw_navigate(kc_wvw_t *ctx,const char *url){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_NAVIGATE;op.text=url;return kc_wvw_dispatch_op(ctx,&op);}
