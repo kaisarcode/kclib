@@ -15,7 +15,6 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,31 +51,12 @@ typedef void (*kc_init_row_handler_t)(
     void *userdata
 );
 
-struct kc_init {
-    char error[256];
-    char name[128];
+typedef struct kc_init {
     char dir[KC_INIT_PATH];
-    char cmd[KC_INIT_BUF];
-    char user[256];
 #ifndef _WIN32
     kc_init_backend_t backend;
 #endif
-};
-
-/**
- * Sets an error message on the context.
- * @param ctx Context pointer.
- * @param fmt printf-style format string.
- * @return None.
- */
-static void kc_init_set_error(kc_init_t *ctx, const char *fmt, ...) {
-    va_list ap;
-    if (!ctx || !fmt) return;
-    va_start(ap, fmt);
-    vsnprintf(ctx->error, sizeof(ctx->error), fmt, ap);
-    va_end(ap);
-    ctx->error[sizeof(ctx->error) - 1] = '\0';
-}
+} kc_init_t;
 
 /**
  * Duplicates one string.
@@ -1622,52 +1602,6 @@ static int kc_init_collect_finish(
 }
 
 /**
- * Load one persistent startup entry into a local handle.
- * @param init Entry handle with name and directory already set.
- * @return KC_INIT_OK on success, KC_INIT_NOT_FOUND when absent,
- *         or KC_INIT_ERROR on failure.
- */
-static int kc_init_load(kc_init_t *init) {
-    kc_init_collect_t collect;
-    int rc;
-
-    memset(&collect, 0, sizeof(collect));
-    rc = kc_init_run_list_one(
-        init,
-        init->name,
-        kc_init_collect_row,
-        &collect
-    );
-    if (rc != 0 || collect.count == 0U) {
-        kc_init_collect_clear(&collect);
-        return KC_INIT_NOT_FOUND;
-    }
-    if (collect.failed || collect.count != 1U) {
-        kc_init_collect_clear(&collect);
-        return KC_INIT_ERROR;
-    }
-
-    if ((size_t)snprintf(
-            init->cmd,
-            sizeof(init->cmd),
-            "%s",
-            collect.entries[0].cmd
-        ) >= sizeof(init->cmd) ||
-        (size_t)snprintf(
-            init->user,
-            sizeof(init->user),
-            "%s",
-            collect.entries[0].user
-        ) >= sizeof(init->user)) {
-        kc_init_collect_clear(&collect);
-        return KC_INIT_ERROR;
-    }
-
-    kc_init_collect_clear(&collect);
-    return KC_INIT_OK;
-}
-
-/**
  * Create or replace one persistent startup registration.
  * The active init backend is detected internally.
  * @param name Registration name.
@@ -1701,42 +1635,58 @@ int kc_init_create(
 }
 
 /**
- * Open one persistent startup registration.
- * @param out Output location for the caller-owned handle.
+ * Get one persistent startup registration by name.
+ * The returned entry and its strings share one allocation released with
+ * kc_init_free().
  * @param name Registration name.
+ * @param out_entry Receives the allocated entry, or NULL when absent.
  * @return KC_INIT_OK on success, KC_INIT_NOT_FOUND when absent,
  *         or KC_INIT_ERROR on failure.
  */
-int kc_init_open(kc_init_t **out, const char *name) {
-    kc_init_t *init;
+int kc_init_get(
+    const char *name,
+    kc_init_entry_t **out_entry
+) {
+    kc_init_t init;
+    kc_init_collect_t collect;
+    kc_init_entry_t *entries;
+    size_t count;
     int rc;
 
-    if (!out || !kc_init_key_valid(name)) return KC_INIT_ERROR;
-    *out = NULL;
+    if (out_entry) *out_entry = NULL;
+    if (!out_entry || !kc_init_key_valid(name)) return KC_INIT_ERROR;
 
-    init = (kc_init_t *)calloc(1, sizeof(*init));
-    if (!init) return KC_INIT_ERROR;
-    if ((size_t)snprintf(
-            init->name,
-            sizeof(init->name),
-            "%s",
-            name
-        ) >= sizeof(init->name) ||
-        kc_init_resolve_dir(init->dir, sizeof(init->dir)) != 0) {
-        free(init);
+    memset(&init, 0, sizeof(init));
+    memset(&collect, 0, sizeof(collect));
+    if (kc_init_resolve_dir(init.dir, sizeof(init.dir)) != 0) {
         return KC_INIT_ERROR;
     }
-#ifndef _WIN32
-    init->backend = kc_init_detect_backend();
-#endif
 
-    rc = kc_init_load(init);
-    if (rc != KC_INIT_OK) {
-        free(init);
-        return rc;
+    rc = kc_init_run_list_one(
+        &init,
+        name,
+        kc_init_collect_row,
+        &collect
+    );
+    if (rc != 0 || collect.count == 0U) {
+        kc_init_collect_clear(&collect);
+        return KC_INIT_NOT_FOUND;
+    }
+    if (collect.failed || collect.count != 1U) {
+        kc_init_collect_clear(&collect);
+        return KC_INIT_ERROR;
     }
 
-    *out = init;
+    entries = NULL;
+    count = 0U;
+    rc = kc_init_collect_finish(&collect, &entries, &count);
+    kc_init_collect_clear(&collect);
+    if (rc != KC_INIT_OK || count != 1U) {
+        free(entries);
+        return KC_INIT_ERROR;
+    }
+
+    *out_entry = entries;
     return KC_INIT_OK;
 }
 
@@ -1799,72 +1749,6 @@ int kc_init_delete(const char *name) {
     return kc_init_run_delete(&init, name) == 0
         ? KC_INIT_OK
         : KC_INIT_ERROR;
-}
-
-/**
- * Replace the command of one persistent startup registration.
- * @param init Startup entry handle.
- * @param cmd New one-line startup command.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
- */
-int kc_init_set_cmd(kc_init_t *init, const char *cmd) {
-    if (!init || !kc_init_cmd_valid(cmd)) return KC_INIT_ERROR;
-#ifndef _WIN32
-    if (init->backend == KC_INIT_BACKEND_NONE) {
-        init->backend = kc_init_detect_backend();
-    }
-#endif
-    if (kc_init_run_update(init, init->name, cmd) != 0) {
-        kc_init_set_error(init, "set command failed");
-        return KC_INIT_ERROR;
-    }
-    if ((size_t)snprintf(
-            init->cmd,
-            sizeof(init->cmd),
-            "%s",
-            cmd
-        ) >= sizeof(init->cmd)) {
-        return KC_INIT_ERROR;
-    }
-    init->error[0] = '\0';
-    return KC_INIT_OK;
-}
-
-/**
- * Return the command of one opened startup registration.
- * @param init Startup entry handle.
- * @return Borrowed command string, or NULL on invalid input.
- */
-const char *kc_init_get_cmd(const kc_init_t *init) {
-    return init ? init->cmd : NULL;
-}
-
-/**
- * Return the recorded user of one opened startup registration.
- * @param init Startup entry handle.
- * @return Borrowed user string, or NULL on invalid input.
- */
-const char *kc_init_get_user(const kc_init_t *init) {
-    return init ? init->user : NULL;
-}
-
-/**
- * Return the last handle error message.
- * @param init Startup entry handle.
- * @return Borrowed error text, or NULL when unset.
- */
-const char *kc_init_error(const kc_init_t *init) {
-    if (!init || !init->error[0]) return NULL;
-    return init->error;
-}
-
-/**
- * Release one local startup entry handle.
- * @param init Startup entry handle, or NULL.
- * @return None.
- */
-void kc_init_close(kc_init_t *init) {
-    free(init);
 }
 
 /**
