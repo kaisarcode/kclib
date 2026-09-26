@@ -147,12 +147,13 @@ generate_manifest() {
     local manifest_file first_project first_binary
     local project_dir project_name project_sha_file
     local binary_path filename rel_path arch platform bin_name
-    local sha256 filesize
+    local sha256 filesize updated_at
 
     manifest_file="$dist_dir/manifest.json"
     first_project=true
     echo "{" > "$manifest_file"
-    date -u '+  "updated_at": "%Y-%m-%dT%H:%M:%SZ",' >> "$manifest_file"
+    updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+    printf '  "updated_at": "%s",\n' "$updated_at" >> "$manifest_file"
     echo "  \"timestamp\": $(date -u +%s)," >> "$manifest_file"
     echo '  "projects": {' >> "$manifest_file"
 
