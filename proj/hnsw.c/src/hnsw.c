@@ -81,19 +81,19 @@ static int hnsw_read_stdin(char **out_text) {
  * @return No return value.
  */
 static void hnsw_help(const char *name) {
-    printf("Usage:\n");
-    printf("  %s --dim <n> --input <dataset> --query <values> [options]\n\n", name);
+    printf("Usage: %s [options]\n", name);
+    printf("\n");
     printf("Options:\n");
-    printf("  --dim, -d <n>        Vector dimension\n");
-    printf("  --input, -i <path>   Dataset file with: id v1 v2 ... vN\n");
-    printf("  --query, -q <text>   Query vector values separated by spaces or commas\n");
-    printf("  --top, -k <n>        Maximum number of results\n");
-    printf("  --threshold, -t <n>  Minimum score or maximum distance\n");
-    printf("  --metric, -m <name>  cosine | inner | l2\n");
+    printf("  -d, --dim <n>        Vector dimension\n");
+    printf("  -i, --input <path>   Dataset file with: id v1 v2 ... vN\n");
+    printf("  -q, --query <text>   Query vector values separated by spaces or commas\n");
+    printf("  -k, --top <n>        Maximum number of results\n");
+    printf("  -t, --threshold <n>  Minimum score or maximum distance\n");
+    printf("  -m, --metric <name>  cosine | inner | l2\n");
     printf("  --max-conn <n>       Maximum graph connections per level\n");
     printf("  --build-effort <n>    Index quality vs speed (higher = better recall, slower build)\n");
     printf("  --search-effort <n>  Search accuracy vs speed (higher = better recall, slower query)\n");
-    printf("  -h, --help           Show help\n");
+    printf("  -h, --help           Show this help\n");
     printf("  -v, --version        Show version\n\n");
     printf("Examples:\n");
     printf("  %s --dim 3 --input vectors.txt --query \"1 0 0\"\n", name);
