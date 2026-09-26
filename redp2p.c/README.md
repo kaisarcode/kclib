@@ -239,9 +239,6 @@ REDP2P requires native TCP/UDP listeners and direct UDP hole punching. It is
 intended for the native platforms supported by the project, including POSIX
 systems and Windows.
 
-Browser WebAssembly is not applicable to this capability because the browser
-runtime does not expose the native listener and direct UDP networking semantics
-represented by REDP2P.
 
 ---
 
@@ -264,8 +261,7 @@ make
 make test
 ```
 
-The native test run executes the private protocol/security regression suite and
-then the reusable public API plus one grouped CLI case.
+The native test run covers the public API, CLI, and protocol behavior.
 
 To run through Wine:
 
