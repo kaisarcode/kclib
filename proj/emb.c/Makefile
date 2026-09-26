@@ -275,18 +275,24 @@ loongarch64/linux:
 
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@cmake -S . -B $(BUILD_DIR)/$(1)-windows \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Windows \
-		-DCMAKE_SYSTEM_PROCESSOR=$(2) \
-		-DEMB_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_C_COMPILER=$(3) \
-		-DCMAKE_CXX_COMPILER=$(4) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-G Ninja -Wno-dev > /dev/null
-	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,,CMAKE_BUILD_PARALLEL_LEVEL=1)
+	@cache=$(BUILD_DIR)/$(1)-windows/CMakeCache.txt && \
+	if [ -f "$cache" ] && { ! grep -Fq "CMAKE_C_COMPILER:FILEPATH=$(command -v $(3) 2>/dev/null || printf '%s' $(3))" "$cache" || ! grep -Fq "CMAKE_CXX_COMPILER:FILEPATH=$(command -v $(4) 2>/dev/null || printf '%s' $(4))" "$cache"; }; then \
+		rm -f "$cache" $(BUILD_DIR)/$(1)-windows/build.ninja && rm -rf $(BUILD_DIR)/$(1)-windows/CMakeFiles; \
+	fi
+	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ]; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DCMAKE_SYSTEM_PROCESSOR=$(2) \
+			-DEMB_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(3) \
+			-DCMAKE_CXX_COMPILER=$(4) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=$(2) -DEMB_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_C_COMPILER=$(3) -DCMAKE_CXX_COMPILER=$(4) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null,CMAKE_BUILD_PARALLEL_LEVEL=1)
 	@cp $(BUILD_DIR)/$(1)-windows/out/emb.exe $(BIN_DIR)/$(1)/windows/emb.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libemb.dll $(BIN_DIR)/$(1)/windows/libemb.dll
 	@echo "OK $(1)/windows"
