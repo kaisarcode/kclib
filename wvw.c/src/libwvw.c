@@ -153,14 +153,7 @@ static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
 static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
 static void kc_wvw_context_add_ref(kc_wvw_t *ctx);
 static void kc_wvw_context_release(kc_wvw_t *ctx);
-static void kc_wvw_context_destroy(kc_wvw_t *ctx) {
-    if (!ctx) return;
-    free(ctx->pending_url);
-    kc_wvw_bridge_state_free(&ctx->bridge);
-    kc_wvw_config_free(&ctx->opts);
-    if (ctx->closed_event) CloseHandle(ctx->closed_event);
-    free(ctx);
-}
+static void kc_wvw_context_destroy(kc_wvw_t *ctx);
 
 /**
  * Retains one context while an asynchronous operation may use it.
@@ -179,36 +172,11 @@ static void kc_wvw_context_add_ref(kc_wvw_t *ctx) {
  * @return None.
  */
 static void kc_wvw_context_destroy(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return;
-    }
-    if (ctx->controller) {
-        ICoreWebView2Controller_Close(ctx->controller);
-    }
-    if (ctx->webview) {
-        ICoreWebView2_Release(ctx->webview);
-    }
-    if (ctx->controller) {
-        ICoreWebView2Controller_Release(ctx->controller);
-    }
-    if (ctx->environment) {
-        ICoreWebView2Environment_Release(ctx->environment);
-    }
-    if (ctx->hwnd && IsWindow(ctx->hwnd)) {
-        DestroyWindow(ctx->hwnd);
-    }
-    if (ctx->loader) {
-        FreeLibrary(ctx->loader);
-    }
-    if (ctx->background_brush) {
-        DeleteObject(ctx->background_brush);
-    }
+    if (!ctx) return;
     free(ctx->pending_url);
     kc_wvw_bridge_state_free(&ctx->bridge);
     kc_wvw_config_free(&ctx->opts);
-    if (ctx->com_initialized) {
-        CoUninitialize();
-    }
+    if (ctx->closed_event) CloseHandle(ctx->closed_event);
     free(ctx);
 }
 
@@ -1123,7 +1091,7 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridg
  * @return None.
  */
 static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
-    int i;
+    size_t i;
 
     if (!bridge) {
         return;
@@ -1146,9 +1114,9 @@ static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
-    int i;
+    size_t i;
 
-    if (!dst || !src || src->method_count < 0) {
+    if (!dst || !src) {
         return KC_WVW_ERROR;
     }
 
@@ -1192,7 +1160,7 @@ static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bri
  * @return Non-zero when the method is accepted, otherwise zero.
  */
 static int kc_wvw_bridge_method_allowed(kc_wvw_bridge_state_t *bridge, const char *method) {
-    int i;
+    size_t i;
 
     if (!bridge || !method) {
         return 0;
@@ -3424,7 +3392,7 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridg
  * @return None.
  */
 static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
-    int i;
+    size_t i;
 
     if (!bridge) {
         return;
@@ -3447,9 +3415,9 @@ static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
-    int i;
+    size_t i;
 
-    if (!dst || !src || src->method_count < 0) {
+    if (!dst || !src) {
         return KC_WVW_ERROR;
     }
 
@@ -3493,7 +3461,7 @@ static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bri
  * @return Non-zero when the method is accepted, otherwise zero.
  */
 static int kc_wvw_bridge_method_allowed(kc_wvw_bridge_state_t *bridge, const char *method) {
-    int i;
+    size_t i;
 
     if (!bridge || !method) {
         return 0;
