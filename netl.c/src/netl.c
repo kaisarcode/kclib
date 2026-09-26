@@ -627,7 +627,8 @@ static void cli_on_input(
 }
 
 /**
- * Dispatch one accepted TCP peer through the private CLI socket handoff.
+ * Dispatch one accepted TCP peer through the CLI socket handoff.
+ * @return None.
  */
 static void cli_on_accept(
     kc_netl_peer_t *peer,
@@ -656,7 +657,8 @@ static void cli_on_error(int status, void *userdata) {
 }
 
 /**
- * Sleep briefly while the private listener worker owns network dispatch.
+ * Sleep briefly while the listener worker owns network dispatch.
+ * @return None.
  */
 static void cli_wait_tick(void) {
 #ifdef _WIN32
