@@ -56,11 +56,11 @@ static void kc_print_help(const char *name) {
     printf("Usage: %s [options]\n", name);
     printf("\n");
     printf("Options:\n");
-    printf("    --html              Render Markdown body as HTML (default)\n");
-    printf("    --body              Output body without frontmatter\n");
-    printf("    --meta              Output raw frontmatter block\n");
-    printf("    -h, --help          Show this help\n");
-    printf("    -v, --version       Show version\n");
+    printf("  --html              Render Markdown body as HTML (default)\n");
+    printf("  --body              Output body without frontmatter\n");
+    printf("  --meta              Output raw frontmatter block\n");
+    printf("  -h, --help          Show this help\n");
+    printf("  -v, --version       Show version\n");
 }
 
 /**
