@@ -5024,6 +5024,26 @@ static int kc_wvw_linux_install_bridge(kc_wvw_t *ctx) {
 }
 
 /**
+ * Keep the logical window size synchronized with GTK allocations.
+ * @param widget Native window.
+ * @param allocation Current allocation.
+ * @param data Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_size_allocate(
+    GtkWidget *widget,
+    GtkAllocation *allocation,
+    gpointer data
+) {
+    kc_wvw_t *ctx = (kc_wvw_t *)data;
+
+    (void)widget;
+    if (!ctx || !allocation) return;
+    if (allocation->width > 0) ctx->opts.width = allocation->width;
+    if (allocation->height > 0) ctx->opts.height = allocation->height;
+}
+
+/**
  * Create the native GTK window and WebView.
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
@@ -5074,6 +5094,7 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
 
     gtk_container_add(GTK_CONTAINER(ctx->window), GTK_WIDGET(ctx->web_view));
     g_signal_connect(ctx->window, "destroy", G_CALLBACK(kc_wvw_linux_destroy), ctx);
+    g_signal_connect(ctx->window, "size-allocate", G_CALLBACK(kc_wvw_linux_size_allocate), ctx);
     gtk_widget_show_all(ctx->window);
     kc_wvw_linux_apply_window_modes(ctx);
     return KC_WVW_OK;
@@ -5305,6 +5326,8 @@ static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
         return KC_WVW_ERROR;
     }
     gtk_window_resize(GTK_WINDOW(ctx->window), width, height);
+    ctx->opts.width = width;
+    ctx->opts.height = height;
     return KC_WVW_OK;
 }
 
@@ -5315,7 +5338,6 @@ static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
-    int width, height;
     GdkWindow *gdk_window;
 
     if (!ctx || !ctx->window || !state) {
@@ -5323,9 +5345,8 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
     }
 
     memset(state, 0, sizeof(*state));
-    gtk_window_get_size(GTK_WINDOW(ctx->window), &width, &height);
-    state->width = width;
-    state->height = height;
+    state->width = ctx->opts.width;
+    state->height = ctx->opts.height;
     gdk_window = gtk_widget_get_window(ctx->window);
     if (gdk_window) {
         GdkWindowState ws = gdk_window_get_state(gdk_window);
