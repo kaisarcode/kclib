@@ -38,7 +38,8 @@
 #define NETL_CLI_COMMAND_SIZE 4096
 
 /**
- * Open the listener with one private accepted-peer callback used only by the CLI.
+ * Open the listener with the CLI accepted-peer callback.
+ * @return KC_NETL_OK on success, otherwise a negative status.
  */
 int kc_netl_cli_open(
     kc_netl_t **out,
@@ -52,6 +53,7 @@ int kc_netl_cli_open(
 
 /**
  * Transfer an accepted TCP socket to the CLI dispatcher.
+ * @return Native socket value, or -1 on failure.
  */
 intptr_t kc_netl_cli_take_peer(kc_netl_peer_t *peer);
 
@@ -610,6 +612,7 @@ typedef struct {
 
 /**
  * Dispatch one received UDP datagram.
+ * @return None.
  */
 static void cli_on_input(
     const kc_netl_input_t *input,
@@ -643,6 +646,7 @@ static void cli_on_accept(
 
 /**
  * Record a terminal listener failure.
+ * @return None.
  */
 static void cli_on_error(int status, void *userdata) {
     cli_listener_state_t *state = (cli_listener_state_t *)userdata;
@@ -668,6 +672,7 @@ static void cli_wait_tick(void) {
 
 /**
  * Run the foreground command-dispatch listener.
+ * @return Process status.
  */
 static int cli_run(
     const char *host,
@@ -706,10 +711,6 @@ static int cli_run(
         return 1;
     }
 
-    /*
-     * The executable keeps the public CLI foreground contract while libnetl
-     * owns all socket polling and dispatch in its private worker.
-     */
     while (!atomic_load(&state.failed)) {
         cli_wait_tick();
     }
