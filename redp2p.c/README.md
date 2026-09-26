@@ -224,9 +224,6 @@ For `kc_redp2p_con_options_t`, `id`, `index`, and local `port` are
 required. `stun` is optional. The consumer derives TCP or UDP from the
 publisher record.
 
-Timing, punch cadence, pending-call TTL, candidate limits, KCP parameters, and
-other protocol mechanics are internal implementation policy rather than public
-application configuration.
 
 ### Runtime Model
 
