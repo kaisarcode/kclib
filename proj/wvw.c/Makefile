@@ -236,6 +236,12 @@ test:
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target wvw_contract_test || exit 1; \
 		$(BUILD_DIR)/test/wvw_contract_test all; \
+		rc=$?; \
+		if [ $rc -eq 134 ] && command -v gdb >/dev/null 2>&1; then \
+			echo "wvw test aborted; collecting backtrace..." >&2; \
+			gdb -q -batch -ex run -ex "thread apply all bt" --args $(BUILD_DIR)/test/wvw_contract_test all; \
+		fi; \
+		exit $rc; \
 	fi
 
 wine:
