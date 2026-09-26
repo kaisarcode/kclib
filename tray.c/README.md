@@ -67,8 +67,6 @@ Menu items can be added, updated, removed, and handled through callbacks.
 
 `kc_tray_add_separator()` adds a separator. Icons, tooltips, and item text can be updated while the tray is running.
 
-
-
 ---
 
 ## Platform Scope
@@ -109,8 +107,6 @@ session is needed for native cases. To run through Wine:
 make x86_64/windows
 make test wine
 ```
-
-
 
 ### Multiarch Builds
 
