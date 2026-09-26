@@ -174,7 +174,6 @@ const char *kc_redp2p_strerror(int status);
 uint64_t kc_redp2p_version(void);
 ```
 
-All close functions accept `NULL`. `kc_redp2p_free(NULL)` is also safe.
 
 The public API intentionally does not expose registration, heartbeat, lookup,
 punching, candidates, KCP state, session keys, control sequences, or
@@ -206,12 +205,11 @@ The tunnel is only a byte or datagram path. REDP2P does not provide
 
 For `kc_redp2p_idx_options_t`:
 
-- `host == NULL` listens on all interfaces.
+- Omit `host` to listen on all interfaces.
 - `port == 0` uses port 9876.
-- `seats == NULL` means no publisher-capacity limit.
-- A non-NULL `seats` pointer whose value is zero rejects every publisher.
+- Omit `seats` for no publisher-capacity limit.
 - `pow == 0` disables registration proof of work.
-- `pass == NULL` or an empty string leaves global registration admission open.
+- Omit `pass` to leave global registration admission open.
 - VIP entries reserve IDs and may provide per-ID admission passwords.
 - `max_consumers == 0` uses the protocol safety default of 32 pending
     consumers per publisher.
@@ -230,36 +228,10 @@ Timing, punch cadence, pending-call TTL, candidate limits, KCP parameters, and
 other protocol mechanics are internal implementation policy rather than public
 application configuration.
 
-### Runtime model
+### Runtime Model
 
-Each `idx`, `pub`, and `con` handle owns its runtime until its matching
-close function is called.
-
-The native event loops use `poll()` on POSIX and `WSAPoll()` on Windows.
-Closing a handle wakes its event loop immediately.
-
-TCP-over-KCP forwarding uses bounded per-session local output buffering.
-A slow local TCP endpoint does not cause REDP2P to drain unlimited KCP data or
-block in an unbounded write loop. Peer and session errors are isolated whenever
-possible.
-
-The index protocol remains an internal implementation detail. It provides
-authenticated registration challenges, encrypted publisher control secrets,
-proof-of-work admission, password and VIP admission proofs, strictly increasing
-authenticated control sequences, heartbeat expiry, bounded pending punch calls,
-per-source and per-target abuse controls, candidate validation, bounded HTTP
-bodies, bounded session state, and explicit protocol validation.
-
-The index never relays application payloads. Successful peer traffic remains
-direct. REDP2P does not add application authentication, authorization, accounts,
-content semantics, or application-layer encryption.
-
-The PHP implementation in `imp/php/` provides the same index wire protocol
-for deployments where a persistent native index process is inconvenient.
-
-A publisher keeps the minimum local session material required to prove ownership
-of its active index registration across process restarts. The platform storage
-location and control material are implementation details.
+The index coordinates publishers and consumers. Publishers expose local TCP or
+UDP services, and consumers connect through the matching public name.
 
 ### Platform scope
 
