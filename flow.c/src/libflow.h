@@ -27,8 +27,9 @@ typedef struct kc_flow_run kc_flow_run_t;
 /**
  * Receive the terminal result of one flow run.
  * A successful non-empty data buffer is caller-owned and released with
- * kc_flow_free(). Empty success and non-success statuses provide NULL data with
- * size zero. Error is borrowed for the callback duration and is NULL on success.
+ * kc_flow_free(). Empty success and non-success statuses provide NULL data
+ * with size zero. Error is borrowed for the callback duration and is NULL on
+ * success.
  * @param status KC_FLOW_OK, KC_FLOW_ESTOP, or KC_FLOW_ERROR.
  * @param data Owned successful output, or NULL.
  * @param data_size Output size.
