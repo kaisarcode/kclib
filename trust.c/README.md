@@ -68,8 +68,6 @@ trust revoke "<remote_uid>"
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
-The CLI is a thin consumer of the reusable public API. It does not send or
-receive invitations, confirmations, UIDs, or protected messages.
 
 ---
 
