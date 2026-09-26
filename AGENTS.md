@@ -152,6 +152,39 @@ Do not expose private internals or redesign production code solely for tests.
 
 Keep README organization recognizably consistent with other kclibs, but document only actual project behavior.
 
+Treat each kclib README as user-facing product documentation, not as a C
+tutorial, implementation diary, design rationale, or ABI commentary.
+
+A README should focus on:
+
+* what the kclib does;
+* how to use its CLI;
+* practical public API examples;
+* user-visible options and behavior;
+* supported platforms and dependencies;
+* build and test commands.
+
+Do not fill README files with low-level C mechanics that a user does not need
+in order to use the library. In particular, avoid explaining pointer ownership,
+borrowed versus owned memory, pointer lifetimes, allocation layout, NULL-safety,
+nullable scalar pointers, retained userdata, callback storage duration, internal
+threading, private event loops, backend plumbing, dispatch mechanics, or other
+implementation details. Those belong in the public header, source, tests, or
+developer documentation when relevant.
+
+Do not narrate development decisions or justify why an implementation was
+designed a certain way. A reader should not need context from the development
+process to understand the README.
+
+Do not explain why a kclib does not support a platform or build target. Document
+supported targets only. If WebAssembly is supported, document how to build and
+test it. If it is not supported, omit WebAssembly entirely.
+
+README examples should show installed CLI names such as `trust`, `tray`, or
+`wvw`, not repository build paths such as
+`./bin/x86_64/linux/<command>`. Artifact paths may still be documented where
+the artifact location itself is relevant.
+
 Update documentation when public or operational behavior changes.
 
 ## Existing projects
