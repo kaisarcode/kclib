@@ -118,7 +118,6 @@ Each mutable public property has a matching getter.
 
 `set_eot` changes the response-cycle marker. With no custom value, the default marker is byte `0x04`.
 
-
 ### Data events and complete exchanges
 
 ```c
@@ -149,7 +148,6 @@ The supported event is `"data"`. Its handler receives response chunks directly a
 5. emit `"data"` chunks;
 6. finish when the configured EOT is received, or when the platform stream ends;
 7. return the complete response without the EOT marker.
-
 
 ### Raw stream
 
@@ -200,7 +198,6 @@ int kc_dmn_list(
 
 void kc_dmn_free(void *ptr);
 ```
-
 
 ### Version
 
