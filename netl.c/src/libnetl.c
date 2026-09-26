@@ -1087,6 +1087,7 @@ int kc_netl_cli_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
     kc_netl_handler_t handler,
+    kc_netl_error_handler_t error_handler,
     void *userdata,
     void (*accept_handler)(kc_netl_peer_t *peer, void *userdata),
     void *accept_userdata
@@ -1096,7 +1097,7 @@ int kc_netl_cli_open(
         options,
         handler,
         NULL,
-        NULL,
+        error_handler,
         userdata,
         accept_handler,
         accept_userdata
