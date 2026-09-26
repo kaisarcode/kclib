@@ -100,7 +100,6 @@ response
 
 ```c
 static void on_request(const kc_http_request_t *request, void *userdata) {
-    /* request and nested data are borrowed for this callback only */
 }
 
 static void on_error(int status, void *userdata) {
@@ -132,8 +131,6 @@ message.
 Header names are normalized lowercase. HTTP/1 chunked input is dechunked and
 trailers are reported separately.
 
-Requests and responses passed to callbacks are borrowed. They and all nested
-strings, fields, and body bytes remain valid only until that callback returns.
 
 ### Build a request
 
@@ -175,13 +172,8 @@ if (kc_http_response(&response, &wire, &wire_size) == KC_HTTP_OK) {
 }
 ```
 
-`kc_http_request_t` and `kc_http_response_t` are parser output types.
-Builders use the separate `kc_http_request_build_t` and
-`kc_http_response_build_t` input types so parsed scalar fields remain direct
-values while optional builder scalars can represent absence with NULL.
-
-Builder inputs are borrowed for the duration of the call. Returned wire bytes
-are caller-owned and released with `kc_http_free()`.
+`kc_http_request_t` and `kc_http_response_t` represent parsed messages. Request and response builders use their corresponding build types.
+Use `kc_http_free()` to release wire data returned by the builders.
 
 Defaults:
 
