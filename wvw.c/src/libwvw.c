@@ -76,44 +76,6 @@ typedef struct {
 
 static int kc_wvw_execute_op(kc_wvw_t *ctx, kc_wvw_op_t *op);
 
-typedef struct {
-    char *url;
-    char *title;
-    char *background;
-    int width, height, posx, posy;
-    int has_posx, has_posy;
-    int fullscreen, borderless, always_on_top, click_through, no_focus;
-} kc_wvw_config_t;
-typedef struct {
-    int width;
-    int height;
-    int minimized;
-    int maximized;
-    int fullscreen;
-    int visible;
-} kc_wvw_window_state_t;
-
-
-typedef enum {
-    KC_WVW_OP_NAVIGATE, KC_WVW_OP_ADD_INIT_SCRIPT, KC_WVW_OP_ENABLE_BRIDGE,
-    KC_WVW_OP_POST_BRIDGE_EVENT, KC_WVW_OP_HIDE, KC_WVW_OP_SHOW,
-    KC_WVW_OP_MINIMIZE, KC_WVW_OP_MAXIMIZE, KC_WVW_OP_RESTORE,
-    KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE,
-    KC_WVW_OP_GET_SIZE, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
-    KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN
-} kc_wvw_op_kind_t;
-
-typedef struct {
-    kc_wvw_op_kind_t kind;
-    const char *text;
-    const kc_wvw_bridge_options_t *bridge;
-    int a, b;
-    int *out_a, *out_b;
-    const char *out_text;
-    int result;
-} kc_wvw_op_t;
-
-static int kc_wvw_execute_op(kc_wvw_t *ctx, kc_wvw_op_t *op);
 
 typedef struct {
     char **methods;
@@ -2918,6 +2880,45 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
 #include <string.h>
 
 #define KC_WVW_BRIDGE_MAX_MESSAGE 65536
+
+typedef struct {
+    char *url;
+    char *title;
+    char *background;
+    int width, height, posx, posy;
+    int has_posx, has_posy;
+    int fullscreen, borderless, always_on_top, click_through, no_focus;
+} kc_wvw_config_t;
+typedef struct {
+    int width;
+    int height;
+    int minimized;
+    int maximized;
+    int fullscreen;
+    int visible;
+} kc_wvw_window_state_t;
+
+
+typedef enum {
+    KC_WVW_OP_NAVIGATE, KC_WVW_OP_ADD_INIT_SCRIPT, KC_WVW_OP_ENABLE_BRIDGE,
+    KC_WVW_OP_POST_BRIDGE_EVENT, KC_WVW_OP_HIDE, KC_WVW_OP_SHOW,
+    KC_WVW_OP_MINIMIZE, KC_WVW_OP_MAXIMIZE, KC_WVW_OP_RESTORE,
+    KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE,
+    KC_WVW_OP_GET_SIZE, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
+    KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN
+} kc_wvw_op_kind_t;
+
+typedef struct {
+    kc_wvw_op_kind_t kind;
+    const char *text;
+    const kc_wvw_bridge_options_t *bridge;
+    int a, b;
+    int *out_a, *out_b;
+    const char *out_text;
+    int result;
+} kc_wvw_op_t;
+
+static int kc_wvw_execute_op(kc_wvw_t *ctx, kc_wvw_op_t *op);
 
 typedef struct {
     char **methods;
