@@ -119,9 +119,13 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(GGML_CXX_COMPILE_OPTIONS -w -Wno-psabi)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "mipsel" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND GGML_CXX_COMPILE_OPTIONS -O2)
+    endif()
     set_source_files_properties(
         ${GGML_CXX_SOURCES}
-        PROPERTIES COMPILE_OPTIONS "-w;-Wno-psabi"
+        PROPERTIES COMPILE_OPTIONS "${GGML_CXX_COMPILE_OPTIONS}"
     )
 endif()
 
