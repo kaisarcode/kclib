@@ -2,7 +2,7 @@
 
 Persistent operating-system startup registration.
 
-init.c registers named commands so the operating system starts them during boot or user startup. It does not start, stop, supervise, or execute those commands in the caller process.
+`init.c` registers named commands so the operating system starts them during boot or user startup.
 
 ---
 
@@ -76,18 +76,10 @@ void kc_init_close(kc_init_t *init);
 uint64_t kc_init_version(void);
 ```
 
-### Public model
+### Public Model
 
-A registration is a persistent operating-system entity identified by name.
-
-```text
-create / delete = lifecycle of the persistent boot registration
-open / close    = lifecycle of a local handle
-set/get_cmd     = persistent command configuration
-get_user        = registration metadata
-```
-
-The operating-system backend is private. Linux selects the available init mechanism automatically, such as systemd, runit, OpenRC, or SysV. Windows uses the native startup mechanism.
+Entries can be created, queried, listed, enabled, disabled, and removed by
+name.
 
 ### Metadata namespace
 
@@ -109,11 +101,10 @@ On Windows, init.c uses the corresponding per-user application-data directory un
 
 `KC_INIT_DIR` is an advanced process-level override. The CLI exposes the same capability through `--dir <path>`. Normal callers do not need to select a directory.
 
-### Platform scope
+### Platform Scope
 
-init.c is an operating-system library. Browser WebAssembly is not applicable because browser code cannot register operating-system startup commands without changing the capability contract.
-
-Supported artifact platforms are Linux and Windows.
+Linux and Windows are supported. Linux uses the available system startup
+mechanism automatically.
 
 ---
 
