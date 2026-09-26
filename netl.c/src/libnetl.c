@@ -123,6 +123,10 @@ struct kc_netl {
 #endif
 };
 
+/**
+ * Platform open.
+ * @return Function result.
+ */
 static int kc_netl_platform_open(void) {
 #ifdef _WIN32
     WSADATA data;
@@ -132,12 +136,20 @@ static int kc_netl_platform_open(void) {
 #endif
 }
 
+/**
+ * Platform close.
+ * @return None.
+ */
 static void kc_netl_platform_close(void) {
 #ifdef _WIN32
     WSACleanup();
 #endif
 }
 
+/**
+ * Would block.
+ * @return Function result.
+ */
 static int kc_netl_would_block(void) {
 #ifdef _WIN32
     return WSAGetLastError() == WSAEWOULDBLOCK;
@@ -146,6 +158,10 @@ static int kc_netl_would_block(void) {
 #endif
 }
 
+/**
+ * Nonblocking.
+ * @return Function result.
+ */
 static int kc_netl_nonblocking(kc_netl_fd_t fd) {
 #ifdef _WIN32
     u_long mode = 1UL;
@@ -157,6 +173,10 @@ static int kc_netl_nonblocking(kc_netl_fd_t fd) {
 #endif
 }
 
+/**
+ * Disable sigpipe.
+ * @return None.
+ */
 static void kc_netl_disable_sigpipe(kc_netl_fd_t fd) {
 #if !defined(_WIN32) && defined(SO_NOSIGPIPE)
     int one = 1;
@@ -166,6 +186,10 @@ static void kc_netl_disable_sigpipe(kc_netl_fd_t fd) {
 #endif
 }
 
+/**
+ * Mutex open.
+ * @return Function result.
+ */
 static int kc_netl_mutex_open(kc_netl_mutex_t *mutex) {
 #ifdef _WIN32
     InitializeCriticalSection(mutex);
@@ -175,6 +199,10 @@ static int kc_netl_mutex_open(kc_netl_mutex_t *mutex) {
 #endif
 }
 
+/**
+ * Mutex close.
+ * @return None.
+ */
 static void kc_netl_mutex_close(kc_netl_mutex_t *mutex) {
 #ifdef _WIN32
     DeleteCriticalSection(mutex);
@@ -183,6 +211,10 @@ static void kc_netl_mutex_close(kc_netl_mutex_t *mutex) {
 #endif
 }
 
+/**
+ * Lock.
+ * @return None.
+ */
 static void kc_netl_lock(kc_netl_t *listener) {
 #ifdef _WIN32
     EnterCriticalSection(&listener->mutex);
@@ -191,6 +223,10 @@ static void kc_netl_lock(kc_netl_t *listener) {
 #endif
 }
 
+/**
+ * Unlock.
+ * @return None.
+ */
 static void kc_netl_unlock(kc_netl_t *listener) {
 #ifdef _WIN32
     LeaveCriticalSection(&listener->mutex);
@@ -199,6 +235,10 @@ static void kc_netl_unlock(kc_netl_t *listener) {
 #endif
 }
 
+/**
+ * Peer text.
+ * @return Function result.
+ */
 static int kc_netl_peer_text(
     const struct sockaddr *addr,
     socklen_t addr_len,
@@ -222,6 +262,10 @@ static int kc_netl_peer_text(
     return KC_NETL_OK;
 }
 
+/**
+ * Output free.
+ * @return None.
+ */
 static void kc_netl_output_free(kc_netl_output_t *output) {
     while (output != NULL) {
         kc_netl_output_t *next = output->next;
@@ -250,6 +294,10 @@ static kc_netl_output_t *kc_netl_output_new(
     return output;
 }
 
+/**
+ * Bind.
+ * @return Function result.
+ */
 static int kc_netl_bind(
     const kc_netl_options_t *options,
     kc_netl_fd_t *out_fd,
@@ -338,6 +386,10 @@ static int kc_netl_bind(
     return KC_NETL_ENET;
 }
 
+/**
+ * Peer count.
+ * @return Function result.
+ */
 static size_t kc_netl_peer_count(const kc_netl_t *listener) {
     const kc_netl_peer_t *peer;
     size_t count = 0U;
@@ -348,6 +400,10 @@ static size_t kc_netl_peer_count(const kc_netl_t *listener) {
     return count;
 }
 
+/**
+ * Poll reserve.
+ * @return Function result.
+ */
 static int kc_netl_poll_reserve(kc_netl_t *listener, size_t count) {
     kc_netl_pollfd_t *new_fds;
     kc_netl_peer_t **new_map;
@@ -377,6 +433,10 @@ static int kc_netl_poll_reserve(kc_netl_t *listener, size_t count) {
     return KC_NETL_OK;
 }
 
+/**
+ * Peer detach.
+ * @return None.
+ */
 static void kc_netl_peer_detach(
     kc_netl_t *listener,
     kc_netl_peer_t *peer
@@ -393,6 +453,10 @@ static void kc_netl_peer_detach(
     }
 }
 
+/**
+ * Peer finish.
+ * @return None.
+ */
 static void kc_netl_peer_finish(
     kc_netl_t *listener,
     kc_netl_peer_t *peer,
@@ -419,6 +483,10 @@ static void kc_netl_peer_finish(
     free(peer);
 }
 
+/**
+ * Fail.
+ * @return None.
+ */
 static void kc_netl_fail(kc_netl_t *listener, int status) {
     kc_netl_error_handler_t handler = NULL;
     void *userdata = NULL;
@@ -435,6 +503,10 @@ static void kc_netl_fail(kc_netl_t *listener, int status) {
     if (handler != NULL) handler(status, userdata);
 }
 
+/**
+ * Accept peer.
+ * @return Function result.
+ */
 static int kc_netl_accept_peer(kc_netl_t *listener) {
     struct sockaddr_storage address;
     socklen_t address_size = (socklen_t)sizeof(address);
@@ -491,6 +563,10 @@ static int kc_netl_accept_peer(kc_netl_t *listener) {
     return KC_NETL_OK;
 }
 
+/**
+ * Receive tcp.
+ * @return None.
+ */
 static void kc_netl_receive_tcp(
     kc_netl_t *listener,
     kc_netl_peer_t *peer
@@ -522,6 +598,10 @@ static void kc_netl_receive_tcp(
     kc_netl_peer_finish(listener, peer, 1);
 }
 
+/**
+ * Receive udp.
+ * @return None.
+ */
 static void kc_netl_receive_udp(kc_netl_t *listener) {
     unsigned char buffer[KC_NETL_BUFFER_SIZE];
     struct sockaddr_storage address;
@@ -573,6 +653,10 @@ static void kc_netl_receive_udp(kc_netl_t *listener) {
     peer.closed = 1;
 }
 
+/**
+ * Flush tcp.
+ * @return None.
+ */
 static void kc_netl_flush_tcp(
     kc_netl_t *listener,
     kc_netl_peer_t *peer
@@ -614,6 +698,10 @@ static void kc_netl_flush_tcp(
     if (failed) kc_netl_peer_finish(listener, peer, 1);
 }
 
+/**
+ * Flush udp.
+ * @return None.
+ */
 static void kc_netl_flush_udp(kc_netl_t *listener) {
     for (;;) {
         kc_netl_output_t *output;
@@ -659,6 +747,10 @@ static void kc_netl_flush_udp(kc_netl_t *listener) {
     }
 }
 
+/**
+ * Should stop.
+ * @return Function result.
+ */
 static int kc_netl_should_stop(kc_netl_t *listener) {
     int stop;
 
@@ -668,6 +760,10 @@ static int kc_netl_should_stop(kc_netl_t *listener) {
     return stop;
 }
 
+/**
+ * Close requested peers.
+ * @return None.
+ */
 static void kc_netl_close_requested_peers(kc_netl_t *listener) {
     for (;;) {
         kc_netl_peer_t *peer;
@@ -691,8 +787,16 @@ static void kc_netl_close_requested_peers(kc_netl_t *listener) {
     }
 }
 
+/**
+ * Destroy.
+ * @return None.
+ */
 static void kc_netl_destroy(kc_netl_t *listener);
 
+/**
+ * Worker run.
+ * @return None.
+ */
 static void kc_netl_worker_run(kc_netl_t *listener) {
     while (!kc_netl_should_stop(listener)) {
         size_t count;
@@ -796,6 +900,10 @@ static void kc_netl_worker_run(kc_netl_t *listener) {
 }
 
 #ifdef _WIN32
+/**
+ * Worker entry.
+ * @return Function result.
+ */
 static DWORD WINAPI kc_netl_worker_entry(LPVOID arg) {
     kc_netl_t *listener = (kc_netl_t *)arg;
 
@@ -822,6 +930,10 @@ static void *kc_netl_worker_entry(void *arg) {
 }
 #endif
 
+/**
+ * Worker start.
+ * @return Function result.
+ */
 static int kc_netl_worker_start(kc_netl_t *listener) {
 #ifdef _WIN32
     listener->worker = CreateThread(
@@ -842,6 +954,10 @@ static int kc_netl_worker_start(kc_netl_t *listener) {
     return KC_NETL_OK;
 }
 
+/**
+ * Worker join.
+ * @return None.
+ */
 static void kc_netl_worker_join(kc_netl_t *listener) {
     if (!listener->worker_started) return;
 #ifdef _WIN32
@@ -854,6 +970,10 @@ static void kc_netl_worker_join(kc_netl_t *listener) {
     listener->worker_started = 0;
 }
 
+/**
+ * Destroy.
+ * @return None.
+ */
 static void kc_netl_destroy(kc_netl_t *listener) {
     kc_netl_peer_t *peer;
 
@@ -888,6 +1008,10 @@ static void kc_netl_destroy(kc_netl_t *listener) {
     free(listener);
 }
 
+/**
+ * Open internal.
+ * @return Function result.
+ */
 static int kc_netl_open_internal(
     kc_netl_t **out,
     const kc_netl_options_t *options,
@@ -967,6 +1091,10 @@ static int kc_netl_open_internal(
     return KC_NETL_OK;
 }
 
+/**
+ * Open.
+ * @return Function result.
+ */
 int kc_netl_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
@@ -990,6 +1118,10 @@ int kc_netl_open(
     );
 }
 
+/**
+ * Respond.
+ * @return Function result.
+ */
 int kc_netl_respond(
     kc_netl_peer_t *peer,
     const void *data,
@@ -1043,6 +1175,10 @@ int kc_netl_respond(
     return KC_NETL_OK;
 }
 
+/**
+ * Peer close.
+ * @return None.
+ */
 void kc_netl_peer_close(kc_netl_peer_t *peer) {
     kc_netl_t *listener;
 
@@ -1054,10 +1190,18 @@ void kc_netl_peer_close(kc_netl_peer_t *peer) {
     kc_netl_unlock(listener);
 }
 
+/**
+ * Port.
+ * @return Function result.
+ */
 unsigned short kc_netl_port(const kc_netl_t *listener) {
     return listener != NULL ? listener->port : 0U;
 }
 
+/**
+ * Close.
+ * @return None.
+ */
 void kc_netl_close(kc_netl_t *listener) {
     int from_worker = 0;
 
@@ -1083,6 +1227,10 @@ void kc_netl_close(kc_netl_t *listener) {
 }
 
 #ifdef KC_NETL_CLI
+/**
+ * Cli open.
+ * @return Function result.
+ */
 int kc_netl_cli_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
@@ -1104,6 +1252,10 @@ int kc_netl_cli_open(
     );
 }
 
+/**
+ * Cli take peer.
+ * @return Function result.
+ */
 intptr_t kc_netl_cli_take_peer(kc_netl_peer_t *peer) {
     kc_netl_t *listener;
     kc_netl_fd_t fd;
@@ -1147,6 +1299,10 @@ const char *kc_netl_strerror(int status) {
 #define KC_NETL_BUILD_VERSION 0
 #endif
 
+/**
+ * Version.
+ * @return Function result.
+ */
 uint64_t kc_netl_version(void) {
     return (uint64_t)KC_NETL_BUILD_VERSION;
 }
