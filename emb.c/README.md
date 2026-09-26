@@ -72,13 +72,9 @@ uint64_t kc_emb_version(void);
 ```
 
 - `kc_emb_dimension` returns the fixed vector dimension declared by the embedded model. It is a model property, not a caller option.
-- `kc_emb_embed` generates an embedding for one null-terminated input string. Empty input is valid.
-- `input` is borrowed only for the duration of the call and is never retained.
-- On success, `*out_data` is a caller-owned float array and `*out_count` is its element count. The embedded BGE small v1.5 model currently returns 384 floats.
-- Release vectors with `kc_emb_free()`; `kc_emb_free(NULL)` is safe.
-- Invalid arguments or initialization/inference/allocation failures return `KC_EMB_ERROR` and reset available outputs to `NULL` / `0`.
-- `kc_emb_version` returns the generated build timestamp.
-- Model loading, GGML compute state, and serialization are internal. Callers do not open, configure, query, or close a model.
+- `kc_emb_embed` generates an embedding for one input string.
+- The embedded BGE small v1.5 model currently returns 384 floats.
+- Use `kc_emb_free()` to release returned vectors.
 
 ### Example
 
@@ -100,7 +96,6 @@ The dimension is fixed by the embedded model. Callers do not choose it. This let
 a vector index such as `hnsw.c` use `emb.dimension()` directly when creating
 an index, without hardcoding the model's current 384-element output.
 
-No lifecycle object or semantic wrapper is required.
 
 ### Runtime model
 
