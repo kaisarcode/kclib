@@ -129,12 +129,12 @@ static int kc_lng_parse_double(const char *text, double *out) {
  * @return No return value.
  */
 static void kc_lng_help(void) {
-    printf("Usage:\n");
-    printf("  lng [options] [text]\n\n");
+    printf("Usage: lng [text] [options]\n");
+    printf("\n");
     printf("Options:\n");
-    printf("  --threshold, -t <n>  Minimum score threshold\n");
-    printf("  --limit, -l <n>      Maximum number of results\n");
-    printf("  -h, --help           Show help\n");
+    printf("  -t, --threshold <n>  Minimum score threshold\n");
+    printf("  -l, --limit <n>      Maximum number of results\n");
+    printf("  -h, --help           Show this help\n");
     printf("  -v, --version        Show version\n\n");
     printf("Examples:\n");
     printf("  lng \"hello world\"\n");
