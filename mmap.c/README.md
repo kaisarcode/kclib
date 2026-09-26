@@ -85,24 +85,17 @@ kc_mmap_close(mm);
 }
 ```
 
-### API semantics
+### Behavior
 
 - `kc_mmap_open()` creates one instance associated with a copied file path.
     Missing files are valid and produce an instance with no value.
-- `kc_mmap_get()` returns `KC_MMAP_NOT_FOUND` only when the valid instance has
-    no current value. On `KC_MMAP_OK`, the returned pointer and size are
-    transport details for the current binary value.
-- `kc_mmap_set()` replaces the current in-memory value and does not write the
-    file. `NULL` with size zero sets the logical value to null. A non-NULL
-    pointer with size zero is a real zero-byte value such as `""`.
-- `kc_mmap_save()` persists the current value. A zero-byte value creates or
-    truncates the backing file to zero bytes. Saving null deletes the backing
-    file and invalidates the instance.
-- `kc_mmap_del()` is shorthand for setting null and saving it. It therefore
-    deletes the backing file and invalidates the instance. Subsequent
+- `kc_mmap_get()` reads the current value. A missing value returns `KC_MMAP_NOT_FOUND`.
+- `kc_mmap_set()` replaces the current value, including an empty value.
+- `kc_mmap_save()` persists the current value. Saving no value removes the backing file.
+- `kc_mmap_del()` removes the stored value and backing file. Subsequent
     `get/set/save/del` calls fail.
-- `kc_mmap_close()` releases the instance and accepts `NULL`.
-- `kc_mmap_version()` returns the generated build version.
+- `kc_mmap_close()` closes the instance.
+- `kc_mmap_version()` returns the library build version.
 
 ```text
 KC_MMAP_NOT_FOUND      -> null
@@ -111,8 +104,6 @@ KC_MMAP_OK + N bytes   -> string / byte value
 KC_MMAP_ERROR          -> binding error
 ```
 
-A `get()` pointer is borrowed from the instance. It remains valid until
-`set()`, `del()`, or `close()`.
 
 ---
 
