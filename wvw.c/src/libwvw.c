@@ -664,6 +664,16 @@ static void kc_wvw_config_free(kc_wvw_config_t *config) {
     memset(config, 0, sizeof(*config));
 }
 
+static void kc_wvw_set_error(kc_wvw_t *ctx, const char *fmt, ...) {
+    va_list ap;
+
+    if (!ctx || !fmt) return;
+    va_start(ap, fmt);
+    vsnprintf(ctx->error, sizeof(ctx->error), fmt, ap);
+    va_end(ap);
+    ctx->error[sizeof(ctx->error) - 1] = '\0';
+}
+
 static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *options) {
     if (!config || !options || !options->url || !options->url[0]) return KC_WVW_ERROR;
     memset(config, 0, sizeof(*config));
