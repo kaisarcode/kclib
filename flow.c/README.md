@@ -272,6 +272,10 @@ if (kc_flow_run(
 /* The run advances independently and can be stopped at any time. */
 ```
 
+After the terminal callback returns, the owning control path releases the run
+with `kc_flow_run_close()` and eventually releases the reusable template with
+`kc_flow_close()`.
+
 The opened flow owns its copied source path and ordered temporary overrides.
 Each `kc_flow_run()` snapshots that state, the optional entry, and its input
 before returning. The run then advances independently through the existing
