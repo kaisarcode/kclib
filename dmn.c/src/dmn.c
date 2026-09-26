@@ -17,6 +17,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _WIN32
+#  include <sys/stat.h>
+#  include <unistd.h>
+#endif
+
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
@@ -202,84 +207,276 @@ static int kc_dmn_cli_serve_win32(
 #endif
 
 /**
- * Relays standard input and output through an opened daemon stream.
+ * Find one byte sequence inside another.
+ * @param data Source bytes.
+ * @param data_size Source byte count.
+ * @param needle Sequence to locate.
+ * @param needle_size Sequence byte count.
+ * @return Byte offset, or maximum size value when absent.
+ */
+static size_t kc_dmn_find_bytes(
+    const unsigned char *data,
+    size_t data_size,
+    const unsigned char *needle,
+    size_t needle_size
+) {
+    size_t i;
+
+    if (!data || !needle || needle_size == 0 || data_size < needle_size) {
+        return (size_t)-1;
+    }
+    for (i = 0; i + needle_size <= data_size; i++) {
+        if (memcmp(data + i, needle, needle_size) == 0) return i;
+    }
+    return (size_t)-1;
+}
+
+/**
+ * Append bytes to one growing CLI buffer.
+ * @param data Buffer pointer.
+ * @param size Current byte count.
+ * @param capacity Current capacity.
+ * @param chunk Source bytes.
+ * @param chunk_size Source byte count.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_dmn_cli_append(
+    unsigned char **data,
+    size_t *size,
+    size_t *capacity,
+    const void *chunk,
+    size_t chunk_size
+) {
+    unsigned char *next;
+    size_t needed;
+    size_t cap;
+
+    if (chunk_size == 0) return 0;
+    if (!data || !size || !capacity || !chunk) return 1;
+    if (*size > (size_t)-1 - chunk_size) return 1;
+
+    needed = *size + chunk_size;
+    if (needed > *capacity) {
+        cap = *capacity ? *capacity : KC_DMN_BUF;
+        while (cap < needed) {
+            if (cap > (size_t)-1 / 2) {
+                cap = needed;
+                break;
+            }
+            cap *= 2;
+        }
+        next = (unsigned char *)realloc(*data, cap);
+        if (!next) return 1;
+        *data = next;
+        *capacity = cap;
+    }
+
+    memcpy(*data + *size, chunk, chunk_size);
+    *size = needed;
+    return 0;
+}
+
+/**
+ * Relay one complete EOT-delimited request through the public API.
  * @param daemon Open daemon handle.
  * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
 static int kc_dmn_cli_relay(kc_dmn_t *daemon) {
-    kc_dmn_stream_t *stream = NULL;
     unsigned char buf[KC_DMN_BUF];
+    unsigned char *request = NULL;
+    unsigned char *response = NULL;
     const unsigned char *eot;
+    size_t request_size = 0;
+    size_t request_capacity = 0;
+    size_t response_size = 0;
     size_t eot_size = 0;
-    int stdin_open = 1;
-    int rc = KC_DMN_OK;
+    int rc = KC_DMN_ERROR;
 
     eot = (const unsigned char *)kc_dmn_get_eot(daemon, &eot_size);
-    rc = kc_dmn_stream(daemon, &stream);
-    if (rc != KC_DMN_OK) return rc;
+    if (!eot || eot_size == 0) return KC_DMN_ERROR;
 
-    while (stdin_open) {
+    while (1) {
         size_t n = fread(buf, 1, sizeof(buf), stdin);
-        int input_eot = 0;
-        int response_eot = 0;
+        size_t marker;
 
         if (n == 0) {
-            if (ferror(stdin)) rc = KC_DMN_ERROR;
+            if (ferror(stdin)) goto done;
             break;
         }
-
-        if (kc_dmn_stream_write(stream, buf, n) != KC_DMN_OK) {
-            rc = KC_DMN_ERROR;
-            break;
-        }
-
-        if (eot && eot_size > 0) {
-            size_t i;
-            for (i = 0; i + eot_size <= n; i++) {
-                if (memcmp(buf + i, eot, eot_size) == 0) {
-                    input_eot = 1;
-                    stdin_open = 0;
-                    break;
-                }
-            }
-        }
-
-        do {
-            size_t data_size = 0;
-            rc = kc_dmn_stream_read(
-                stream,
+        if (kc_dmn_cli_append(
+                &request,
+                &request_size,
+                &request_capacity,
                 buf,
-                sizeof(buf),
-                &data_size
-            );
-            if (rc == KC_DMN_EOF) {
-                rc = KC_DMN_OK;
-                break;
-            }
-            if (rc != KC_DMN_OK) break;
+                n
+            ) != 0)
+            goto done;
 
-            if (eot && eot_size > 0) {
-                size_t i;
-                for (i = 0; i + eot_size <= data_size; i++) {
-                    if (memcmp(buf + i, eot, eot_size) == 0) {
-                        response_eot = 1;
-                        break;
-                    }
-                }
-            }
-
-            if (fwrite(buf, 1, data_size, stdout) != data_size ||
-                    fflush(stdout) != 0) {
-                rc = KC_DMN_ERROR;
-                break;
-            }
-        } while (input_eot && !response_eot);
-
-        if (rc != KC_DMN_OK || response_eot || !stdin_open) break;
+        marker = kc_dmn_find_bytes(
+            request,
+            request_size,
+            eot,
+            eot_size
+        );
+        if (marker != (size_t)-1) {
+            request_size = marker;
+            break;
+        }
     }
 
-    kc_dmn_stream_close(stream);
+    if (kc_dmn_send_data(
+            daemon,
+            request,
+            request_size,
+            (void **)&response,
+            &response_size
+        ) != KC_DMN_OK)
+        goto done;
+
+    if (response_size > 0 &&
+            fwrite(response, 1, response_size, stdout) != response_size)
+        goto done;
+    if (fwrite(eot, 1, eot_size, stdout) != eot_size) goto done;
+    if (fflush(stdout) != 0) goto done;
+
+    rc = KC_DMN_OK;
+
+done:
+    free(request);
+    kc_dmn_free(response);
     return rc;
+}
+
+/**
+ * Resolve the daemon runtime directory for CLI endpoint display.
+ * @param out Output path buffer.
+ * @param cap Output capacity.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_dmn_cli_runtime_dir(char *out, size_t cap) {
+    const char *override = getenv("KC_DMN_DIR");
+
+    if (!out || cap == 0) return 1;
+    if (override && override[0]) {
+        return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : 1;
+    }
+
+#ifdef _WIN32
+    {
+        char tmp[MAX_PATH];
+        DWORD size = GetTempPathA((DWORD)sizeof(tmp), tmp);
+
+        if (size == 0 || size >= (DWORD)sizeof(tmp)) return 1;
+        return (size_t)snprintf(
+            out,
+            cap,
+            "%skaisarcode\\dmn",
+            tmp
+        ) < cap ? 0 : 1;
+    }
+#else
+    {
+        const char *xdg = getenv("XDG_RUNTIME_DIR");
+        char path[KC_DMN_BUF];
+        struct stat st;
+
+        if (xdg && xdg[0]) {
+            return (size_t)snprintf(
+                out,
+                cap,
+                "%s/kaisarcode/dmn",
+                xdg
+            ) < cap ? 0 : 1;
+        }
+
+        if ((size_t)snprintf(
+                path,
+                sizeof(path),
+                "/run/user/%u",
+                (unsigned)getuid()
+            ) < sizeof(path) &&
+                stat(path, &st) == 0 &&
+                S_ISDIR(st.st_mode)) {
+            return (size_t)snprintf(
+                out,
+                cap,
+                "%s/kaisarcode/dmn",
+                path
+            ) < cap ? 0 : 1;
+        }
+
+        return (size_t)snprintf(
+            out,
+            cap,
+            "/tmp/kaisarcode/dmn-%u",
+            (unsigned)getuid()
+        ) < cap ? 0 : 1;
+    }
+#endif
+}
+
+/**
+ * Compose one daemon endpoint for CLI display.
+ * @param name Daemon name.
+ * @param out Output path buffer.
+ * @param cap Output capacity.
+ * @return Zero on success, nonzero on failure.
+ */
+static int kc_dmn_cli_endpoint(
+    const char *name,
+    char *out,
+    size_t cap
+) {
+#ifdef _WIN32
+    return (size_t)snprintf(
+        out,
+        cap,
+        "\\\\.\\pipe\\kc-dmn-%s",
+        name
+    ) < cap ? 0 : 1;
+#else
+    char dir[KC_DMN_BUF];
+
+    if (kc_dmn_cli_runtime_dir(dir, sizeof(dir)) != 0) return 1;
+    return (size_t)snprintf(
+        out,
+        cap,
+        "%s/%s",
+        dir,
+        name
+    ) < cap ? 0 : 1;
+#endif
+}
+
+/**
+ * Print daemon list rows while keeping endpoint details CLI-local.
+ * @param filter Optional daemon name.
+ * @return Process status.
+ */
+static int kc_dmn_cli_list(const char *filter) {
+    kc_dmn_entry_t *entries = NULL;
+    size_t count = 0;
+    size_t i;
+
+    if (kc_dmn_list(&entries, &count) != KC_DMN_OK) return 1;
+
+    for (i = 0; i < count; i++) {
+        char endpoint[KC_DMN_BUF];
+
+        if (filter && strcmp(filter, entries[i].name) != 0) continue;
+        if (kc_dmn_cli_endpoint(
+                entries[i].name,
+                endpoint,
+                sizeof(endpoint)
+            ) != 0) {
+            kc_dmn_free(entries);
+            return 1;
+        }
+        printf("%s\t%s\n", entries[i].name, endpoint);
+    }
+
+    kc_dmn_free(entries);
+    return 0;
 }
 
 /**
@@ -318,20 +515,9 @@ int main(int argc, char **argv) {
 
     if (strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "--list") == 0) {
         const char *filter = (i + 2 == argc) ? argv[i + 1] : NULL;
-        kc_dmn_entry_t *entries = NULL;
-        size_t count = 0;
-        size_t n;
-        int rc;
 
         if (i + 2 < argc) return 1;
-        rc = kc_dmn_list(&entries, &count);
-        if (rc != KC_DMN_OK) return 1;
-        for (n = 0; n < count; n++) {
-            if (!filter || strcmp(filter, entries[n].name) == 0)
-                printf("%s\t%s\n", entries[n].name, entries[n].endpoint);
-        }
-        kc_dmn_free(entries);
-        return 0;
+        return kc_dmn_cli_list(filter);
     }
 
     if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--delete") == 0) {
@@ -353,20 +539,8 @@ int main(int argc, char **argv) {
 
         if (strcmp(argv[i + 1], "-l") == 0 ||
                 strcmp(argv[i + 1], "--list") == 0) {
-            kc_dmn_entry_t *entries = NULL;
-            size_t count = 0;
-            size_t n;
-            int rc;
-
             if (i + 2 != argc) return 1;
-            rc = kc_dmn_list(&entries, &count);
-            if (rc != KC_DMN_OK) return 1;
-            for (n = 0; n < count; n++) {
-                if (strcmp(argv[i], entries[n].name) == 0)
-                    printf("%s\t%s\n", entries[n].name, entries[n].endpoint);
-            }
-            kc_dmn_free(entries);
-            return 0;
+            return kc_dmn_cli_list(argv[i]);
         }
 
         if (strcmp(argv[i + 1], "-s") == 0 ||
