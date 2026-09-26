@@ -5310,6 +5310,10 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     if (!ctx->web_view) {
         return KC_WVW_ERROR;
     }
+    if (g_once_init_enter(&kc_wvw_gtk_shutdown_once)) {
+        atexit(kc_wvw_linux_shutdown);
+        g_once_init_leave(&kc_wvw_gtk_shutdown_once, 1);
+    }
     if (kc_wvw_background_transparent(ctx->opts.background) && kc_wvw_linux_prepare_transparent_window(ctx) != KC_WVW_OK) {
         return KC_WVW_ERROR;
     }
@@ -5330,7 +5334,7 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
 }
 
 typedef struct {kc_wvw_t *ctx;kc_wvw_op_t *op;GMutex mutex;GCond cond;int done;} kc_wvw_linux_call_t;
-static gsize kc_wvw_gtk_once;static GMainContext *kc_wvw_gtk_context;static GMainLoop *kc_wvw_gtk_loop;static GThread *kc_wvw_gtk_thread;static GMutex kc_wvw_gtk_mutex;static GCond kc_wvw_gtk_cond;static int kc_wvw_gtk_ready,kc_wvw_gtk_started;
+static gsize kc_wvw_gtk_once;static gsize kc_wvw_gtk_shutdown_once;static GMainContext *kc_wvw_gtk_context;static GMainLoop *kc_wvw_gtk_loop;static GThread *kc_wvw_gtk_thread;static GMutex kc_wvw_gtk_mutex;static GCond kc_wvw_gtk_cond;static int kc_wvw_gtk_ready,kc_wvw_gtk_started;
 
 /**
  * Run the process-wide GTK event loop.
@@ -5377,9 +5381,6 @@ static int kc_wvw_linux_service(void){
             }
         }
         g_mutex_unlock(&kc_wvw_gtk_mutex);
-        if (kc_wvw_gtk_thread && kc_wvw_gtk_started) {
-            atexit(kc_wvw_linux_shutdown);
-        }
         g_once_init_leave(&kc_wvw_gtk_once, 1);
     }
     return kc_wvw_gtk_started ? KC_WVW_OK : KC_WVW_ERROR;
