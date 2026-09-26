@@ -29,7 +29,7 @@ if(NOT WVW_TEST_EXTERNAL_ARTIFACTS)
     if(WIN32)
         set(WVW_SOURCES src/libwvw.c lib/parson/parson.c)
         set(WVW_WEBVIEW2_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/webview2/include")
-        set(WVW_WEBVIEW2_LOADER "${CMAKE_CURRENT_SOURCE_DIR}/lib/webview2/bin/x86_64/WebView2Loader.dll")
+        set(WVW_WEBVIEW2_LOADER "${CMAKE_CURRENT_SOURCE_DIR}/lib/webview2/runtime/x86_64/WebView2Loader.dll")
 
         set_source_files_properties(src/libwvw.c PROPERTIES
             COMPILE_DEFINITIONS KC_WVW_BUILD_VERSION=${WVW_BUILD_VERSION}
