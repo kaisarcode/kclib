@@ -1,4 +1,12 @@
-/** tray.c - Thin native tray CLI. License: GPL-3.0. */
+/**
+ * tray.c - Native system tray CLI.
+ * Summary: Adapts command-line arguments to the public tray API.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+
 #include "libtray.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +27,12 @@ typedef struct {
 } cli_item_t;
 static atomic_int finished;
 
+/**
+ * Handle a menu selection in the CLI.
+ * @param item Item handle.
+ * @param data Callback data.
+ * @return None.
+ */
 static void cli_action(kc_tray_item_t *item, void *data) {
     cli_item_t *entry = (cli_item_t *)data;
     (void)item;
@@ -32,14 +46,27 @@ static void cli_action(kc_tray_item_t *item, void *data) {
         fflush(stdout);
     }
 }
+
+/**
+ * Print the CLI usage and options.
+ * @param name Case or program name.
+ * @return None.
+ */
 static void help(const char *name) {
     printf("Usage: %s [--icon PATH] [--tooltip TEXT] [--item TEXT | --sep | --quit TEXT]...\n"
-           "  --item TEXT    Print TEXT when selected\n"
-           "  --sep          Insert a separator\n"
-           "  --quit TEXT    Exit when selected\n"
-           "  -h, --help    Show help\n"
-           "  -v, --version Show build version\n", name);
+            "  --item TEXT    Print TEXT when selected\n"
+            "  --sep          Insert a separator\n"
+            "  --quit TEXT    Exit when selected\n"
+            "  -h, --help    Show help\n"
+            "  -v, --version Show build version\n", name);
 }
+
+/**
+ * Run the tray command or its contract tests.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process status or test result.
+ */
 int main(int argc, char **argv) {
     kc_tray_options_t opts = {0};
     kc_tray_t *tray = NULL;
@@ -93,7 +120,7 @@ int main(int argc, char **argv) {
     for (i = 0; i < count; i++) {
         kc_tray_item_t *child = NULL;
         int rc = items[i].separator ? kc_tray_add_separator(tray, &child) :
-                 kc_tray_add_item(tray, &child, items[i].label, cli_action, &items[i]);
+                    kc_tray_add_item(tray, &child, items[i].label, cli_action, &items[i]);
         if (rc != KC_TRAY_OK) {
             fprintf(stderr, "tray: %s\n", kc_tray_get_error(tray) ?
                     kc_tray_get_error(tray) : "menu insertion failed");

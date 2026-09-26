@@ -1,4 +1,4 @@
-# tray.c — native system tray
+# tray.c - native system tray
 
 `libtray` exposes a persistent desktop tray and persistent child menu items on Windows, Linux (GTK 3), and macOS (AppKit). `kc_tray_open()` returns without running a caller-visible event loop. The standalone `tray` program is a small consumer of the same public API.
 

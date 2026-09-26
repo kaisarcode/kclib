@@ -1,4 +1,12 @@
-/** libtray.c - Native tray backends. License: GPL-3.0. */
+/**
+ * libtray.c - Native system tray implementation.
+ * Summary: Implements persistent trays and platform-specific menu items.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+
 #include "libtray.h"
 #if defined(_WIN32)
 #include <windows.h>
@@ -80,6 +88,11 @@ typedef struct kc_op {
 #endif
 } kc_op_t;
 
+/**
+ * Copy an optional string into owned storage.
+ * @param s Input string, or NULL when supported.
+ * @return Owned string, or NULL on failure.
+ */
 static char *kc_copy(const char *s) {
     size_t n;
     char *p;
@@ -89,6 +102,13 @@ static char *kc_copy(const char *s) {
     if (p) memcpy(p, s, n);
     return p;
 }
+
+/**
+ * Store a formatted error on one tray.
+ * @param t Tray context.
+ * @param fmt Format string.
+ * @return None.
+ */
 static void kc_error(kc_tray_t *t, const char *fmt, ...) {
     va_list ap;
     if (!t) return;
@@ -96,6 +116,12 @@ static void kc_error(kc_tray_t *t, const char *fmt, ...) {
     vsnprintf(t->error, sizeof(t->error), fmt, ap);
     va_end(ap);
 }
+
+/**
+ * Release an owned item and its label.
+ * @param item Item handle.
+ * @return None.
+ */
 static void kc_item_free(kc_tray_item_t *item) {
 #if defined(__APPLE__)
     [item->native release];
@@ -103,6 +129,12 @@ static void kc_item_free(kc_tray_item_t *item) {
     free(item->text);
     free(item);
 }
+
+/**
+ * Release tray storage and all remaining children.
+ * @param t Tray context.
+ * @return None.
+ */
 static void kc_free(kc_tray_t *t) {
     kc_tray_item_t *p, *next;
     for (p = t->items; p; p = next) {
@@ -121,6 +153,12 @@ static void kc_free(kc_tray_t *t) {
 #if defined(_WIN32)
 #define KC_MSG_ICON (WM_APP + 40)
 #define KC_MSG_OP (WM_APP + 41)
+
+/**
+ * Convert UTF-8 input to an owned UTF-16 string.
+ * @param s Input string, or NULL when supported.
+ * @return Owned string, or NULL on failure.
+ */
 static wchar_t *kc_wide(const char *s) {
     int n;
     wchar_t *p;
@@ -133,12 +171,26 @@ static wchar_t *kc_wide(const char *s) {
     }
     return p;
 }
+
+/**
+ * Initialize Windows notification icon metadata.
+ * @param t Tray context.
+ * @param nid Notification icon metadata.
+ * @return None.
+ */
 static void kc_nid(kc_tray_t *t, NOTIFYICONDATAW *nid) {
     memset(nid, 0, sizeof(*nid));
     nid->cbSize = sizeof(*nid);
     nid->hWnd = t->window;
     nid->uID = 1;
 }
+
+/**
+ * Update the platform notification icon.
+ * @param t Tray context.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_icon(kc_tray_t *t, const char *s) {
     NOTIFYICONDATAW nid;
     HICON icon = NULL;
@@ -160,6 +212,13 @@ static int kc_native_icon(kc_tray_t *t, const char *s) {
     t->native_icon = icon;
     return 0;
 }
+
+/**
+ * Update the platform tooltip.
+ * @param t Tray context.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_tip(kc_tray_t *t, const char *s) {
     NOTIFYICONDATAW nid;
     wchar_t *wide = kc_wide(s);
@@ -176,17 +235,30 @@ static int kc_native_tip(kc_tray_t *t, const char *s) {
     }
     return 0;
 }
+
+/**
+ * Insert a native menu item or separator.
+ * @param item Item handle.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_add(kc_tray_item_t *item) {
     kc_tray_t *t = item->tray;
     wchar_t *wide = kc_wide(item->text);
     BOOL ok;
     if (item->text && !wide) { kc_error(t, "invalid item text"); return -1; }
     ok = AppendMenuW(t->menu, item->text ? MF_STRING : MF_SEPARATOR,
-                     item->id, wide);
+                        item->id, wide);
     free(wide);
     if (!ok) { kc_error(t, "menu insertion failed"); return -1; }
     return 0;
 }
+
+/**
+ * Change a native menu item label.
+ * @param item Item handle.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_text(kc_tray_item_t *item, const char *s) {
     MENUITEMINFOW info;
     wchar_t *wide = kc_wide(s);
@@ -199,6 +271,12 @@ static int kc_native_text(kc_tray_item_t *item, const char *s) {
     if (!ok) { kc_error(item->tray, "menu update failed"); return -1; }
     return 0;
 }
+
+/**
+ * Remove a native menu item or separator.
+ * @param item Item handle.
+ * @return None.
+ */
 static void kc_native_remove(kc_tray_item_t *item) {
     unsigned position = 0;
     kc_tray_item_t *p;
@@ -218,7 +296,6 @@ static void kc_native_remove(kc_tray_item_t *item) {
     if (tray && !tray->closing && item && !item->removed && item->callback) {
         tray->active = item;
         item->callback(item, item->userdata);
-        /* The public pointer ceases to exist immediately after its callback. */
         if (item->removed) kc_item_free(item);
         if (owner->active == item) owner->active = NULL;
     }
@@ -226,13 +303,20 @@ static void kc_native_remove(kc_tray_item_t *item) {
     if (owner && owner->free_on_exit) kc_free(owner);
 }
 @end
+
+/**
+ * Update the platform notification icon.
+ * @param t Tray context.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_icon(kc_tray_t *t, const char *s) {
     NSImage *image = nil;
     if (s) {
         NSString *name = [NSString stringWithUTF8String:s];
         if (!name) { kc_error(t, "invalid icon path"); return -1; }
         image = strchr(s, '/') ? [[[NSImage alloc] initWithContentsOfFile:name] autorelease]
-                               : [NSImage imageNamed:name];
+                                : [NSImage imageNamed:name];
         if (!image) { kc_error(t, "icon loading failed"); return -1; }
         image = [[image copy] autorelease];
         [image setSize:NSMakeSize(18, 18)];
@@ -240,12 +324,25 @@ static int kc_native_icon(kc_tray_t *t, const char *s) {
     t->status.button.image = image;
     return 0;
 }
+
+/**
+ * Update the platform tooltip.
+ * @param t Tray context.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_tip(kc_tray_t *t, const char *s) {
     NSString *tip = s ? [NSString stringWithUTF8String:s] : nil;
     if (s && !tip) { kc_error(t, "invalid tooltip"); return -1; }
     t->status.button.toolTip = tip;
     return 0;
 }
+
+/**
+ * Insert a native menu item or separator.
+ * @param item Item handle.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_add(kc_tray_item_t *item) {
     kc_tray_t *t = item->tray;
     NSMenuItem *native;
@@ -254,7 +351,7 @@ static int kc_native_add(kc_tray_item_t *item) {
         NSString *title = [NSString stringWithUTF8String:item->text];
         if (!title) { kc_error(t, "invalid item text"); return -1; }
         native = [[[NSMenuItem alloc] initWithTitle:title action:@selector(activate:)
-                                         keyEquivalent:@""] autorelease];
+                                            keyEquivalent:@""] autorelease];
         native.target = t->target;
         native.representedObject = [NSValue valueWithPointer:item];
     }
@@ -262,16 +359,35 @@ static int kc_native_add(kc_tray_item_t *item) {
     item->native = [native retain];
     return 0;
 }
+
+/**
+ * Change a native menu item label.
+ * @param item Item handle.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_text(kc_tray_item_t *item, const char *s) {
     NSString *title = [NSString stringWithUTF8String:s];
     if (!title) { kc_error(item->tray, "invalid item text"); return -1; }
     item->native.title = title;
     return 0;
 }
+
+/**
+ * Remove a native menu item or separator.
+ * @param item Item handle.
+ * @return None.
+ */
 static void kc_native_remove(kc_tray_item_t *item) {
     [item->tray->menu removeItem:item->native];
     [item->native release]; item->native = nil;
 }
+
+/**
+ * Create the native tray resources.
+ * @param t Tray context.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_init(kc_tray_t *t) {
     [NSApplication sharedApplication];
     t->status = [[[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength] retain];
@@ -287,6 +403,13 @@ static int kc_native_init(kc_tray_t *t) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
+
+/**
+ * Update the platform notification icon.
+ * @param t Tray context.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_icon(kc_tray_t *t, const char *s) {
     const char *previous = t->icon;
     if (!s) { gtk_status_icon_set_from_icon_name(t->status, "emblem-system"); return 0; }
@@ -302,11 +425,25 @@ static int kc_native_icon(kc_tray_t *t, const char *s) {
     }
     return 0;
 }
+
+/**
+ * Update the platform tooltip.
+ * @param t Tray context.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_tip(kc_tray_t *t, const char *s) {
     gtk_status_icon_set_tooltip_text(t->status, s);
     return 0;
 }
 static gboolean kc_gtk_free_later(gpointer data);
+
+/**
+ * Dispatch a GTK menu activation to its item callback.
+ * @param widget Activated GTK widget.
+ * @param data Callback data.
+ * @return None.
+ */
 static void kc_gtk_activate(GtkWidget *widget, gpointer data) {
     kc_tray_item_t *item = (kc_tray_item_t *)data;
     kc_tray_t *t = item->tray;
@@ -323,17 +460,39 @@ static void kc_gtk_activate(GtkWidget *widget, gpointer data) {
         g_source_unref(source);
     }
 }
+
+/**
+ * Display the GTK context menu.
+ * @param icon Native icon or icon string.
+ * @param button Mouse button.
+ * @param time Activation time.
+ * @param data Callback data.
+ * @return None.
+ */
 static void kc_gtk_popup(GtkStatusIcon *icon, guint button, guint time, gpointer data) {
     kc_tray_t *t = (kc_tray_t *)data;
     if (!t->closing) gtk_menu_popup(GTK_MENU(t->menu), NULL, NULL,
         gtk_status_icon_position_menu, icon, button, time);
 }
+
+/**
+ * Display the GTK menu on primary activation.
+ * @param icon Native icon or icon string.
+ * @param data Callback data.
+ * @return None.
+ */
 static void kc_gtk_click(GtkStatusIcon *icon, gpointer data) {
     kc_gtk_popup(icon, 0, gtk_get_current_event_time(), data);
 }
+
+/**
+ * Insert a native menu item or separator.
+ * @param item Item handle.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_add(kc_tray_item_t *item) {
     GtkWidget *native = item->text ? gtk_menu_item_new_with_label(item->text)
-                                   : gtk_separator_menu_item_new();
+                                    : gtk_separator_menu_item_new();
     if (!native) { kc_error(item->tray, "menu insertion failed"); return -1; }
     if (item->text) g_signal_connect(native, "activate", G_CALLBACK(kc_gtk_activate), item);
     gtk_menu_shell_append(GTK_MENU_SHELL(item->tray->menu), native);
@@ -341,15 +500,34 @@ static int kc_native_add(kc_tray_item_t *item) {
     item->native = native;
     return 0;
 }
+
+/**
+ * Change a native menu item label.
+ * @param item Item handle.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_text(kc_tray_item_t *item, const char *s) {
     gtk_menu_item_set_label(GTK_MENU_ITEM(item->native), s);
     return 0;
 }
+
+/**
+ * Remove a native menu item or separator.
+ * @param item Item handle.
+ * @return None.
+ */
 static void kc_native_remove(kc_tray_item_t *item) {
     g_signal_handlers_disconnect_by_data(item->native, item);
     gtk_widget_destroy(item->native);
     item->native = NULL;
 }
+
+/**
+ * Create the native tray resources.
+ * @param t Tray context.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_native_init(kc_tray_t *t) {
     t->status = gtk_status_icon_new_from_icon_name("emblem-system");
     t->menu = gtk_menu_new();
@@ -364,6 +542,11 @@ static int kc_native_init(kc_tray_t *t) {
 #endif
 #endif
 
+/**
+ * Release the native tray resources.
+ * @param t Tray context.
+ * @return None.
+ */
 static void kc_native_close(kc_tray_t *t) {
 #if defined(_WIN32)
     NOTIFYICONDATAW nid;
@@ -397,6 +580,12 @@ static void kc_native_close(kc_tray_t *t) {
     if (t->menu) { gtk_widget_destroy(t->menu); t->menu = NULL; }
 #endif
 }
+
+/**
+ * Unlink a child from its owning tray.
+ * @param item Item handle.
+ * @return None.
+ */
 static void kc_unlink(kc_tray_item_t *item) {
     kc_tray_t *t = item->tray;
     kc_tray_item_t **p = &t->items;
@@ -408,6 +597,12 @@ static void kc_unlink(kc_tray_item_t *item) {
     }
     item->next = NULL;
 }
+
+/**
+ * Apply one requested mutation on the native UI thread.
+ * @param op Operation to execute.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_execute(kc_op_t *op) {
     kc_tray_t *t = op->tray;
     kc_tray_item_t *item = op->item;
@@ -433,8 +628,8 @@ static int kc_execute(kc_op_t *op) {
         copy = kc_copy(op->value);
         if (op->value && !copy) { kc_error(t, "allocation failed"); return -1; }
         result = op->kind == OP_ICON ? kc_native_icon(t, op->value) :
-                 op->kind == OP_TOOLTIP ? kc_native_tip(t, op->value) :
-                 kc_native_text(item, op->value);
+                    op->kind == OP_TOOLTIP ? kc_native_tip(t, op->value) :
+                    kc_native_text(item, op->value);
         if (result) { free(copy); return -1; }
         if (op->kind == OP_ICON) { free(t->icon); t->icon = copy; }
         else if (op->kind == OP_TOOLTIP) { free(t->tooltip); t->tooltip = copy; }
@@ -466,6 +661,15 @@ static int kc_execute(kc_op_t *op) {
 }
 
 #if defined(_WIN32)
+
+/**
+ * Process Windows tray messages and menu selection.
+ * @param hwnd Window handle.
+ * @param msg Windows message code.
+ * @param wp Message data.
+ * @param lp Message data.
+ * @return Windows message result.
+ */
 static LRESULT CALLBACK kc_window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     kc_tray_t *t;
     if (msg == WM_NCCREATE) {
@@ -500,6 +704,12 @@ static LRESULT CALLBACK kc_window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
+
+/**
+ * Run the Windows message pump for one tray.
+ * @param data Callback data.
+ * @return Worker thread result.
+ */
 static DWORD WINAPI kc_windows_worker(LPVOID data) {
     kc_tray_t *t = (kc_tray_t *)data;
     WNDCLASSW wc;
@@ -512,7 +722,7 @@ static DWORD WINAPI kc_windows_worker(LPVOID data) {
     if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) goto fail;
     t->menu = CreatePopupMenu();
     t->window = CreateWindowExW(0, wc.lpszClassName, L"tray", 0, 0, 0, 0, 0,
-                               HWND_MESSAGE, NULL, wc.hInstance, t);
+                                HWND_MESSAGE, NULL, wc.hInstance, t);
     if (!t->menu || !t->window) goto fail;
     kc_nid(t, &nid);
     nid.uFlags = NIF_ICON | NIF_MESSAGE;
@@ -535,6 +745,12 @@ fail:
     SetEvent(t->ready);
     return 1;
 }
+
+/**
+ * Run a tray operation on the required native UI thread.
+ * @param op Operation to execute.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_dispatch(kc_op_t *op) {
     kc_tray_t *t = op->tray;
     if (t->closing) return -1;
@@ -543,6 +759,12 @@ static int kc_dispatch(kc_op_t *op) {
     return op->result;
 }
 #elif defined(__APPLE__)
+
+/**
+ * Run a tray operation on the required native UI thread.
+ * @param op Operation to execute.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_dispatch(kc_op_t *op) {
     if (![NSThread isMainThread]) { kc_error(op->tray, "AppKit requires the main thread"); return -1; }
     @autoreleasepool { return kc_execute(op); }
@@ -554,10 +776,22 @@ static GThread *kc_gtk_thread;
 static GMutex kc_gtk_mutex;
 static GCond kc_gtk_cond;
 static int kc_gtk_ready, kc_gtk_started;
+
+/**
+ * Release a tray after its GTK callback unwinds.
+ * @param data Callback data.
+ * @return G_SOURCE_REMOVE after completion.
+ */
 static gboolean kc_gtk_free_later(gpointer data) {
     kc_free((kc_tray_t *)data);
     return G_SOURCE_REMOVE;
 }
+
+/**
+ * Apply one queued GTK operation.
+ * @param data Callback data.
+ * @return G_SOURCE_REMOVE after completion.
+ */
 static gboolean kc_gtk_dispatch(gpointer data) {
     kc_op_t *op = (kc_op_t *)data;
     int result = kc_execute(op);
@@ -568,6 +802,12 @@ static gboolean kc_gtk_dispatch(gpointer data) {
     g_mutex_unlock(&op->mutex);
     return G_SOURCE_REMOVE;
 }
+
+/**
+ * Run a tray operation on the required native UI thread.
+ * @param op Operation to execute.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_dispatch(kc_op_t *op) {
     kc_tray_t *t = op->tray;
     int result;
@@ -587,6 +827,12 @@ static int kc_dispatch(kc_op_t *op) {
     g_cond_clear(&op->cond); g_mutex_clear(&op->mutex);
     return result;
 }
+
+/**
+ * Run the process-wide GTK event loop.
+ * @param data Callback data.
+ * @return Worker thread result.
+ */
 static gpointer kc_linux_worker(gpointer data) {
     GMainLoop *loop;
     (void)data;
@@ -601,6 +847,11 @@ static gpointer kc_linux_worker(gpointer data) {
     g_main_loop_unref(loop);
     return NULL;
 }
+
+/**
+ * Initialize the process-wide GTK event service.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_gtk_service(void) {
     if (g_once_init_enter(&kc_gtk_once)) {
         g_mutex_init(&kc_gtk_mutex);
@@ -618,7 +869,18 @@ static int kc_gtk_service(void) {
 }
 #endif
 
+/**
+ * Return the generated tray build version.
+ * @return Build version.
+ */
 uint64_t kc_tray_version(void) { return (uint64_t)KC_TRAY_BUILD_VERSION; }
+
+/**
+ * Create a persistent, nonblocking tray.
+ * @param out Output handle.
+ * @param options Initial options.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 int kc_tray_open(kc_tray_t **out, const kc_tray_options_t *options) {
     kc_tray_t *t;
     if (out) *out = NULL;
@@ -658,22 +920,58 @@ int kc_tray_open(kc_tray_t **out, const kc_tray_options_t *options) {
     }
     return 0;
 }
+
+/**
+ * Update the native tray icon.
+ * @param t Tray context.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 int kc_tray_set_icon(kc_tray_t *t, const char *s) {
     kc_op_t op = {0};
     if (!t) return -1;
     op.tray = t; op.kind = OP_ICON; op.value = s;
     return kc_dispatch(&op);
 }
+
+/**
+ * Return the configured tray icon.
+ * @param t Tray context.
+ * @return Borrowed value, or NULL when unavailable.
+ */
 const char *kc_tray_get_icon(const kc_tray_t *t) { return t ? t->icon : NULL; }
+
+/**
+ * Update the native tooltip.
+ * @param t Tray context.
+ * @param s Input string, or NULL when supported.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 int kc_tray_set_tooltip(kc_tray_t *t, const char *s) {
     kc_op_t op = {0};
     if (!t) return -1;
     op.tray = t; op.kind = OP_TOOLTIP; op.value = s;
     return kc_dispatch(&op);
 }
+
+/**
+ * Return the configured tooltip.
+ * @param t Tray context.
+ * @return Borrowed value, or NULL when unavailable.
+ */
 const char *kc_tray_get_tooltip(const kc_tray_t *t) { return t ? t->tooltip : NULL; }
+
+/**
+ * Allocate and attach one persistent child.
+ * @param t Tray context.
+ * @param out Output handle.
+ * @param text Item text.
+ * @param cb Activation callback.
+ * @param userdata Caller data.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 static int kc_add(kc_tray_t *t, kc_tray_item_t **out, const char *text,
-                  kc_tray_item_callback_t cb, void *userdata) {
+                    kc_tray_item_callback_t cb, void *userdata) {
     kc_tray_item_t *item;
     kc_op_t op = {0};
     if (out) *out = NULL;
@@ -689,32 +987,80 @@ static int kc_add(kc_tray_t *t, kc_tray_item_t **out, const char *text,
     *out = item;
     return 0;
 }
+
+/**
+ * Create a persistent menu item.
+ * @param t Tray context.
+ * @param out Output handle.
+ * @param text Item text.
+ * @param cb Activation callback.
+ * @param userdata Caller data.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 int kc_tray_add_item(kc_tray_t *t, kc_tray_item_t **out, const char *text,
-                     kc_tray_item_callback_t cb, void *userdata) {
+                        kc_tray_item_callback_t cb, void *userdata) {
     if (!text || !*text) { if (out) *out = NULL; if (t) kc_error(t, "invalid item text"); return -1; }
     return kc_add(t, out, text, cb, userdata);
 }
+
+/**
+ * Create a removable menu separator.
+ * @param t Tray context.
+ * @param out Output handle.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 int kc_tray_add_separator(kc_tray_t *t, kc_tray_item_t **out) {
     return kc_add(t, out, NULL, NULL, NULL);
 }
+
+/**
+ * Update a menu item label.
+ * @param item Item handle.
+ * @param text Item text.
+ * @return KC_TRAY_OK on success, or KC_TRAY_ERROR on failure.
+ */
 int kc_tray_item_set_text(kc_tray_item_t *item, const char *text) {
     kc_op_t op = {0};
     if (!item || !item->text) return -1;
     op.tray = item->tray; op.item = item; op.value = text; op.kind = OP_TEXT;
     return kc_dispatch(&op);
 }
+
+/**
+ * Return the menu item label.
+ * @param item Item handle.
+ * @return Borrowed value, or NULL when unavailable.
+ */
 const char *kc_tray_item_get_text(const kc_tray_item_t *item) {
     return item ? item->text : NULL;
 }
+
+/**
+ * Remove an item from its parent tray.
+ * @param item Item handle.
+ * @return None.
+ */
 void kc_tray_item_remove(kc_tray_item_t *item) {
     kc_op_t op = {0};
     if (!item) return;
     op.tray = item->tray; op.item = item; op.kind = OP_REMOVE;
     (void)kc_dispatch(&op);
 }
+
+/**
+ * Return the last error for a tray.
+ * @param t Tray context.
+ * @return Borrowed value, or NULL when unavailable.
+ */
 const char *kc_tray_get_error(const kc_tray_t *t) {
     return t && t->error[0] ? t->error : NULL;
 }
+
+/**
+ * Close a tray and all of its children.
+ * @param t Tray context.
+ * @return None.
+ */
 void kc_tray_close(kc_tray_t *t) {
     kc_op_t op = {0};
     int in_callback;
@@ -723,7 +1069,7 @@ void kc_tray_close(kc_tray_t *t) {
     if (in_callback) t->free_on_exit = 1;
     op.tray = t; op.kind = OP_CLOSE;
     (void)kc_dispatch(&op);
-    if (in_callback) return; /* UI worker releases after the callback unwinds. */
+    if (in_callback) return;
 #if defined(_WIN32)
     WaitForSingleObject(t->thread, INFINITE);
     CloseHandle(t->thread);
