@@ -15,8 +15,8 @@ WINE_X86_64_CXX ?= x86_64-w64-mingw32-g++
 WASM_EMCMAKE ?= emcmake
 WASM_EMCC    ?= emcc
 WASM_NODE    ?= node
-MIPSEL_CC ?= $(shell if command -v mipsel-linux-gnu-gcc-13 >/dev/null 2>&1; then printf '%s' mipsel-linux-gnu-gcc-13; else printf '%s' mipsel-linux-gnu-gcc; fi)
-MIPSEL_CXX ?= $(shell if command -v mipsel-linux-gnu-g++-13 >/dev/null 2>&1; then printf '%s' mipsel-linux-gnu-g++-13; else printf '%s' mipsel-linux-gnu-g++; fi)
+MIPSEL_CC ?= mipsel-linux-gnu-gcc-13
+MIPSEL_CXX ?= mipsel-linux-gnu-g++-13
 XDG_DATA_HOME ?= $(HOME)/.local/share
 OSXCROSS_ROOT ?= $(XDG_DATA_HOME)/osxcross/target
 MACOSX_DEPLOYMENT_TARGET ?= 11.0
@@ -257,6 +257,8 @@ mips/linux:
 	$(call linux_target,mips,mips,mips-linux-gnu-gcc,mips-linux-gnu-g++)
 
 mipsel/linux:
+	@command -v $(MIPSEL_CC) >/dev/null 2>&1 || { echo "Missing MIPS little-endian C compiler: $(MIPSEL_CC)" >&2; exit 1; }
+	@command -v $(MIPSEL_CXX) >/dev/null 2>&1 || { echo "Missing MIPS little-endian C++ compiler: $(MIPSEL_CXX)" >&2; exit 1; }
 	$(call linux_target,mipsel,mipsel,$(MIPSEL_CC),$(MIPSEL_CXX),CMAKE_BUILD_PARALLEL_LEVEL=1)
 
 mips64el/linux:
