@@ -65,8 +65,6 @@ struct kc_dmn {
     char *cmd;
     unsigned char *eot;
     size_t eot_size;
-    kc_dmn_handler_t data_handler;
-    void *data_userdata;
 };
 
 /**
@@ -101,13 +99,17 @@ typedef struct {
 } kc_dmn_backend_t;
 #endif
 
-struct kc_dmn_stream {
+typedef struct {
 #ifdef _WIN32
     HANDLE handle;
 #else
     int fd;
 #endif
-};
+} kc_dmn_transport_t;
+
+#define KC_DMN_IO_OK     0
+#define KC_DMN_IO_EOF    1
+#define KC_DMN_IO_ERROR -1
 
 /**
  * Resolves the runtime directory for socket and PID files.
@@ -1303,7 +1305,6 @@ static int kc_dmn_run_signal(const char *dir, const char *key, int signo) {
 
 typedef struct {
     char **names;
-    char **endpoints;
     size_t count;
     size_t capacity;
     int failed;
@@ -1317,6 +1318,7 @@ typedef struct {
 static char *kc_dmn_strdup(const char *text) {
     size_t n;
     char *copy;
+
     if (!text) return NULL;
     n = strlen(text) + 1;
     copy = (char *)malloc(n);
@@ -1332,20 +1334,17 @@ static char *kc_dmn_strdup(const char *text) {
  */
 static void kc_dmn_collect_clear(kc_dmn_collect_t *collect) {
     size_t i;
+
     if (!collect) return;
-    for (i = 0; i < collect->count; i++) {
-        free(collect->names[i]);
-        free(collect->endpoints[i]);
-    }
+    for (i = 0; i < collect->count; i++) free(collect->names[i]);
     free(collect->names);
-    free(collect->endpoints);
     memset(collect, 0, sizeof(*collect));
 }
 
 /**
- * Collect one daemon list row.
+ * Collect one daemon identity.
  * @param name Daemon name.
- * @param endpoint Daemon endpoint.
+ * @param endpoint Internal daemon endpoint.
  * @param userdata Collection state.
  * @return None.
  */
@@ -1356,38 +1355,27 @@ static void kc_dmn_collect_row(
 ) {
     kc_dmn_collect_t *collect = (kc_dmn_collect_t *)userdata;
     char **names;
-    char **endpoints;
     size_t next;
 
+    (void)endpoint;
     if (!collect || collect->failed) return;
+
     if (collect->count == collect->capacity) {
         next = collect->capacity ? collect->capacity * 2 : 8;
-        names = (char **)realloc(collect->names, next * sizeof(*names));
+        names = (char **)realloc(
+            collect->names,
+            next * sizeof(*names)
+        );
         if (!names) {
             collect->failed = 1;
             return;
         }
         collect->names = names;
-        endpoints = (char **)realloc(
-            collect->endpoints,
-            next * sizeof(*endpoints)
-        );
-        if (!endpoints) {
-            collect->failed = 1;
-            return;
-        }
-        collect->endpoints = endpoints;
         collect->capacity = next;
     }
 
     collect->names[collect->count] = kc_dmn_strdup(name);
-    collect->endpoints[collect->count] = kc_dmn_strdup(endpoint);
-    if (!collect->names[collect->count] ||
-            !collect->endpoints[collect->count]) {
-        free(collect->names[collect->count]);
-        free(collect->endpoints[collect->count]);
-        collect->names[collect->count] = NULL;
-        collect->endpoints[collect->count] = NULL;
+    if (!collect->names[collect->count]) {
         collect->failed = 1;
         return;
     }
@@ -1395,7 +1383,7 @@ static void kc_dmn_collect_row(
 }
 
 /**
- * Materialize collected daemon entries.
+ * Materialize collected daemon identities.
  * @param collect Collection state.
  * @param out_entries Output entry array.
  * @param out_count Output entry count.
@@ -1417,7 +1405,6 @@ static int kc_dmn_collect_finish(
     bytes = collect->count * sizeof(*entries);
     for (i = 0; i < collect->count; i++) {
         bytes += strlen(collect->names[i]) + 1;
-        bytes += strlen(collect->endpoints[i]) + 1;
     }
 
     entries = (kc_dmn_entry_t *)malloc(bytes);
@@ -1426,13 +1413,9 @@ static int kc_dmn_collect_finish(
 
     for (i = 0; i < collect->count; i++) {
         size_t n = strlen(collect->names[i]) + 1;
+
         memcpy(cursor, collect->names[i], n);
         entries[i].name = cursor;
-        cursor += n;
-
-        n = strlen(collect->endpoints[i]) + 1;
-        memcpy(cursor, collect->endpoints[i], n);
-        entries[i].endpoint = cursor;
         cursor += n;
     }
 
@@ -1744,43 +1727,23 @@ const void *kc_dmn_get_eot(
 }
 
 /**
- * Register or clear one daemon event handler.
+ * Open one private daemon transport.
  * @param dmn Daemon handle.
- * @param event Event name.
- * @param handler Event handler, or NULL.
- * @param userdata Opaque handler data.
- * @return dmn status code.
+ * @param out Output transport.
+ * @return KC_DMN_OK, KC_DMN_NOT_FOUND, or KC_DMN_ERROR.
  */
-int kc_dmn_on(
+static int kc_dmn_transport_open(
     kc_dmn_t *dmn,
-    const char *event,
-    kc_dmn_handler_t handler,
-    void *userdata
-) {
-    if (!dmn || !event || strcmp(event, "data") != 0)
-        return KC_DMN_ERROR;
-    dmn->data_handler = handler;
-    dmn->data_userdata = userdata;
-    return KC_DMN_OK;
-}
-
-/**
- * Open one raw daemon byte stream.
- * @param dmn Daemon handle.
- * @param out Output stream handle.
- * @return dmn status code.
- */
-int kc_dmn_stream(
-    kc_dmn_t *dmn,
-    kc_dmn_stream_t **out
+    kc_dmn_transport_t **out
 ) {
     char endpoint[KC_DMN_PATH];
-    kc_dmn_stream_t *stream;
+    kc_dmn_transport_t *transport;
 
     if (!out) return KC_DMN_ERROR;
     *out = NULL;
     if (!dmn) return KC_DMN_ERROR;
     if (!kc_dmn_exists(dmn->dir, dmn->name)) return KC_DMN_NOT_FOUND;
+
     if (kc_dmn_sock_path(
             dmn->dir,
             dmn->name,
@@ -1789,10 +1752,11 @@ int kc_dmn_stream(
         ) != 0)
         return KC_DMN_ERROR;
 
-    stream = (kc_dmn_stream_t *)calloc(1, sizeof(*stream));
-    if (!stream) return KC_DMN_ERROR;
+    transport = (kc_dmn_transport_t *)calloc(1, sizeof(*transport));
+    if (!transport) return KC_DMN_ERROR;
+
 #ifdef _WIN32
-    stream->handle = CreateFileA(
+    transport->handle = CreateFileA(
         endpoint,
         GENERIC_READ | GENERIC_WRITE,
         0,
@@ -1801,30 +1765,31 @@ int kc_dmn_stream(
         0,
         NULL
     );
-    if (stream->handle == INVALID_HANDLE_VALUE) {
-        free(stream);
+    if (transport->handle == INVALID_HANDLE_VALUE) {
+        free(transport);
         return KC_DMN_ERROR;
     }
 #else
-    stream->fd = kc_dmn_connect_posix(endpoint);
-    if (stream->fd < 0) {
-        free(stream);
+    transport->fd = kc_dmn_connect_posix(endpoint);
+    if (transport->fd < 0) {
+        free(transport);
         return KC_DMN_ERROR;
     }
 #endif
-    *out = stream;
+
+    *out = transport;
     return KC_DMN_OK;
 }
 
 /**
- * Write bytes to one raw daemon stream.
- * @param stream Stream handle.
+ * Write bytes to one private daemon transport.
+ * @param transport Transport state.
  * @param data Source bytes.
  * @param size Source byte count.
- * @return dmn status code.
+ * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
  */
-int kc_dmn_stream_write(
-    kc_dmn_stream_t *stream,
+static int kc_dmn_transport_write(
+    kc_dmn_transport_t *transport,
     const void *data,
     size_t size
 ) {
@@ -1832,15 +1797,17 @@ int kc_dmn_stream_write(
     size_t off = 0;
 #endif
 
-    if (!stream || (!data && size > 0)) return KC_DMN_ERROR;
+    if (!transport || (!data && size > 0)) return KC_DMN_ERROR;
     if (size == 0) return KC_DMN_OK;
+
 #ifdef _WIN32
     while (off < size) {
         size_t chunk = size - off;
         DWORD written;
+
         if (chunk > (size_t)(DWORD)-1) chunk = (size_t)(DWORD)-1;
         if (!WriteFile(
-                stream->handle,
+                transport->handle,
                 (const unsigned char *)data + off,
                 (DWORD)chunk,
                 &written,
@@ -1851,84 +1818,88 @@ int kc_dmn_stream_write(
     }
 #else
     if (kc_dmn_write_all(
-            stream->fd,
+            transport->fd,
             (const char *)data,
             size
         ) != 0)
         return KC_DMN_ERROR;
 #endif
+
     return KC_DMN_OK;
 }
 
 /**
- * Read bytes from one raw daemon stream.
- * @param stream Stream handle.
+ * Read bytes from one private daemon transport.
+ * @param transport Transport state.
  * @param data Output buffer.
  * @param capacity Output buffer capacity.
  * @param out_size Output byte count.
- * @return dmn status code.
+ * @return KC_DMN_IO_OK, KC_DMN_IO_EOF, or KC_DMN_IO_ERROR.
  */
-int kc_dmn_stream_read(
-    kc_dmn_stream_t *stream,
+static int kc_dmn_transport_read(
+    kc_dmn_transport_t *transport,
     void *data,
     size_t capacity,
     size_t *out_size
 ) {
     if (out_size) *out_size = 0;
-    if (!stream || !data || capacity == 0 || !out_size)
-        return KC_DMN_ERROR;
+    if (!transport || !data || capacity == 0 || !out_size)
+        return KC_DMN_IO_ERROR;
+
 #ifdef _WIN32
     {
         DWORD read_size;
-        if (capacity > (size_t)(DWORD)-1) return KC_DMN_ERROR;
+
+        if (capacity > (size_t)(DWORD)-1) return KC_DMN_IO_ERROR;
         if (!ReadFile(
-                stream->handle,
+                transport->handle,
                 data,
                 (DWORD)capacity,
                 &read_size,
                 NULL
             )) {
             DWORD error = GetLastError();
+
             if (error == ERROR_BROKEN_PIPE ||
                     error == ERROR_PIPE_NOT_CONNECTED ||
                     error == ERROR_NO_DATA ||
                     error == ERROR_HANDLE_EOF)
-                return KC_DMN_EOF;
-            return KC_DMN_ERROR;
+                return KC_DMN_IO_EOF;
+            return KC_DMN_IO_ERROR;
         }
-        if (read_size == 0) return KC_DMN_EOF;
+        if (read_size == 0) return KC_DMN_IO_EOF;
         *out_size = (size_t)read_size;
     }
 #else
     {
         ssize_t n;
+
         do {
-            n = read(stream->fd, data, capacity);
+            n = read(transport->fd, data, capacity);
         } while (n < 0 && errno == EINTR);
-        if (n < 0) return KC_DMN_ERROR;
-        if (n == 0) return KC_DMN_EOF;
+        if (n < 0) return KC_DMN_IO_ERROR;
+        if (n == 0) return KC_DMN_IO_EOF;
         *out_size = (size_t)n;
     }
 #endif
-    return KC_DMN_OK;
+
+    return KC_DMN_IO_OK;
 }
 
 /**
- * Close and release one raw daemon stream.
- * @param stream Stream handle, or NULL.
+ * Close and release one private daemon transport.
+ * @param transport Transport state, or NULL.
  * @return None.
  */
-void kc_dmn_stream_close(
-    kc_dmn_stream_t *stream
-) {
-    if (!stream) return;
+static void kc_dmn_transport_close(kc_dmn_transport_t *transport) {
+    if (!transport) return;
 #ifdef _WIN32
-    if (stream->handle != INVALID_HANDLE_VALUE)
-        CloseHandle(stream->handle);
+    if (transport->handle != INVALID_HANDLE_VALUE)
+        CloseHandle(transport->handle);
 #else
-    if (stream->fd >= 0) close(stream->fd);
+    if (transport->fd >= 0) close(transport->fd);
 #endif
-    free(stream);
+    free(transport);
 }
 
 /**
@@ -1947,7 +1918,7 @@ int kc_dmn_send_data(
     void **out_data,
     size_t *out_size
 ) {
-    kc_dmn_stream_t *stream = NULL;
+    kc_dmn_transport_t *transport = NULL;
     unsigned char chunk[KC_DMN_BUF];
     unsigned char *pending = NULL;
     size_t pending_size = 0;
@@ -1962,23 +1933,24 @@ int kc_dmn_send_data(
             !dmn->eot || dmn->eot_size == 0)
         return KC_DMN_ERROR;
 
-    rc = kc_dmn_stream(dmn, &stream);
+    rc = kc_dmn_transport_open(dmn, &transport);
     if (rc != KC_DMN_OK) return rc;
 
-    if (kc_dmn_stream_write(stream, data, data_size) != KC_DMN_OK ||
-            kc_dmn_stream_write(
-                stream,
+    if (kc_dmn_transport_write(
+            transport, data, data_size) != KC_DMN_OK ||
+            kc_dmn_transport_write(
+            transport,
                 dmn->eot,
                 dmn->eot_size
             ) != KC_DMN_OK) {
-        kc_dmn_stream_close(stream);
+        kc_dmn_transport_close(transport);
         return KC_DMN_ERROR;
     }
 
     if (dmn->eot_size > 1) {
         pending = (unsigned char *)malloc(dmn->eot_size - 1);
         if (!pending) {
-            kc_dmn_stream_close(stream);
+            kc_dmn_transport_close(transport);
             return KC_DMN_ERROR;
         }
     }
@@ -1991,20 +1963,14 @@ int kc_dmn_send_data(
         size_t keep;
         size_t emit_size;
 
-        rc = kc_dmn_stream_read(
-            stream,
+        rc = kc_dmn_transport_read(
+            transport,
             chunk,
             sizeof(chunk),
             &chunk_size
         );
-        if (rc == KC_DMN_EOF) {
+        if (rc == KC_DMN_IO_EOF) {
             if (pending_size > 0) {
-                if (dmn->data_handler)
-                    dmn->data_handler(
-                        pending,
-                        pending_size,
-                        dmn->data_userdata
-                    );
                 if (kc_dmn_append(
                         &result,
                         &result_size,
@@ -2039,12 +2005,6 @@ int kc_dmn_send_data(
         );
         if (marker != (size_t)-1) {
             if (marker > 0) {
-                if (dmn->data_handler)
-                    dmn->data_handler(
-                        joined,
-                        marker,
-                        dmn->data_userdata
-                    );
                 if (kc_dmn_append(
                         &result,
                         &result_size,
@@ -2066,12 +2026,6 @@ int kc_dmn_send_data(
             : 0;
         emit_size = joined_size - keep;
         if (emit_size > 0) {
-            if (dmn->data_handler)
-                dmn->data_handler(
-                    joined,
-                    emit_size,
-                    dmn->data_userdata
-                );
             if (kc_dmn_append(
                     &result,
                     &result_size,
@@ -2091,7 +2045,7 @@ int kc_dmn_send_data(
     }
 
     free(pending);
-    kc_dmn_stream_close(stream);
+    kc_dmn_transport_close(transport);
 
     if (rc != KC_DMN_OK) {
         free(result);
