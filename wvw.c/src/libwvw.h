@@ -60,10 +60,10 @@ typedef struct {
 } kc_wvw_bridge_options_t;
 
 /**
- * Open one operational native WebView window without a caller-visible event loop.
- * Strings and scalar option values are copied before return. URL is required.
- * Omitted width and height use 1280x720; omitted positions use native placement.
- * Omitted boolean options are false.
+ * Open one operational native WebView window.
+ * Strings and scalar option values are copied before return.
+ * URL is required. Omitted width and height use 1280x720.
+ * Omitted positions use native placement. Boolean defaults are false.
  * @param out Output WebView handle, set to NULL on failure.
  * @param options Initial window and WebView options.
  * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
@@ -111,19 +111,39 @@ int kc_wvw_enable_bridge(kc_wvw_t *wvw, const kc_wvw_bridge_options_t *options);
  */
 int kc_wvw_post_bridge_event(kc_wvw_t *wvw, const char *json);
 
-/** Hide the native window. */
+/**
+ * Hide the native window.
+ * @param wvw WebView handle.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_hide(kc_wvw_t *wvw);
 
-/** Show the native window. */
+/**
+ * Show the native window.
+ * @param wvw WebView handle.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_show(kc_wvw_t *wvw);
 
-/** Minimize the native window. */
+/**
+ * Minimize the native window.
+ * @param wvw WebView handle.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_minimize(kc_wvw_t *wvw);
 
-/** Maximize the native window. */
+/**
+ * Maximize the native window.
+ * @param wvw WebView handle.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_maximize(kc_wvw_t *wvw);
 
-/** Restore the native window from minimized or maximized state. */
+/**
+ * Restore the native window from minimized or maximized state.
+ * @param wvw WebView handle.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_restore(kc_wvw_t *wvw);
 
 /**
@@ -177,16 +197,32 @@ int kc_wvw_set_position(kc_wvw_t *wvw, int x, int y);
  */
 int kc_wvw_get_position(const kc_wvw_t *wvw, int *out_x, int *out_y);
 
-/** Return nonzero when the native window is visible. */
+/**
+ * Return whether the native window is visible.
+ * @param wvw WebView handle.
+ * @return 1 when visible, 0 when hidden, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_is_visible(const kc_wvw_t *wvw);
 
-/** Return nonzero when the native window is minimized. */
+/**
+ * Return whether the native window is minimized.
+ * @param wvw WebView handle.
+ * @return 1 when minimized, 0 otherwise, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_is_minimized(const kc_wvw_t *wvw);
 
-/** Return nonzero when the native window is maximized. */
+/**
+ * Return whether the native window is maximized.
+ * @param wvw WebView handle.
+ * @return 1 when maximized, 0 otherwise, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_is_maximized(const kc_wvw_t *wvw);
 
-/** Return nonzero when the native window is fullscreen. */
+/**
+ * Return whether the native window is fullscreen.
+ * @param wvw WebView handle.
+ * @return 1 when fullscreen, 0 otherwise, or KC_WVW_ERROR on failure.
+ */
 int kc_wvw_is_fullscreen(const kc_wvw_t *wvw);
 
 /**
