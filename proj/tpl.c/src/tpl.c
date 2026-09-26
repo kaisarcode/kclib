@@ -99,10 +99,10 @@ static void kc_print_help(const char *name) {
     printf("Usage: %s [options] [source]\n", name);
     printf("\n");
     printf("Options:\n");
-    printf("    -root, --root <dir>      Base directory for includes (default: .)\n");
-    printf("    -var, --var <key=value>  Inject a template variable (repeatable)\n");
-    printf("    -h, --help               Show this help\n");
-    printf("    -v, --version            Show version\n");
+    printf("  -root, --root <dir>      Base directory for includes (default: .)\n");
+    printf("  -var, --var <key=value>  Inject a template variable (repeatable)\n");
+    printf("  -h, --help               Show this help\n");
+    printf("  -v, --version            Show version\n");
     printf("\n");
     printf("Input:\n");
     printf("    source                    Optional template source; stdin is used when omitted\n");
