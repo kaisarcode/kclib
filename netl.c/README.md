@@ -77,7 +77,6 @@ if (event.type == KC_NETL_EVENT_CONNECTION) {
             &sent
         );
     } else if (event.type == KC_NETL_EVENT_CLOSE) {
-        /* The borrowed connection handle expires on the next poll. */
     }
 }
 
@@ -94,10 +93,6 @@ The public lifecycle is:
 - `kc_netl_port()` reports the actual bound port, including ephemeral ports.
 - `kc_netl_close()` closes the listener and all remaining connections.
 
-Event buffers and peer strings are borrowed until the next `kc_netl_poll()`.
-A TCP connection handle is owned by the listener. After a CLOSE event or an
-explicit `kc_netl_connection_close()`, it remains inspectable only until the
-next poll or listener close.
 
 ### Model
 
