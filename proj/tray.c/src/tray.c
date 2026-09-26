@@ -53,12 +53,16 @@ static void cli_action(kc_tray_item_t *item, void *data) {
  * @return None.
  */
 static void help(const char *name) {
-    printf("Usage: %s [--icon PATH] [--tooltip TEXT] [--item TEXT | --sep | --quit TEXT]...\n"
-            "  --item TEXT    Print TEXT when selected\n"
-            "  --sep          Insert a separator\n"
-            "  --quit TEXT    Exit when selected\n"
-            "  -h, --help    Show help\n"
-            "  -v, --version Show build version\n", name);
+    printf("Usage: %s [options]\n", name);
+    printf("\n");
+    printf("Options:\n");
+    printf("  --icon <path>      Set tray icon\n");
+    printf("  --tooltip <text>   Set tray tooltip\n");
+    printf("  --item <text>      Print text when selected\n");
+    printf("  --sep              Insert a separator\n");
+    printf("  --quit <text>      Exit when selected\n");
+    printf("  -h, --help         Show this help\n");
+    printf("  -v, --version      Show version\n");
 }
 
 /**
