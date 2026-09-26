@@ -85,9 +85,9 @@ The public API is:
 - `kc_tpl_open()` creates a reusable template and copies its source.
 - `kc_tpl_render()` renders that stored source with one isolated variable array.
 - `kc_tpl_error()` returns the latest error for the template instance.
-- `kc_tpl_free()` releases rendered output and accepts `NULL`.
-- `kc_tpl_close()` releases the template instance and accepts `NULL`.
-- `kc_tpl_version()` returns the generated build version.
+- `kc_tpl_free()` releases rendered output.
+- `kc_tpl_close()` closes the template instance.
+- `kc_tpl_version()` returns the library build version.
 
 `kc_tpl_open()` uses `"."` as the include root when options are `NULL` or
 when `options->root` is `NULL`. A non-NULL `root` is explicit and must be a
