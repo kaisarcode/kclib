@@ -69,14 +69,7 @@ The public lifecycle is:
 - `kc_mdp_close()` releases the document, including cached HTML.
 - `kc_mdp_version()` returns the library build version.
 
-The input string is borrowed only for the duration of `kc_mdp_open()`.
-Successful open owns its split body and metadata independently of the original
-input buffer.
-
-Pointers returned by `kc_mdp_body()`, `kc_mdp_meta()`, and
-`kc_mdp_html()` belong to the document. Callers must not free them. They
-remain valid until `kc_mdp_close()`. Empty body, metadata, or HTML results are
-represented by valid empty strings.
+Empty body, metadata, or HTML results are returned as empty strings.
 
 ---
 
