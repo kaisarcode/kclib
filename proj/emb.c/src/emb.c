@@ -32,9 +32,8 @@
  * @return None.
  */
 static void kc_print_help(const char *name) {
-    printf("Usage:\n");
-    printf("  %s <input>\n", name);
-    printf("  %s < input\n\n", name);
+    printf("Usage: %s [input] [options]\n", name);
+    printf("\n");
     printf("Options:\n");
     printf("  -d, --dim       Show embedded model vector dimension\n");
     printf("  -h, --help      Show this help\n");
