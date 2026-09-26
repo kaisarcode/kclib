@@ -78,6 +78,55 @@ capability-level concept. Prefer simple public value structs, explicit arrays,
 plain scalar types, and clear ownership. Avoid public ABI complexity that does
 not serve an actual kclib consumer.
 
+## Represent intent, not mechanism
+
+The public API must represent the user's intent and the capability being
+offered, not the low-level mechanism used to implement it.
+
+Design public operations in terms of what a consumer wants to do:
+
+```text
+listen
+receive
+respond
+save
+build
+stop
+render
+search
+```
+
+Do not expose lower-level machinery merely because the implementation uses it:
+
+```text
+poll loops
+socket readiness
+send/sendto distinctions
+partial-write retry state
+native handles
+temporary synchronization phases
+internal queues
+platform-specific transport details
+```
+
+A technically correct native primitive is not automatically an appropriate
+public kclib operation. If the library can absorb the mechanism while preserving
+the caller's meaningful control, keep that mechanism private.
+
+Do not over-simplify by removing real user control. Operations such as explicit
+save, build, configuration mutation, or cooperative stop remain public when the
+caller intentionally decides when or whether they happen.
+
+Use this test for every public symbol:
+
+```text
+Does this describe what the user wants to do,
+or how the implementation happens to do it?
+```
+
+If it primarily describes the implementation, redesign the public surface at
+the capability level.
+
 ## Compatibility
 
 Treat the public header and CLI behavior as compatibility contracts.
