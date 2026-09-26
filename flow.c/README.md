@@ -229,10 +229,26 @@ printf "Hello" | flow file.flow --link page
 ```c
 #include "libflow.h"
 
+static void finished(
+    int status,
+    void *data,
+    size_t size,
+    const char *error,
+    void *userdata
+) {
+    (void)userdata;
+
+    if (status == KC_FLOW_OK) {
+        /* use data/size */
+        kc_flow_free(data);
+    } else {
+        /* inspect error */
+        (void)error;
+    }
+}
+
 kc_flow_t *flow = NULL;
 kc_flow_run_t *run = NULL;
-void *output = NULL;
-size_t output_size = 0;
 
 if (kc_flow_open(&flow, "file.flow") != KC_FLOW_OK) {
     return 1;
@@ -240,20 +256,20 @@ if (kc_flow_open(&flow, "file.flow") != KC_FLOW_OK) {
 
 kc_flow_set(flow, "flow.hello", "Hello");
 
-if (kc_flow_run(flow, &run, NULL, NULL, 0) != KC_FLOW_OK) {
+if (kc_flow_run(
+        flow,
+        &run,
+        NULL,
+        NULL,
+        0,
+        finished,
+        NULL
+    ) != KC_FLOW_OK) {
     kc_flow_close(flow);
     return 1;
 }
 
-/* The run now advances independently and can be stopped at any time. */
-if (kc_flow_run_wait(run, &output, &output_size) != KC_FLOW_OK) {
-    const char *error = kc_flow_run_error(run);
-    (void)error;
-}
-
-kc_flow_free(output);
-kc_flow_run_close(run);
-kc_flow_close(flow);
+/* The run advances independently and can be stopped at any time. */
 ```
 
 The opened flow owns its copied source path and ordered temporary overrides.
@@ -277,17 +293,16 @@ request and completes with `KC_FLOW_ESTOP`.
 
 - `kc_flow_open()` opens one existing flow file and copies its path.
 - `kc_flow_set()` and `kc_flow_unset()` append ordered temporary overrides to the opened flow.
-- `kc_flow_run()` starts one independent non-blocking run from a snapshot of the opened flow, optional entry, and input.
+- `kc_flow_run()` starts one independent non-blocking run and delivers exactly one terminal callback with status, output, and contextual error.
 - `kc_flow_run_stop()` cooperatively stops that run after its current step finishes.
-- `kc_flow_run_wait()` waits for completion and returns the final status.
-- `kc_flow_run_error()` returns the contextual error for that run.
 - `kc_flow_run_close()` releases the run. If it is still active, close requests a cooperative stop and joins it before release.
-- `kc_flow_free()` releases output returned by a completed run.
+- `kc_flow_free()` releases successful output received by the terminal callback.
 - `kc_flow_close()` releases the opened flow. Existing runs remain valid because they own independent snapshots.
 - `kc_flow_version()` returns the build version.
 
 Multiple runs created from one opened flow are independent. Each run owns its
-stop request, execution error, branch traversal, and final result.
+stop request and branch traversal. Terminal status, successful output, and any
+contextual error are delivered together through its completion callback.
 
 ### Visualization
 
