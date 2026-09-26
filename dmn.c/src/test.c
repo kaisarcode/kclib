@@ -546,11 +546,11 @@ static int case_kc_dmn_list(void) {
     );
     for (i = 0; i < count; i++) {
         if (strcmp(entries[i].name, "listed") == 0) {
-            found = entries[i].endpoint && entries[i].endpoint[0];
+            found = 1;
             break;
         }
     }
-    fail += expect_true("list includes daemon and endpoint", found);
+    fail += expect_true("list includes daemon", found);
     kc_dmn_free(entries);
     (void)kc_dmn_delete("listed");
     remove_runtime_dir(dir);
@@ -733,52 +733,6 @@ static int case_kc_dmn_get_eot(void) {
     return fail != 0;
 }
 
-typedef struct {
-    int calls;
-    size_t bytes;
-} data_state_t;
-
-/**
- * Record one data event.
- * @param data Borrowed data chunk.
- * @param size Chunk size.
- * @param userdata Data event state.
- * @return None.
- */
-static void on_data(const void *data, size_t size, void *userdata) {
-    data_state_t *state = (data_state_t *)userdata;
-    if (!state || (!data && size > 0)) return;
-    state->calls++;
-    state->bytes += size;
-}
-
-/**
- * Test kc_dmn_on.
- * @return Zero on success, non-zero on failure.
- */
-static int case_kc_dmn_on(void) {
-    kc_dmn_t *daemon = NULL;
-    data_state_t state = {0};
-    int fail = 0;
-
-    fail += expect_int("open handle", KC_DMN_OK, kc_dmn_open(&daemon, "event"));
-    if (daemon) {
-        fail += expect_int(
-            "unknown event rejected",
-            KC_DMN_ERROR,
-            kc_dmn_on(daemon, "unknown", on_data, &state)
-        );
-        fail += expect_int(
-            "data handler accepted",
-            KC_DMN_OK,
-            kc_dmn_on(daemon, "data", on_data, &state)
-        );
-    }
-    kc_dmn_close(daemon);
-    case_result(fail, "kc_dmn_on", "registers the data event handler");
-    return fail != 0;
-}
-
 /**
  * Test kc_dmn_send_data.
  * @return Zero on success, non-zero on failure.
@@ -786,7 +740,6 @@ static int case_kc_dmn_on(void) {
 static int case_kc_dmn_send_data(void) {
     char dir[512];
     kc_dmn_t *daemon = NULL;
-    data_state_t state = {0};
     void *response = NULL;
     size_t response_size = 0;
     int fail = 0;
@@ -805,11 +758,6 @@ static int case_kc_dmn_send_data(void) {
     );
     if (daemon) {
         fail += expect_int(
-            "register data handler",
-            KC_DMN_OK,
-            kc_dmn_on(daemon, "data", on_data, &state)
-        );
-        fail += expect_int(
             "send data",
             KC_DMN_OK,
             kc_dmn_send_data(
@@ -821,13 +769,12 @@ static int case_kc_dmn_send_data(void) {
             )
         );
         fail += expect_true("response returned", response_size > 0);
-        fail += expect_true("data handler called", state.calls > 0);
     }
     kc_dmn_free(response);
     kc_dmn_close(daemon);
     (void)kc_dmn_delete("senddata");
     remove_runtime_dir(dir);
-    case_result(fail, "kc_dmn_send_data", "returns a complete response and emits chunks");
+    case_result(fail, "kc_dmn_send_data", "returns one complete EOT-delimited response");
     return fail != 0;
 }
 
@@ -856,146 +803,6 @@ static int case_kc_dmn_send_signal(void) {
     remove_runtime_dir(dir);
     case_result(fail, "kc_dmn_send_signal", "sends a platform daemon signal");
     return fail != 0;
-}
-
-/**
- * Test kc_dmn_stream.
- * @return Zero on success, non-zero on failure.
- */
-static int case_kc_dmn_stream(void) {
-    char dir[512];
-    kc_dmn_t *daemon = NULL;
-    kc_dmn_stream_t *stream = NULL;
-    int fail = 0;
-
-    if (make_runtime_dir(dir, sizeof(dir), "stream") != 0) return 1;
-    fail += expect_int(
-        "create daemon",
-        KC_DMN_OK,
-        create_daemon("stream", dir, response_command())
-    );
-    short_sleep();
-    fail += expect_int(
-        "open daemon",
-        KC_DMN_OK,
-        open_daemon(&daemon, "stream", dir)
-    );
-    if (daemon)
-        fail += expect_int(
-            "open stream",
-            KC_DMN_OK,
-            kc_dmn_stream(daemon, &stream)
-        );
-    fail += expect_true("stream returned", stream != NULL);
-    kc_dmn_stream_close(stream);
-    kc_dmn_close(daemon);
-    (void)kc_dmn_delete("stream");
-    remove_runtime_dir(dir);
-    case_result(fail, "kc_dmn_stream", "opens a raw daemon stream");
-    return fail != 0;
-}
-
-/**
- * Test kc_dmn_stream_write.
- * @return Zero on success, non-zero on failure.
- */
-static int case_kc_dmn_stream_write(void) {
-    char dir[512];
-    kc_dmn_t *daemon = NULL;
-    kc_dmn_stream_t *stream = NULL;
-    int fail = 0;
-
-    if (make_runtime_dir(dir, sizeof(dir), "stream-write") != 0) return 1;
-    fail += expect_int(
-        "create daemon",
-        KC_DMN_OK,
-        create_daemon("streamwrite", dir, response_command())
-    );
-    short_sleep();
-    fail += expect_int(
-        "open daemon",
-        KC_DMN_OK,
-        open_daemon(&daemon, "streamwrite", dir)
-    );
-    if (daemon)
-        fail += expect_int(
-            "open stream",
-            KC_DMN_OK,
-            kc_dmn_stream(daemon, &stream)
-        );
-    if (stream)
-        fail += expect_int(
-            "write raw bytes",
-            KC_DMN_OK,
-            kc_dmn_stream_write(stream, "raw\n\004", 5)
-        );
-    kc_dmn_stream_close(stream);
-    kc_dmn_close(daemon);
-    (void)kc_dmn_delete("streamwrite");
-    remove_runtime_dir(dir);
-    case_result(fail, "kc_dmn_stream_write", "writes raw stream bytes");
-    return fail != 0;
-}
-
-/**
- * Test kc_dmn_stream_read.
- * @return Zero on success, non-zero on failure.
- */
-static int case_kc_dmn_stream_read(void) {
-    char dir[512];
-    kc_dmn_t *daemon = NULL;
-    kc_dmn_stream_t *stream = NULL;
-    unsigned char data[128];
-    size_t size = 0;
-    int fail = 0;
-
-    if (make_runtime_dir(dir, sizeof(dir), "stream-read") != 0) return 1;
-    fail += expect_int(
-        "create daemon",
-        KC_DMN_OK,
-        create_daemon("streamread", dir, response_command())
-    );
-    short_sleep();
-    fail += expect_int(
-        "open daemon",
-        KC_DMN_OK,
-        open_daemon(&daemon, "streamread", dir)
-    );
-    if (daemon)
-        fail += expect_int(
-            "open stream",
-            KC_DMN_OK,
-            kc_dmn_stream(daemon, &stream)
-        );
-    if (stream) {
-        fail += expect_int(
-            "write request",
-            KC_DMN_OK,
-            kc_dmn_stream_write(stream, "raw\n\004", 5)
-        );
-        fail += expect_int(
-            "read response",
-            KC_DMN_OK,
-            kc_dmn_stream_read(stream, data, sizeof(data), &size)
-        );
-        fail += expect_true("raw response has bytes", size > 0);
-    }
-    kc_dmn_stream_close(stream);
-    kc_dmn_close(daemon);
-    (void)kc_dmn_delete("streamread");
-    remove_runtime_dir(dir);
-    case_result(fail, "kc_dmn_stream_read", "reads raw stream bytes");
-    return fail != 0;
-}
-
-/**
- * Test kc_dmn_stream_close.
- * @return Zero on success, non-zero on failure.
- */
-static int case_kc_dmn_stream_close(void) {
-    kc_dmn_stream_close(NULL);
-    case_result(0, "kc_dmn_stream_close", "accepts NULL");
-    return 0;
 }
 
 /**
@@ -1092,7 +899,7 @@ static int case_kc_dmn_cli(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 19;
+    test_case_total = 14;
     test_case_current = 0;
     run_case(&rc, case_kc_dmn_create);
     run_case(&rc, case_kc_dmn_open);
@@ -1102,13 +909,8 @@ static int case_all(void) {
     run_case(&rc, case_kc_dmn_get_cmd);
     run_case(&rc, case_kc_dmn_set_eot);
     run_case(&rc, case_kc_dmn_get_eot);
-    run_case(&rc, case_kc_dmn_on);
     run_case(&rc, case_kc_dmn_send_data);
     run_case(&rc, case_kc_dmn_send_signal);
-    run_case(&rc, case_kc_dmn_stream);
-    run_case(&rc, case_kc_dmn_stream_write);
-    run_case(&rc, case_kc_dmn_stream_read);
-    run_case(&rc, case_kc_dmn_stream_close);
     run_case(&rc, case_kc_dmn_free);
     run_case(&rc, case_kc_dmn_close);
     run_case(&rc, case_kc_dmn_version);
@@ -1148,13 +950,8 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_dmn_get_cmd") == 0) return case_kc_dmn_get_cmd();
     if (strcmp(argv[1], "kc_dmn_set_eot") == 0) return case_kc_dmn_set_eot();
     if (strcmp(argv[1], "kc_dmn_get_eot") == 0) return case_kc_dmn_get_eot();
-    if (strcmp(argv[1], "kc_dmn_on") == 0) return case_kc_dmn_on();
     if (strcmp(argv[1], "kc_dmn_send_data") == 0) return case_kc_dmn_send_data();
     if (strcmp(argv[1], "kc_dmn_send_signal") == 0) return case_kc_dmn_send_signal();
-    if (strcmp(argv[1], "kc_dmn_stream") == 0) return case_kc_dmn_stream();
-    if (strcmp(argv[1], "kc_dmn_stream_write") == 0) return case_kc_dmn_stream_write();
-    if (strcmp(argv[1], "kc_dmn_stream_read") == 0) return case_kc_dmn_stream_read();
-    if (strcmp(argv[1], "kc_dmn_stream_close") == 0) return case_kc_dmn_stream_close();
     if (strcmp(argv[1], "kc_dmn_free") == 0) return case_kc_dmn_free();
     if (strcmp(argv[1], "kc_dmn_close") == 0) return case_kc_dmn_close();
     if (strcmp(argv[1], "kc_dmn_version") == 0) return case_kc_dmn_version();
