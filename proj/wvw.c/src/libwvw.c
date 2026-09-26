@@ -128,9 +128,6 @@ struct kc_wvw {
     char error[256];
 };
 
-static gsize kc_wvw_gtk_shutdown_once;
-static void kc_wvw_linux_shutdown(void);
-
 static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridge, const char *url);
 static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge);
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src);
@@ -3076,6 +3073,9 @@ struct kc_wvw {
 };
 
 #else
+
+static gsize kc_wvw_gtk_shutdown_once;
+static void kc_wvw_linux_shutdown(void);
 
 struct kc_wvw {
     kc_wvw_config_t opts;
