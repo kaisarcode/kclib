@@ -96,7 +96,6 @@ The dimension is fixed by the embedded model. Callers do not choose it. This let
 a vector index such as `hnsw.c` use `emb.dimension()` directly when creating
 an index, without hardcoding the model's current 384-element output.
 
-
 ### Runtime model
 
 The embedded model is **BAAI/bge-small-en-v1.5**, published by the Beijing Academy of Artificial Intelligence (BAAI) as part of FlagEmbedding. The upstream model is distributed under the **MIT License**:
