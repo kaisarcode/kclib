@@ -690,7 +690,7 @@ static int case_kc_mmap_cli(void) {
         test_cli_run_input(help_args, NULL, 0U, out, sizeof(out),
             err, sizeof(err), &status) ? 1 : status);
     fail += expect_true("CLI help path-first usage",
-        strstr(out, "mmap <path> -set|--set [value]") != NULL);
+        strstr(out, "Usage: mmap <path> [options]") != NULL);
     fail += expect_int("CLI version exits 0", 0,
         test_cli_run_input(version_args, NULL, 0U, out, sizeof(out),
             err, sizeof(err), &status) ? 1 : status);
