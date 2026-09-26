@@ -3086,6 +3086,7 @@ struct kc_wvw {
     GCond cond;
     GtkWidget *window;
     WebKitWebView *web_view;
+    WebKitWebContext *web_context;
     kc_wvw_bridge_state_t bridge;
     char error[256];
 };
@@ -4952,6 +4953,10 @@ static void kc_wvw_request_close(kc_wvw_t *ctx) {
     }
 
     gtk_widget_destroy(ctx->window);
+    if (ctx->web_context) {
+        g_object_unref(ctx->web_context);
+        ctx->web_context = NULL;
+    }
 }
 
 /**
@@ -5309,8 +5314,16 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
         gtk_window_fullscreen(GTK_WINDOW(ctx->window));
     }
 
-    ctx->web_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
+    ctx->web_context = webkit_web_context_new();
+    if (!ctx->web_context) {
+        return KC_WVW_ERROR;
+    }
+
+    ctx->web_view = WEBKIT_WEB_VIEW(
+        webkit_web_view_new_with_context(ctx->web_context));
     if (!ctx->web_view) {
+        g_object_unref(ctx->web_context);
+        ctx->web_context = NULL;
         return KC_WVW_ERROR;
     }
     if (g_once_init_enter(&kc_wvw_gtk_shutdown_once)) {
