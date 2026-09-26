@@ -154,7 +154,7 @@ Subscriptions belong to the current process. Closing the handle removes those
 subscriptions, but the resident watcher keeps running and keeps executing its
 persistent command.
 
-Passing a NULL handler clears the selected event subscription.
+Clearing a handler removes the selected event subscription.
 
 ### Listing
 
@@ -178,24 +178,11 @@ The returned entries and their strings share one allocation released with
 uint64_t kc_wch_version(void);
 ```
 
-### Runtime model
+### Runtime Model
 
-The native filesystem backends remain private implementation details:
-
-- Linux uses inotify.
-- Apple platforms use kqueue.
-- Windows uses ReadDirectoryChangesW.
-
-The resident watcher persists registration metadata and process state in its runtime directory. On POSIX, wch prefers `XDG_RUNTIME_DIR`, then `/run/user/<uid>`, with `/tmp` only as a fallback; Windows uses the system temporary directory. This is runtime state rather than persistent configuration.
-
-The persistent command continues running on events even when no client has the
-watcher open.
-
-Temporary subscriptions use a private local event transport. That transport is
-not part of the public API.
-
-Browser WebAssembly is not applicable to the resident product because a browser
-runtime cannot provide a system process that survives the host application.
+A created watcher continues running after the creating process exits. Opening a
+watcher provides access to that resident watcher, and removing it stops the
+watcher.
 
 ---
 
