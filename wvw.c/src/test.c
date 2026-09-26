@@ -196,6 +196,22 @@ static void case_kc_wvw_size(void) {
         "set_size and get_size expose explicit dimensions", ok);
 }
 
+static void case_kc_wvw_position(void) {
+    kc_wvw_t *wvw = NULL;
+    char *url = NULL;
+    int x = 0, y = 0;
+    int ok = open_test(&wvw, &url);
+    if (ok) {
+        ok = kc_wvw_set_position(wvw, 120, 140) == KC_WVW_OK &&
+             kc_wvw_get_position(wvw, &x, &y) == KC_WVW_OK &&
+             x == 120 && y == 140;
+    }
+    kc_wvw_close(wvw);
+    free(url);
+    result("kc_wvw_position",
+        "set_position and get_position expose explicit coordinates", ok);
+}
+
 static void case_kc_wvw_booleans(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
@@ -249,7 +265,7 @@ static void case_kc_wvw_cli(void) {
 }
 
 static void run_all(void) {
-    total = 10;
+    total = 11;
     case_kc_wvw_version();
     case_kc_wvw_open();
     case_kc_wvw_navigation();
@@ -258,6 +274,7 @@ static void run_all(void) {
     case_kc_wvw_actions();
     case_kc_wvw_title();
     case_kc_wvw_size();
+    case_kc_wvw_position();
     case_kc_wvw_booleans();
     case_kc_wvw_cli();
 }
