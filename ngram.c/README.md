@@ -1,6 +1,6 @@
 # ngram.c - Sliding-window n-gram traversal
 
-\`ngram.c\` is a small stateless C library and CLI for descending sliding-window traversal over byte-delimited text tokens. The reusable library emits borrowed spans through a synchronous callback. The CLI can additionally run one command per emitted span.
+\`ngram.c\` traverses descending sliding windows over byte-delimited text tokens. The CLI can also run one command for each emitted window.
 
 ---
 
@@ -114,7 +114,6 @@ int rc = kc_ngram_traverse(
 | \`min_tokens\` | \`1\` | Must be at least \`1\` |
 | \`separators\` | \`" \t\r\n"\` | Byte set used to delimit tokens; an empty string means no separator bytes |
 
-Passing \`options == NULL\` omits every option. Inside a non-NULL options value, a NULL optional field is also omitted. A non-NULL pointer is explicit and interpreted literally, so a pointer to \`max_tokens == 0\` is distinct from an omitted \`max_tokens\`.
 
 There is no public \`options_default()\` function. Default policy stays inside the library.
 
@@ -124,7 +123,7 @@ There is no public \`options_default()\` function. Default policy stays inside t
 
 Each \`kc_ngram_chunk_t\` describes the original input span:
 
-- \`data\` is a borrowed pointer to the first byte of the first token in the window;
+- \`data\` identifies the text covered by the current window;
 - \`data_size\` is the exact byte span through the last byte of the last token, including separator bytes between tokens;
 - \`token_start\` is the zero-based index of the first token;
 - \`token_count\` is the number of tokens in the window.
