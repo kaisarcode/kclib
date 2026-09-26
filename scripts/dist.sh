@@ -151,11 +151,13 @@ generate_manifest() {
 
     manifest_file="$dist_dir/manifest.json"
     first_project=true
-    echo "{" > "$manifest_file"
     updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-    printf '  "updated_at": "%s",\n' "$updated_at" >> "$manifest_file"
-    echo "  \"timestamp\": $(date -u +%s)," >> "$manifest_file"
-    echo '  "projects": {' >> "$manifest_file"
+    {
+        echo "{"
+        printf '  "updated_at": "%s",\n' "$updated_at"
+        echo "  \"timestamp\": $(date -u +%s),"
+        echo '  "projects": {'
+    } > "$manifest_file"
 
     for project_dir in "$dist_dir"/*/; do
         [ -d "$project_dir" ] || continue

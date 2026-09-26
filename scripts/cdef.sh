@@ -8,7 +8,7 @@
 set -eu
 
 SCRIPT_DIR=$(dirname "$0")
-SCRIPT_DIR=$(CDPATH= cd "$SCRIPT_DIR" || exit 1; pwd)
+SCRIPT_DIR=$(CDPATH='' cd "$SCRIPT_DIR" || exit 1; pwd)
 
 # Prints command usage information.
 # @return 0 on success.
