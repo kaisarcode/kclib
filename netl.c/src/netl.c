@@ -44,6 +44,7 @@ int kc_netl_cli_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
     kc_netl_handler_t handler,
+    kc_netl_error_handler_t error_handler,
     void *userdata,
     void (*accept_handler)(kc_netl_peer_t *peer, void *userdata),
     void *accept_userdata
@@ -695,6 +696,7 @@ static int cli_run(
         &listener,
         &options,
         cli_on_input,
+        cli_on_error,
         &state,
         protocol == KC_NETL_TCP ? cli_on_accept : NULL,
         &state
