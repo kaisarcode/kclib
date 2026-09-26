@@ -47,8 +47,6 @@ wvw \
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
-The CLI is a thin consumer of the reusable public API. It blocks until the
-window closes, but that waiting behavior is private to the CLI.
 
 The same settings can be supplied through environment variables:
 
@@ -105,8 +103,7 @@ kc_wvw_navigate(wvw, "https://kaisarcode.com");
 kc_wvw_close(wvw);
 ```
 
-`kc_wvw_open()` returns an operational WebView. The caller does not need to
-run a public event loop after opening it.
+`kc_wvw_open()` opens a ready-to-use WebView window.
 
 `url` is required. Omitted width and height use 1280x720. Omitted position
 values use native placement. Omitted boolean options are false.
@@ -202,8 +199,7 @@ kc_wvw_add_init_script(wvw, "window.APP_VERSION = '1.0';");
 kc_wvw_enable_bridge(wvw, &bridge);
 ```
 
-Bridge callback results are borrowed. The library validates and consumes the
-returned JSON synchronously and does not free it.
+Bridge callbacks return JSON responses for exposed methods.
 
 When the bridge is active, navigation is restricted to trusted origins.
 `file:`, `data:`, and localhost access are controlled by the corresponding
