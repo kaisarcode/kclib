@@ -128,6 +128,9 @@ struct kc_wvw {
     char error[256];
 };
 
+static gsize kc_wvw_gtk_shutdown_once;
+static void kc_wvw_linux_shutdown(void);
+
 static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridge, const char *url);
 static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge);
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src);
@@ -5334,7 +5337,7 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
 }
 
 typedef struct {kc_wvw_t *ctx;kc_wvw_op_t *op;GMutex mutex;GCond cond;int done;} kc_wvw_linux_call_t;
-static gsize kc_wvw_gtk_once;static gsize kc_wvw_gtk_shutdown_once;static GMainContext *kc_wvw_gtk_context;static GMainLoop *kc_wvw_gtk_loop;static GThread *kc_wvw_gtk_thread;static GMutex kc_wvw_gtk_mutex;static GCond kc_wvw_gtk_cond;static int kc_wvw_gtk_ready,kc_wvw_gtk_started;
+static gsize kc_wvw_gtk_once;static GMainContext *kc_wvw_gtk_context;static GMainLoop *kc_wvw_gtk_loop;static GThread *kc_wvw_gtk_thread;static GMutex kc_wvw_gtk_mutex;static GCond kc_wvw_gtk_cond;static int kc_wvw_gtk_ready,kc_wvw_gtk_started;
 
 /**
  * Run the process-wide GTK event loop.
