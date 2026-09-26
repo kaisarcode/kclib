@@ -114,7 +114,6 @@ int rc = kc_ngram_traverse(
 | \`min_tokens\` | \`1\` | Must be at least \`1\` |
 | \`separators\` | \`" \t\r\n"\` | Byte set used to delimit tokens; an empty string means no separator bytes |
 
-
 There is no public \`options_default()\` function. Default policy stays inside the library.
 
 ### Traversal
@@ -127,7 +126,6 @@ Each \`kc_ngram_chunk_t\` describes the original input span:
 - \`data_size\` is the exact byte span through the last byte of the last token, including separator bytes between tokens;
 - \`token_start\` is the zero-based index of the first token;
 - \`token_count\` is the number of tokens in the window.
-
 
 Visitor return semantics are deliberately numeric:
 
