@@ -135,14 +135,8 @@ if (kc_tpm_open(&profile, map_text, NULL) == KC_TPM_OK) {
 A successful `kc_tpm_open()` always returns a complete profile that can be
 scored immediately and repeatedly. There is no separate build phase.
 
-`map_text` is borrowed only for the duration of `kc_tpm_open()`.
-`input_text` is borrowed only for the duration of `kc_tpm_score()`.
-The profile owns all derived n-gram storage until `kc_tpm_close()`.
 
-The n-gram size defaults internally to 3 when it is omitted. This applies both
-when `options` is `NULL` and when `options->ngram_size` is `NULL`. A
-non-NULL pointer is explicit: the pointed value must be from 1 through 8. In
-particular, a pointer to 0 is invalid.
+The n-gram size defaults to 3 and accepts values from 1 through 8.
 
 `kc_tpm_score()` returns `KC_TPM_ERROR` for invalid arguments, allocation
 failure, or input-profile capacity overflow. A valid empty input or a
