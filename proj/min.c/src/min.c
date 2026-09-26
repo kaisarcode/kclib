@@ -99,14 +99,14 @@ static void kc_print_help(const char *name) {
     printf("Usage: %s <css|js|html|text> [options]\n", name);
     printf("\n");
     printf("Parameters:\n");
-    printf("    css           Minify CSS input\n");
-    printf("    js            Minify JavaScript input\n");
-    printf("    html          Minify HTML input\n");
-    printf("    text          Minify generic txt input\n");
+    printf("  css           Minify CSS input\n");
+    printf("  js            Minify JavaScript input\n");
+    printf("  html          Minify HTML input\n");
+    printf("  text          Minify generic txt input\n");
     printf("\n");
     printf("Options:\n");
-    printf("    -h, --help    Show this help\n");
-    printf("    -v, --version Show version\n");
+    printf("  -h, --help    Show this help\n");
+    printf("  -v, --version Show version\n");
 }
 
 /**
