@@ -1,9 +1,6 @@
 # tray.c - Native System Tray
 
-`tray.c` is a C library and CLI for creating a persistent system tray and
-persistent child menu items on Windows, Linux (GTK 3), and macOS (AppKit).
-`kc_tray_open()` returns without running a caller-visible event loop. The
-standalone `tray` program is a small consumer of the same public API.
+`tray.c` creates native system tray icons and menu items on Windows, Linux, and macOS.
 
 ---
 
@@ -64,21 +61,11 @@ if (kc_tray_open(&tray, &options) == KC_TRAY_OK) {
 }
 ```
 
-`kc_tray_open(&tray, NULL)` omits explicit initial properties. The library
-copies option strings. The tray owns all items, and `kc_tray_close()` releases
-them. Each `kc_tray_add_item()` callback receives the exact activated item plus
-retained caller `userdata`; the caller keeps `userdata` valid until item
-removal or tray close. Both `kc_tray_item_remove(item)` and
-`kc_tray_close(tray)` may be called inside a menu callback. After either call,
-the removed pointer has ended its public lifetime, and close prevents future
-callbacks.
+Menu items can be added, updated, removed, and handled through callbacks.
 
 ### Properties and Errors
 
-`kc_tray_add_separator()` creates a removable child whose text getter returns
-`NULL`. `kc_tray_item_set_text()`, `kc_tray_set_icon()`, and
-`kc_tray_set_tooltip()` update the native object. `NULL` clears the icon or
-tooltip; item text must be nonempty.
+`kc_tray_add_separator()` adds a separator. Icons, tooltips, and item text can be updated while the tray is running.
 
 
 
@@ -92,8 +79,7 @@ tooltip; item text must be nonempty.
 | Linux | Icons may be file paths or icon names. GTK status-icon and event-context work run on a worker thread; applications already using GTK should not access GTK objects from other threads concurrently. A notification-area host is required for visibility. |
 | macOS | Icons may be file paths or named AppKit images. |
 
-An unset icon uses the platform default. Browser WASM is not a target because
-this library requires native desktop status-area facilities.
+An unset icon uses the platform default.
 
 ---
 
