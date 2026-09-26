@@ -12,7 +12,7 @@ standalone `tray` program is a small consumer of the same public API.
 Create a tray with a greeting item and a quit item:
 
 ```bash
-./bin/x86_64/linux/tray --icon /path/to/icon.png --tooltip "My app" \
+tray --icon /path/to/icon.png --tooltip "My app" \
   --item "Greet" --sep --quit "Quit"
 ```
 
