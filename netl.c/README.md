@@ -158,9 +158,6 @@ The native listener requires operating-system TCP/UDP server sockets. It is
 intended for native platforms supported by the project, including POSIX systems
 and Windows.
 
-Browser WASM is not a target for `netl.c`: browser runtimes do not expose the
-native bind/listen/accept TCP and UDP capability represented by this library.
-Other kclibs such as `http.c` can support WASM independently.
 
 ---
 
