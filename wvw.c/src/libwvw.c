@@ -116,6 +116,8 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
 static void kc_wvw_context_add_ref(kc_wvw_t *ctx);
 static void kc_wvw_context_release(kc_wvw_t *ctx);
 static void kc_wvw_context_destroy(kc_wvw_t *ctx);
+static void kc_wvw_config_free(kc_wvw_config_t *config);
+static void kc_wvw_set_error(kc_wvw_t *ctx, const char *fmt, ...);
 
 /**
  * Retains one context while an asynchronous operation may use it.
@@ -2170,7 +2172,10 @@ static DWORD WINAPI kc_wvw_windows_worker(LPVOID data) {
     if(ctx->controller){ICoreWebView2Controller_Close(ctx->controller);ICoreWebView2Controller_Release(ctx->controller);ctx->controller=NULL;}
     if(ctx->webview){ICoreWebView2_Release(ctx->webview);ctx->webview=NULL;}
     if(ctx->environment){ICoreWebView2Environment_Release(ctx->environment);ctx->environment=NULL;}
-    if(ctx->hwnd&&IsWindow(ctx->hwnd))DestroyWindow(ctx->hwnd);ctx->hwnd=NULL;
+    if (ctx->hwnd && IsWindow(ctx->hwnd)) {
+        DestroyWindow(ctx->hwnd);
+    }
+    ctx->hwnd = NULL;
     if(ctx->loader){FreeLibrary(ctx->loader);ctx->loader=NULL;}if(ctx->background_brush){DeleteObject(ctx->background_brush);ctx->background_brush=NULL;}
     if(ctx->com_initialized){CoUninitialize();ctx->com_initialized=0;}SetEvent(ctx->closed_event);
     if(ctx->free_on_exit){if(ctx->thread)CloseHandle(ctx->thread);ctx->thread=NULL;kc_wvw_context_release(ctx);}return 0;
