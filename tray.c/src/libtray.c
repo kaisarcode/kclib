@@ -382,7 +382,14 @@ static void kc_native_close(kc_tray_t *t) {
     [t->menu release]; [t->target release];
 #else
     if (t->status) {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
         gtk_status_icon_set_visible(t->status, FALSE);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         g_signal_handlers_disconnect_by_data(t->status, t);
         g_object_unref(t->status); t->status = NULL;
     }
