@@ -80,8 +80,7 @@ typedef void (*kc_netl_error_handler_t)(
  * NULL or empty host binds all interfaces. Port zero requests an ephemeral
  * operating-system-selected port. NULL max_pending_connections uses the
  * internal default. The input handler is required; close/error handlers are
- * optional. Callback functions may call kc_netl_respond() and
- * kc_netl_peer_close(), but must not call kc_netl_close().
+ * optional. Callbacks may respond, close peers, or close the listener.
  *
  * The library owns the internal worker and all transport scheduling.
  */
@@ -120,7 +119,7 @@ unsigned short kc_netl_port(const kc_netl_t *listener);
 
 /**
  * Stop the listener, close all TCP peers, and release it.
- * NULL is accepted. Do not call from a netl callback.
+ * NULL is accepted. This may also be called from a netl callback.
  */
 void kc_netl_close(kc_netl_t *listener);
 
