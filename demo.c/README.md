@@ -11,21 +11,21 @@ build.
 Run without arguments to greet the default name:
 
 ```bash
-./bin/x86_64/linux/demo
+demo
 Hello World!
 ```
 
 Provide a name:
 
 ```bash
-./bin/x86_64/linux/demo -n John
+demo -n John
 Hello John!
 ```
 
 The long form is also available:
 
 ```bash
-./bin/x86_64/linux/demo --name Jane
+demo --name Jane
 Hello Jane!
 ```
 
