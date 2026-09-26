@@ -218,6 +218,7 @@ test:
 				-DWVW_BUILD_TESTS=ON \
 				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll \
 				-DWVW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll.a \
+				-DWVW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/wvw.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -229,6 +230,7 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DWVW_BUILD_TESTS=ON \
 				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/$(NATIVE_SHARED_LIBRARY) \
+				-DWVW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/wvw \
 				$(NATIVE_IMPORT_ARGUMENT) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
