@@ -174,7 +174,6 @@ const char *kc_redp2p_strerror(int status);
 uint64_t kc_redp2p_version(void);
 ```
 
-
 The public API intentionally does not expose registration, heartbeat, lookup,
 punching, candidates, KCP state, session keys, control sequences, or
 application-data I/O.
@@ -224,7 +223,6 @@ For `kc_redp2p_con_options_t`, `id`, `index`, and local `port` are
 required. `stun` is optional. The consumer derives TCP or UDP from the
 publisher record.
 
-
 ### Runtime Model
 
 The index coordinates publishers and consumers. Publishers expose local TCP or
@@ -235,7 +233,6 @@ UDP services, and consumers connect through the matching public name.
 REDP2P requires native TCP/UDP listeners and direct UDP hole punching. It is
 intended for the native platforms supported by the project, including POSIX
 systems and Windows.
-
 
 ---
 
