@@ -211,7 +211,8 @@ static void kc_native_remove(kc_tray_item_t *item) {
 @end
 @implementation KCTrayTarget
 - (void)activate:(id)sender {
-    kc_tray_item_t *item = (kc_tray_item_t *)[(NSMenuItem *)sender representedObject].pointerValue;
+    NSValue *value = (NSValue *)[(NSMenuItem *)sender representedObject];
+    kc_tray_item_t *item = (kc_tray_item_t *)[value pointerValue];
     kc_tray_t *owner = tray;
     [self retain];
     if (tray && !tray->closing && item && !item->removed && item->callback) {
