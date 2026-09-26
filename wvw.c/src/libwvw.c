@@ -37,20 +37,69 @@ typedef enum {
     KC_WVW_INIT_FAILED,
 } kc_wvw_init_state_t;
 
+typedef struct {
+    char *url;
+    char *title;
+    char *background;
+    int width, height, posx, posy;
+    int has_posx, has_posy;
+    int fullscreen, borderless, always_on_top, click_through, no_focus;
+} kc_wvw_config_t;
+
 typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_STR,
-} kc_env_type_t;
+    KC_WVW_OP_NAVIGATE, KC_WVW_OP_ADD_INIT_SCRIPT, KC_WVW_OP_ENABLE_BRIDGE,
+    KC_WVW_OP_POST_BRIDGE_EVENT, KC_WVW_OP_HIDE, KC_WVW_OP_SHOW,
+    KC_WVW_OP_MINIMIZE, KC_WVW_OP_MAXIMIZE, KC_WVW_OP_RESTORE,
+    KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE,
+    KC_WVW_OP_GET_SIZE, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
+    KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN
+} kc_wvw_op_kind_t;
 
 typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
+    kc_wvw_op_kind_t kind;
+    const char *text;
+    const kc_wvw_bridge_options_t *bridge;
+    int a, b;
+    int *out_a, *out_b;
+    const char *out_text;
+    int result;
+} kc_wvw_op_t;
+
+static int kc_wvw_execute_op(kc_wvw_t *ctx, kc_wvw_op_t *op);
+
+typedef struct {
+    char *url;
+    char *title;
+    char *background;
+    int width, height, posx, posy;
+    int has_posx, has_posy;
+    int fullscreen, borderless, always_on_top, click_through, no_focus;
+} kc_wvw_config_t;
+
+typedef enum {
+    KC_WVW_OP_NAVIGATE, KC_WVW_OP_ADD_INIT_SCRIPT, KC_WVW_OP_ENABLE_BRIDGE,
+    KC_WVW_OP_POST_BRIDGE_EVENT, KC_WVW_OP_HIDE, KC_WVW_OP_SHOW,
+    KC_WVW_OP_MINIMIZE, KC_WVW_OP_MAXIMIZE, KC_WVW_OP_RESTORE,
+    KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE,
+    KC_WVW_OP_GET_SIZE, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
+    KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN
+} kc_wvw_op_kind_t;
+
+typedef struct {
+    kc_wvw_op_kind_t kind;
+    const char *text;
+    const kc_wvw_bridge_options_t *bridge;
+    int a, b;
+    int *out_a, *out_b;
+    const char *out_text;
+    int result;
+} kc_wvw_op_t;
+
+static int kc_wvw_execute_op(kc_wvw_t *ctx, kc_wvw_op_t *op);
 
 typedef struct {
     char **methods;
-    int method_count;
+    size_t method_count;
     kc_wvw_bridge_callback_t callback;
     void *userdata;
     int allow_file;
@@ -60,12 +109,11 @@ typedef struct {
 } kc_wvw_bridge_state_t;
 
 struct kc_wvw {
-    kc_wvw_options_t opts;
+    kc_wvw_config_t opts;
     volatile LONG ref_count;
-    int running;
-    int closing;
-    int com_initialized;
-    volatile LONG stop_requested;
+    int running, closing, com_initialized, started, free_on_exit;
+    DWORD worker_id;
+    HANDLE thread, ready, closed_event;
     HWND hwnd;
     HBRUSH background_brush;
     HINSTANCE hinstance;
@@ -87,22 +135,13 @@ static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
 static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
 static void kc_wvw_context_add_ref(kc_wvw_t *ctx);
 static void kc_wvw_context_release(kc_wvw_t *ctx);
-static void kc_wvw_context_destroy(kc_wvw_t *ctx);
-
-/**
- * Sets an error message on the context.
- * @param ctx Window context.
- * @param fmt Printf-style format string.
- * @param ... Format arguments.
- * @return None.
- */
-static void kc_wvw_set_error(kc_wvw_t *ctx, const char *fmt, ...) {
-    va_list ap;
-    if (!ctx || !fmt) return;
-    va_start(ap, fmt);
-    vsnprintf(ctx->error, sizeof(ctx->error), fmt, ap);
-    va_end(ap);
-    ctx->error[sizeof(ctx->error) - 1] = '\0';
+static void kc_wvw_context_destroy(kc_wvw_t *ctx) {
+    if (!ctx) return;
+    free(ctx->pending_url);
+    kc_wvw_bridge_state_free(&ctx->bridge);
+    kc_wvw_config_free(&ctx->opts);
+    if (ctx->closed_event) CloseHandle(ctx->closed_event);
+    free(ctx);
 }
 
 /**
@@ -148,7 +187,7 @@ static void kc_wvw_context_destroy(kc_wvw_t *ctx) {
     }
     free(ctx->pending_url);
     kc_wvw_bridge_state_free(&ctx->bridge);
-    kc_wvw_options_free(&ctx->opts);
+    kc_wvw_config_free(&ctx->opts);
     if (ctx->com_initialized) {
         CoUninitialize();
     }
@@ -166,22 +205,6 @@ static void kc_wvw_context_release(kc_wvw_t *ctx) {
     }
 }
 
-static const kc_env_map_t env_config_table[] = {
-    { "KC_WVW_URL", offsetof(kc_wvw_options_t, url), KC_ENV_TYPE_STR },
-    { "KC_WVW_TITLE", offsetof(kc_wvw_options_t, title), KC_ENV_TYPE_STR },
-    { "KC_WVW_BACKGROUND", offsetof(kc_wvw_options_t, background), KC_ENV_TYPE_STR },
-    { "KC_WVW_WIDTH", offsetof(kc_wvw_options_t, width), KC_ENV_TYPE_INT },
-    { "KC_WVW_HEIGHT", offsetof(kc_wvw_options_t, height), KC_ENV_TYPE_INT },
-    { "KC_WVW_POSX", offsetof(kc_wvw_options_t, posx), KC_ENV_TYPE_INT },
-    { "KC_WVW_POSY", offsetof(kc_wvw_options_t, posy), KC_ENV_TYPE_INT },
-    { "KC_WVW_FULLSCREEN", offsetof(kc_wvw_options_t, fullscreen), KC_ENV_TYPE_INT },
-    { "KC_WVW_BORDERLESS", offsetof(kc_wvw_options_t, borderless), KC_ENV_TYPE_INT },
-    { "KC_WVW_ALWAYS_ON_TOP", offsetof(kc_wvw_options_t, always_on_top), KC_ENV_TYPE_INT },
-    { "KC_WVW_CLICK_THROUGH", offsetof(kc_wvw_options_t, click_through), KC_ENV_TYPE_INT },
-    { "KC_WVW_NO_FOCUS", offsetof(kc_wvw_options_t, no_focus), KC_ENV_TYPE_INT },
-};
-
-static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
 #ifndef KC_WVW_BUILD_VERSION
 #define KC_WVW_BUILD_VERSION 0
 #endif
@@ -684,6 +707,39 @@ static char *kc_wvw_strdup(const char *text) {
     memcpy(copy, text, length + 1);
     return copy;
 }
+
+static void kc_wvw_config_free(kc_wvw_config_t *config) {
+    if (!config) return;
+    free(config->url); free(config->title); free(config->background);
+    memset(config, 0, sizeof(*config));
+}
+
+static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *options) {
+    if (!config || !options || !options->url || !options->url[0]) return KC_WVW_ERROR;
+    memset(config, 0, sizeof(*config));
+    config->url = kc_wvw_strdup(options->url);
+    config->title = kc_wvw_strdup(options->title ? options->title : "wvw");
+    config->background = options->background ? kc_wvw_strdup(options->background) : NULL;
+    if (!config->url || !config->title || (options->background && !config->background)) {
+        kc_wvw_config_free(config); return KC_WVW_ERROR;
+    }
+    config->width = options->width ? *options->width : 1280;
+    config->height = options->height ? *options->height : 720;
+    config->has_posx = options->posx != NULL; config->has_posy = options->posy != NULL;
+    config->posx = options->posx ? *options->posx : 0; config->posy = options->posy ? *options->posy : 0;
+    config->fullscreen = options->fullscreen ? !!*options->fullscreen : 0;
+    config->borderless = options->borderless ? !!*options->borderless : 0;
+    config->always_on_top = options->always_on_top ? !!*options->always_on_top : 0;
+    config->click_through = options->click_through ? !!*options->click_through : 0;
+    config->no_focus = options->no_focus ? !!*options->no_focus : 0;
+    if (config->width <= 0 || config->height <= 0 ||
+        config->width > KC_WVW_SIZE_MAX || config->height > KC_WVW_SIZE_MAX ||
+        strlen(config->title) > KC_WVW_TITLE_MAX) {
+        kc_wvw_config_free(config); return KC_WVW_ERROR;
+    }
+    return KC_WVW_OK;
+}
+
 
 /**
  * Return whether the configured background requests a transparent host surface.
@@ -1823,12 +1879,9 @@ static void kc_wvw_request_close(kc_wvw_t *ctx) {
         return;
     }
 
-    ctx->closing = 1;
-    if (ctx->hwnd && IsWindow(ctx->hwnd)) {
-        DestroyWindow(ctx->hwnd);
-    } else {
-        ctx->running = 0;
-    }
+    ctx->closing = 1; ctx->running = 0;
+    if (ctx->hwnd && IsWindow(ctx->hwnd)) DestroyWindow(ctx->hwnd);
+    PostQuitMessage(0);
 }
 
 /**
@@ -1901,6 +1954,11 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
     case KC_WVW_CLOSE_MESSAGE:
         kc_wvw_request_close(ctx);
         return 0;
+    case (WM_APP + 2): {
+        kc_wvw_op_t *op = (kc_wvw_op_t *)lparam;
+        if (op) op->result = kc_wvw_execute_op(ctx, op);
+        return 0;
+    }
     default:
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
@@ -1939,8 +1997,8 @@ static int kc_wvw_create_window(kc_wvw_t *ctx) {
         ex_style |= WS_EX_NOACTIVATE;
     }
 
-    rect.left = (ctx->opts.posx != KC_WVW_POSITION_AUTO) ? ctx->opts.posx : CW_USEDEFAULT;
-    rect.top = (ctx->opts.posy != KC_WVW_POSITION_AUTO) ? ctx->opts.posy : CW_USEDEFAULT;
+    rect.left = (ctx->opts.has_posx) ? ctx->opts.posx : CW_USEDEFAULT;
+    rect.top = (ctx->opts.has_posy) ? ctx->opts.posy : CW_USEDEFAULT;
     if (rect.left != CW_USEDEFAULT) {
         int screen_w = GetSystemMetrics(SM_CXSCREEN);
         int win_w = rect.right;
@@ -1958,8 +2016,8 @@ static int kc_wvw_create_window(kc_wvw_t *ctx) {
     AdjustWindowRectEx(&rect, style, FALSE, ex_style);
 
     if (ctx->opts.fullscreen) {
-        rect.left = (ctx->opts.posx != KC_WVW_POSITION_AUTO) ? ctx->opts.posx : 0;
-        rect.top = (ctx->opts.posy != KC_WVW_POSITION_AUTO) ? ctx->opts.posy : 0;
+        rect.left = (ctx->opts.has_posx) ? ctx->opts.posx : 0;
+        rect.top = (ctx->opts.has_posy) ? ctx->opts.posy : 0;
         rect.right = GetSystemMetrics(SM_CXSCREEN);
         rect.bottom = GetSystemMetrics(SM_CYSCREEN);
     }
@@ -2137,142 +2195,55 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_controller_invoke(ICoreWebView2CreateCor
     return S_OK;
 }
 
-/**
- * Create an options struct initialized with default values.
- * @return Default-initialized options.
- */
-kc_wvw_options_t kc_wvw_options_default(void) {
-    kc_wvw_options_t opts;
 
-    memset(&opts, 0, sizeof(opts));
-    opts.width = 1280;
-    opts.height = 720;
-    return opts;
+
+
+
+
+
+
+
+
+
+static DWORD WINAPI kc_wvw_windows_worker(LPVOID data) {
+    kc_wvw_t *ctx=(kc_wvw_t *)data; HRESULT hr; MSG message;
+    ctx->worker_id=GetCurrentThreadId(); ctx->init_state=KC_WVW_INIT_PENDING;
+    hr=CoInitializeEx(NULL,COINIT_APARTMENTTHREADED);
+    if(FAILED(hr)&&hr!=RPC_E_CHANGED_MODE){kc_wvw_set_error(ctx,"COM initialization failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
+    ctx->com_initialized=SUCCEEDED(hr);ctx->hinstance=GetModuleHandleW(NULL);ctx->background_brush=kc_wvw_background_brush(ctx->opts.background);
+    ctx->pending_url=kc_wvw_strdup(ctx->opts.url);
+    if(!ctx->pending_url){kc_wvw_set_error(ctx,"memory allocation failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
+    if(kc_wvw_load_loader(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2Loader.dll not found");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
+    if(kc_wvw_create_window(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
+    if(kc_wvw_start_webview(ctx)!=KC_WVW_OK||kc_wvw_wait_for_ready(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2 initialization failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
+    ctx->started=1;ctx->running=1;SetEvent(ctx->ready);
+    while(ctx->running&&GetMessageW(&message,NULL,0,0)>0){TranslateMessage(&message);DispatchMessageW(&message);}
+    ctx->running=0;
+    if(ctx->controller){ICoreWebView2Controller_Close(ctx->controller);ICoreWebView2Controller_Release(ctx->controller);ctx->controller=NULL;}
+    if(ctx->webview){ICoreWebView2_Release(ctx->webview);ctx->webview=NULL;}
+    if(ctx->environment){ICoreWebView2Environment_Release(ctx->environment);ctx->environment=NULL;}
+    if(ctx->hwnd&&IsWindow(ctx->hwnd))DestroyWindow(ctx->hwnd);ctx->hwnd=NULL;
+    if(ctx->loader){FreeLibrary(ctx->loader);ctx->loader=NULL;}if(ctx->background_brush){DeleteObject(ctx->background_brush);ctx->background_brush=NULL;}
+    if(ctx->com_initialized){CoUninitialize();ctx->com_initialized=0;}SetEvent(ctx->closed_event);
+    if(ctx->free_on_exit){if(ctx->thread)CloseHandle(ctx->thread);ctx->thread=NULL;kc_wvw_context_release(ctx);}return 0;
+}
+static int kc_wvw_dispatch_op(kc_wvw_t *ctx,kc_wvw_op_t *op){
+    if(!ctx||!op||ctx->closing||!ctx->started)return KC_WVW_ERROR;
+    if(GetCurrentThreadId()==ctx->worker_id)return kc_wvw_execute_op(ctx,op);
+    if(!ctx->hwnd||!IsWindow(ctx->hwnd))return KC_WVW_ERROR;
+    SendMessageW(ctx->hwnd,WM_APP+2,0,(LPARAM)op);return op->result;
+}
+int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){
+    kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options)return KC_WVW_ERROR;
+    ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;ctx->ref_count=1;
+    if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);return KC_WVW_ERROR;}
+    ctx->ready=CreateEventW(NULL,TRUE,FALSE,NULL);ctx->closed_event=CreateEventW(NULL,TRUE,FALSE,NULL);
+    if(!ctx->ready||!ctx->closed_event){if(ctx->ready)CloseHandle(ctx->ready);if(ctx->closed_event)CloseHandle(ctx->closed_event);kc_wvw_config_free(&ctx->opts);free(ctx);return KC_WVW_ERROR;}
+    ctx->thread=CreateThread(NULL,0,kc_wvw_windows_worker,ctx,0,NULL);
+    if(!ctx->thread){CloseHandle(ctx->ready);CloseHandle(ctx->closed_event);kc_wvw_config_free(&ctx->opts);free(ctx);return KC_WVW_ERROR;}
+    *out=ctx;WaitForSingleObject(ctx->ready,INFINITE);CloseHandle(ctx->ready);ctx->ready=NULL;return ctx->started?KC_WVW_OK:KC_WVW_ERROR;
 }
 
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_wvw_options_load_env(kc_wvw_options_t *opts) {
-    int i;
-
-    if (!opts) {
-        return;
-    }
-
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        if (!val) {
-            continue;
-        }
-        if (env_config_table[i].type == KC_ENV_TYPE_INT) {
-            char *end;
-            long value = strtol(val, &end, 10);
-            if (end != val && *end == '\0') {
-                *(int *)((char *)opts + env_config_table[i].offset) = (int)value;
-            }
-        } else {
-            char **slot = (char **)((char *)opts + env_config_table[i].offset);
-            free(*slot);
-            *slot = kc_wvw_strdup(val);
-        }
-    }
-}
-
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_wvw_options_free(kc_wvw_options_t *opts) {
-    if (!opts) {
-        return;
-    }
-
-    free(opts->url);
-    free(opts->title);
-    free(opts->background);
-
-    opts->url = NULL;
-    opts->title = NULL;
-    opts->background = NULL;
-
-}
-
-/**
- * Create a new native WebView context.
- * @param ctx_out Destination context pointer.
- * @param opts Configuration options.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
-    kc_wvw_t *ctx;
-    HRESULT hr;
-
-    if (!ctx_out || !opts || !opts->url) {
-        return KC_WVW_ERROR;
-    }
-    *ctx_out = NULL;
-
-    ctx = (kc_wvw_t *)calloc(1, sizeof(kc_wvw_t));
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-    *ctx_out = ctx;
-    ctx->ref_count = 1;
-
-    ctx->init_state = KC_WVW_INIT_PENDING;
-    ctx->opts = *opts;
-    ctx->opts.url = kc_wvw_strdup(opts->url);
-    ctx->opts.title = opts->title ? kc_wvw_strdup(opts->title) : kc_wvw_strdup("wvw");
-    ctx->opts.background = opts->background ? kc_wvw_strdup(opts->background) : NULL;
-
-    ctx->opts.posx = opts->posx;
-    ctx->opts.posy = opts->posy;
-
-    ctx->opts.width = opts->width;
-    ctx->opts.height = opts->height;
-    ctx->opts.fullscreen = opts->fullscreen;
-    ctx->opts.borderless = opts->borderless;
-    ctx->opts.always_on_top = opts->always_on_top;
-    ctx->opts.click_through = opts->click_through;
-    ctx->opts.no_focus = opts->no_focus;
-    ctx->pending_url = kc_wvw_strdup(opts->url);
-    if (!ctx->opts.url || !ctx->opts.title || (opts->background && !ctx->opts.background) || !ctx->pending_url) {
-        kc_wvw_set_error(ctx, "memory allocation failed");
-        return KC_WVW_ERROR;
-    }
-
-    hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
-        kc_wvw_set_error(ctx, "COM initialization failed");
-        return KC_WVW_ERROR;
-    }
-    ctx->com_initialized = SUCCEEDED(hr);
-    ctx->hinstance = GetModuleHandleW(NULL);
-    ctx->background_brush = kc_wvw_background_brush(ctx->opts.background);
-
-    if (kc_wvw_load_loader(ctx) != KC_WVW_OK) {
-        kc_wvw_set_error(ctx, "WebView2Loader.dll not found");
-        return KC_WVW_ERROR;
-    }
-    if (kc_wvw_create_window(ctx) != KC_WVW_OK) {
-        kc_wvw_set_error(ctx, "window creation failed");
-        return KC_WVW_ERROR;
-    }
-    if (kc_wvw_start_webview(ctx) != KC_WVW_OK) {
-        kc_wvw_set_error(ctx, "WebView2 initialization failed");
-        return KC_WVW_ERROR;
-    }
-    if (kc_wvw_wait_for_ready(ctx) != KC_WVW_OK) {
-        kc_wvw_set_error(ctx, "WebView2 ready timeout");
-        return KC_WVW_ERROR;
-    }
-
-    return KC_WVW_OK;
-}
 
 /**
  * Return the last context error.
@@ -2286,75 +2257,16 @@ const char *kc_wvw_get_error(const kc_wvw_t *ctx) {
     return ctx->error;
 }
 
-/**
- * Request stop for a specific wvw context.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_stop(kc_wvw_t *ctx) {
-    if (!ctx) return KC_WVW_ERROR;
-    ctx->stop_requested = 1;
-    ctx->running = 0;
-    if (ctx->hwnd) {
-        PostMessageW(ctx->hwnd, WM_CLOSE, 0, 0);
-    }
-    return KC_WVW_OK;
-}
 
-/**
- * Release a WebView context and its resources.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_close(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return KC_WVW_OK;
-    }
 
-    if (ctx->closing) {
-        return KC_WVW_OK;
-    }
 
-    ctx->closing = 1;
-    if (ctx->controller) {
-        ICoreWebView2Controller_Close(ctx->controller);
-    }
-    if (ctx->hwnd && IsWindow(ctx->hwnd)) {
-        DestroyWindow(ctx->hwnd);
-        ctx->hwnd = NULL;
-    }
-    kc_wvw_context_release(ctx);
-    return KC_WVW_OK;
-}
 
-/**
- * Start the native window event loop.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_loop(kc_wvw_t *ctx) {
-    MSG message;
+int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx||!ctx->closed_event)return KC_WVW_ERROR;WaitForSingleObject(ctx->closed_event,INFINITE);return KC_WVW_OK;}
+void kc_wvw_close(kc_wvw_t *ctx){if(!ctx)return;if(ctx->worker_id&&GetCurrentThreadId()==ctx->worker_id){ctx->free_on_exit=1;kc_wvw_request_close(ctx);return;}if(ctx->thread){if(ctx->hwnd&&IsWindow(ctx->hwnd))PostMessageW(ctx->hwnd,KC_WVW_CLOSE_MESSAGE,0,0);WaitForSingleObject(ctx->thread,INFINITE);CloseHandle(ctx->thread);ctx->thread=NULL;}kc_wvw_context_release(ctx);}
 
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
 
-    ctx->running = 1;
-    if (kc_wvw_navigate(ctx, ctx->opts.url) != KC_WVW_OK) {
-        return KC_WVW_ERROR;
-    }
 
-    while (ctx->running) {
-        BOOL rc = GetMessageW(&message, NULL, 0, 0);
-        if (rc <= 0) {
-            break;
-        }
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
-    }
 
-    return KC_WVW_OK;
-}
 
 /**
  * Navigate the current WebView to a new URL.
@@ -2362,7 +2274,7 @@ int kc_wvw_loop(kc_wvw_t *ctx) {
  * @param url Destination URL.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
+static int kc_wvw_navigate_impl(kc_wvw_t *ctx, const char *url) {
     char *next_url;
     wchar_t *target;
     HRESULT hr;
@@ -2401,7 +2313,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
  * @param javascript Source text to install.
  * @return KC_WVW_OK on installation or KC_WVW_ERROR on failure.
  */
-int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
+static int kc_wvw_add_init_script_impl(kc_wvw_t *ctx, const char *javascript) {
     wchar_t *wide;
     HRESULT hr;
     kc_wvw_script_handler_t *handler;
@@ -2431,7 +2343,7 @@ int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
  * @param opts Bridge configuration options.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
+static int kc_wvw_enable_bridge_impl(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
     kc_wvw_bridge_state_t bridge;
 
     if (!ctx || !opts) {
@@ -2465,7 +2377,7 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
  * @param json JSON payload to dispatch as the event detail.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
+static int kc_wvw_post_bridge_event_impl(kc_wvw_t *ctx, const char *json) {
     return kc_wvw_bridge_post_json(ctx, json);
 }
 
@@ -2474,7 +2386,7 @@ int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_hide(kc_wvw_t *ctx) {
+static int kc_wvw_hide_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->hwnd) {
         return KC_WVW_ERROR;
     }
@@ -2487,7 +2399,7 @@ int kc_wvw_hide(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_show(kc_wvw_t *ctx) {
+static int kc_wvw_show_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->hwnd) {
         return KC_WVW_ERROR;
     }
@@ -2500,7 +2412,7 @@ int kc_wvw_show(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_minimize(kc_wvw_t *ctx) {
+static int kc_wvw_minimize_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->hwnd) {
         return KC_WVW_ERROR;
     }
@@ -2513,7 +2425,7 @@ int kc_wvw_minimize(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_maximize(kc_wvw_t *ctx) {
+static int kc_wvw_maximize_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->hwnd) {
         return KC_WVW_ERROR;
     }
@@ -2526,7 +2438,7 @@ int kc_wvw_maximize(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_restore(kc_wvw_t *ctx) {
+static int kc_wvw_restore_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->hwnd) {
         return KC_WVW_ERROR;
     }
@@ -2540,7 +2452,7 @@ int kc_wvw_restore(kc_wvw_t *ctx) {
  * @param title UTF-8 title string.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
+static int kc_wvw_set_title_impl(kc_wvw_t *ctx, const char *title) {
     wchar_t *wtitle;
 
     if (!ctx || !ctx->hwnd || !title) {
@@ -2555,9 +2467,7 @@ int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
         return KC_WVW_ERROR;
     }
 
-    SetWindowTextW(ctx->hwnd, wtitle);
-    free(wtitle);
-    return KC_WVW_OK;
+    SetWindowTextW(ctx->hwnd,wtitle);free(wtitle);{char *copy=kc_wvw_strdup(title);if(!copy)return KC_WVW_ERROR;free(ctx->opts.title);ctx->opts.title=copy;}return KC_WVW_OK;
 }
 
 /**
@@ -2567,7 +2477,7 @@ int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
  * @param height Height in pixels.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height) {
+static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
     DWORD style;
     RECT rect;
 
@@ -2596,7 +2506,7 @@ int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height) {
  * @param state Destination state structure.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_get_state(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
+static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
     RECT rect;
     LONG style;
 
@@ -2814,6 +2724,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
     char *method;
     char *params;
     char *result = NULL;
+    const char *callback_result = NULL;
     char *error;
     char *response;
     int rc;
@@ -2881,7 +2792,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
     if (strcmp(method, "close") == 0) {
-        kc_wvw_stop(ctx);
+        kc_wvw_request_close(ctx);
         result = kc_wvw_strdup("{\"ok\":true}");
         response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
         free(id); free(method); free(params); free(result);
@@ -2991,47 +2902,11 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
 
-    result = NULL;
-    if (!ctx->bridge.callback) {
-        error = kc_wvw_bridge_error_object("METHOD_NOT_FOUND", "No bridge callback registered.");
-        response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
-        free(id);
-        free(method);
-        free(params);
-        free(error);
-        return response;
-    }
-    rc = ctx->bridge.callback(ctx, method, params, &result, ctx->bridge.userdata);
-    if (rc == KC_WVW_OK) {
-        if (!result) {
-            result = kc_wvw_strdup("null");
-        }
-        if (result && !kc_wvw_json_valid_value(result)) {
-            free(result);
-            result = NULL;
-        }
-        if (result) {
-            response = kc_wvw_bridge_wrap_response(id, 1, result);
-        } else {
-            result = kc_wvw_bridge_error_object("INVALID_RESPONSE", "Bridge callback returned invalid JSON.");
-            response = result ? kc_wvw_bridge_wrap_response(id, 0, result) : NULL;
-        }
-    } else {
-        if (result && !kc_wvw_json_valid_value(result)) {
-            free(result);
-            result = NULL;
-        }
-        if (!result) {
-            result = kc_wvw_bridge_error_object("OPERATION_FAILED", "Bridge callback failed.");
-        }
-        response = result ? kc_wvw_bridge_wrap_response(id, 0, result) : NULL;
-    }
-
-    free(id);
-    free(method);
-    free(params);
-    free(result);
-    return response;
+    if(!ctx->bridge.callback){error=kc_wvw_bridge_error_object("METHOD_NOT_FOUND","No bridge callback registered.");response=error?kc_wvw_bridge_wrap_response(id,0,error):NULL;free(id);free(method);free(params);free(error);return response;}
+    rc=ctx->bridge.callback(ctx,method,params,&callback_result,ctx->bridge.userdata);
+    if(rc==KC_WVW_OK){if(!callback_result)callback_result="null";if(kc_wvw_json_valid_value(callback_result))response=kc_wvw_bridge_wrap_response(id,1,callback_result);else{error=kc_wvw_bridge_error_object("INVALID_RESPONSE","Bridge callback returned invalid JSON.");response=error?kc_wvw_bridge_wrap_response(id,0,error):NULL;free(error);}}
+    else{if(callback_result&&kc_wvw_json_valid_value(callback_result))response=kc_wvw_bridge_wrap_response(id,0,callback_result);else{error=kc_wvw_bridge_error_object("OPERATION_FAILED","Bridge callback failed.");response=error?kc_wvw_bridge_wrap_response(id,0,error):NULL;free(error);}}
+    free(id);free(method);free(params);return response;
 }
 
 #else
@@ -3058,20 +2933,9 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
 
 #define KC_WVW_BRIDGE_MAX_MESSAGE 65536
 
-typedef enum {
-    KC_ENV_TYPE_INT,
-    KC_ENV_TYPE_STR,
-} kc_env_type_t;
-
-typedef struct {
-    const char *env_var;
-    size_t offset;
-    kc_env_type_t type;
-} kc_env_map_t;
-
 typedef struct {
     char **methods;
-    int method_count;
+    size_t method_count;
     kc_wvw_bridge_callback_t callback;
     void *userdata;
     int allow_file;
@@ -3083,9 +2947,8 @@ typedef struct {
 #if defined(__APPLE__)
 
 struct kc_wvw {
-    kc_wvw_options_t opts;
-    int running;
-    int closing;
+    kc_wvw_config_t opts;
+    int running, closing, closed, cli_waiting;
     void *ns_window;
     void *ns_webview;
     void *ns_script_handler;
@@ -3098,9 +2961,12 @@ struct kc_wvw {
 #else
 
 struct kc_wvw {
-    kc_wvw_options_t opts;
-    int running;
-    volatile sig_atomic_t stop_requested;
+    kc_wvw_config_t opts;
+    int running, closed;
+    GMainContext *context;
+    GThread *thread;
+    GMutex mutex;
+    GCond cond;
     GtkWidget *window;
     WebKitWebView *web_view;
     kc_wvw_bridge_state_t bridge;
@@ -3132,22 +2998,6 @@ static void kc_wvw_set_error(kc_wvw_t *ctx, const char *fmt, ...) {
     ctx->error[sizeof(ctx->error) - 1] = '\0';
 }
 
-static const kc_env_map_t env_config_table[] = {
-    { "KC_WVW_URL", offsetof(kc_wvw_options_t, url), KC_ENV_TYPE_STR },
-    { "KC_WVW_TITLE", offsetof(kc_wvw_options_t, title), KC_ENV_TYPE_STR },
-    { "KC_WVW_BACKGROUND", offsetof(kc_wvw_options_t, background), KC_ENV_TYPE_STR },
-    { "KC_WVW_WIDTH", offsetof(kc_wvw_options_t, width), KC_ENV_TYPE_INT },
-    { "KC_WVW_HEIGHT", offsetof(kc_wvw_options_t, height), KC_ENV_TYPE_INT },
-    { "KC_WVW_POSX", offsetof(kc_wvw_options_t, posx), KC_ENV_TYPE_INT },
-    { "KC_WVW_POSY", offsetof(kc_wvw_options_t, posy), KC_ENV_TYPE_INT },
-    { "KC_WVW_FULLSCREEN", offsetof(kc_wvw_options_t, fullscreen), KC_ENV_TYPE_INT },
-    { "KC_WVW_BORDERLESS", offsetof(kc_wvw_options_t, borderless), KC_ENV_TYPE_INT },
-    { "KC_WVW_ALWAYS_ON_TOP", offsetof(kc_wvw_options_t, always_on_top), KC_ENV_TYPE_INT },
-    { "KC_WVW_CLICK_THROUGH", offsetof(kc_wvw_options_t, click_through), KC_ENV_TYPE_INT },
-    { "KC_WVW_NO_FOCUS", offsetof(kc_wvw_options_t, no_focus), KC_ENV_TYPE_INT },
-};
-
-static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
 #ifndef KC_WVW_BUILD_VERSION
 #define KC_WVW_BUILD_VERSION 0
 #endif
@@ -3182,6 +3032,39 @@ static char *kc_wvw_strdup(const char *text) {
     memcpy(copy, text, length + 1);
     return copy;
 }
+
+static void kc_wvw_config_free(kc_wvw_config_t *config) {
+    if (!config) return;
+    free(config->url); free(config->title); free(config->background);
+    memset(config, 0, sizeof(*config));
+}
+
+static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *options) {
+    if (!config || !options || !options->url || !options->url[0]) return KC_WVW_ERROR;
+    memset(config, 0, sizeof(*config));
+    config->url = kc_wvw_strdup(options->url);
+    config->title = kc_wvw_strdup(options->title ? options->title : "wvw");
+    config->background = options->background ? kc_wvw_strdup(options->background) : NULL;
+    if (!config->url || !config->title || (options->background && !config->background)) {
+        kc_wvw_config_free(config); return KC_WVW_ERROR;
+    }
+    config->width = options->width ? *options->width : 1280;
+    config->height = options->height ? *options->height : 720;
+    config->has_posx = options->posx != NULL; config->has_posy = options->posy != NULL;
+    config->posx = options->posx ? *options->posx : 0; config->posy = options->posy ? *options->posy : 0;
+    config->fullscreen = options->fullscreen ? !!*options->fullscreen : 0;
+    config->borderless = options->borderless ? !!*options->borderless : 0;
+    config->always_on_top = options->always_on_top ? !!*options->always_on_top : 0;
+    config->click_through = options->click_through ? !!*options->click_through : 0;
+    config->no_focus = options->no_focus ? !!*options->no_focus : 0;
+    if (config->width <= 0 || config->height <= 0 ||
+        config->width > KC_WVW_SIZE_MAX || config->height > KC_WVW_SIZE_MAX ||
+        strlen(config->title) > KC_WVW_TITLE_MAX) {
+        kc_wvw_config_free(config); return KC_WVW_ERROR;
+    }
+    return KC_WVW_OK;
+}
+
 
 typedef struct {
     char *data;
@@ -3826,69 +3709,14 @@ static char *kc_wvw_bridge_escape_js_string(const char *json) {
     return buf.data;
 }
 
-/**
- * Create an options struct initialized with default values.
- * @return Default-initialized options.
- */
-kc_wvw_options_t kc_wvw_options_default(void) {
-    kc_wvw_options_t opts;
 
-    memset(&opts, 0, sizeof(opts));
-    opts.width = 1280;
-    opts.height = 720;
-    return opts;
-}
 
-/**
- * Load configuration from environment variables.
- * @param opts Options to update.
- * @return None.
- */
-void kc_wvw_options_load_env(kc_wvw_options_t *opts) {
-    int i;
 
-    if (!opts) {
-        return;
-    }
 
-    for (i = 0; i < env_config_table_n; i++) {
-        const char *val = getenv(env_config_table[i].env_var);
-        if (!val) {
-            continue;
-        }
-        if (env_config_table[i].type == KC_ENV_TYPE_INT) {
-            char *end;
-            long value = strtol(val, &end, 10);
-            if (end != val && *end == '\0') {
-                *(int *)((char *)opts + env_config_table[i].offset) = (int)value;
-            }
-        } else {
-            char **slot = (char **)((char *)opts + env_config_table[i].offset);
-            free(*slot);
-            *slot = kc_wvw_strdup(val);
-        }
-    }
-}
 
-/**
- * Free dynamically allocated resources within an options struct.
- * @param opts Options to clean up.
- * @return None.
- */
-void kc_wvw_options_free(kc_wvw_options_t *opts) {
-    if (!opts) {
-        return;
-    }
 
-    free(opts->url);
-    free(opts->title);
-    free(opts->background);
 
-    opts->url = NULL;
-    opts->title = NULL;
-    opts->background = NULL;
 
-}
 
 /**
  * Return the last context error.
@@ -4099,6 +3927,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
     char *method;
     char *params;
     char *result = NULL;
+    const char *callback_result = NULL;
     char *error;
     char *response;
     int rc;
@@ -4166,7 +3995,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
     if (strcmp(method, "close") == 0) {
-        kc_wvw_stop(ctx);
+        kc_wvw_request_close(ctx);
         result = kc_wvw_strdup("{\"ok\":true}");
         response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
         free(id); free(method); free(params); free(result);
@@ -4276,50 +4105,14 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
 
-    result = NULL;
-    if (!ctx->bridge.callback) {
-        error = kc_wvw_bridge_error_object("METHOD_NOT_FOUND", "No bridge callback registered.");
-        response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
-        free(id);
-        free(method);
-        free(params);
-        free(error);
-        return response;
-    }
-    rc = ctx->bridge.callback(ctx, method, params, &result, ctx->bridge.userdata);
-    if (rc == KC_WVW_OK) {
-        if (!result) {
-            result = kc_wvw_strdup("null");
-        }
-        if (result && !kc_wvw_json_valid_value(result)) {
-            free(result);
-            result = NULL;
-        }
-        if (result) {
-            response = kc_wvw_bridge_wrap_response(id, 1, result);
-        } else {
-            result = kc_wvw_bridge_error_object("INVALID_RESPONSE", "Bridge callback returned invalid JSON.");
-            response = result ? kc_wvw_bridge_wrap_response(id, 0, result) : NULL;
-        }
-    } else {
-        if (result && !kc_wvw_json_valid_value(result)) {
-            free(result);
-            result = NULL;
-        }
-        if (!result) {
-            result = kc_wvw_bridge_error_object("OPERATION_FAILED", "Bridge callback failed.");
-        }
-        response = result ? kc_wvw_bridge_wrap_response(id, 0, result) : NULL;
-    }
-
-    free(id);
-    free(method);
-    free(params);
-    free(result);
-    return response;
+    if(!ctx->bridge.callback){error=kc_wvw_bridge_error_object("METHOD_NOT_FOUND","No bridge callback registered.");response=error?kc_wvw_bridge_wrap_response(id,0,error):NULL;free(id);free(method);free(params);free(error);return response;}
+    rc=ctx->bridge.callback(ctx,method,params,&callback_result,ctx->bridge.userdata);
+    if(rc==KC_WVW_OK){if(!callback_result)callback_result="null";if(kc_wvw_json_valid_value(callback_result))response=kc_wvw_bridge_wrap_response(id,1,callback_result);else{error=kc_wvw_bridge_error_object("INVALID_RESPONSE","Bridge callback returned invalid JSON.");response=error?kc_wvw_bridge_wrap_response(id,0,error):NULL;free(error);}}
+    else{if(callback_result&&kc_wvw_json_valid_value(callback_result))response=kc_wvw_bridge_wrap_response(id,0,callback_result);else{error=kc_wvw_bridge_error_object("OPERATION_FAILED","Bridge callback failed.");response=error?kc_wvw_bridge_wrap_response(id,0,error):NULL;free(error);}}
+    free(id);free(method);free(params);return response;
 }
 #if defined(__APPLE__)
-
+static void kc_wvw_request_close(kc_wvw_t *ctx){if(ctx&&ctx->ns_window){@autoreleasepool{[(__bridge NSWindow *)ctx->ns_window close];}}}
 static int kc_wvw_macos_create_window(kc_wvw_t *ctx);
 
 /**
@@ -4487,57 +4280,19 @@ static int kc_wvw_background_transparent(const char *text) {
     if (!self.ctx) {
         return;
     }
-    self.ctx->running = 0;
+    self.ctx->running=0;self.ctx->closed=1;if(self.ctx->cli_waiting)[NSApp stop:nil];
 }
 @end
 
-/**
- * Create a new native WebView context.
- * @param ctx_out Destination context pointer.
- * @param opts Configuration options.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_open(kc_wvw_t **out, kc_wvw_options_t *opts) {
-    kc_wvw_t *ctx;
 
-    if (!out || !opts || !opts->url) {
-        return KC_WVW_ERROR;
-    }
-    *out = NULL;
-
-    ctx = (kc_wvw_t *)calloc(1, sizeof(kc_wvw_t));
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-    *out = ctx;
-
-    ctx->opts = *opts;
-    ctx->opts.url = kc_wvw_strdup(opts->url);
-    ctx->opts.title = opts->title ? kc_wvw_strdup(opts->title) : kc_wvw_strdup("wvw");
-    ctx->opts.background = opts->background ? kc_wvw_strdup(opts->background) : NULL;
-    
-    ctx->opts.posx = opts->posx;
-    ctx->opts.posy = opts->posy;
-    
-    ctx->opts.width = opts->width;
-    ctx->opts.height = opts->height;
-    ctx->opts.fullscreen = opts->fullscreen;
-    ctx->opts.borderless = opts->borderless;
-    ctx->opts.always_on_top = opts->always_on_top;
-    ctx->opts.click_through = opts->click_through;
-    ctx->opts.no_focus = opts->no_focus;
-
-    if (!ctx->opts.url || !ctx->opts.title || (opts->background && !ctx->opts.background)) {
-        kc_wvw_set_error(ctx, "memory allocation failed");
-        return KC_WVW_ERROR;
-    }
-
-    if (kc_wvw_macos_create_window(ctx) != KC_WVW_OK) {
-        kc_wvw_set_error(ctx, "window creation failed");
-        return KC_WVW_ERROR;
-    }
-    return KC_WVW_OK;
+static int kc_wvw_dispatch_op(kc_wvw_t *ctx,kc_wvw_op_t *op){if(!ctx||!op||ctx->closed||![NSThread isMainThread])return KC_WVW_ERROR;return kc_wvw_execute_op(ctx,op);}
+int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){
+    kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options||![NSThread isMainThread])return KC_WVW_ERROR;
+    ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;*out=ctx;
+    if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);*out=NULL;return KC_WVW_ERROR;}
+    if(kc_wvw_macos_create_window(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");return KC_WVW_ERROR;}return KC_WVW_OK;
 }
+
 
 /**
  * Navigate the current WebView to a new URL.
@@ -4545,7 +4300,7 @@ int kc_wvw_open(kc_wvw_t **out, kc_wvw_options_t *opts) {
  * @param url Destination URL.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
+static int kc_wvw_navigate_impl(kc_wvw_t *ctx, const char *url) {
     if (!ctx || !url) {
         return KC_WVW_ERROR;
     }
@@ -4572,7 +4327,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
  * @param javascript Source text to install.
  * @return KC_WVW_OK on installation or KC_WVW_ERROR on failure.
  */
-int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
+static int kc_wvw_add_init_script_impl(kc_wvw_t *ctx, const char *javascript) {
     if (!ctx || !javascript) {
         return KC_WVW_ERROR;
     }
@@ -4597,23 +4352,8 @@ int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
     return KC_WVW_OK;
 }
 
-/**
- * Request stop for a specific wvw context.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_stop(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
 
-    ctx->closing = 1;
-    ctx->running = 0;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [NSApp stop:nil];
-    });
-    return KC_WVW_OK;
-}
+
 
 /**
  * Install the Objective-C bridge handlers on the macOS WebView.
@@ -4697,7 +4437,7 @@ static int kc_wvw_macos_install_bridge(kc_wvw_t *ctx) {
  * @param opts Bridge configuration options.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
+static int kc_wvw_enable_bridge_impl(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
     kc_wvw_bridge_state_t bridge;
 
     if (!ctx || !opts) {
@@ -4725,7 +4465,7 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
  * @param json JSON payload to dispatch as the event detail.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
+static int kc_wvw_post_bridge_event_impl(kc_wvw_t *ctx, const char *json) {
     return kc_wvw_bridge_post_json(ctx, json);
 }
 
@@ -4762,7 +4502,7 @@ static int kc_wvw_macos_create_window(kc_wvw_t *ctx) {
         [webView loadRequest:request];
 
         CGFloat originX = 0, originY = 0;
-        if (ctx->opts.posx != KC_WVW_POSITION_AUTO || ctx->opts.posy != KC_WVW_POSITION_AUTO) {
+        if (ctx->opts.has_posx || ctx->opts.has_posy) {
             NSScreen *mainScreen = [NSScreen mainScreen];
             CGFloat screenWidth = mainScreen.visibleFrame.size.width;
             CGFloat screenHeight = mainScreen.visibleFrame.size.height;
@@ -4833,7 +4573,7 @@ static int kc_wvw_macos_create_window(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_show(kc_wvw_t *ctx) {
+static int kc_wvw_show_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->ns_window) {
         return KC_WVW_ERROR;
     }
@@ -4850,7 +4590,7 @@ int kc_wvw_show(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_hide(kc_wvw_t *ctx) {
+static int kc_wvw_hide_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->ns_window) {
         return KC_WVW_ERROR;
     }
@@ -4867,7 +4607,7 @@ int kc_wvw_hide(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_minimize(kc_wvw_t *ctx) {
+static int kc_wvw_minimize_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->ns_window) {
         return KC_WVW_ERROR;
     }
@@ -4884,7 +4624,7 @@ int kc_wvw_minimize(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_maximize(kc_wvw_t *ctx) {
+static int kc_wvw_maximize_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->ns_window) {
         return KC_WVW_ERROR;
     }
@@ -4901,7 +4641,7 @@ int kc_wvw_maximize(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_restore(kc_wvw_t *ctx) {
+static int kc_wvw_restore_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->ns_window) {
         return KC_WVW_ERROR;
     }
@@ -4924,7 +4664,7 @@ int kc_wvw_restore(kc_wvw_t *ctx) {
  * @param title UTF-8 title string.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
+static int kc_wvw_set_title_impl(kc_wvw_t *ctx, const char *title) {
     if (!ctx || !ctx->ns_window || !title) {
         return KC_WVW_ERROR;
     }
@@ -4936,8 +4676,7 @@ int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
         NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
         NSString *nsTitle = [NSString stringWithUTF8String:title];
         [window setTitle:nsTitle];
-    }
-    return KC_WVW_OK;
+    }{char *copy=kc_wvw_strdup(title);if(!copy)return KC_WVW_ERROR;free(ctx->opts.title);ctx->opts.title=copy;}return KC_WVW_OK;
 }
 
 /**
@@ -4947,7 +4686,7 @@ int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
  * @param height Height in pixels.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height) {
+static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
     if (!ctx || !ctx->ns_window || width <= 0 || height <= 0) {
         return KC_WVW_ERROR;
     }
@@ -4971,7 +4710,7 @@ int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height) {
  * @param state Destination state structure.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_get_state(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
+static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
     if (!ctx || !ctx->ns_window || !state) {
         return KC_WVW_ERROR;
     }
@@ -4990,79 +4729,13 @@ int kc_wvw_get_state(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
     return KC_WVW_OK;
 }
 
-/**
- * Start the native window event loop.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_loop(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
 
-    ctx->running = 1;
-    @autoreleasepool {
-        [NSApp run];
-    }
-    return KC_WVW_OK;
-}
 
-/**
- * Release a WebView context and its resources.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_close(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return KC_WVW_OK;
-    }
 
-    if (ctx->ns_webview) {
-        @autoreleasepool {
-            WKWebView *webView = (__bridge WKWebView *)ctx->ns_webview;
-            [[webView configuration].userContentController
-                removeScriptMessageHandlerForName:@"kc_wvw_native"];
-            [webView setNavigationDelegate:nil];
-        }
-    }
 
-    if (ctx->ns_window) {
-        @autoreleasepool {
-            NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
-            [window setDelegate:nil];
-            [window close];
-        }
-        CFRelease(ctx->ns_window);
-        ctx->ns_window = NULL;
-    }
+int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx||![NSThread isMainThread])return KC_WVW_ERROR;if(ctx->closed)return KC_WVW_OK;ctx->cli_waiting=1;@autoreleasepool{[NSApp run];}ctx->cli_waiting=0;return KC_WVW_OK;}
+void kc_wvw_close(kc_wvw_t *ctx){if(!ctx)return;if(ctx->ns_webview){@autoreleasepool{WKWebView *webView=(__bridge WKWebView *)ctx->ns_webview;[[webView configuration].userContentController removeScriptMessageHandlerForName:@"kc_wvw_native"];[webView setNavigationDelegate:nil];}}if(ctx->ns_window){@autoreleasepool{NSWindow *window=(__bridge NSWindow *)ctx->ns_window;[window setDelegate:nil];[window close];}CFRelease(ctx->ns_window);ctx->ns_window=NULL;}if(ctx->ns_script_handler){CFRelease(ctx->ns_script_handler);ctx->ns_script_handler=NULL;}if(ctx->ns_nav_delegate){CFRelease(ctx->ns_nav_delegate);ctx->ns_nav_delegate=NULL;}if(ctx->ns_window_delegate){CFRelease(ctx->ns_window_delegate);ctx->ns_window_delegate=NULL;}if(ctx->ns_webview){CFRelease(ctx->ns_webview);ctx->ns_webview=NULL;}kc_wvw_bridge_state_free(&ctx->bridge);kc_wvw_config_free(&ctx->opts);free(ctx);}
 
-    if (ctx->ns_script_handler) {
-        CFRelease(ctx->ns_script_handler);
-        ctx->ns_script_handler = NULL;
-    }
-    if (ctx->ns_nav_delegate) {
-        CFRelease(ctx->ns_nav_delegate);
-        ctx->ns_nav_delegate = NULL;
-    }
-    if (ctx->ns_window_delegate) {
-        CFRelease(ctx->ns_window_delegate);
-        ctx->ns_window_delegate = NULL;
-    }
-
-    if (ctx->ns_webview) {
-        @autoreleasepool {
-            WKWebView *webView = (__bridge WKWebView *)ctx->ns_webview;
-            [webView stopLoading];
-        }
-        CFRelease(ctx->ns_webview);
-        ctx->ns_webview = NULL;
-    }
-
-    kc_wvw_bridge_state_free(&ctx->bridge);
-    kc_wvw_options_free(&ctx->opts);
-    free(ctx);
-    return KC_WVW_OK;
-}
 
 #else
 /**
@@ -5354,7 +5027,7 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
 
     gtk_window_set_default_size(GTK_WINDOW(ctx->window), ctx->opts.width, ctx->opts.height);
     gtk_window_set_title(GTK_WINDOW(ctx->window), ctx->opts.title ? ctx->opts.title : "wvw");
-    if (ctx->opts.posx != KC_WVW_POSITION_AUTO || ctx->opts.posy != KC_WVW_POSITION_AUTO) {
+    if (ctx->opts.has_posx || ctx->opts.has_posy) {
         GdkDisplay *display = gdk_display_get_default();
         GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
         GdkRectangle geometry;
@@ -5395,115 +5068,31 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     return KC_WVW_OK;
 }
 
-/**
- * Create a new native WebView context.
- * @param ctx_out Destination context pointer.
- * @param opts Configuration options.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
-    kc_wvw_t *ctx;
 
-    if (!ctx_out || !opts || !opts->url) {
-        return KC_WVW_ERROR;
-    }
-    *ctx_out = NULL;
+typedef struct {kc_wvw_t *ctx;kc_wvw_op_t *op;GMutex mutex;GCond cond;int done;} kc_wvw_linux_call_t;
+static gsize kc_wvw_gtk_once;static GMainContext *kc_wvw_gtk_context;static GThread *kc_wvw_gtk_thread;static GMutex kc_wvw_gtk_mutex;static GCond kc_wvw_gtk_cond;static int kc_wvw_gtk_ready,kc_wvw_gtk_started;
+static gpointer kc_wvw_linux_worker(gpointer data){GMainLoop *loop;(void)data;kc_wvw_gtk_started=gtk_init_check(NULL,NULL);g_mutex_lock(&kc_wvw_gtk_mutex);kc_wvw_gtk_ready=1;g_cond_signal(&kc_wvw_gtk_cond);g_mutex_unlock(&kc_wvw_gtk_mutex);if(!kc_wvw_gtk_started)return NULL;loop=g_main_loop_new(kc_wvw_gtk_context,FALSE);g_main_loop_run(loop);g_main_loop_unref(loop);return NULL;}
+static int kc_wvw_linux_service(void){if(g_once_init_enter(&kc_wvw_gtk_once)){g_mutex_init(&kc_wvw_gtk_mutex);g_cond_init(&kc_wvw_gtk_cond);kc_wvw_gtk_context=g_main_context_default();g_mutex_lock(&kc_wvw_gtk_mutex);kc_wvw_gtk_thread=g_thread_new("kc-wvw",kc_wvw_linux_worker,NULL);if(kc_wvw_gtk_thread)while(!kc_wvw_gtk_ready)g_cond_wait(&kc_wvw_gtk_cond,&kc_wvw_gtk_mutex);g_mutex_unlock(&kc_wvw_gtk_mutex);g_once_init_leave(&kc_wvw_gtk_once,1);}return kc_wvw_gtk_started?KC_WVW_OK:KC_WVW_ERROR;}
+static gboolean kc_wvw_linux_dispatch_cb(gpointer data){kc_wvw_linux_call_t *call=(kc_wvw_linux_call_t *)data;int rc=kc_wvw_execute_op(call->ctx,call->op);g_mutex_lock(&call->mutex);call->op->result=rc;call->done=1;g_cond_signal(&call->cond);g_mutex_unlock(&call->mutex);return G_SOURCE_REMOVE;}
+static int kc_wvw_dispatch_op(kc_wvw_t *ctx,kc_wvw_op_t *op){kc_wvw_linux_call_t call;GSource *source;if(!ctx||!op||ctx->closed||!ctx->context)return KC_WVW_ERROR;if(g_thread_self()==ctx->thread)return kc_wvw_execute_op(ctx,op);memset(&call,0,sizeof(call));call.ctx=ctx;call.op=op;g_mutex_init(&call.mutex);g_cond_init(&call.cond);g_mutex_lock(&call.mutex);source=g_idle_source_new();g_source_set_callback(source,kc_wvw_linux_dispatch_cb,&call,NULL);g_source_attach(source,ctx->context);g_source_unref(source);while(!call.done)g_cond_wait(&call.cond,&call.mutex);g_mutex_unlock(&call.mutex);g_cond_clear(&call.cond);g_mutex_clear(&call.mutex);return op->result;}
+typedef struct {kc_wvw_t *ctx;GMutex mutex;GCond cond;int done,result;} kc_wvw_linux_init_t;
+static gboolean kc_wvw_linux_open_cb(gpointer data){kc_wvw_linux_init_t *call=(kc_wvw_linux_init_t *)data;int rc=kc_wvw_linux_create_window(call->ctx);if(rc==KC_WVW_OK)rc=kc_wvw_navigate_impl(call->ctx,call->ctx->opts.url);g_mutex_lock(&call->mutex);call->result=rc;call->done=1;g_cond_signal(&call->cond);g_mutex_unlock(&call->mutex);return G_SOURCE_REMOVE;}
+static int kc_wvw_linux_open_dispatch(kc_wvw_t *ctx){kc_wvw_linux_init_t call;GSource *source;memset(&call,0,sizeof(call));call.ctx=ctx;g_mutex_init(&call.mutex);g_cond_init(&call.cond);g_mutex_lock(&call.mutex);source=g_idle_source_new();g_source_set_callback(source,kc_wvw_linux_open_cb,&call,NULL);g_source_attach(source,ctx->context);g_source_unref(source);while(!call.done)g_cond_wait(&call.cond,&call.mutex);g_mutex_unlock(&call.mutex);g_cond_clear(&call.cond);g_mutex_clear(&call.mutex);return call.result;}
+static gboolean kc_wvw_linux_close_cb(gpointer data){kc_wvw_request_close((kc_wvw_t *)data);return G_SOURCE_REMOVE;}
+static void kc_wvw_linux_close_dispatch(kc_wvw_t *ctx){GSource *source;if(!ctx||!ctx->context)return;source=g_idle_source_new();g_source_set_callback(source,kc_wvw_linux_close_cb,ctx,NULL);g_source_attach(source,ctx->context);g_source_unref(source);g_mutex_lock(&ctx->mutex);while(!ctx->closed)g_cond_wait(&ctx->cond,&ctx->mutex);g_mutex_unlock(&ctx->mutex);}
+int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options)return KC_WVW_ERROR;ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);return KC_WVW_ERROR;}g_mutex_init(&ctx->mutex);g_cond_init(&ctx->cond);if(kc_wvw_linux_service()!=KC_WVW_OK){kc_wvw_set_error(ctx,"GTK initialization failed");*out=ctx;return KC_WVW_ERROR;}ctx->context=kc_wvw_gtk_context;ctx->thread=kc_wvw_gtk_thread;*out=ctx;if(kc_wvw_linux_open_dispatch(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");return KC_WVW_ERROR;}ctx->running=1;return KC_WVW_OK;}
 
-    ctx = (kc_wvw_t *)calloc(1, sizeof(kc_wvw_t));
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-    *ctx_out = ctx;
 
-    ctx->opts = *opts;
-    ctx->opts.url = kc_wvw_strdup(opts->url);
-    ctx->opts.title = opts->title ? kc_wvw_strdup(opts->title) : kc_wvw_strdup("wvw");
-    ctx->opts.background = opts->background ? kc_wvw_strdup(opts->background) : NULL;
 
-    ctx->opts.posx = opts->posx;
-    ctx->opts.posy = opts->posy;
 
-    ctx->opts.width = opts->width;
-    ctx->opts.height = opts->height;
-    ctx->opts.fullscreen = opts->fullscreen;
-    ctx->opts.borderless = opts->borderless;
-    ctx->opts.always_on_top = opts->always_on_top;
-    ctx->opts.click_through = opts->click_through;
-    ctx->opts.no_focus = opts->no_focus;
 
-    if (!ctx->opts.url || !ctx->opts.title || (opts->background && !ctx->opts.background)) {
-        kc_wvw_set_error(ctx, "memory allocation failed");
-        return KC_WVW_ERROR;
-    }
 
-    if (!gtk_init_check(NULL, NULL)) {
-        kc_wvw_set_error(ctx, "GTK initialization failed");
-        return KC_WVW_ERROR;
-    }
-    if (kc_wvw_linux_create_window(ctx) != KC_WVW_OK) {
-        kc_wvw_set_error(ctx, "window creation failed");
-        return KC_WVW_ERROR;
-    }
+int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx)return KC_WVW_ERROR;g_mutex_lock(&ctx->mutex);while(!ctx->closed)g_cond_wait(&ctx->cond,&ctx->mutex);g_mutex_unlock(&ctx->mutex);return KC_WVW_OK;}
+void kc_wvw_close(kc_wvw_t *ctx){if(!ctx)return;if(!ctx->closed)kc_wvw_linux_close_dispatch(ctx);kc_wvw_bridge_state_free(&ctx->bridge);kc_wvw_config_free(&ctx->opts);g_cond_clear(&ctx->cond);g_mutex_clear(&ctx->mutex);free(ctx);}
 
-    return KC_WVW_OK;
-}
 
-/**
- * Request stop for a specific wvw context.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_stop(kc_wvw_t *ctx) {
-    int was_running;
 
-    if (!ctx) return KC_WVW_ERROR;
-    was_running = ctx->running;
-    ctx->stop_requested = 1;
-    ctx->running = 0;
-    if (was_running && gtk_main_level() > 0) {
-        gtk_main_quit();
-    }
-    return KC_WVW_OK;
-}
 
-/**
- * Release a WebView context and its resources.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_close(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return KC_WVW_OK;
-    }
-
-    if (ctx->window && GTK_IS_WIDGET(ctx->window)) {
-        gtk_widget_destroy(ctx->window);
-    }
-
-    kc_wvw_bridge_state_free(&ctx->bridge);
-    kc_wvw_options_free(&ctx->opts);
-    free(ctx);
-    return KC_WVW_OK;
-}
-
-/**
- * Start the native window event loop.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_loop(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-
-    ctx->running = 1;
-    if (kc_wvw_navigate(ctx, ctx->opts.url) != KC_WVW_OK) {
-        return KC_WVW_ERROR;
-    }
-
-    gtk_main();
-    return KC_WVW_OK;
-}
 
 /**
  * Navigate the current WebView to a new URL.
@@ -5511,7 +5100,7 @@ int kc_wvw_loop(kc_wvw_t *ctx) {
  * @param url Destination URL.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
+static int kc_wvw_navigate_impl(kc_wvw_t *ctx, const char *url) {
     if (!ctx || !url) {
         return KC_WVW_ERROR;
     }
@@ -5529,7 +5118,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
  * @param javascript Source text to install.
  * @return KC_WVW_OK on installation or KC_WVW_ERROR on failure.
  */
-int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
+static int kc_wvw_add_init_script_impl(kc_wvw_t *ctx, const char *javascript) {
     WebKitUserContentManager *manager;
 
     if (!ctx || !ctx->web_view || !javascript) {
@@ -5550,7 +5139,7 @@ int kc_wvw_add_init_script(kc_wvw_t *ctx, const char *javascript) {
  * @param opts Bridge configuration options.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
+static int kc_wvw_enable_bridge_impl(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
     kc_wvw_bridge_state_t bridge;
 
     if (!ctx || !opts) {
@@ -5578,7 +5167,7 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
  * @param json JSON payload to dispatch as the event detail.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
+static int kc_wvw_post_bridge_event_impl(kc_wvw_t *ctx, const char *json) {
     return kc_wvw_bridge_post_json(ctx, json);
 }
 
@@ -5590,7 +5179,7 @@ int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_hide(kc_wvw_t *ctx) {
+static int kc_wvw_hide_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->window) {
         return KC_WVW_ERROR;
     }
@@ -5603,7 +5192,7 @@ int kc_wvw_hide(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_show(kc_wvw_t *ctx) {
+static int kc_wvw_show_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->window) {
         return KC_WVW_ERROR;
     }
@@ -5617,7 +5206,7 @@ int kc_wvw_show(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_minimize(kc_wvw_t *ctx) {
+static int kc_wvw_minimize_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->window) {
         return KC_WVW_ERROR;
     }
@@ -5630,7 +5219,7 @@ int kc_wvw_minimize(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_maximize(kc_wvw_t *ctx) {
+static int kc_wvw_maximize_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->window) {
         return KC_WVW_ERROR;
     }
@@ -5643,7 +5232,7 @@ int kc_wvw_maximize(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_restore(kc_wvw_t *ctx) {
+static int kc_wvw_restore_impl(kc_wvw_t *ctx) {
     GdkWindow *gdk_window;
 
     if (!ctx || !ctx->window) {
@@ -5669,15 +5258,14 @@ int kc_wvw_restore(kc_wvw_t *ctx) {
  * @param title UTF-8 title string.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
+static int kc_wvw_set_title_impl(kc_wvw_t *ctx, const char *title) {
     if (!ctx || !ctx->window || !title) {
         return KC_WVW_ERROR;
     }
     if (strlen(title) > KC_WVW_TITLE_MAX) {
         return KC_WVW_ERROR;
     }
-    gtk_window_set_title(GTK_WINDOW(ctx->window), title);
-    return KC_WVW_OK;
+    gtk_window_set_title(GTK_WINDOW(ctx->window),title);{char *copy=kc_wvw_strdup(title);if(!copy)return KC_WVW_ERROR;free(ctx->opts.title);ctx->opts.title=copy;}return KC_WVW_OK;
 }
 
 /**
@@ -5687,7 +5275,7 @@ int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
  * @param height Height in pixels.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height) {
+static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
     if (!ctx || !ctx->window || width <= 0 || height <= 0) {
         return KC_WVW_ERROR;
     }
@@ -5704,7 +5292,7 @@ int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height) {
  * @param state Destination state structure.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_get_state(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
+static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
     int width, height;
     GdkWindow *gdk_window;
 
@@ -5732,3 +5320,33 @@ int kc_wvw_get_state(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
 #endif
 
 #endif
+
+static int kc_wvw_execute_op(kc_wvw_t *ctx,kc_wvw_op_t *op){
+    kc_wvw_window_state_t state;if(!ctx||!op)return KC_WVW_ERROR;
+    switch(op->kind){
+    case KC_WVW_OP_NAVIGATE:return kc_wvw_navigate_impl(ctx,op->text);
+    case KC_WVW_OP_ADD_INIT_SCRIPT:return kc_wvw_add_init_script_impl(ctx,op->text);
+    case KC_WVW_OP_ENABLE_BRIDGE:return kc_wvw_enable_bridge_impl(ctx,op->bridge);
+    case KC_WVW_OP_POST_BRIDGE_EVENT:return kc_wvw_post_bridge_event_impl(ctx,op->text);
+    case KC_WVW_OP_HIDE:return kc_wvw_hide_impl(ctx);case KC_WVW_OP_SHOW:return kc_wvw_show_impl(ctx);
+    case KC_WVW_OP_MINIMIZE:return kc_wvw_minimize_impl(ctx);case KC_WVW_OP_MAXIMIZE:return kc_wvw_maximize_impl(ctx);case KC_WVW_OP_RESTORE:return kc_wvw_restore_impl(ctx);
+    case KC_WVW_OP_SET_TITLE:return kc_wvw_set_title_impl(ctx,op->text);case KC_WVW_OP_GET_TITLE:op->out_text=ctx->opts.title;return op->out_text?KC_WVW_OK:KC_WVW_ERROR;
+    case KC_WVW_OP_SET_SIZE:return kc_wvw_set_size_impl(ctx,op->a,op->b);
+    case KC_WVW_OP_GET_SIZE:if(!op->out_a||!op->out_b||kc_wvw_get_state_impl(ctx,&state)!=KC_WVW_OK)return KC_WVW_ERROR;*op->out_a=state.width;*op->out_b=state.height;return KC_WVW_OK;
+    case KC_WVW_OP_IS_VISIBLE:case KC_WVW_OP_IS_MINIMIZED:case KC_WVW_OP_IS_MAXIMIZED:case KC_WVW_OP_IS_FULLSCREEN:
+        if(kc_wvw_get_state_impl(ctx,&state)!=KC_WVW_OK)return KC_WVW_ERROR;
+        op->a=op->kind==KC_WVW_OP_IS_VISIBLE?state.visible:op->kind==KC_WVW_OP_IS_MINIMIZED?state.minimized:op->kind==KC_WVW_OP_IS_MAXIMIZED?state.maximized:state.fullscreen;return KC_WVW_OK;
+    default:return KC_WVW_ERROR;}
+}
+int kc_wvw_navigate(kc_wvw_t *ctx,const char *url){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_NAVIGATE;op.text=url;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_add_init_script(kc_wvw_t *ctx,const char *js){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_ADD_INIT_SCRIPT;op.text=js;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_enable_bridge(kc_wvw_t *ctx,const kc_wvw_bridge_options_t *o){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_ENABLE_BRIDGE;op.bridge=o;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_post_bridge_event(kc_wvw_t *ctx,const char *json){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_POST_BRIDGE_EVENT;op.text=json;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_hide(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_HIDE;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_show(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SHOW;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_minimize(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_MINIMIZE;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_maximize(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_MAXIMIZE;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_restore(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_RESTORE;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_set_title(kc_wvw_t *ctx,const char *title){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_TITLE;op.text=title;return kc_wvw_dispatch_op(ctx,&op);}
+const char *kc_wvw_get_title(const kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_TITLE;if(kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op)!=KC_WVW_OK)return NULL;return op.out_text;}
+int kc_wvw_set_size(kc_wvw_t *ctx,int w,int h){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_SIZE;op.a=w;op.b=h;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_get_size(const kc_wvw_t *ctx,int *w,int *h){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_SIZE;op.out_a=w;op.out_b=h;return kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op);}
+static int kc_wvw_bool_query(const kc_wvw_t *ctx,kc_wvw_op_kind_t k){kc_wvw_op_t op={0};op.kind=k;if(kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op)!=KC_WVW_OK)return 0;return !!op.a;}
+int kc_wvw_is_visible(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_VISIBLE);}int kc_wvw_is_minimized(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_MINIMIZED);}int kc_wvw_is_maximized(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_MAXIMIZED);}int kc_wvw_is_fullscreen(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_FULLSCREEN);}
