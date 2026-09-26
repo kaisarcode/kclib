@@ -214,7 +214,13 @@ int main(int argc, char **argv) {
             kc_init_cli_version();
             return 0;
         }
-        break;
+        if (strcmp(argv[i], "-l") == 0 ||
+                strcmp(argv[i], "--list") == 0 ||
+                strcmp(argv[i], "-d") == 0 ||
+                strcmp(argv[i], "--delete") == 0) {
+            break;
+        }
+        return 1;
     }
 
     if (i >= argc) {
