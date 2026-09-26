@@ -1,6 +1,6 @@
 /**
  * libnetl.h - Incoming network listener.
- * Summary: Public API for receiving bytes from TCP/UDP peers and optionally responding.
+ * Summary: Receives bytes from TCP/UDP peers and optionally responds.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
