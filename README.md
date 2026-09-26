@@ -5,7 +5,7 @@ independent, and composable native primitives. Each project solves one specific
 problem through a reusable C library and, usually, a thin CLI built on the same
 public API.
 
-All kclib projects are developed together in this monorepo under `NAME.c/`
+All kclib projects are developed together in this monorepo under `proj/NAME.c/`
 directories. They are not maintained as separate Git repositories.
 
 It is not a framework or a monolithic library. The tools work independently or
@@ -29,7 +29,7 @@ The complete inventory of the collection - name, purpose, and when to use it -
 lives in [INDEX.md](INDEX.md). It is the single source of truth for the catalog;
 app and agent instructions read from the same file.
 
-Each project directory contains detailed documentation in `NAME.c/README.md`.
+Each project directory contains detailed documentation in `proj/NAME.c/README.md`.
 That README defines the actual behavior, options, API, and constraints of its
 project.
 
@@ -38,7 +38,7 @@ project.
 A project usually has this structure:
 
 ```text
-NAME.c/
+proj/NAME.c/
 |-- README.md
 |-- Makefile
 |-- CMakeLists.txt
@@ -51,7 +51,8 @@ NAME.c/
 ```
 
 Repository-wide ignore rules live in the monorepo root `.gitignore` and
-`.kcsignore`.
+`.kcsignore`. Repository tooling lives in `scripts/`, while generated
+publication artifacts are written to the ignored `dist/` directory.
 
 - `src/libNAME.c` contains reusable behavior.
 - `src/libNAME.h` is the public library contract.
@@ -96,6 +97,26 @@ files, and signals. `llm.c` is the exception because keeping a loaded model and
 its generation state resident is valuable, so it exposes a Unix control socket
 through `--ctrl`. Protocol-specific control channels, such as `redp2p.c`, remain
 part of their respective protocols rather than a common kclib facility.
+
+## Repository layout
+
+```text
+kclib/
+|-- AGENTS.md
+|-- README.md
+|-- INDEX.md
+|-- proj/
+|   `-- NAME.c/
+|-- scripts/
+|   |-- cdef.sh
+|   |-- dist.sh
+|   `-- link.sh
+`-- dist/              # generated, not versioned
+```
+
+`proj/` contains the kclib source projects. `scripts/` contains repository-wide
+maintenance and distribution tooling. `dist/` is generated from project build
+artifacts and is intentionally excluded from source control.
 
 ## Build and tests
 
