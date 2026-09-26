@@ -20,7 +20,7 @@
  * @return None.
  */
 static void print_help(void) {
-    printf("Usage: mmap <path> <-get|--get|-set|--set|-del|--del> [value]\n");
+    printf("Usage: mmap <path> [options]\n");
     printf("\n");
     printf("Options:\n");
     printf("  -get, --get          Read the stored value\n");
