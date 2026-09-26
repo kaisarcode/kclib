@@ -52,7 +52,7 @@ index is the summary, not the contract.
 | [`wch`](https://github.com/kaisarcode/kclib/wch.c) | Watches files and directories and emits `add`, `upd`, and `del` without polling. | Reacting to filesystem changes. |
 | [`mmap`](https://github.com/kaisarcode/kclib/mmap.c) | Stores bytes in files and later exposes them as mapped memory. | File-backed storage or shared memory. |
 | [`wvw`](https://github.com/kaisarcode/kclib/wvw.c) | Opens a native WebView window with an explicit optional JavaScript bridge. | A GUI window that renders HTML. |
-| [`tray`](https://github.com/kaisarcode/kclib/tray.c) | Shows a native system tray icon and menu and runs a configured local program on activation. | A tray/notification-area status entry with a lightweight menu. |
+| [`tray`](https://github.com/kaisarcode/kclib/tray.c) | Provides a persistent native system tray and mutable menu items with callbacks. | A tray/notification-area status entry with a lightweight menu. |
 
 ## Composition
 

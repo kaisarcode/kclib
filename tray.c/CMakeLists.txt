@@ -71,6 +71,7 @@ if(NOT TRAY_TEST_EXTERNAL_ARTIFACTS)
             set_source_files_properties(src/libtray.c PROPERTIES
                 LANGUAGE OBJC
             )
+            set_source_files_properties(src/tray.c PROPERTIES LANGUAGE OBJC)
             add_executable(tray src/tray.c ${TRAY_SOURCES})
             target_include_directories(tray PRIVATE src)
             target_link_libraries(tray "-framework Cocoa" "-framework Foundation" pthread m)
@@ -137,6 +138,10 @@ if(TRAY_BUILD_TESTS)
     endif()
 
     add_executable(tray_contract_test src/test.c)
+    if(APPLE)
+        set_source_files_properties(src/test.c PROPERTIES LANGUAGE OBJC)
+        target_link_libraries(tray_contract_test PRIVATE "-framework Cocoa")
+    endif()
     target_include_directories(tray_contract_test PRIVATE src)
     target_link_libraries(tray_contract_test PRIVATE ${TRAY_TEST_SHARED_TARGET})
     target_compile_definitions(tray_contract_test PRIVATE

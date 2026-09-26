@@ -1,1024 +1,724 @@
-/**
- * libtray.c - Native system tray implementation.
- * Summary: Provides a tray icon with a native context menu.
- *
- * Author:  KaisarCode
- * Website: https://kaisarcode.com
- * License: https://www.gnu.org/licenses/gpl-3.0.html
- */
-
-#ifndef _WIN32
-#ifndef __APPLE__
-#define _POSIX_C_SOURCE 200809L
-#endif
-#endif
-
+/** libtray.c - Native tray backends. License: GPL-3.0. */
 #include "libtray.h"
-
 #if defined(_WIN32)
 #include <windows.h>
+#include <shellapi.h>
+#include <wchar.h>
 #elif defined(__APPLE__)
 #import <Cocoa/Cocoa.h>
-#import <Foundation/Foundation.h>
-#include <objc/runtime.h>
 #else
 #include <gtk/gtk.h>
 #endif
-
-#include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#if defined(_WIN32)
-#define KC_TRAY_WINDOW_CLASS L"kcTrayWindow"
-#define KC_TRAY_MESSAGE      (WM_APP + 1)
-#define KC_TRAY_STOP_MESSAGE (WM_APP + 2)
-#define KC_TRAY_ICON_ID      1
-#endif
+#include <stdio.h>
+#include <stdarg.h>
 
 #ifndef KC_TRAY_BUILD_VERSION
 #define KC_TRAY_BUILD_VERSION 0ULL
 #endif
 
-struct kc_tray_options {
-    char *icon;
-    char *tooltip;
+struct kc_tray_item {
+    kc_tray_t *tray;
+    struct kc_tray_item *next;
+    char *text;
+    kc_tray_item_callback_t callback;
+    void *userdata;
+    unsigned id;
+    int removed;
+#if defined(__APPLE__)
+    NSMenuItem *native;
+#elif !defined(_WIN32)
+    GtkWidget *native;
+#endif
 };
-
 struct kc_tray {
     char *icon;
     char *tooltip;
-    kc_tray_callback_t callback;
-    void *userdata;
-    kc_tray_item_t *items;
-    int count;
-    int running;
-    int stop_requested;
-    int closing;
     char error[256];
+    kc_tray_item_t *items;
+    kc_tray_item_t *tail;
+    kc_tray_item_t *active;
+    unsigned next_id;
+    int closing;
+    int free_on_exit;
 #if defined(_WIN32)
-    HWND hwnd;
+    HANDLE thread;
+    HANDLE ready;
+    HWND window;
     HICON native_icon;
+    HMENU menu;
+    DWORD worker_id;
+    int started;
 #elif defined(__APPLE__)
-    void *ns_status_item;
+    NSStatusItem *status;
+    NSMenu *menu;
+    id target;
 #else
-    GtkStatusIcon *status_icon;
+    GThread *thread;
+    GMainContext *context;
     GMainLoop *loop;
+    GMutex mutex;
+    GCond cond;
+    int started;
+    GtkStatusIcon *status;
+    GtkWidget *menu;
 #endif
 };
 
-/**
- * Set an error message on the context.
- * @param ctx Tray context.
- * @param fmt Printf-style format string.
- * @param ... Format arguments.
- * @return None.
- */
-static void kc_tray_set_error(kc_tray_t *ctx, const char *fmt, ...) {
+enum kc_op_kind { OP_INIT, OP_ICON, OP_TOOLTIP, OP_ADD, OP_TEXT, OP_REMOVE, OP_CLOSE };
+typedef struct kc_op {
+    kc_tray_t *tray;
+    kc_tray_item_t *item;
+    const char *value;
+    enum kc_op_kind kind;
+    int result;
+#if !defined(_WIN32) && !defined(__APPLE__)
+    GMutex mutex;
+    GCond cond;
+    int done;
+#endif
+} kc_op_t;
+
+static char *kc_copy(const char *s) {
+    size_t n;
+    char *p;
+    if (!s) return NULL;
+    n = strlen(s) + 1;
+    p = (char *)malloc(n);
+    if (p) memcpy(p, s, n);
+    return p;
+}
+static void kc_error(kc_tray_t *t, const char *fmt, ...) {
     va_list ap;
-
-    if (!ctx || !fmt) {
-        return;
-    }
+    if (!t) return;
     va_start(ap, fmt);
-    vsnprintf(ctx->error, sizeof(ctx->error), fmt, ap);
+    vsnprintf(t->error, sizeof(t->error), fmt, ap);
     va_end(ap);
-    ctx->error[sizeof(ctx->error) - 1] = '\0';
 }
-
-/**
- * Copy one string into fresh heap memory.
- * @param text Source string that must be NULL-terminated.
- * @return Owned copy, or NULL when text is NULL or memory is exhausted.
- */
-static char *kc_tray_strdup(const char *text) {
-    size_t length;
-    char *copy;
-
-    if (!text) {
-        return NULL;
-    }
-    length = strlen(text);
-    copy = (char *)malloc(length + 1);
-    if (!copy) {
-        return NULL;
-    }
-    memcpy(copy, text, length + 1);
-    return copy;
+static void kc_item_free(kc_tray_item_t *item) {
+#if defined(__APPLE__)
+    [item->native release];
+#endif
+    free(item->text);
+    free(item);
 }
-
-/**
- * Release the current tray item array and its copied strings.
- * @param ctx Tray context.
- * @return None.
- */
-static void kc_tray_menu_items_free(kc_tray_t *ctx) {
-    int i;
-
-    if (!ctx || !ctx->items) {
-        return;
+static void kc_free(kc_tray_t *t) {
+    kc_tray_item_t *p, *next;
+    for (p = t->items; p; p = next) {
+        next = p->next;
+        kc_item_free(p);
     }
-    for (i = 0; i < ctx->count; i++) {
-        free((void *)ctx->items[i].label);
-        free((void *)ctx->items[i].action);
-    }
-    free(ctx->items);
-    ctx->items = NULL;
-    ctx->count = 0;
-}
-
-/**
- * Validate one tray menu item definition.
- * @param item Item definition to validate.
- * @return 1 when valid, 0 when invalid.
- */
-static int kc_tray_item_valid(const kc_tray_item_t *item) {
-    if (!item) {
-        return 0;
-    }
-    if (item->label == NULL && item->action != NULL) {
-        return 0;
-    }
-    if (item->label != NULL && item->action == NULL) {
-        return 0;
-    }
-    if (item->label && item->label[0] == '\0') {
-        return 0;
-    }
-    if (item->action && item->action[0] == '\0') {
-        return 0;
-    }
-    return 1;
-}
-
-/**
- * Copy an item array into context-owned storage.
- * The active menu is replaced only after the full copy succeeds.
- * @param ctx Tray context.
- * @param items Caller item array.
- * @param count Number of items.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on allocation failure.
- */
-static int kc_tray_menu_copy(kc_tray_t *ctx, const kc_tray_item_t *items, int count) {
-    kc_tray_item_t *copy;
-    int i;
-
-    copy = (kc_tray_item_t *)calloc((size_t)count, sizeof(kc_tray_item_t));
-    if (!copy) {
-        return KC_TRAY_ERROR;
-    }
-    for (i = 0; i < count; i++) {
-        if (items[i].label) {
-            copy[i].label = kc_tray_strdup(items[i].label);
-            if (!copy[i].label) {
-                goto failure;
-            }
-        }
-        if (items[i].action) {
-            copy[i].action = kc_tray_strdup(items[i].action);
-            if (!copy[i].action) {
-                goto failure;
-            }
-        }
-    }
-
-    kc_tray_menu_items_free(ctx);
-    ctx->items = copy;
-    ctx->count = count;
-    return KC_TRAY_OK;
-
-failure:
-    for (i = 0; i < count; i++) {
-        free((void *)copy[i].label);
-        free((void *)copy[i].action);
-    }
-    free(copy);
-    return KC_TRAY_ERROR;
-}
-
-/**
- * Deliver one menu activation to the context callback.
- * @param ctx Tray context.
- * @param action Action name of the activated item.
- * @return None.
- */
-static void kc_tray_deliver(kc_tray_t *ctx, const char *action) {
-    if (!ctx || !ctx->callback || !action) {
-        return;
-    }
-    ctx->callback(ctx->userdata, action);
+    free(t->icon);
+    free(t->tooltip);
+#if !defined(_WIN32) && !defined(__APPLE__)
+    g_cond_clear(&t->cond);
+    g_mutex_clear(&t->mutex);
+#endif
+    free(t);
 }
 
 #if defined(_WIN32)
-
-/**
- * Convert one UTF-8 string to a fresh UTF-16 buffer.
- * @param text UTF-8 source string.
- * @return Owned UTF-16 copy, or NULL on invalid input or allocation failure.
- */
-static wchar_t *kc_tray_utf16_from_utf8(const char *text) {
-    int length;
-    wchar_t *buffer;
-
-    if (!text) {
-        return NULL;
+#define KC_MSG_ICON (WM_APP + 40)
+#define KC_MSG_OP (WM_APP + 41)
+static wchar_t *kc_wide(const char *s) {
+    int n;
+    wchar_t *p;
+    if (!s) return NULL;
+    n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0);
+    if (!n) return NULL;
+    p = (wchar_t *)malloc((size_t)n * sizeof(wchar_t));
+    if (p && !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, p, n)) {
+        free(p); return NULL;
     }
-    length = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
-    if (length <= 0) {
-        return NULL;
-    }
-    buffer = (wchar_t *)malloc((size_t)length * sizeof(wchar_t));
-    if (!buffer) {
-        return NULL;
-    }
-    MultiByteToWideChar(CP_UTF8, 0, text, -1, buffer, length);
-    return buffer;
+    return p;
 }
-
-/**
- * Show the context menu for the tray icon and deliver the selection.
- * @param ctx Tray context.
- * @param hwnd Message window that owns the notification icon.
- * @return None.
- */
-static void kc_tray_windows_popup(kc_tray_t *ctx, HWND hwnd) {
-    HMENU menu;
-    POINT point;
-    UINT selection;
-    int i;
-
-    menu = CreatePopupMenu();
-    if (!menu) {
-        return;
-    }
-    for (i = 0; i < ctx->count; i++) {
-        if (!ctx->items[i].label) {
-            AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
-        } else {
-            wchar_t *label = kc_tray_utf16_from_utf8(ctx->items[i].label);
-            if (!label) {
-                DestroyMenu(menu);
-                return;
-            }
-            AppendMenuW(menu, MF_STRING, (UINT_PTR)(i + 1), label);
-            free(label);
-        }
-    }
-    if (!GetCursorPos(&point)) {
-        DestroyMenu(menu);
-        return;
-    }
-    SetForegroundWindow(hwnd);
-    selection = TrackPopupMenu(menu,
-        TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
-        point.x, point.y, 0, hwnd, NULL);
-    DestroyMenu(menu);
-
-    if (selection && selection <= (UINT)ctx->count) {
-        kc_tray_deliver(ctx, ctx->items[selection - 1].action);
-    }
+static void kc_nid(kc_tray_t *t, NOTIFYICONDATAW *nid) {
+    memset(nid, 0, sizeof(*nid));
+    nid->cbSize = sizeof(*nid);
+    nid->hWnd = t->window;
+    nid->uID = 1;
 }
-
-/**
- * Message procedure for the tray message window.
- * @param hwnd Message window handle.
- * @param msg Window message.
- * @param wparam Message payload.
- * @param lparam Message payload.
- * @return Message result.
- */
-static LRESULT CALLBACK kc_tray_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-    kc_tray_t *ctx;
-
-    if (msg == WM_CREATE) {
-        CREATESTRUCTW *create = (CREATESTRUCTW *)lparam;
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)create->lpCreateParams);
-        return 0;
-    }
-
-    ctx = (kc_tray_t *)(intptr_t)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-    if (!ctx) {
-        return DefWindowProcW(hwnd, msg, wparam, lparam);
-    }
-
-    if (msg == KC_TRAY_MESSAGE) {
-        if (wparam == KC_TRAY_ICON_ID) {
-            if (lparam == WM_LBUTTONUP || lparam == WM_RBUTTONUP || lparam == WM_CONTEXTMENU) {
-                kc_tray_windows_popup(ctx, hwnd);
-            }
-        }
-        return 0;
-    }
-    if (msg == KC_TRAY_STOP_MESSAGE) {
-        return 0;
-    }
-
-    return DefWindowProcW(hwnd, msg, wparam, lparam);
-}
-
-/**
- * Create the Windows tray icon owned by a hidden message window.
- * @param ctx Tray context.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on failure.
- */
-static int kc_tray_windows_init(kc_tray_t *ctx) {
-    HINSTANCE instance;
-    WNDCLASSW window_class;
+static int kc_native_icon(kc_tray_t *t, const char *s) {
     NOTIFYICONDATAW nid;
-    HWND hwnd;
-    HICON icon;
-
-    instance = GetModuleHandleW(NULL);
-    memset(&window_class, 0, sizeof(window_class));
-    window_class.lpfnWndProc = kc_tray_wnd_proc;
-    window_class.hInstance = instance;
-    window_class.lpszClassName = KC_TRAY_WINDOW_CLASS;
-    if (!RegisterClassW(&window_class) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-        kc_tray_set_error(ctx, "window class registration failed");
-        return KC_TRAY_ERROR;
+    HICON icon = NULL;
+    wchar_t *path = kc_wide(s);
+    if (s) {
+        if (!path) { kc_error(t, "invalid icon path"); return -1; }
+        icon = (HICON)LoadImageW(NULL, path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+        free(path);
+        if (!icon) { kc_error(t, "icon loading failed"); return -1; }
     }
-
-    hwnd = CreateWindowExW(0, KC_TRAY_WINDOW_CLASS, L"kc_tray", 0,
-        0, 0, 0, 0, HWND_MESSAGE, NULL, instance, ctx);
-    if (!hwnd) {
-        kc_tray_set_error(ctx, "tray window creation failed");
-        return KC_TRAY_ERROR;
+    kc_nid(t, &nid);
+    nid.uFlags = NIF_ICON;
+    nid.hIcon = icon ? icon : LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+    if (!Shell_NotifyIconW(NIM_MODIFY, &nid)) {
+        if (icon) DestroyIcon(icon);
+        kc_error(t, "notification icon update failed"); return -1;
     }
-    ctx->hwnd = hwnd;
-
-    memset(&nid, 0, sizeof(nid));
-    nid.cbSize = sizeof(nid);
-    nid.hWnd = hwnd;
-    nid.uID = KC_TRAY_ICON_ID;
-    nid.uFlags = NIF_MESSAGE;
-    nid.uCallbackMessage = KC_TRAY_MESSAGE;
-
-    if (ctx->tooltip) {
-        wchar_t *tip = kc_tray_utf16_from_utf8(ctx->tooltip);
-        if (tip) {
-            wcsncpy(nid.szTip, tip, 127);
-            nid.szTip[127] = L'\0';
-            nid.uFlags |= NIF_TIP;
-            free(tip);
-        }
-    }
-
-    if (ctx->icon) {
-        wchar_t *path = kc_tray_utf16_from_utf8(ctx->icon);
-        if (path) {
-            icon = (HICON)LoadImageW(NULL, path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
-            free(path);
-            if (icon) {
-                nid.hIcon = icon;
-                nid.uFlags |= NIF_ICON;
-                ctx->native_icon = icon;
-            }
-        }
-    }
-    if (!(nid.uFlags & NIF_ICON)) {
-        nid.hIcon = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
-        nid.uFlags |= NIF_ICON;
-    }
-
-    if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
-        kc_tray_set_error(ctx, "notification icon addition failed");
-        return KC_TRAY_ERROR;
-    }
-    return KC_TRAY_OK;
+    if (t->native_icon) DestroyIcon(t->native_icon);
+    t->native_icon = icon;
+    return 0;
 }
-
-/**
- * Remove the Windows tray icon and destroy the message window.
- * @param ctx Tray context.
- * @return None.
- */
-static void kc_tray_windows_release(kc_tray_t *ctx) {
+static int kc_native_tip(kc_tray_t *t, const char *s) {
     NOTIFYICONDATAW nid;
-
-    if (!ctx || !ctx->hwnd) {
-        return;
+    wchar_t *wide = kc_wide(s);
+    if (s && !wide) { kc_error(t, "invalid tooltip"); return -1; }
+    if (wide && wcslen(wide) >= sizeof(nid.szTip) / sizeof(wchar_t)) {
+        free(wide); kc_error(t, "tooltip is too long"); return -1;
     }
-    memset(&nid, 0, sizeof(nid));
-    nid.cbSize = sizeof(nid);
-    nid.hWnd = ctx->hwnd;
-    nid.uID = KC_TRAY_ICON_ID;
-    Shell_NotifyIconW(NIM_DELETE, &nid);
-    DestroyWindow(ctx->hwnd);
-    ctx->hwnd = NULL;
-    if (ctx->native_icon) {
-        DestroyIcon(ctx->native_icon);
-        ctx->native_icon = NULL;
+    kc_nid(t, &nid);
+    nid.uFlags = NIF_TIP;
+    if (wide) wcsncpy(nid.szTip, wide, sizeof(nid.szTip) / sizeof(wchar_t) - 1);
+    free(wide);
+    if (!Shell_NotifyIconW(NIM_MODIFY, &nid)) {
+        kc_error(t, "tooltip update failed"); return -1;
     }
+    return 0;
 }
-
+static int kc_native_add(kc_tray_item_t *item) {
+    kc_tray_t *t = item->tray;
+    wchar_t *wide = kc_wide(item->text);
+    BOOL ok;
+    if (item->text && !wide) { kc_error(t, "invalid item text"); return -1; }
+    ok = AppendMenuW(t->menu, item->text ? MF_STRING : MF_SEPARATOR,
+                     item->id, wide);
+    free(wide);
+    if (!ok) { kc_error(t, "menu insertion failed"); return -1; }
+    return 0;
+}
+static int kc_native_text(kc_tray_item_t *item, const char *s) {
+    MENUITEMINFOW info;
+    wchar_t *wide = kc_wide(s);
+    BOOL ok;
+    if (!wide) { kc_error(item->tray, "invalid item text"); return -1; }
+    memset(&info, 0, sizeof(info));
+    info.cbSize = sizeof(info); info.fMask = MIIM_STRING; info.dwTypeData = wide;
+    ok = SetMenuItemInfoW(item->tray->menu, item->id, FALSE, &info);
+    free(wide);
+    if (!ok) { kc_error(item->tray, "menu update failed"); return -1; }
+    return 0;
+}
+static void kc_native_remove(kc_tray_item_t *item) {
+    unsigned position = 0;
+    kc_tray_item_t *p;
+    for (p = item->tray->items; p && p != item; p = p->next) position++;
+    if (p) DeleteMenu(item->tray->menu, position, MF_BYPOSITION);
+}
 #elif defined(__APPLE__)
-
-static void kc_tray_macos_rebuild_menu(kc_tray_t *ctx);
-
-/**
- * Target object that receives status-item menu actions.
- */
-@interface KCTrayStatusItemTarget : NSObject
-@property (nonatomic, assign) kc_tray_t *ctx;
-- (void)kc_tray_item_action:(id)sender;
+@interface KCTrayTarget : NSObject { @public kc_tray_t *tray; }
+- (void)activate:(id)sender;
 @end
-
-@implementation KCTrayStatusItemTarget
-
-- (void)kc_tray_item_action:(id)sender {
-    NSMenuItem *item;
-    NSInteger index;
-    const char *action;
-
-    if (!self.ctx || ![sender isKindOfClass:[NSMenuItem class]]) {
-        return;
+@implementation KCTrayTarget
+- (void)activate:(id)sender {
+    kc_tray_item_t *item = (kc_tray_item_t *)[(NSMenuItem *)sender representedObject].pointerValue;
+    kc_tray_t *owner = tray;
+    [self retain];
+    if (tray && !tray->closing && item && !item->removed && item->callback) {
+        tray->active = item;
+        item->callback(item, item->userdata);
+        /* The public pointer ceases to exist immediately after its callback. */
+        if (item->removed) kc_item_free(item);
+        if (owner->active == item) owner->active = NULL;
     }
-    item = (NSMenuItem *)sender;
-    index = item.tag;
-    @autoreleasepool {
-        if (index < 0 || index >= self.ctx->count || !self.ctx->items) {
-            return;
-        }
-        action = self.ctx->items[index].action;
-        kc_tray_deliver(self.ctx, action);
-    }
+    [self release];
+    if (owner && owner->free_on_exit) kc_free(owner);
 }
-
 @end
-
-/**
- * Rebuild the NSStatusItem menu from the active item array.
- * @param ctx Tray context.
- * @return None.
- */
-static void kc_tray_macos_rebuild_menu(kc_tray_t *ctx) {
-    NSMenu *menu;
-    int i;
-
-    if (!ctx || !ctx->ns_status_item) {
-        return;
-    }
-
-    @autoreleasepool {
-        NSStatusItem *status_item = (__bridge NSStatusItem *)ctx->ns_status_item;
-        id target = objc_getAssociatedObject(status_item, "kc_tray_target");
-        menu = [[[NSMenu alloc] init] autorelease];
-
-        if (ctx->count > 0 && ctx->items) {
-            for (i = 0; i < ctx->count; i++) {
-                if (!ctx->items[i].label) {
-                    [menu addItem:[NSMenuItem separatorItem]];
-                } else {
-                    NSString *label = [NSString stringWithUTF8String:ctx->items[i].label];
-                    NSMenuItem *item = [[[NSMenuItem alloc] initWithTitle:label
-                        action:@selector(kc_tray_item_action:)
-                        keyEquivalent:@""] autorelease];
-                    item.target = target;
-                    item.tag = i;
-                    [menu addItem:item];
-                }
-            }
-        }
-
-        status_item.menu = menu;
-    }
+static int kc_native_icon(kc_tray_t *t, const char *s) {
+    NSImage *image = nil;
+    if (s) {
+        NSString *name = [NSString stringWithUTF8String:s];
+        if (!name) { kc_error(t, "invalid icon path"); return -1; }
+        image = strchr(s, '/') ? [[[NSImage alloc] initWithContentsOfFile:name] autorelease]
+                               : [NSImage imageNamed:name];
+        if (!image) { kc_error(t, "icon loading failed"); return -1; }
+        image = [[image copy] autorelease];
+        [image setSize:NSMakeSize(18, 18)];
+    } else image = [NSImage imageNamed:NSImageNameApplicationIcon];
+    t->status.button.image = image;
+    return 0;
 }
-
-/**
- * Create the macOS tray status item.
- * @param ctx Tray context.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on failure.
- */
-static int kc_tray_macos_init(kc_tray_t *ctx) {
-    @autoreleasepool {
-        NSStatusItem *status_item;
-
-        [NSApplication sharedApplication];
-        status_item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
-
-        if (ctx->icon) {
-            NSString *icon_str = [NSString stringWithUTF8String:ctx->icon];
-            NSImage *image = nil;
-            if (strchr(ctx->icon, '/')) {
-                image = [[[NSImage alloc] initWithContentsOfFile:icon_str] autorelease];
-            } else {
-                image = [NSImage imageNamed:icon_str];
-            }
-            if (image) {
-                [image setSize:NSMakeSize(18, 18)];
-                status_item.button.image = image;
-            }
-        }
-        if (!status_item.button.image) {
-            NSImage *default_image = [NSImage imageNamed:NSImageNameApplicationIcon];
-            if (default_image) {
-                [default_image setSize:NSMakeSize(18, 18)];
-                status_item.button.image = default_image;
-            }
-        }
-
-        if (ctx->tooltip) {
-            [[status_item button] setToolTip:[NSString stringWithUTF8String:ctx->tooltip]];
-        }
-
-        KCTrayStatusItemTarget *target = [[[KCTrayStatusItemTarget alloc] init] autorelease];
-        target.ctx = ctx;
-        objc_setAssociatedObject(status_item, "kc_tray_target", target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-        ctx->ns_status_item = (void *)CFBridgingRetain(status_item);
-        kc_tray_macos_rebuild_menu(ctx);
-    }
-
-    return KC_TRAY_OK;
+static int kc_native_tip(kc_tray_t *t, const char *s) {
+    NSString *tip = s ? [NSString stringWithUTF8String:s] : nil;
+    if (s && !tip) { kc_error(t, "invalid tooltip"); return -1; }
+    t->status.button.toolTip = tip;
+    return 0;
 }
-
-/**
- * Remove the macOS tray status item.
- * @param ctx Tray context.
- * @return None.
- */
-static void kc_tray_macos_release(kc_tray_t *ctx) {
-    if (!ctx || !ctx->ns_status_item) {
-        return;
+static int kc_native_add(kc_tray_item_t *item) {
+    kc_tray_t *t = item->tray;
+    NSMenuItem *native;
+    if (!item->text) native = [NSMenuItem separatorItem];
+    else {
+        NSString *title = [NSString stringWithUTF8String:item->text];
+        if (!title) { kc_error(t, "invalid item text"); return -1; }
+        native = [[[NSMenuItem alloc] initWithTitle:title action:@selector(activate:)
+                                         keyEquivalent:@""] autorelease];
+        native.target = t->target;
+        native.representedObject = [NSValue valueWithPointer:item];
     }
-
-    @autoreleasepool {
-        NSStatusItem *status_item = (__bridge NSStatusItem *)ctx->ns_status_item;
-        objc_setAssociatedObject(status_item, "kc_tray_target", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        status_item.menu = nil;
-        [[NSStatusBar systemStatusBar] removeStatusItem:status_item];
-        CFRelease(ctx->ns_status_item);
-        ctx->ns_status_item = NULL;
-    }
+    [t->menu addItem:native];
+    item->native = [native retain];
+    return 0;
 }
-
+static int kc_native_text(kc_tray_item_t *item, const char *s) {
+    NSString *title = [NSString stringWithUTF8String:s];
+    if (!title) { kc_error(item->tray, "invalid item text"); return -1; }
+    item->native.title = title;
+    return 0;
+}
+static void kc_native_remove(kc_tray_item_t *item) {
+    [item->tray->menu removeItem:item->native];
+    [item->native release]; item->native = nil;
+}
+static int kc_native_init(kc_tray_t *t) {
+    [NSApplication sharedApplication];
+    t->status = [[[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength] retain];
+    if (!t->status) { kc_error(t, "status item creation failed"); return -1; }
+    t->menu = [[NSMenu alloc] init];
+    t->target = [[KCTrayTarget alloc] init];
+    ((KCTrayTarget *)t->target)->tray = t;
+    t->status.menu = t->menu;
+    return 0;
+}
 #else
-
-/**
- * Release one transient GTK context menu after dismissal.
- * @param menu GTK menu that finished selection.
- * @param userdata Unused.
- * @return None.
- */
-static void kc_tray_linux_menu_done(GtkWidget *menu, gpointer userdata) {
-    (void)userdata;
-    gtk_widget_destroy(menu);
-}
-
-/**
- * Deliver the action attached to one activated menu item.
- * @param item Activated menu item.
- * @param userdata Tray context.
- * @return None.
- */
-static void kc_tray_linux_deliver(GtkWidget *item, gpointer userdata) {
-    kc_tray_t *ctx = (kc_tray_t *)userdata;
-    const char *action;
-
-    if (!ctx) {
-        return;
-    }
-    action = (const char *)g_object_get_data(G_OBJECT(item), "kc-tray-action");
-    kc_tray_deliver(ctx, action);
-}
-
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
-
-/**
- * Build and show the context menu for the status icon.
- * @param icon Status icon.
- * @param button Mouse button.
- * @param activate_time Event time.
- * @param userdata Tray context.
- * @return None.
- */
-static void kc_tray_linux_popup_menu(GtkStatusIcon *icon, guint button, guint activate_time, gpointer userdata) {
-    kc_tray_t *ctx = (kc_tray_t *)userdata;
-    GtkWidget *menu;
-    GtkWidget *item;
-    int i;
-
-    (void)icon;
-
-    if (!ctx) {
-        return;
+static int kc_native_icon(kc_tray_t *t, const char *s) {
+    const char *previous = t->icon;
+    if (!s) { gtk_status_icon_set_from_icon_name(t->status, "emblem-system"); return 0; }
+    if (strchr(s, '/')) gtk_status_icon_set_from_file(t->status, s);
+    else gtk_status_icon_set_from_icon_name(t->status, s);
+    if (!gtk_status_icon_get_storage_type(t->status) ||
+        (strchr(s, '/') && !gtk_status_icon_get_pixbuf(t->status))) {
+        if (previous) {
+            if (strchr(previous, '/')) gtk_status_icon_set_from_file(t->status, previous);
+            else gtk_status_icon_set_from_icon_name(t->status, previous);
+        } else gtk_status_icon_set_from_icon_name(t->status, "emblem-system");
+        kc_error(t, "icon loading failed"); return -1;
     }
-    menu = gtk_menu_new();
-    for (i = 0; i < ctx->count; i++) {
-        if (!ctx->items[i].label) {
-            item = gtk_separator_menu_item_new();
-        } else {
-            item = gtk_menu_item_new_with_label(ctx->items[i].label);
-            g_object_set_data(G_OBJECT(item), "kc-tray-action",
-                (gpointer)ctx->items[i].action);
-            g_signal_connect(item, "activate", G_CALLBACK(kc_tray_linux_deliver), ctx);
-        }
-        gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
-    }
-    g_signal_connect(menu, "selection-done", G_CALLBACK(kc_tray_linux_menu_done), NULL);
-    gtk_widget_show_all(menu);
-    gtk_menu_popup(GTK_MENU(menu), NULL, NULL, gtk_status_icon_position_menu,
-        icon, button, activate_time);
+    return 0;
 }
-
-/**
- * Forward primary activation to the same popup menu path.
- * @param icon Status icon.
- * @param userdata Tray context.
- * @return None.
- */
-static void kc_tray_linux_activate(GtkStatusIcon *icon, gpointer userdata) {
-    kc_tray_linux_popup_menu(icon, 0, gtk_get_current_event_time(), userdata);
+static int kc_native_tip(kc_tray_t *t, const char *s) {
+    gtk_status_icon_set_tooltip_text(t->status, s);
+    return 0;
 }
-
-/**
- * Create the Linux system-tray icon.
- * @param ctx Tray context.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on failure.
- */
-static int kc_tray_linux_init(kc_tray_t *ctx) {
-    GtkStatusIcon *icon;
-
-    if (!gtk_init_check(NULL, NULL)) {
-        kc_tray_set_error(ctx, "GTK initialization failed");
-        return KC_TRAY_ERROR;
+static gboolean kc_gtk_free_later(gpointer data);
+static void kc_gtk_activate(GtkWidget *widget, gpointer data) {
+    kc_tray_item_t *item = (kc_tray_item_t *)data;
+    kc_tray_t *t = item->tray;
+    (void)widget;
+    if (t->closing || item->removed || !item->callback) return;
+    t->active = item;
+    item->callback(item, item->userdata);
+    if (item->removed) kc_item_free(item);
+    t->active = NULL;
+    if (t->free_on_exit) {
+        GSource *source = g_idle_source_new();
+        g_source_set_callback(source, (GSourceFunc)kc_gtk_free_later, t, NULL);
+        g_source_attach(source, t->context);
+        g_source_unref(source);
     }
-
-    icon = NULL;
-    if (ctx->icon) {
-        if (strchr(ctx->icon, '/')) {
-            icon = gtk_status_icon_new_from_file(ctx->icon);
-        } else {
-            icon = gtk_status_icon_new_from_icon_name(ctx->icon);
-        }
-    }
-    if (!icon) {
-        icon = gtk_status_icon_new_from_icon_name("emblem-system");
-    }
-    if (!icon) {
-        kc_tray_set_error(ctx, "status icon creation failed");
-        return KC_TRAY_ERROR;
-    }
-
-    g_signal_connect(icon, "popup-menu", G_CALLBACK(kc_tray_linux_popup_menu), ctx);
-    g_signal_connect(icon, "activate", G_CALLBACK(kc_tray_linux_activate), ctx);
-    if (ctx->tooltip) {
-        gtk_status_icon_set_tooltip_text(icon, ctx->tooltip);
-    }
-    gtk_status_icon_set_visible(icon, TRUE);
-    ctx->status_icon = icon;
-    return KC_TRAY_OK;
 }
-
-/**
- * Remove the Linux tray icon.
- * @param ctx Tray context.
- * @return None.
- */
-static void kc_tray_linux_release(kc_tray_t *ctx) {
-    GtkStatusIcon *icon;
-
-    if (!ctx || !ctx->status_icon) {
-        return;
-    }
-    icon = ctx->status_icon;
-    ctx->status_icon = NULL;
-    gtk_status_icon_set_visible(icon, FALSE);
-    g_signal_handlers_disconnect_by_data(icon, ctx);
-    g_object_unref(icon);
+static void kc_gtk_popup(GtkStatusIcon *icon, guint button, guint time, gpointer data) {
+    kc_tray_t *t = (kc_tray_t *)data;
+    if (!t->closing) gtk_menu_popup(GTK_MENU(t->menu), NULL, NULL,
+        gtk_status_icon_position_menu, icon, button, time);
 }
-
+static void kc_gtk_click(GtkStatusIcon *icon, gpointer data) {
+    kc_gtk_popup(icon, 0, gtk_get_current_event_time(), data);
+}
+static int kc_native_add(kc_tray_item_t *item) {
+    GtkWidget *native = item->text ? gtk_menu_item_new_with_label(item->text)
+                                   : gtk_separator_menu_item_new();
+    if (!native) { kc_error(item->tray, "menu insertion failed"); return -1; }
+    if (item->text) g_signal_connect(native, "activate", G_CALLBACK(kc_gtk_activate), item);
+    gtk_menu_shell_append(GTK_MENU_SHELL(item->tray->menu), native);
+    gtk_widget_show(native);
+    item->native = native;
+    return 0;
+}
+static int kc_native_text(kc_tray_item_t *item, const char *s) {
+    gtk_menu_item_set_label(GTK_MENU_ITEM(item->native), s);
+    return 0;
+}
+static void kc_native_remove(kc_tray_item_t *item) {
+    g_signal_handlers_disconnect_by_data(item->native, item);
+    gtk_widget_destroy(item->native);
+    item->native = NULL;
+}
+static int kc_native_init(kc_tray_t *t) {
+    t->status = gtk_status_icon_new_from_icon_name("emblem-system");
+    t->menu = gtk_menu_new();
+    if (!t->status || !t->menu) { kc_error(t, "GTK tray creation failed"); return -1; }
+    g_signal_connect(t->status, "popup-menu", G_CALLBACK(kc_gtk_popup), t);
+    g_signal_connect(t->status, "activate", G_CALLBACK(kc_gtk_click), t);
+    gtk_status_icon_set_visible(t->status, TRUE);
+    return 0;
+}
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
-
 #endif
 
-/**
- * Create one owned platform tray icon from the copied options.
- * @param ctx Tray context.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on failure.
- */
-static int kc_tray_platform_init(kc_tray_t *ctx) {
+static void kc_native_close(kc_tray_t *t) {
 #if defined(_WIN32)
-    return kc_tray_windows_init(ctx);
+    NOTIFYICONDATAW nid;
+    if (t->window) {
+        kc_nid(t, &nid); Shell_NotifyIconW(NIM_DELETE, &nid);
+        DestroyWindow(t->window); t->window = NULL;
+    }
+    if (t->menu) DestroyMenu(t->menu);
+    if (t->native_icon) DestroyIcon(t->native_icon);
 #elif defined(__APPLE__)
-    return kc_tray_macos_init(ctx);
+    if (t->status) {
+        ((KCTrayTarget *)t->target)->tray = NULL;
+        t->status.menu = nil;
+        [[NSStatusBar systemStatusBar] removeStatusItem:t->status];
+        [t->status release]; t->status = nil;
+    }
+    [t->menu release]; [t->target release];
 #else
-    return kc_tray_linux_init(ctx);
+    if (t->status) {
+        gtk_status_icon_set_visible(t->status, FALSE);
+        g_signal_handlers_disconnect_by_data(t->status, t);
+        g_object_unref(t->status); t->status = NULL;
+    }
+    if (t->menu) { gtk_widget_destroy(t->menu); t->menu = NULL; }
 #endif
 }
-
-/**
- * Release the platform tray icon.
- * @param ctx Tray context.
- * @return None.
- */
-static void kc_tray_platform_release(kc_tray_t *ctx) {
+static void kc_unlink(kc_tray_item_t *item) {
+    kc_tray_t *t = item->tray;
+    kc_tray_item_t **p = &t->items;
+    while (*p && *p != item) p = &(*p)->next;
+    if (*p) *p = item->next;
+    if (t->tail == item) {
+        t->tail = NULL;
+        for (kc_tray_item_t *q = t->items; q; q = q->next) t->tail = q;
+    }
+    item->next = NULL;
+}
+static int kc_execute(kc_op_t *op) {
+    kc_tray_t *t = op->tray;
+    kc_tray_item_t *item = op->item;
+    char *copy;
+    int result;
+    if (t->closing) return -1;
+    t->error[0] = 0;
+    switch (op->kind) {
+    case OP_INIT:
+#if !defined(_WIN32) && !defined(__APPLE__)
+        result = kc_native_init(t);
+        if (result) kc_native_close(t);
+        return result;
+#else
+        return -1;
+#endif
+    case OP_ICON:
+    case OP_TOOLTIP:
+    case OP_TEXT:
+        if (op->kind == OP_TEXT && (!op->value || !*op->value || !item || item->removed)) {
+            kc_error(t, "invalid item text"); return -1;
+        }
+        copy = kc_copy(op->value);
+        if (op->value && !copy) { kc_error(t, "allocation failed"); return -1; }
+        result = op->kind == OP_ICON ? kc_native_icon(t, op->value) :
+                 op->kind == OP_TOOLTIP ? kc_native_tip(t, op->value) :
+                 kc_native_text(item, op->value);
+        if (result) { free(copy); return -1; }
+        if (op->kind == OP_ICON) { free(t->icon); t->icon = copy; }
+        else if (op->kind == OP_TOOLTIP) { free(t->tooltip); t->tooltip = copy; }
+        else { free(item->text); item->text = copy; }
+        return 0;
+    case OP_ADD:
+        if (kc_native_add(item)) return -1;
+        item->tray = t;
+        if (t->tail) t->tail->next = item;
+        else t->items = item;
+        t->tail = item;
+        return 0;
+    case OP_REMOVE:
+        if (!item || item->removed) return -1;
+        item->removed = 1;
+        kc_native_remove(item);
+        kc_unlink(item);
+        if (t->active != item) kc_item_free(item);
+        return 0;
+    case OP_CLOSE:
+        t->closing = 1;
+        kc_native_close(t);
 #if defined(_WIN32)
-    kc_tray_windows_release(ctx);
-#elif defined(__APPLE__)
-    kc_tray_macos_release(ctx);
-#else
-    kc_tray_linux_release(ctx);
+        PostQuitMessage(0);
 #endif
+        return 0;
+    }
+    return -1;
 }
 
-/**
- * Rebuild the active platform menu after a menu replacement or clear.
- * Windows and Linux rebuild the menu at popup time, so only macOS needs
- * to recreate its NSStatusItem menu.
- * @param ctx Tray context.
- * @return None.
- */
-static void kc_tray_platform_menu_rebuild(kc_tray_t *ctx) {
-#if defined(__APPLE__)
-    kc_tray_macos_rebuild_menu(ctx);
-#else
-    (void)ctx;
-#endif
-}
-
-/**
- * Returns the build version generated at compile time.
- * @return Unix timestamp for the current build.
- */
-uint64_t kc_tray_version(void) {
-    return (uint64_t)KC_TRAY_BUILD_VERSION;
-}
-
-/**
- * Return default options for the library (caller owns, must free).
- * @return Opaque options handle, or NULL on failure.
- */
-kc_tray_options_t kc_tray_options_default(void) {
-    return (kc_tray_options_t)calloc(1, sizeof(struct kc_tray_options));
-}
-
-/**
- * Set an option value by key.
- * @param opts Options handle from kc_tray_options_default.
- * @param key Option key, "icon" or "tooltip".
- * @param value Option value, or NULL to clear.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on unknown key.
- */
-int kc_tray_options_set(kc_tray_options_t opts, const char *key, const char *value) {
-    struct kc_tray_options *o = (struct kc_tray_options *)opts;
-    char **field;
-
-    if (!o || !key) {
-        return KC_TRAY_ERROR;
-    }
-    if (strcmp(key, "icon") == 0) {
-        field = &o->icon;
-    } else if (strcmp(key, "tooltip") == 0) {
-        field = &o->tooltip;
-    } else {
-        return KC_TRAY_ERROR;
-    }
-
-    if (!value) {
-        free(*field);
-        *field = NULL;
-        return KC_TRAY_OK;
-    }
-    free(*field);
-    *field = kc_tray_strdup(value);
-    return *field ? KC_TRAY_OK : KC_TRAY_ERROR;
-}
-
-/**
- * Release resources owned by an options handle.
- * @param opts Options handle from kc_tray_options_default, or NULL.
- * @return None.
- */
-void kc_tray_options_free(kc_tray_options_t opts) {
-    struct kc_tray_options *o = (struct kc_tray_options *)opts;
-
-    if (!o) {
-        return;
-    }
-    free(o->icon);
-    free(o->tooltip);
-    free(o);
-}
-
-/**
- * Initialize a new tray context.
- * @param ctx_out Destination context pointer.
- * @param opts Opaque options handle from kc_tray_options_default.
- * @param callback Menu activation callback, or NULL.
- * @param userdata Caller data passed to the callback.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on failure.
- */
-int kc_tray_open(kc_tray_t **ctx_out, kc_tray_options_t opts, kc_tray_callback_t callback, void *userdata) {
-    struct kc_tray_options *o;
-    kc_tray_t *ctx;
-
-    if (ctx_out) {
-        *ctx_out = NULL;
-    }
-    if (!ctx_out || !opts) {
-        return KC_TRAY_ERROR;
-    }
-    o = (struct kc_tray_options *)opts;
-
-    ctx = (kc_tray_t *)calloc(1, sizeof(kc_tray_t));
-    if (!ctx) {
-        return KC_TRAY_ERROR;
-    }
-    ctx->callback = callback;
-    ctx->userdata = userdata;
-
-    if (o->icon) {
-        ctx->icon = kc_tray_strdup(o->icon);
-        if (!ctx->icon) {
-            free(ctx);
-            return KC_TRAY_ERROR;
-        }
-    }
-    if (o->tooltip) {
-        ctx->tooltip = kc_tray_strdup(o->tooltip);
-        if (!ctx->tooltip) {
-            free(ctx->icon);
-            free(ctx);
-            return KC_TRAY_ERROR;
-        }
-    }
-
-    if (kc_tray_platform_init(ctx) != KC_TRAY_OK) {
-        kc_tray_close(ctx);
-        return KC_TRAY_ERROR;
-    }
-
-    *ctx_out = ctx;
-    return KC_TRAY_OK;
-}
-
-/**
- * Replace the tray menu with a copied item array.
- * @param ctx Context pointer.
- * @param items Array of menu items, or NULL to clear.
- * @param count Number of items.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on invalid input.
- */
-int kc_tray_set_menu(kc_tray_t *ctx, const kc_tray_item_t *items, int count) {
-    int i;
-
-    if (!ctx) {
-        return KC_TRAY_ERROR;
-    }
-    if (count < 0) {
-        return KC_TRAY_ERROR;
-    }
-    if (count == 0) {
-        kc_tray_menu_items_free(ctx);
-        kc_tray_platform_menu_rebuild(ctx);
-        return KC_TRAY_OK;
-    }
-    if (!items) {
-        return KC_TRAY_ERROR;
-    }
-    for (i = 0; i < count; i++) {
-        if (!kc_tray_item_valid(&items[i])) {
-            return KC_TRAY_ERROR;
-        }
-    }
-    if (kc_tray_menu_copy(ctx, items, count) != KC_TRAY_OK) {
-        return KC_TRAY_ERROR;
-    }
-    kc_tray_platform_menu_rebuild(ctx);
-    return KC_TRAY_OK;
-}
-
-/**
- * Enter the platform event loop until kc_tray_stop is requested.
- * @param ctx Context pointer.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on failure.
- */
-int kc_tray_run(kc_tray_t *ctx) {
-    if (!ctx || ctx->closing) {
-        return KC_TRAY_ERROR;
-    }
-    ctx->running = 1;
 #if defined(_WIN32)
-    if (!ctx->hwnd) {
-        ctx->running = 0;
-        kc_tray_set_error(ctx, "tray not initialized");
-        return KC_TRAY_ERROR;
+static LRESULT CALLBACK kc_window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    kc_tray_t *t;
+    if (msg == WM_NCCREATE) {
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+            (LONG_PTR)((CREATESTRUCTW *)lp)->lpCreateParams);
     }
-    while (!ctx->stop_requested) {
-        MSG message;
-        BOOL result = GetMessageW(&message, NULL, 0, 0);
-        if (result <= 0) {
-            break;
-        }
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+    t = (kc_tray_t *)(intptr_t)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    if (t && msg == KC_MSG_OP) {
+        kc_op_t *op = (kc_op_t *)(intptr_t)lp;
+        op->result = kc_execute(op);
+        return 0;
     }
-#elif defined(__APPLE__)
-    if (!ctx->ns_status_item) {
-        ctx->running = 0;
-        kc_tray_set_error(ctx, "tray not initialized");
-        return KC_TRAY_ERROR;
-    }
-    while (!ctx->stop_requested) {
-        NSEvent *event;
-        @autoreleasepool {
-            event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                untilDate:[NSDate distantFuture]
-                inMode:NSDefaultRunLoopMode
-                dequeue:YES];
-            if (event) {
-                [NSApp sendEvent:event];
+    if (t && msg == KC_MSG_ICON && wp == 1 && !t->closing &&
+        (lp == WM_LBUTTONUP || lp == WM_RBUTTONUP || lp == WM_CONTEXTMENU)) {
+        POINT pt;
+        UINT id;
+        if (!GetCursorPos(&pt)) return 0;
+        SetForegroundWindow(hwnd);
+        id = TrackPopupMenu(t->menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                            pt.x, pt.y, 0, hwnd, NULL);
+        if (id && !t->closing) {
+            kc_tray_item_t *item;
+            for (item = t->items; item && item->id != id; item = item->next) {}
+            if (item && item->callback) {
+                t->active = item;
+                item->callback(item, item->userdata);
+                if (item->removed) kc_item_free(item);
+                t->active = NULL;
             }
         }
+        return 0;
     }
-#else
-    if (!ctx->status_icon) {
-        ctx->running = 0;
-        kc_tray_set_error(ctx, "tray not initialized");
-        return KC_TRAY_ERROR;
-    }
-    if (!ctx->stop_requested) {
-        ctx->loop = g_main_loop_new(NULL, FALSE);
-        if (!ctx->loop) {
-            ctx->running = 0;
-            kc_tray_set_error(ctx, "main loop creation failed");
-            return KC_TRAY_ERROR;
-        }
-        g_main_loop_run(ctx->loop);
-        g_main_loop_unref(ctx->loop);
-        ctx->loop = NULL;
-    }
-#endif
-    ctx->running = 0;
-    return KC_TRAY_OK;
+    return DefWindowProcW(hwnd, msg, wp, lp);
 }
-
-/**
- * Request stop for a specific tray context.
- * @param ctx Context pointer.
- * @return KC_TRAY_OK on success, KC_TRAY_ERROR on failure.
- */
-int kc_tray_stop(kc_tray_t *ctx) {
-    if (!ctx) {
-        return KC_TRAY_ERROR;
+static DWORD WINAPI kc_windows_worker(LPVOID data) {
+    kc_tray_t *t = (kc_tray_t *)data;
+    WNDCLASSW wc;
+    NOTIFYICONDATAW nid;
+    MSG msg;
+    memset(&wc, 0, sizeof(wc));
+    wc.lpfnWndProc = kc_window_proc;
+    wc.hInstance = GetModuleHandleW(NULL);
+    wc.lpszClassName = L"KCTrayWindowV2";
+    if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) goto fail;
+    t->menu = CreatePopupMenu();
+    t->window = CreateWindowExW(0, wc.lpszClassName, L"tray", 0, 0, 0, 0, 0,
+                               HWND_MESSAGE, NULL, wc.hInstance, t);
+    if (!t->menu || !t->window) goto fail;
+    kc_nid(t, &nid);
+    nid.uFlags = NIF_ICON | NIF_MESSAGE;
+    nid.hIcon = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+    nid.uCallbackMessage = KC_MSG_ICON;
+    if (!Shell_NotifyIconW(NIM_ADD, &nid)) goto fail;
+    t->started = 1;
+    SetEvent(t->ready);
+    while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+        TranslateMessage(&msg); DispatchMessageW(&msg);
     }
-    ctx->stop_requested = 1;
-#if defined(_WIN32)
-    if (ctx->running && ctx->hwnd) {
-        PostMessageW(ctx->hwnd, KC_TRAY_STOP_MESSAGE, 0, 0);
+    if (t->free_on_exit) {
+        CloseHandle(t->thread);
+        kc_free(t);
     }
+    return 0;
+fail:
+    kc_error(t, "Windows tray initialization failed");
+    kc_native_close(t);
+    SetEvent(t->ready);
+    return 1;
+}
+static int kc_dispatch(kc_op_t *op) {
+    kc_tray_t *t = op->tray;
+    if (t->closing) return -1;
+    if (GetCurrentThreadId() == t->worker_id) return kc_execute(op);
+    SendMessageW(t->window, KC_MSG_OP, 0, (LPARAM)op);
+    return op->result;
+}
 #elif defined(__APPLE__)
-    if (ctx->running && NSApp) {
-        NSEvent *wake = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
-            location:NSZeroPoint modifierFlags:0 timestamp:0
-            windowNumber:0 context:nil subtype:0 data1:0 data2:0];
-        if (wake) {
-            [NSApp postEvent:wake atStart:NO];
+static int kc_dispatch(kc_op_t *op) {
+    if (![NSThread isMainThread]) { kc_error(op->tray, "AppKit requires the main thread"); return -1; }
+    @autoreleasepool { return kc_execute(op); }
+}
+#else
+static gsize kc_gtk_once;
+static GMainContext *kc_gtk_context;
+static GThread *kc_gtk_thread;
+static GMutex kc_gtk_mutex;
+static GCond kc_gtk_cond;
+static int kc_gtk_ready, kc_gtk_started;
+static gboolean kc_gtk_free_later(gpointer data) {
+    kc_free((kc_tray_t *)data);
+    return G_SOURCE_REMOVE;
+}
+static gboolean kc_gtk_dispatch(gpointer data) {
+    kc_op_t *op = (kc_op_t *)data;
+    int result = kc_execute(op);
+    g_mutex_lock(&op->mutex);
+    op->result = result;
+    op->done = 1;
+    g_cond_signal(&op->cond);
+    g_mutex_unlock(&op->mutex);
+    return G_SOURCE_REMOVE;
+}
+static int kc_dispatch(kc_op_t *op) {
+    kc_tray_t *t = op->tray;
+    int result;
+    GSource *source;
+    if (t->closing) return -1;
+    if (g_thread_self() == t->thread) return kc_execute(op);
+    g_mutex_init(&op->mutex); g_cond_init(&op->cond);
+    op->done = 0;
+    g_mutex_lock(&op->mutex);
+    source = g_idle_source_new();
+    g_source_set_callback(source, kc_gtk_dispatch, op, NULL);
+    g_source_attach(source, t->context);
+    g_source_unref(source);
+    while (!op->done) g_cond_wait(&op->cond, &op->mutex);
+    result = op->result;
+    g_mutex_unlock(&op->mutex);
+    g_cond_clear(&op->cond); g_mutex_clear(&op->mutex);
+    return result;
+}
+static gpointer kc_linux_worker(gpointer data) {
+    GMainLoop *loop;
+    (void)data;
+    kc_gtk_started = gtk_init_check(NULL, NULL);
+    g_mutex_lock(&kc_gtk_mutex);
+    kc_gtk_ready = 1;
+    g_cond_signal(&kc_gtk_cond);
+    g_mutex_unlock(&kc_gtk_mutex);
+    if (!kc_gtk_started) return NULL;
+    loop = g_main_loop_new(kc_gtk_context, FALSE);
+    g_main_loop_run(loop);
+    g_main_loop_unref(loop);
+    return NULL;
+}
+static int kc_gtk_service(void) {
+    if (g_once_init_enter(&kc_gtk_once)) {
+        g_mutex_init(&kc_gtk_mutex);
+        g_cond_init(&kc_gtk_cond);
+        kc_gtk_context = g_main_context_default();
+        g_mutex_lock(&kc_gtk_mutex);
+        kc_gtk_thread = g_thread_new("kc-tray", kc_linux_worker, NULL);
+        if (kc_gtk_thread) {
+            while (!kc_gtk_ready) g_cond_wait(&kc_gtk_cond, &kc_gtk_mutex);
         }
+        g_mutex_unlock(&kc_gtk_mutex);
+        g_once_init_leave(&kc_gtk_once, 1);
+    }
+    return kc_gtk_started ? 0 : -1;
+}
+#endif
+
+uint64_t kc_tray_version(void) { return (uint64_t)KC_TRAY_BUILD_VERSION; }
+int kc_tray_open(kc_tray_t **out, const kc_tray_options_t *options) {
+    kc_tray_t *t;
+    if (out) *out = NULL;
+    if (!out) return -1;
+#if defined(__APPLE__)
+    if (![NSThread isMainThread]) return -1;
+#endif
+    t = (kc_tray_t *)calloc(1, sizeof(*t));
+    if (!t) return -1;
+#if defined(_WIN32)
+    t->ready = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!t->ready) { free(t); return -1; }
+    t->thread = CreateThread(NULL, 0, kc_windows_worker, t, 0, &t->worker_id);
+    if (!t->thread) { CloseHandle(t->ready); free(t); return -1; }
+    WaitForSingleObject(t->ready, INFINITE);
+    CloseHandle(t->ready); t->ready = NULL;
+    if (!t->started) { WaitForSingleObject(t->thread, INFINITE); CloseHandle(t->thread); kc_free(t); return -1; }
+#elif defined(__APPLE__)
+    @autoreleasepool {
+        if (kc_native_init(t)) { kc_native_close(t); kc_free(t); return -1; }
     }
 #else
-    if (ctx->running && ctx->loop) {
-        g_main_loop_quit(ctx->loop);
+    g_mutex_init(&t->mutex); g_cond_init(&t->cond);
+    if (kc_gtk_service()) { kc_free(t); return -1; }
+    t->context = kc_gtk_context;
+    t->thread = kc_gtk_thread;
+    {
+        kc_op_t init = {0};
+        init.tray = t; init.kind = OP_INIT;
+        if (kc_dispatch(&init)) { kc_free(t); return -1; }
     }
 #endif
-    return KC_TRAY_OK;
+    *out = t;
+    if (options && ((options->icon && kc_tray_set_icon(t, options->icon)) ||
+                    (options->tooltip && kc_tray_set_tooltip(t, options->tooltip)))) {
+        kc_tray_close(t); *out = NULL; return -1;
+    }
+    return 0;
 }
-
-/**
- * Release a tray context and all copied resources.
- * @param ctx Context pointer, or NULL.
- * @return KC_TRAY_OK.
- */
-int kc_tray_close(kc_tray_t *ctx) {
-    if (!ctx) {
-        return KC_TRAY_OK;
-    }
-    if (!ctx->closing) {
-        ctx->closing = 1;
-        kc_tray_platform_release(ctx);
-    }
-    kc_tray_menu_items_free(ctx);
-    free(ctx->icon);
-    free(ctx->tooltip);
-    free(ctx);
-    return KC_TRAY_OK;
+int kc_tray_set_icon(kc_tray_t *t, const char *s) {
+    kc_op_t op = {0};
+    if (!t) return -1;
+    op.tray = t; op.kind = OP_ICON; op.value = s;
+    return kc_dispatch(&op);
 }
-
-/**
- * Get the last error message from a context.
- * @param ctx Context pointer.
- * @return Error string, or NULL if no error.
- */
-const char *kc_tray_get_error(const kc_tray_t *ctx) {
-    if (!ctx || !ctx->error[0]) {
-        return NULL;
-    }
-    return ctx->error;
+const char *kc_tray_get_icon(const kc_tray_t *t) { return t ? t->icon : NULL; }
+int kc_tray_set_tooltip(kc_tray_t *t, const char *s) {
+    kc_op_t op = {0};
+    if (!t) return -1;
+    op.tray = t; op.kind = OP_TOOLTIP; op.value = s;
+    return kc_dispatch(&op);
+}
+const char *kc_tray_get_tooltip(const kc_tray_t *t) { return t ? t->tooltip : NULL; }
+static int kc_add(kc_tray_t *t, kc_tray_item_t **out, const char *text,
+                  kc_tray_item_callback_t cb, void *userdata) {
+    kc_tray_item_t *item;
+    kc_op_t op = {0};
+    if (out) *out = NULL;
+    if (!t || !out || (text && !*text) || t->closing) return -1;
+    item = (kc_tray_item_t *)calloc(1, sizeof(*item));
+    if (!item) { kc_error(t, "allocation failed"); return -1; }
+    item->tray = t; item->text = kc_copy(text);
+    if (text && !item->text) { kc_item_free(item); kc_error(t, "allocation failed"); return -1; }
+    item->callback = cb; item->userdata = userdata;
+    item->id = ++t->next_id;
+    op.tray = t; op.item = item; op.kind = OP_ADD;
+    if (kc_dispatch(&op)) { kc_item_free(item); return -1; }
+    *out = item;
+    return 0;
+}
+int kc_tray_add_item(kc_tray_t *t, kc_tray_item_t **out, const char *text,
+                     kc_tray_item_callback_t cb, void *userdata) {
+    if (!text || !*text) { if (out) *out = NULL; if (t) kc_error(t, "invalid item text"); return -1; }
+    return kc_add(t, out, text, cb, userdata);
+}
+int kc_tray_add_separator(kc_tray_t *t, kc_tray_item_t **out) {
+    return kc_add(t, out, NULL, NULL, NULL);
+}
+int kc_tray_item_set_text(kc_tray_item_t *item, const char *text) {
+    kc_op_t op = {0};
+    if (!item || !item->text) return -1;
+    op.tray = item->tray; op.item = item; op.value = text; op.kind = OP_TEXT;
+    return kc_dispatch(&op);
+}
+const char *kc_tray_item_get_text(const kc_tray_item_t *item) {
+    return item ? item->text : NULL;
+}
+void kc_tray_item_remove(kc_tray_item_t *item) {
+    kc_op_t op = {0};
+    if (!item) return;
+    op.tray = item->tray; op.item = item; op.kind = OP_REMOVE;
+    (void)kc_dispatch(&op);
+}
+const char *kc_tray_get_error(const kc_tray_t *t) {
+    return t && t->error[0] ? t->error : NULL;
+}
+void kc_tray_close(kc_tray_t *t) {
+    kc_op_t op = {0};
+    int in_callback;
+    if (!t) return;
+    in_callback = t->active != NULL;
+    if (in_callback) t->free_on_exit = 1;
+    op.tray = t; op.kind = OP_CLOSE;
+    (void)kc_dispatch(&op);
+    if (in_callback) return; /* UI worker releases after the callback unwinds. */
+#if defined(_WIN32)
+    WaitForSingleObject(t->thread, INFINITE);
+    CloseHandle(t->thread);
+#endif
+    kc_free(t);
 }
