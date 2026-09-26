@@ -289,7 +289,6 @@ request and completes with `KC_FLOW_ESTOP`.
 Multiple runs created from one opened flow are independent. Each run owns its
 stop request, execution error, branch traversal, and final result.
 
-
 ### Visualization
 
 `flow.c` is a strict execution engine dedicated to running system command workflows.
