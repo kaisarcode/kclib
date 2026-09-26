@@ -580,7 +580,7 @@ static void kc_netl_flush_tcp(
     int failed = 0;
 
     kc_netl_lock(listener);
-    while (peer->out_head != NULL && !peer->closed && !peer->closing) {
+    while (peer->out_head != NULL && !peer->closed) {
         kc_netl_output_t *output = peer->out_head;
         size_t remain = output->size - output->offset;
         int amount = remain > (size_t)INT_MAX ? INT_MAX : (int)remain;
