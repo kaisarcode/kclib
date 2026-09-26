@@ -83,6 +83,15 @@ not serve an actual kclib consumer.
 The public API must represent the user's intent and the capability being
 offered, not the low-level mechanism used to implement it.
 
+This rule applies to the public surface only: public headers, exported symbols,
+and the semantics directly exposed to consumers. It does not restrict internal
+implementation design.
+
+Inside a kclib, use any private mechanisms required to implement the capability
+correctly and efficiently, including private helpers, state machines, threads,
+poll loops, queues, buffers, retries, native handles, platform-specific code,
+and direct operating-system APIs.
+
 Design public operations in terms of what a consumer wants to do:
 
 ```text
@@ -96,7 +105,7 @@ render
 search
 ```
 
-Do not expose lower-level machinery merely because the implementation uses it:
+Do not export lower-level machinery merely because the implementation uses it:
 
 ```text
 poll loops
@@ -125,7 +134,8 @@ or how the implementation happens to do it?
 ```
 
 If it primarily describes the implementation, redesign the public surface at
-the capability level.
+the capability level. The private implementation remains free to use whatever
+mechanisms are necessary.
 
 ## Compatibility
 
