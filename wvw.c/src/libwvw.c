@@ -2969,6 +2969,8 @@ static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge);
 static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
 static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
 static void kc_wvw_request_close(kc_wvw_t *ctx);
+static int kc_wvw_navigate_impl(kc_wvw_t *ctx, const char *url);
+static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state);
 
 /**
  * Sets an error message on the context.
