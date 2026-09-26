@@ -71,6 +71,9 @@ const char *kc_wvw_get_title(const kc_wvw_t *wvw);
 int kc_wvw_set_size(kc_wvw_t *wvw, int width, int height);
 int kc_wvw_get_size(const kc_wvw_t *wvw, int *out_width, int *out_height);
 
+int kc_wvw_set_position(kc_wvw_t *wvw, int x, int y);
+int kc_wvw_get_position(const kc_wvw_t *wvw, int *out_x, int *out_y);
+
 int kc_wvw_is_visible(const kc_wvw_t *wvw);
 int kc_wvw_is_minimized(const kc_wvw_t *wvw);
 int kc_wvw_is_maximized(const kc_wvw_t *wvw);
@@ -80,7 +83,7 @@ void kc_wvw_close(kc_wvw_t *wvw);
 ```
 
 Actions remain actions. Named value properties use `set_*` and `get_*`.
-Boolean properties use `is_*`. There is no aggregate `get_state()`: each
+This includes both window size and window position. Boolean properties use `is_*`. There is no aggregate `get_state()`: each
 query says directly what it returns.
 
 `kc_wvw_get_title()` and `kc_wvw_get_error()` return borrowed strings.
