@@ -821,8 +821,6 @@ static int case_kc_flow_run(void) {
 
     fail += expect_int("run NULL flow", KC_FLOW_ERROR,
         flow_run_sync(NULL, NULL, NULL, 0, &out, &out_size));
-    fail += expect_int("run requires handler", KC_FLOW_ERROR,
-        kc_flow_run(flow, NULL, NULL, NULL, 0, NULL, NULL));
     fail += expect_true("NULL runtime clears output", out == NULL && out_size == 0);
 
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
@@ -830,6 +828,20 @@ static int case_kc_flow_run(void) {
 
     if (join_path(tmpdir, "fanout.flow", path, sizeof(path)) != 0) return 1;
     fail += expect_int("open fanout", KC_FLOW_OK, kc_flow_open(&flow, path));
+    {
+        kc_flow_run_t *invalid_run = NULL;
+        fail += expect_int("run requires handler", KC_FLOW_ERROR,
+            kc_flow_run(
+                flow,
+                &invalid_run,
+                NULL,
+                NULL,
+                0,
+                NULL,
+                NULL
+            ));
+        fail += expect_true("missing handler creates no run", invalid_run == NULL);
+    }
     fail += expect_int("run declared fanout", KC_FLOW_OK,
         flow_run_sync(flow, NULL, NULL, 0, &out, &out_size));
     fail += expect_output_contains("fanout left", (const char *)out, out_size, "Hi Left");
