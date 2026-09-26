@@ -109,9 +109,13 @@ struct kc_netl {
     kc_netl_mutex_t mutex;
     int mutex_ready;
     kc_netl_thread_t worker;
+#ifdef _WIN32
+    DWORD worker_id;
+#endif
     int worker_started;
     int stop;
     int failed;
+    int self_close;
 
 #ifdef KC_NETL_CLI
     void (*cli_accept_handler)(kc_netl_peer_t *peer, void *userdata);
@@ -687,6 +691,8 @@ static void kc_netl_close_requested_peers(kc_netl_t *listener) {
     }
 }
 
+static void kc_netl_destroy(kc_netl_t *listener);
+
 static void kc_netl_worker_run(kc_netl_t *listener) {
     while (!kc_netl_should_stop(listener)) {
         size_t count;
@@ -791,12 +797,27 @@ static void kc_netl_worker_run(kc_netl_t *listener) {
 
 #ifdef _WIN32
 static DWORD WINAPI kc_netl_worker_entry(LPVOID arg) {
-    kc_netl_worker_run((kc_netl_t *)arg);
+    kc_netl_t *listener = (kc_netl_t *)arg;
+
+    kc_netl_worker_run(listener);
+    if (listener->self_close) {
+        CloseHandle(listener->worker);
+        listener->worker = NULL;
+        listener->worker_started = 0;
+        kc_netl_destroy(listener);
+    }
     return 0;
 }
 #else
 static void *kc_netl_worker_entry(void *arg) {
-    kc_netl_worker_run((kc_netl_t *)arg);
+    kc_netl_t *listener = (kc_netl_t *)arg;
+
+    kc_netl_worker_run(listener);
+    if (listener->self_close) {
+        (void)pthread_detach(pthread_self());
+        listener->worker_started = 0;
+        kc_netl_destroy(listener);
+    }
     return NULL;
 }
 #endif
@@ -809,7 +830,7 @@ static int kc_netl_worker_start(kc_netl_t *listener) {
         kc_netl_worker_entry,
         listener,
         0,
-        NULL
+        &listener->worker_id
     );
     if (listener->worker == NULL) return KC_NETL_ENET;
 #else
@@ -1038,11 +1059,24 @@ unsigned short kc_netl_port(const kc_netl_t *listener) {
 }
 
 void kc_netl_close(kc_netl_t *listener) {
+    int from_worker = 0;
+
     if (listener == NULL) return;
+
+#ifdef _WIN32
+    from_worker = listener->worker_started &&
+        GetCurrentThreadId() == listener->worker_id;
+#else
+    from_worker = listener->worker_started &&
+        pthread_equal(pthread_self(), listener->worker);
+#endif
 
     kc_netl_lock(listener);
     listener->stop = 1;
+    if (from_worker) listener->self_close = 1;
     kc_netl_unlock(listener);
+
+    if (from_worker) return;
 
     kc_netl_worker_join(listener);
     kc_netl_destroy(listener);
