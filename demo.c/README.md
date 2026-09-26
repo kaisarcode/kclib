@@ -37,7 +37,6 @@ Hello Jane!
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
-
 ---
 
 ## Public API
