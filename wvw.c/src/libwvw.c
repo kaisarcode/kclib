@@ -32,6 +32,38 @@ typedef HRESULT (STDAPICALLTYPE *kc_wvw_create_environment_fn)(PCWSTR, PCWSTR, I
 typedef HRESULT (STDAPICALLTYPE *kc_wvw_get_version_fn)(PCWSTR, LPWSTR *);
 
 typedef enum {
+    KC_WVW_INIT_PENDING,
+    KC_WVW_INIT_READY,
+    KC_WVW_INIT_FAILED
+} kc_wvw_init_state_t;
+
+typedef struct {
+    char *url;
+    char *title;
+    char *background;
+    int width;
+    int height;
+    int posx;
+    int posy;
+    int has_posx;
+    int has_posy;
+    int fullscreen;
+    int borderless;
+    int always_on_top;
+    int click_through;
+    int no_focus;
+} kc_wvw_config_t;
+
+typedef struct {
+    int width;
+    int height;
+    int minimized;
+    int maximized;
+    int fullscreen;
+    int visible;
+} kc_wvw_window_state_t;
+
+typedef enum {
     KC_WVW_OP_NAVIGATE,
     KC_WVW_OP_ADD_INIT_SCRIPT,
     KC_WVW_OP_ENABLE_BRIDGE,
