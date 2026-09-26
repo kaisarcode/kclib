@@ -131,7 +131,6 @@ message.
 Header names are normalized lowercase. HTTP/1 chunked input is dechunked and
 trailers are reported separately.
 
-
 ### Build a request
 
 ```c
