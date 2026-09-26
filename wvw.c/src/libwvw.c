@@ -3037,7 +3037,7 @@ struct kc_wvw {
 
 struct kc_wvw {
     kc_wvw_config_t opts;
-    int running, closed;
+    int running, closed, position_pending;
     GMainContext *context;
     GThread *thread;
     GMutex mutex;
@@ -5154,6 +5154,26 @@ static void kc_wvw_linux_size_allocate(
     if (allocation->height > 0) ctx->opts.height = allocation->height;
 }
 
+static gboolean kc_wvw_linux_configure(
+    GtkWidget *widget,
+    GdkEvent *event,
+    gpointer data
+) {
+    kc_wvw_t *ctx = (kc_wvw_t *)data;
+    GdkEventConfigure *configure;
+
+    (void)widget;
+    if (!ctx || !event || event->type != GDK_CONFIGURE) return FALSE;
+    if (ctx->position_pending) return FALSE;
+
+    configure = (GdkEventConfigure *)event;
+    ctx->opts.posx = configure->x;
+    ctx->opts.posy = configure->y;
+    ctx->opts.has_posx = 1;
+    ctx->opts.has_posy = 1;
+    return FALSE;
+}
+
 /**
  * Create the native GTK window and WebView.
  * @param ctx Window context.
@@ -5206,6 +5226,7 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     gtk_container_add(GTK_CONTAINER(ctx->window), GTK_WIDGET(ctx->web_view));
     g_signal_connect(ctx->window, "destroy", G_CALLBACK(kc_wvw_linux_destroy), ctx);
     g_signal_connect(ctx->window, "size-allocate", G_CALLBACK(kc_wvw_linux_size_allocate), ctx);
+    g_signal_connect(ctx->window, "configure-event", G_CALLBACK(kc_wvw_linux_configure), ctx);
     gtk_widget_show_all(ctx->window);
     kc_wvw_linux_apply_window_modes(ctx);
     return KC_WVW_OK;
@@ -5444,6 +5465,7 @@ static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
 
 static int kc_wvw_set_position_impl(kc_wvw_t *ctx, int x, int y) {
     if (!ctx || !ctx->window) return KC_WVW_ERROR;
+    ctx->position_pending = 1;
     gtk_window_move(GTK_WINDOW(ctx->window), x, y);
     ctx->opts.posx = x;
     ctx->opts.posy = y;
@@ -5453,16 +5475,10 @@ static int kc_wvw_set_position_impl(kc_wvw_t *ctx, int x, int y) {
 }
 
 static int kc_wvw_get_position_impl(kc_wvw_t *ctx, int *out_x, int *out_y) {
-    int x, y;
-
     if (!ctx || !ctx->window || !out_x || !out_y) return KC_WVW_ERROR;
-    gtk_window_get_position(GTK_WINDOW(ctx->window), &x, &y);
-    ctx->opts.posx = x;
-    ctx->opts.posy = y;
-    ctx->opts.has_posx = 1;
-    ctx->opts.has_posy = 1;
-    *out_x = x;
-    *out_y = y;
+    *out_x = ctx->opts.posx;
+    *out_y = ctx->opts.posy;
+    ctx->position_pending = 0;
     return KC_WVW_OK;
 }
 
