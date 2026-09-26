@@ -14,6 +14,7 @@
 #include "libflow.h"
 
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -512,8 +513,60 @@ static int cli_run(
 }
 #endif
 
+typedef struct {
+    void *data;
+    size_t size;
+    char error[256];
+    int status;
+    int calls;
+    atomic_int done;
+} test_run_result_t;
+
+static void test_sleep_ms(unsigned milliseconds);
+
 /**
- * Run one flow synchronously for contract tests.
+ * Receive one terminal flow result for contract tests.
+ * @param status Completion status.
+ * @param data Owned successful output.
+ * @param size Output byte count.
+ * @param error Borrowed contextual error.
+ * @param userdata Test result state.
+ * @return None.
+ */
+static void test_run_handler(
+    int status,
+    void *data,
+    size_t size,
+    const char *error,
+    void *userdata
+) {
+    test_run_result_t *result = (test_run_result_t *)userdata;
+
+    result->status = status;
+    result->data = data;
+    result->size = size;
+    result->calls++;
+    if (error != NULL) {
+        snprintf(result->error, sizeof(result->error), "%s", error);
+    } else {
+        result->error[0] = '\0';
+    }
+    atomic_store_explicit(&result->done, 1, memory_order_release);
+}
+
+/**
+ * Wait for one test callback to complete.
+ * @param result Test result state.
+ * @return None.
+ */
+static void test_run_wait(test_run_result_t *result) {
+    while (!atomic_load_explicit(&result->done, memory_order_acquire)) {
+        test_sleep_ms(1U);
+    }
+}
+
+/**
+ * Run one flow synchronously through the public callback contract.
  * @param flow Opened flow.
  * @param entry Optional explicit entry.
  * @param input Optional input bytes.
@@ -531,15 +584,34 @@ static int flow_run_sync(
     size_t *out_size
 ) {
     kc_flow_run_t *run = NULL;
+    test_run_result_t result;
     int rc;
 
     if (out_data) *out_data = NULL;
     if (out_size) *out_size = 0;
     if (!out_data || !out_size) return KC_FLOW_ERROR;
 
-    rc = kc_flow_run(flow, &run, entry, input, input_size);
+    memset(&result, 0, sizeof(result));
+    atomic_init(&result.done, 0);
+    rc = kc_flow_run(
+        flow,
+        &run,
+        entry,
+        input,
+        input_size,
+        test_run_handler,
+        &result
+    );
     if (rc != KC_FLOW_OK) return rc;
-    rc = kc_flow_run_wait(run, out_data, out_size);
+
+    test_run_wait(&result);
+    if (result.status == KC_FLOW_OK) {
+        *out_data = result.data;
+        *out_size = result.size;
+    } else {
+        kc_flow_free(result.data);
+    }
+    rc = result.status;
     kc_flow_run_close(run);
     return rc;
 }
@@ -734,7 +806,7 @@ static int case_kc_flow_override_order(void) {
 }
 
 /**
- * Tests kc_flow_run, kc_flow_run_wait, and kc_flow_run_close.
+ * Tests kc_flow_run callback completion and kc_flow_run_close.
  * @return 0 on success, 1 on failure.
  */
 static int case_kc_flow_run(void) {
@@ -749,6 +821,8 @@ static int case_kc_flow_run(void) {
 
     fail += expect_int("run NULL flow", KC_FLOW_ERROR,
         flow_run_sync(NULL, NULL, NULL, 0, &out, &out_size));
+    fail += expect_int("run requires handler", KC_FLOW_ERROR,
+        kc_flow_run(flow, NULL, NULL, NULL, 0, NULL, NULL));
     fail += expect_true("NULL runtime clears output", out == NULL && out_size == 0);
 
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
@@ -797,18 +871,31 @@ static int case_kc_flow_run(void) {
 
     {
         kc_flow_run_t *run = NULL;
+        test_run_result_t result;
+        memset(&result, 0, sizeof(result));
+        atomic_init(&result.done, 0);
         if (join_path(tmpdir, "stdin.flow", path, sizeof(path)) != 0) return 1;
         fail += expect_int("open flow for detached run", KC_FLOW_OK,
             kc_flow_open(&flow, path));
         fail += expect_int("start detached run", KC_FLOW_OK,
-            kc_flow_run(flow, &run, NULL, "Snapshot", 8));
+            kc_flow_run(
+                flow,
+                &run,
+                NULL,
+                "Snapshot",
+                8,
+                test_run_handler,
+                &result
+            ));
         kc_flow_close(flow);
         flow = NULL;
+        test_run_wait(&result);
         fail += expect_int("detached run survives flow close", KC_FLOW_OK,
-            kc_flow_run_wait(run, &out, &out_size));
+            result.status);
+        fail += expect_int("detached run callback once", 1, result.calls);
         fail += expect_output_contains("detached run output",
-            (const char *)out, out_size, "Snapshot");
-        kc_flow_free(out);
+            (const char *)result.data, result.size, "Snapshot");
+        kc_flow_free(result.data);
         out = NULL;
         out_size = 0;
         kc_flow_run_close(run);
@@ -846,33 +933,42 @@ static int case_kc_flow_run(void) {
 }
 
 /**
- * Tests kc_flow_run_error.
+ * Tests terminal failure delivery through the run callback.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_flow_run_error(void) {
-    const char *name = "kc_flow_run_error";
-    const char *detail = "keeps execution errors on the independent run context";
+static int case_kc_flow_run_failure(void) {
+    const char *name = "kc_flow_run_failure";
+    const char *detail = "delivers status, descriptive error, and no output exactly once";
     kc_flow_t *flow = NULL;
     kc_flow_run_t *run = NULL;
+    test_run_result_t result;
     char tmpdir[320];
     char path[640];
-    void *out = NULL;
-    size_t out_size = 0;
-    const char *error;
     int fail = 0;
 
-    fail += expect_true("NULL run error is NULL", kc_flow_run_error(NULL) == NULL);
+    memset(&result, 0, sizeof(result));
+    atomic_init(&result.done, 0);
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
     if (write_all_fixtures(tmpdir) != 0) return 1;
     if (join_path(tmpdir, "cycle.flow", path, sizeof(path)) != 0) return 1;
-    fail += expect_int("open cycle for error", KC_FLOW_OK, kc_flow_open(&flow, path));
+    fail += expect_int("open cycle for failure", KC_FLOW_OK,
+        kc_flow_open(&flow, path));
     fail += expect_int("start failing run", KC_FLOW_OK,
-        kc_flow_run(flow, &run, NULL, NULL, 0));
-    fail += expect_int("failing run completes with error", KC_FLOW_ERROR,
-        kc_flow_run_wait(run, &out, &out_size));
-    error = kc_flow_run_error(run);
-    fail += expect_true("run error is descriptive", error != NULL && error[0] != '\0');
-    fail += expect_true("failed run has no output", out == NULL && out_size == 0);
+        kc_flow_run(
+            flow,
+            &run,
+            NULL,
+            NULL,
+            0,
+            test_run_handler,
+            &result
+        ));
+    test_run_wait(&result);
+    fail += expect_int("failure status", KC_FLOW_ERROR, result.status);
+    fail += expect_int("failure callback once", 1, result.calls);
+    fail += expect_true("failure error is descriptive", result.error[0] != '\0');
+    fail += expect_true("failed run has no output",
+        result.data == NULL && result.size == 0);
     kc_flow_run_close(run);
     kc_flow_close(flow);
 
@@ -891,9 +987,11 @@ static int case_kc_flow_run_stop(void) {
     kc_flow_run_t *run = NULL;
     char tmpdir[320];
     char path[640];
-    void *out = NULL;
-    size_t out_size = 0;
+    test_run_result_t result;
     int fail = 0;
+
+    memset(&result, 0, sizeof(result));
+    atomic_init(&result.done, 0);
 
     fail += expect_int("stop NULL run", KC_FLOW_ERROR, kc_flow_run_stop(NULL));
     if (make_temp_dir(tmpdir, sizeof(tmpdir)) != 0) return 1;
@@ -913,13 +1011,23 @@ static int case_kc_flow_run_stop(void) {
     if (join_path(tmpdir, "stop.flow", path, sizeof(path)) != 0) return 1;
     fail += expect_int("open stop flow", KC_FLOW_OK, kc_flow_open(&flow, path));
     fail += expect_int("start non-blocking run", KC_FLOW_OK,
-        kc_flow_run(flow, &run, NULL, NULL, 0));
+        kc_flow_run(
+            flow,
+            &run,
+            NULL,
+            NULL,
+            0,
+            test_run_handler,
+            &result
+        ));
     test_sleep_ms(100U);
     fail += expect_int("request cooperative stop", KC_FLOW_OK, kc_flow_run_stop(run));
-    fail += expect_int("stopped run status", KC_FLOW_ESTOP,
-        kc_flow_run_wait(run, &out, &out_size));
-    fail += expect_true("stopped run has no final output", out == NULL && out_size == 0);
-    fail += expect_string("stopped run error", "flow stopped", kc_flow_run_error(run));
+    test_run_wait(&result);
+    fail += expect_int("stopped run status", KC_FLOW_ESTOP, result.status);
+    fail += expect_int("stopped run callback once", 1, result.calls);
+    fail += expect_true("stopped run has no final output",
+        result.data == NULL && result.size == 0);
+    fail += expect_string("stopped run error", "flow stopped", result.error);
     kc_flow_run_close(run);
     kc_flow_close(flow);
 
@@ -1065,7 +1173,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_flow_override_order);
     run_case(&rc, case_kc_flow_run);
     run_case(&rc, case_kc_flow_run_stop);
-    run_case(&rc, case_kc_flow_run_error);
+    run_case(&rc, case_kc_flow_run_failure);
     run_case(&rc, case_kc_flow_free);
     run_case(&rc, case_kc_flow_version);
     run_case(&rc, case_kc_flow_cli);
@@ -1094,7 +1202,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "kc_flow_run") == 0) return case_kc_flow_run();
     if (strcmp(argv[1], "kc_flow_run_stop") == 0) return case_kc_flow_run_stop();
-    if (strcmp(argv[1], "kc_flow_run_error") == 0) return case_kc_flow_run_error();
+    if (strcmp(argv[1], "kc_flow_run_failure") == 0) return case_kc_flow_run_failure();
     if (strcmp(argv[1], "kc_flow_free") == 0) return case_kc_flow_free();
     if (strcmp(argv[1], "kc_flow_version") == 0) return case_kc_flow_version();
     if (strcmp(argv[1], "kc_flow_cli") == 0) return case_kc_flow_cli();
