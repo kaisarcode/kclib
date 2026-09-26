@@ -7,10 +7,15 @@
 
 set -e
 
+# Prints command usage information.
+# @return 0 on success.
 usage() {
     echo "Usage: $0 all|NAME.c" >&2
 }
 
+# Tests one kclib project on every supported test runtime.
+# @param project_dir Project directory.
+# @return 0 on success.
 test_project() {
     local project_dir="$1"
     local project_name
@@ -21,12 +26,14 @@ test_project() {
         cd "$project_dir"
         make test
         make test wine
-        if grep -Fq 'filter wasm,$(MAKECMDGOALS)' Makefile; then
+        if grep -Eq '^wasm[[:space:]]*:' Makefile; then
             make test wasm
         fi
     )
 }
 
+# Dispatches one project test run or all project test runs.
+# @return 0 on success.
 main() {
     local script_dir root_dir proj_dir target project_dir
 
