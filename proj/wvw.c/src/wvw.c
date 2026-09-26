@@ -27,20 +27,20 @@ static void kc_wvw_help(const char *name) {
     printf("Usage: %s [options]\n", name);
     printf("\n");
     printf("Options:\n");
-    printf("    --url <url>         Set initial URL\n");
-    printf("    --title <title>     Set window title\n");
-    printf("    --background <hex>  Set WebView background as RRGGBB or AARRGGBB\n");
-    printf("    --width <px>        Set window width\n");
-    printf("    --height <px>       Set window height\n");
-    printf("    --posx <px>         Set window x position\n");
-    printf("    --posy <px>         Set window y position\n");
-    printf("    --fullscreen        Start in fullscreen mode\n");
-    printf("    --borderless        Start in borderless mode\n");
-    printf("    --always-on-top     Keep the window above normal windows\n");
-    printf("    --click-through     Ignore mouse input on the host window\n");
-    printf("    --no-focus          Do not activate the window for keyboard focus\n");
-    printf("    -h, --help          Show this help\n");
-    printf("    -v, --version       Show build version\n");
+    printf("  --url <url>         Set initial URL\n");
+    printf("  --title <title>     Set window title\n");
+    printf("  --background <hex>  Set WebView background as RRGGBB or AARRGGBB\n");
+    printf("  --width <px>        Set window width\n");
+    printf("  --height <px>       Set window height\n");
+    printf("  --posx <px>         Set window x position\n");
+    printf("  --posy <px>         Set window y position\n");
+    printf("  --fullscreen        Start in fullscreen mode\n");
+    printf("  --borderless        Start in borderless mode\n");
+    printf("  --always-on-top     Keep the window above normal windows\n");
+    printf("  --click-through     Ignore mouse input on the host window\n");
+    printf("  --no-focus          Do not activate the window for keyboard focus\n");
+    printf("  -h, --help          Show this help\n");
+    printf("  -v, --version       Show version\n");
 }
 
 /**
