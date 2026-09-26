@@ -64,11 +64,14 @@ kc_b64_free(decoded);
 
 ---
 
-### Lifecycle
+### Usage Notes
 
-- `kc_b64_encode()` returns caller-owned encoded output that must be released with `kc_b64_free()`.
-- `kc_b64_decode()` accepts strict RFC 4648 input with canonical padding, returns caller-owned decoded output, and resets `out_size` to `0` on failure when the size pointer is valid. Empty input is valid and returns an owned zero-length result.
-- `kc_b64_free()` releases memory returned by the b64 library.
+`kc_b64_encode()` encodes binary data as Base64.
+
+`kc_b64_decode()` decodes strict RFC 4648 Base64 with canonical padding.
+Empty input is valid.
+
+Use `kc_b64_free()` to release results returned by the library.
 
 ---
 
