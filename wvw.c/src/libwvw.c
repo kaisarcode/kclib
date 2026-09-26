@@ -2466,7 +2466,7 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
     style = GetWindowLongPtrW(ctx->hwnd, GWL_STYLE);
     state->maximized = !!(style & WS_MAXIMIZE);
     state->minimized = !!(style & WS_MINIMIZE);
-    state->fullscreen = !!(style & WS_POPUP);
+    state->fullscreen = ctx->opts.fullscreen;
     state->visible = IsWindowVisible(ctx->hwnd);
     if (GetClientRect(ctx->hwnd, &rect)) {
         state->width = rect.right - rect.left;
