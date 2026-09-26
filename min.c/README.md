@@ -61,9 +61,7 @@ kc_min_free(txt);
 
 The public operations are:
 
-Each minifier accepts one borrowed null-terminated source string. On success it
-returns an owned null-terminated string, including an allocated empty string for
-empty input. A `NULL` input or allocation failure returns `NULL`.
+Each minifier accepts source text and returns its minified form. Use `kc_min_free()` to release returned output.
 
 There is no public context, mode enum, dispatcher, or lifecycle state.
 
