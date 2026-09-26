@@ -160,9 +160,7 @@ uint64_t kc_wvw_version(void);
 Actions remain actions. Named properties use `set_*` and `get_*`.
 Boolean window properties use `is_*`.
 
-`kc_wvw_get_title()` and `kc_wvw_get_error()` return borrowed strings.
 
-`kc_wvw_close(NULL)` is safe.
 
 ### Native Bridge
 
@@ -262,8 +260,6 @@ make x86_64/macos
 make aarch64/macos
 ```
 
-WebAssembly is not supported because this library provides a native desktop
-window backed by a platform WebView.
 
 ---
 
@@ -298,7 +294,6 @@ and shared library.
 - Foundation
 - `osxcross` with a compatible Apple SDK when cross-compiling from Linux
 
-macOS window operations must run from the main thread.
 
 ---
 
