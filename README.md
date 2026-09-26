@@ -108,6 +108,7 @@ kclib/
 |-- proj/
 |   `-- NAME.c/
 |-- scripts/
+|   |-- build.sh
 |   |-- cdef.sh
 |   |-- dist.sh
 |   `-- link.sh
@@ -120,7 +121,21 @@ artifacts and is intentionally excluded from source control.
 
 ## Build and tests
 
-The normal operator entry points are:
+Build every kclib sequentially:
+
+```sh
+./scripts/build.sh all
+```
+
+Build one project:
+
+```sh
+./scripts/build.sh demo.c
+```
+
+The build script enters each selected project directory and runs `make all`.
+
+The normal project-local entry points are:
 
 ```sh
 make
