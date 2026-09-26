@@ -17,7 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -25,9 +24,10 @@
 #include <windows.h>
 #include <wchar.h>
 #else
+#include <unistd.h>
+#ifndef __EMSCRIPTEN__
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
 #endif
 #endif
 
