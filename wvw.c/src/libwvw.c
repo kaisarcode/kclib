@@ -1295,7 +1295,7 @@ static char *kc_wvw_bridge_error_object(const char *code, const char *message) {
  */
 static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge, const char *sender_expr, const char *receiver_setup) {
     kc_wvw_text_buf_t buf;
-    int i;
+    size_t i;
 
     if (!bridge || !sender_expr || !receiver_setup || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
         return NULL;
@@ -3594,7 +3594,7 @@ static char *kc_wvw_bridge_error_object(const char *code, const char *message) {
  */
 static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge) {
     kc_wvw_text_buf_t buf;
-    int i;
+    size_t i;
 
     if (!bridge || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
         return NULL;
