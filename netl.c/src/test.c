@@ -26,6 +26,9 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <process.h>
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
 #define TEST_FD SOCKET
 #define TEST_FD_INVALID INVALID_SOCKET
 #define TEST_CLOSE(fd) closesocket(fd)
