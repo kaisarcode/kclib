@@ -4934,9 +4934,21 @@ void kc_wvw_close(kc_wvw_t *ctx){if(!ctx)return;if(ctx->ns_webview){@autorelease
  * @return None.
  */
 static void kc_wvw_request_close(kc_wvw_t *ctx) {
-    if (ctx && ctx->window) {
-        gtk_widget_destroy(ctx->window);
+    WebKitUserContentManager *manager;
+
+    if (!ctx || !ctx->window) return;
+
+    if (ctx->web_view) {
+        manager = webkit_web_view_get_user_content_manager(ctx->web_view);
+        if (manager) {
+            g_signal_handlers_disconnect_by_data(manager, ctx);
+            webkit_user_content_manager_unregister_script_message_handler(
+                manager, "kc_wvw_native");
+        }
+        g_signal_handlers_disconnect_by_data(ctx->web_view, ctx);
     }
+
+    gtk_widget_destroy(ctx->window);
 }
 
 /**
@@ -5100,19 +5112,18 @@ static int kc_wvw_background_transparent(const char *text) {
  */
 static void kc_wvw_linux_destroy(GtkWidget *widget, gpointer userdata) {
     kc_wvw_t *ctx = (kc_wvw_t *)userdata;
-    int was_running = 0;
 
     (void)widget;
 
-    if (ctx) {
-        was_running = ctx->running;
-        ctx->running = 0;
-        ctx->window = NULL;
-        ctx->web_view = NULL;
-    }
-    if (was_running && gtk_main_level() > 0) {
-        gtk_main_quit();
-    }
+    if (!ctx) return;
+
+    g_mutex_lock(&ctx->mutex);
+    ctx->running = 0;
+    ctx->closed = 1;
+    ctx->window = NULL;
+    ctx->web_view = NULL;
+    g_cond_broadcast(&ctx->cond);
+    g_mutex_unlock(&ctx->mutex);
 }
 
 /**
@@ -5395,6 +5406,11 @@ void kc_wvw_close(kc_wvw_t *ctx) {
     if (!ctx->closed) {
         op.kind = KC_WVW_OP_CLOSE;
         (void)kc_wvw_dispatch_op(ctx, &op);
+        g_mutex_lock(&ctx->mutex);
+        while (!ctx->closed) {
+            g_cond_wait(&ctx->cond, &ctx->mutex);
+        }
+        g_mutex_unlock(&ctx->mutex);
     }
     kc_wvw_bridge_state_free(&ctx->bridge);
     kc_wvw_config_free(&ctx->opts);
