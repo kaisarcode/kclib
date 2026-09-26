@@ -235,7 +235,7 @@ test:
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target wvw_contract_test || exit 1; \
-		$(BUILD_DIR)/test/wvw_contract_test all 2>/dev/null; \
+		$(BUILD_DIR)/test/wvw_contract_test all; \
 	fi
 
 wine:
