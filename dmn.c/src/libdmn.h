@@ -18,7 +18,6 @@ extern "C" {
 #endif
 
 typedef struct kc_dmn kc_dmn_t;
-typedef struct kc_dmn_stream kc_dmn_stream_t;
 
 typedef struct {
     const char *cmd;
@@ -28,18 +27,10 @@ typedef struct {
 
 typedef struct {
     const char *name;
-    const char *endpoint;
 } kc_dmn_entry_t;
-
-typedef void (*kc_dmn_handler_t)(
-    const void *data,
-    size_t size,
-    void *userdata
-);
 
 #define KC_DMN_OK          0
 #define KC_DMN_NOT_FOUND   1
-#define KC_DMN_EOF         2
 #define KC_DMN_ERROR      -1
 
 /**
@@ -65,7 +56,7 @@ int kc_dmn_open(
 );
 
 /**
- * List daemons in the active runtime directory.
+ * List daemon identities in the active runtime directory.
  * Returned entries share one allocation released with kc_dmn_free().
  * @param out_entries Output entry array.
  * @param out_count Output entry count.
@@ -120,33 +111,6 @@ int kc_dmn_set_eot(
 );
 
 /**
- * Return the configured daemon EOT marker.
- * @param dmn Daemon handle.
- * @param out_size Optional output for the EOT byte count.
- * @return Borrowed EOT bytes, or NULL on invalid input.
- */
-const void *kc_dmn_get_eot(
-    const kc_dmn_t *dmn,
-    size_t *out_size
-);
-
-/**
- * Register or clear one daemon event handler.
- * The supported public event is data.
- * @param dmn Daemon handle.
- * @param event Event name.
- * @param handler Event handler, or NULL to clear it.
- * @param userdata Opaque handler data.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_on(
-    kc_dmn_t *dmn,
-    const char *event,
-    kc_dmn_handler_t handler,
-    void *userdata
-);
-
-/**
  * Perform one complete daemon data exchange.
  * The returned response excludes the configured EOT marker.
  * @param dmn Daemon handle.
@@ -173,54 +137,6 @@ int kc_dmn_send_data(
 int kc_dmn_send_signal(
     kc_dmn_t *dmn,
     int signal
-);
-
-/**
- * Open one raw byte stream to an opened daemon.
- * @param dmn Daemon handle.
- * @param out Output stream handle.
- * @return KC_DMN_OK, KC_DMN_NOT_FOUND, or KC_DMN_ERROR.
- */
-int kc_dmn_stream(
-    kc_dmn_t *dmn,
-    kc_dmn_stream_t **out
-);
-
-/**
- * Write bytes to one raw daemon stream.
- * @param stream Stream handle.
- * @param data Source bytes.
- * @param size Source byte count.
- * @return KC_DMN_OK on success, or KC_DMN_ERROR on failure.
- */
-int kc_dmn_stream_write(
-    kc_dmn_stream_t *stream,
-    const void *data,
-    size_t size
-);
-
-/**
- * Read bytes from one raw daemon stream.
- * @param stream Stream handle.
- * @param data Output buffer.
- * @param capacity Output buffer capacity.
- * @param out_size Output byte count.
- * @return KC_DMN_OK, KC_DMN_EOF, or KC_DMN_ERROR.
- */
-int kc_dmn_stream_read(
-    kc_dmn_stream_t *stream,
-    void *data,
-    size_t capacity,
-    size_t *out_size
-);
-
-/**
- * Close and release one raw daemon stream.
- * @param stream Stream handle, or NULL.
- * @return None.
- */
-void kc_dmn_stream_close(
-    kc_dmn_stream_t *stream
 );
 
 /**
