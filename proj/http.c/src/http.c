@@ -67,7 +67,7 @@ static void cli_help(const char *name) {
     printf("  --chunked                       Use chunked transfer encoding\n");
     printf("  --chunk-size <n>                Chunk size (default: 8192)\n");
     printf("  --trailer <name: value>         Add a trailer\n\n");
-    printf("Common options:\n");
+    printf("Options:\n");
     printf("  -h, --help                      Show this help\n");
     printf("  -v, --version                   Show version\n");
 }
