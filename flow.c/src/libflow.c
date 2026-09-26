@@ -128,9 +128,8 @@ struct kc_flow_run {
     char *entry;
     char *input;
     size_t input_size;
-    char *output;
-    size_t output_size;
-    int status;
+    kc_flow_handler_t handler;
+    void *userdata;
     int started;
     int joined;
     atomic_int stop_requested;
@@ -3692,8 +3691,10 @@ static void *kc_flow_run_worker(void *arg)
     kc_flow_run_t *run = (kc_flow_run_t *)arg;
     char *output = NULL;
     size_t output_size = 0;
+    int status;
+    const char *error = NULL;
 
-    run->status = kc_flow_run_loaded(
+    status = kc_flow_run_loaded(
         &run->runtime,
         run->runtime.path,
         run->entry,
@@ -3702,19 +3703,21 @@ static void *kc_flow_run_worker(void *arg)
         &output,
         &output_size
     );
-    if (run->status == KC_FLOW_OK) {
+    if (status == KC_FLOW_OK) {
         if (output_size == 0) {
             free(output);
             output = NULL;
         }
-        run->output = output;
-        run->output_size = output_size;
         kc_flow_clear_error(&run->runtime);
     } else {
         free(output);
-        run->output = NULL;
-        run->output_size = 0;
+        output = NULL;
+        output_size = 0;
+        error = run->runtime.error[0] != '\0' ? run->runtime.error : "run failed";
     }
+
+    run->handler(status, output, output_size, error, run->userdata);
+
 #ifdef _WIN32
     return 0;
 #else
@@ -3812,6 +3815,8 @@ int kc_flow_unset(kc_flow_t *flow, const char *key) {
  * @param entry Optional explicit entry.
  * @param input Optional input bytes.
  * @param input_size Input byte size.
+ * @param handler Terminal result handler.
+ * @param userdata Caller data passed to handler.
  * @return KC_FLOW_OK when started, or KC_FLOW_ERROR.
  */
 int kc_flow_run(
@@ -3819,14 +3824,17 @@ int kc_flow_run(
     kc_flow_run_t **out_run,
     const char *entry,
     const void *input,
-    size_t input_size
+    size_t input_size,
+    kc_flow_handler_t handler,
+    void *userdata
 ) {
     kc_flow_run_t *run;
 
     if (out_run) {
         *out_run = NULL;
     }
-    if (!flow || !out_run || (entry && !*entry) || (input_size > 0 && !input)) {
+    if (!flow || !out_run || !handler ||
+        (entry && !*entry) || (input_size > 0 && !input)) {
         return KC_FLOW_ERROR;
     }
 
@@ -3857,7 +3865,8 @@ int kc_flow_run(
         }
     }
     run->input_size = input_size;
-    run->status = KC_FLOW_ERROR;
+    run->handler = handler;
+    run->userdata = userdata;
     atomic_init(&run->stop_requested, 0);
 
 #ifdef _WIN32
@@ -3924,48 +3933,6 @@ static int kc_flow_run_join(kc_flow_run_t *run) {
 }
 
 /**
- * Wait for one run and transfer successful final output to the caller.
- * @param run Run pointer.
- * @param out_data Pointer to receive owned output.
- * @param out_size Pointer to receive output size.
- * @return KC_FLOW_OK, KC_FLOW_ESTOP, or KC_FLOW_ERROR.
- */
-int kc_flow_run_wait(
-    kc_flow_run_t *run,
-    void **out_data,
-    size_t *out_size
-) {
-    if (out_data) {
-        *out_data = NULL;
-    }
-    if (out_size) {
-        *out_size = 0;
-    }
-    if (!run || !out_data || !out_size) {
-        return KC_FLOW_ERROR;
-    }
-    if (kc_flow_run_join(run) != KC_FLOW_OK) {
-        return KC_FLOW_ERROR;
-    }
-    if (run->status == KC_FLOW_OK) {
-        *out_data = run->output;
-        *out_size = run->output_size;
-        run->output = NULL;
-        run->output_size = 0;
-    }
-    return run->status;
-}
-
-/**
- * Return one run's contextual error.
- * @param run Run pointer.
- * @return Borrowed error string, or NULL.
- */
-const char *kc_flow_run_error(const kc_flow_run_t *run) {
-    return run ? run->runtime.error : NULL;
-}
-
-/**
  * Release one run.
  * @param run Run pointer.
  * @return None.
@@ -3978,7 +3945,6 @@ void kc_flow_run_close(kc_flow_run_t *run) {
         (void)kc_flow_run_stop(run);
         (void)kc_flow_run_join(run);
     }
-    free(run->output);
     free(run->input);
     free(run->entry);
     kc_flow_release(&run->runtime);
