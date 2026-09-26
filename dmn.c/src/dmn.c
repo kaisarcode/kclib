@@ -347,6 +347,7 @@ done:
     return rc;
 }
 
+#ifndef _WIN32
 /**
  * Resolve the daemon runtime directory for CLI endpoint display.
  * @param out Output path buffer.
@@ -355,65 +356,49 @@ done:
  */
 static int kc_dmn_cli_runtime_dir(char *out, size_t cap) {
     const char *override = getenv("KC_DMN_DIR");
+    const char *xdg;
+    char path[KC_DMN_BUF];
+    struct stat st;
 
     if (!out || cap == 0) return 1;
     if (override && override[0]) {
         return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : 1;
     }
 
-#ifdef _WIN32
-    {
-        char tmp[MAX_PATH];
-        DWORD size = GetTempPathA((DWORD)sizeof(tmp), tmp);
-
-        if (size == 0 || size >= (DWORD)sizeof(tmp)) return 1;
+    xdg = getenv("XDG_RUNTIME_DIR");
+    if (xdg && xdg[0]) {
         return (size_t)snprintf(
             out,
             cap,
-            "%skaisarcode\\dmn",
-            tmp
+            "%s/kaisarcode/dmn",
+            xdg
         ) < cap ? 0 : 1;
     }
-#else
-    {
-        const char *xdg = getenv("XDG_RUNTIME_DIR");
-        char path[KC_DMN_BUF];
-        struct stat st;
 
-        if (xdg && xdg[0]) {
-            return (size_t)snprintf(
-                out,
-                cap,
-                "%s/kaisarcode/dmn",
-                xdg
-            ) < cap ? 0 : 1;
-        }
-
-        if ((size_t)snprintf(
-                path,
-                sizeof(path),
-                "/run/user/%u",
-                (unsigned)getuid()
-            ) < sizeof(path) &&
-                stat(path, &st) == 0 &&
-                S_ISDIR(st.st_mode)) {
-            return (size_t)snprintf(
-                out,
-                cap,
-                "%s/kaisarcode/dmn",
-                path
-            ) < cap ? 0 : 1;
-        }
-
-        return (size_t)snprintf(
-            out,
-            cap,
-            "/tmp/kaisarcode/dmn-%u",
+    if ((size_t)snprintf(
+            path,
+            sizeof(path),
+            "/run/user/%u",
             (unsigned)getuid()
+        ) < sizeof(path) &&
+            stat(path, &st) == 0 &&
+            S_ISDIR(st.st_mode)) {
+        return (size_t)snprintf(
+            out,
+            cap,
+            "%s/kaisarcode/dmn",
+            path
         ) < cap ? 0 : 1;
     }
-#endif
+
+    return (size_t)snprintf(
+        out,
+        cap,
+        "/tmp/kaisarcode/dmn-%u",
+        (unsigned)getuid()
+    ) < cap ? 0 : 1;
 }
+#endif
 
 /**
  * Compose one daemon endpoint for CLI display.
