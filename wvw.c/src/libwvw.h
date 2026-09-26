@@ -159,6 +159,24 @@ int kc_wvw_set_size(kc_wvw_t *wvw, int width, int height);
  */
 int kc_wvw_get_size(const kc_wvw_t *wvw, int *out_width, int *out_height);
 
+/**
+ * Move the native window.
+ * @param wvw WebView handle.
+ * @param x X position in screen coordinates.
+ * @param y Y position in screen coordinates.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_set_position(kc_wvw_t *wvw, int x, int y);
+
+/**
+ * Return the current native window position.
+ * @param wvw WebView handle.
+ * @param out_x Output x position.
+ * @param out_y Output y position.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_get_position(const kc_wvw_t *wvw, int *out_x, int *out_y);
+
 /** Return nonzero when the native window is visible. */
 int kc_wvw_is_visible(const kc_wvw_t *wvw);
 
