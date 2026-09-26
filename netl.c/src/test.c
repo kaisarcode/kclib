@@ -70,18 +70,30 @@ typedef struct {
     size_t sizes[8];
 } callback_state_t;
 
+/**
+ * Expect true.
+ * @return Function result.
+ */
 static int expect_true(const char *label, int value) {
     if (value) return 0;
     fprintf(stderr, "FAIL: %s\n", label);
     return 1;
 }
 
+/**
+ * Expect int.
+ * @return Function result.
+ */
 static int expect_int(const char *label, int expected, int actual) {
     if (expected == actual) return 0;
     fprintf(stderr, "FAIL: %s expected=%d actual=%d\n", label, expected, actual);
     return 1;
 }
 
+/**
+ * Expect bytes.
+ * @return Function result.
+ */
 static int expect_bytes(
     const char *label,
     const void *expected,
@@ -99,6 +111,10 @@ static int expect_bytes(
     return 1;
 }
 
+/**
+ * Expect contains.
+ * @return Function result.
+ */
 static int expect_contains(
     const char *label,
     const unsigned char *data,
@@ -118,6 +134,10 @@ static int expect_contains(
     return 1;
 }
 
+/**
+ * Result.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *description) {
     test_case_current++;
     printf(
@@ -130,10 +150,18 @@ static void case_result(int fail, const char *name, const char *description) {
     );
 }
 
+/**
+ * Run case.
+ * @return None.
+ */
 static void run_case(int *total_fail, int (*fn)(void)) {
     if (fn() != 0) (*total_fail)++;
 }
 
+/**
+ * Sleep ms.
+ * @return None.
+ */
 static void test_sleep_ms(unsigned long ms) {
 #ifdef _WIN32
     Sleep((DWORD)ms);
@@ -145,6 +173,10 @@ static void test_sleep_ms(unsigned long ms) {
 #endif
 }
 
+/**
+ * Wait atomic at least.
+ * @return Function result.
+ */
 static int wait_atomic_at_least(atomic_int *value, int expected) {
     int i;
     for (i = 0; i < 200; i++) {
@@ -154,6 +186,10 @@ static int wait_atomic_at_least(atomic_int *value, int expected) {
     return 1;
 }
 
+/**
+ * Socket timeout.
+ * @return Function result.
+ */
 static int test_socket_timeout(TEST_FD fd) {
 #ifdef _WIN32
     DWORD timeout = 2000U;
@@ -178,6 +214,10 @@ static int test_socket_timeout(TEST_FD fd) {
 #endif
 }
 
+/**
+ * Tcp connect.
+ * @return Function result.
+ */
 static TEST_FD test_tcp_connect(unsigned short port) {
     struct sockaddr_in address;
     TEST_FD fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -203,6 +243,10 @@ static TEST_FD test_tcp_connect(unsigned short port) {
     return fd;
 }
 
+/**
+ * Socket expect.
+ * @return Function result.
+ */
 static int test_socket_expect(
     TEST_FD fd,
     const void *expected,
@@ -227,6 +271,10 @@ static int test_socket_expect(
     );
 }
 
+/**
+ * On input.
+ * @return None.
+ */
 static void on_input(const kc_netl_input_t *input, void *userdata) {
     callback_state_t *state = (callback_state_t *)userdata;
     int index = atomic_load(&state->input_count);
@@ -256,18 +304,30 @@ static void on_input(const kc_netl_input_t *input, void *userdata) {
     atomic_fetch_add(&state->input_count, 1);
 }
 
+/**
+ * On close.
+ * @return None.
+ */
 static void on_close(kc_netl_peer_t *peer, void *userdata) {
     callback_state_t *state = (callback_state_t *)userdata;
     (void)peer;
     atomic_fetch_add(&state->close_count, 1);
 }
 
+/**
+ * On error.
+ * @return None.
+ */
 static void on_error(int status, void *userdata) {
     callback_state_t *state = (callback_state_t *)userdata;
     (void)status;
     atomic_fetch_add(&state->error_count, 1);
 }
 
+/**
+ * State init.
+ * @return None.
+ */
 static void state_init(callback_state_t *state) {
     memset(state, 0, sizeof(*state));
     atomic_init(&state->input_count, 0);
@@ -276,6 +336,10 @@ static void state_init(callback_state_t *state) {
     atomic_init(&state->udp_reply, 0);
 }
 
+/**
+ * Kc netl open.
+ * @return Function result.
+ */
 static int case_kc_netl_open(void) {
     kc_netl_options_t options;
     kc_netl_t *listener = (kc_netl_t *)1;
@@ -326,6 +390,10 @@ static int case_kc_netl_open(void) {
     return fail != 0;
 }
 
+/**
+ * Kc netl tcp.
+ * @return Function result.
+ */
 static int case_kc_netl_tcp(void) {
     kc_netl_options_t options;
     kc_netl_t *listener = NULL;
@@ -428,6 +496,10 @@ static int case_kc_netl_tcp(void) {
     return fail != 0;
 }
 
+/**
+ * Kc netl udp.
+ * @return Function result.
+ */
 static int case_kc_netl_udp(void) {
     kc_netl_options_t options;
     kc_netl_t *listener = NULL;
@@ -505,6 +577,10 @@ static int case_kc_netl_udp(void) {
     return fail != 0;
 }
 
+/**
+ * Kc netl status.
+ * @return Function result.
+ */
 static int case_kc_netl_status(void) {
     int fail = 0;
 
@@ -531,6 +607,10 @@ static int case_kc_netl_status(void) {
     return fail != 0;
 }
 
+/**
+ * Cli path.
+ * @return Function result.
+ */
 static int test_cli_path(char *out, size_t cap) {
     const char *slash;
     const char *backslash;
@@ -565,6 +645,10 @@ static int test_cli_path(char *out, size_t cap) {
     return 0;
 }
 
+/**
+ * Read file.
+ * @return Function result.
+ */
 static int test_read_file(
     const char *path,
     unsigned char **out,
@@ -606,6 +690,10 @@ static int test_read_file(
     return 0;
 }
 
+/**
+ * Cli run.
+ * @return Function result.
+ */
 static int test_cli_run(
     const char *arg,
     unsigned char **out,
@@ -732,6 +820,10 @@ static int test_cli_run(
     return rc;
 }
 
+/**
+ * Kc netl cli.
+ * @return Function result.
+ */
 static int case_kc_netl_cli(void) {
     unsigned char *out = NULL;
     unsigned char *err = NULL;
@@ -766,6 +858,10 @@ static int case_kc_netl_cli(void) {
     return fail != 0;
 }
 
+/**
+ * All.
+ * @return Function result.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -780,6 +876,10 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Main.
+ * @return Function result.
+ */
 int main(int argc, char **argv) {
     test_program_path = argv[0];
 
