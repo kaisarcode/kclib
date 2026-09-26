@@ -1,66 +1,132 @@
-# wvw.c - native WebView window
+# wvw.c - Native WebView Window
 
-`libwvw` exposes one persistent native WebView window on Windows, Linux and
-macOS. The public API is designed as the direct programmatic surface used by C
-and FFI consumers: `kc_wvw_open()` returns an operational WebView and there is
-no caller-visible run, loop, wait or stop step.
+`wvw.c` provides a reusable native WebView window library with a CLI consumer,
+portable contract tests, and platform backends for Windows, Linux, and macOS.
 
-The standalone `wvw` executable is a small consumer of the same public API.
-As a terminal program it blocks until its window closes; that waiting behavior
-is private to the CLI and is not part of `libwvw.h`.
+The native backends are WebView2 on Windows, WebKitGTK on Linux, and WKWebView
+on macOS.
 
-Backends are WebView2 on Windows, WebKitGTK on Linux and WKWebView on macOS.
+---
+
+## CLI
+
+Open a URL with the default window settings:
+
+```bash
+./bin/x86_64/linux/wvw --url https://example.com
+```
+
+Set the title, size, and position:
+
+```bash
+./bin/x86_64/linux/wvw \
+    --url https://example.com \
+    --title Example \
+    --width 1280 \
+    --height 720 \
+    --posx 100 \
+    --posy 100
+```
+
+### Parameters
+
+| Flag | Description |
+| :--- | :--- |
+| `--url <url>` | Initial URL |
+| `--title <title>` | Window title |
+| `--background <hex>` | Background as `RRGGBB` or `AARRGGBB` |
+| `--width <px>` | Initial window width |
+| `--height <px>` | Initial window height |
+| `--posx <px>` | Initial horizontal position |
+| `--posy <px>` | Initial vertical position |
+| `--fullscreen` | Start in fullscreen mode |
+| `--borderless` | Start without window decorations |
+| `--always-on-top` | Keep the window above normal windows |
+| `--click-through` | Ignore mouse input on the host window |
+| `--no-focus` | Do not activate the window for keyboard focus |
+| `-h`, `--help` | Show help and usage |
+| `-v`, `--version` | Show version |
+
+The CLI is a thin consumer of the reusable public API. It blocks until the
+window closes, but that waiting behavior is private to the CLI.
+
+The same settings can be supplied through environment variables:
+
+```text
+KC_WVW_URL
+KC_WVW_TITLE
+KC_WVW_BACKGROUND
+KC_WVW_WIDTH
+KC_WVW_HEIGHT
+KC_WVW_POSX
+KC_WVW_POSY
+KC_WVW_FULLSCREEN
+KC_WVW_BORDERLESS
+KC_WVW_ALWAYS_ON_TOP
+KC_WVW_CLICK_THROUGH
+KC_WVW_NO_FOCUS
+```
+
+Command-line arguments override environment defaults.
+
+---
 
 ## Public API
-
-A minimal window can be opened with borrowed input options:
 
 ```c
 #include "libwvw.h"
 
 kc_wvw_t *wvw = NULL;
+int width = 800;
+int height = 600;
+int posx = 100;
+int posy = 100;
+
 kc_wvw_options_t options = {
     .url = "https://example.com",
-    .title = "Example"
+    .title = "Example",
+    .width = &width,
+    .height = &height,
+    .posx = &posx,
+    .posy = &posy
 };
 
 if (kc_wvw_open(&wvw, &options) != KC_WVW_OK) {
     const char *error = kc_wvw_get_error(wvw);
-    /* handle error */
+    kc_wvw_close(wvw);
+    return 1;
 }
 
-/* The WebView is already operational here. */
 kc_wvw_set_title(wvw, "Ready");
+kc_wvw_set_size(wvw, 1024, 768);
+kc_wvw_set_position(wvw, 200, 150);
 kc_wvw_navigate(wvw, "https://kaisarcode.com");
 
 kc_wvw_close(wvw);
 ```
 
-Input strings and scalar option values needed after `open` returns are copied
-by the library. `url` is required. Omitted `width` and `height` use
-1280x720. Omitted positions use native placement. Omitted boolean options are
-false.
+`kc_wvw_open()` returns an operational WebView. The caller does not need to
+run a public event loop after opening it.
 
-Scalar option pointers make omission different from an explicit zero:
+`url` is required. Omitted width and height use 1280x720. Omitted position
+values use native placement. Omitted boolean options are false.
 
-```c
-int width = 800;
-int fullscreen = 0;
-
-kc_wvw_options_t options = {
-    .url = "file:///tmp/app.html",
-    .width = &width,
-    .fullscreen = &fullscreen
-};
-```
-
-The public window operations are:
+The public window API includes:
 
 ```c
+int kc_wvw_open(kc_wvw_t **out, const kc_wvw_options_t *options);
+const char *kc_wvw_get_error(const kc_wvw_t *wvw);
+
 int kc_wvw_navigate(kc_wvw_t *wvw, const char *url);
+int kc_wvw_add_init_script(kc_wvw_t *wvw, const char *javascript);
+int kc_wvw_enable_bridge(
+    kc_wvw_t *wvw,
+    const kc_wvw_bridge_options_t *options
+);
+int kc_wvw_post_bridge_event(kc_wvw_t *wvw, const char *json);
 
-int kc_wvw_show(kc_wvw_t *wvw);
 int kc_wvw_hide(kc_wvw_t *wvw);
+int kc_wvw_show(kc_wvw_t *wvw);
 int kc_wvw_minimize(kc_wvw_t *wvw);
 int kc_wvw_maximize(kc_wvw_t *wvw);
 int kc_wvw_restore(kc_wvw_t *wvw);
@@ -69,10 +135,18 @@ int kc_wvw_set_title(kc_wvw_t *wvw, const char *title);
 const char *kc_wvw_get_title(const kc_wvw_t *wvw);
 
 int kc_wvw_set_size(kc_wvw_t *wvw, int width, int height);
-int kc_wvw_get_size(const kc_wvw_t *wvw, int *out_width, int *out_height);
+int kc_wvw_get_size(
+    const kc_wvw_t *wvw,
+    int *out_width,
+    int *out_height
+);
 
 int kc_wvw_set_position(kc_wvw_t *wvw, int x, int y);
-int kc_wvw_get_position(const kc_wvw_t *wvw, int *out_x, int *out_y);
+int kc_wvw_get_position(
+    const kc_wvw_t *wvw,
+    int *out_x,
+    int *out_y
+);
 
 int kc_wvw_is_visible(const kc_wvw_t *wvw);
 int kc_wvw_is_minimized(const kc_wvw_t *wvw);
@@ -80,50 +154,20 @@ int kc_wvw_is_maximized(const kc_wvw_t *wvw);
 int kc_wvw_is_fullscreen(const kc_wvw_t *wvw);
 
 void kc_wvw_close(kc_wvw_t *wvw);
+uint64_t kc_wvw_version(void);
 ```
 
-Actions remain actions. Named value properties use `set_*` and `get_*`.
-This includes both window size and window position. Boolean properties use `is_*`. There is no aggregate `get_state()`: each
-query says directly what it returns.
+Actions remain actions. Named properties use `set_*` and `get_*`.
+Boolean window properties use `is_*`.
 
 `kc_wvw_get_title()` and `kc_wvw_get_error()` return borrowed strings.
-The title is invalidated by the next successful title change or close. The
-error is contextual and invalidated by close.
 
-`kc_wvw_close(NULL)` is safe and ends the public lifetime of a non-NULL
-WebView.
+`kc_wvw_close(NULL)` is safe.
 
-## FFI shape
+### Native Bridge
 
-The public header is intentionally the FFI surface. Generated LuaJIT cdefs use
-the same C names, so the natural binding shape is mechanically equivalent to:
-
-```lua
-local view = wvw.open({
-    url = "file:///tmp/app.html",
-    title = "My app"
-})
-
-view:set_title("Ready")
-
-local title = view:get_title()
-local width, height = view:get_size()
-
-if view:is_visible() then
-    view:minimize()
-    view:restore()
-end
-
-view:close()
-```
-
-There is no `loop()`, `run()`, `wait()`, `start()` or `stop()` operation
-for programmatic consumers.
-
-## Native bridge
-
-The bridge is disabled by default. Applications explicitly install trusted
-document-start JavaScript and may enable a fixed method whitelist:
+The bridge is disabled by default. Applications can install document-start
+JavaScript and expose a fixed method whitelist to trusted content.
 
 ```c
 static int app_bridge(
@@ -148,6 +192,7 @@ static int app_bridge(
 }
 
 const char *methods[] = { "get_version" };
+
 kc_wvw_bridge_options_t bridge = {
     .methods = methods,
     .method_count = 1,
@@ -159,121 +204,120 @@ kc_wvw_add_init_script(wvw, "window.APP_VERSION = '1.0';");
 kc_wvw_enable_bridge(wvw, &bridge);
 ```
 
-The callback receives the method name and serialized JSON parameters exactly as
-strings. `out_result_json` is borrowed from the callback: `wvw` validates and
-uses it synchronously and never frees it. A NULL success result means JSON
-`null`. A non-NULL result must contain exactly one complete serialized JSON
-value.
+Bridge callback results are borrowed. The library validates and consumes the
+returned JSON synchronously and does not free it.
 
-The method array is copied when the bridge is enabled. Callback and userdata
-remain retained logically until `kc_wvw_close()`; the caller keeps userdata
-valid for that lifetime.
+When the bridge is active, navigation is restricted to trusted origins.
+`file:`, `data:`, and localhost access are controlled by the corresponding
+bridge options.
 
-When a bridge is active, remote navigation is blocked. `file:` and `data:`
-access require their corresponding bridge flags and localhost requires
-`allow_localhost`.
+### Window Options
 
-The page-side bridge keeps its existing `window.NativeBridge` surface and the
-`nativebridge` event. `kc_wvw_post_bridge_event()` sends one serialized JSON
-value as that event's detail.
+`background` accepts `RRGGBB` and `AARRGGBB`.
 
-## CLI
-
-```sh
-./bin/x86_64/linux/wvw --url https://example.com
-./bin/x86_64/linux/wvw --url https://example.com --title Example --width 1280 --height 720
-```
-
-Supported options:
-
-```text
---url <url>
---title <title>
---background <hex>
---width <px>
---height <px>
---posx <px>
---posy <px>
---fullscreen
---borderless
---always-on-top
---click-through
---no-focus
--h, --help
--v, --version
-```
-
-The environment provides CLI defaults and command-line arguments override them:
-
-```text
-KC_WVW_URL
-KC_WVW_TITLE
-KC_WVW_BACKGROUND
-KC_WVW_WIDTH
-KC_WVW_HEIGHT
-KC_WVW_POSX
-KC_WVW_POSY
-KC_WVW_FULLSCREEN
-KC_WVW_BORDERLESS
-KC_WVW_ALWAYS_ON_TOP
-KC_WVW_CLICK_THROUGH
-KC_WVW_NO_FOCUS
-```
-
-`KC_WVW_BROWSER_ARGS` remains available on Windows for explicit WebView2
-runtime diagnostics and experiments.
-
-The CLI intentionally blocks until its window closes. That behavior is
-implemented through a private CLI/library contract and is not exported by the
-public header or generated cdef.
-
-## Window options
-
-`background` accepts `RRGGBB` and `AARRGGBB`. Transparent
-`AARRGGBB` requests a best-effort transparent host surface. On Windows,
-WebView2 supports startup alpha values 00 or FF; Linux and macOS use their
-native compositor/WebView facilities.
-
-`always_on_top`, `click_through` and `no_focus` are initial host-window
-properties intended for overlay-style applications.
+`always_on_top`, `click_through`, and `no_focus` configure the native host
+window at startup.
 
 `KC_WVW_TITLE_MAX` is 4096 bytes and `KC_WVW_SIZE_MAX` is 16384 pixels.
 
-## Build and tests
+---
 
-```sh
+## Build
+
+Compiled artifacts are generated under `bin/{arch}/{platform}/`.
+
+```bash
+make
+```
+
+A plain `make` builds the current host target.
+
+### Tests
+
+Build project artifacts first, then run the native contract suite:
+
+```bash
 make
 make test
 ```
 
-Windows-through-Wine tests use:
+The test suite validates the reusable public API and one grouped CLI case.
 
-```sh
+To run the Windows contract suite through Wine:
+
+```bash
 make x86_64/windows
 make test wine
 ```
 
-The grouped contract includes `kc_wvw_cli`, which verifies help, version,
-missing URL, unknown options, missing values and invalid integer values without
-opening a GUI window.
+### Multiarch Builds
 
-WASM is not applicable because this library's capability is a native desktop
-host window containing a platform WebView.
+`make all` builds all configured targets:
 
-Artifacts are written under `bin/{arch}/{platform}/`.
+```bash
+make all
+make x86_64/linux
+make x86_64/windows
+make x86_64/macos
+make aarch64/macos
+```
 
-## Platform notes
+WebAssembly is not supported because this library provides a native desktop
+window backed by a platform WebView.
 
-Windows uses Microsoft Edge WebView2 and requires the Evergreen Runtime.
-Distributions place `WebView2Loader.dll` beside `wvw.exe` and
-`libwvw.dll`.
+---
 
-Linux requires GTK 3 and WebKitGTK 4.1.
+## Development Requirements
 
-macOS uses AppKit and WKWebView and requires calls that touch AppKit to originate
-from the main thread. The standalone CLI owns its normal AppKit application
-loop itself.
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` with C11 support
+
+### Linux
+
+- GTK 3
+- WebKitGTK 4.1
+- `pkg-config`
+
+### Windows
+
+- MinGW for cross-compilation on Linux.
+- Microsoft Edge WebView2 Runtime for execution.
+- `wine` for Windows tests on Linux.
+
+The Windows build places `WebView2Loader.dll` beside the generated executable
+and shared library.
+
+### macOS
+
+- AppKit
+- WebKit
+- Foundation
+- `osxcross` with a compatible Apple SDK when cross-compiling from Linux
+
+macOS window operations must run from the main thread.
+
+---
+
+## Beta Notice
+
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
+
+---
 
 ## License
 
-This project is distributed under the GNU General Public License version 3.
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
