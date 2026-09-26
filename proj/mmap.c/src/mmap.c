@@ -20,15 +20,14 @@
  * @return None.
  */
 static void print_help(void) {
-    printf("Usage:\n");
-    printf("  mmap <path> -get|--get\n");
-    printf("  mmap <path> -set|--set [value]\n");
-    printf("  mmap <path> -del|--del\n");
-    printf("  mmap -h, --help\n");
-    printf("  mmap -v, --version\n");
+    printf("Usage: mmap <path> <-get|--get|-set|--set|-del|--del> [value]\n");
     printf("\n");
-    printf("Input:\n");
-    printf("  value  Optional direct value for set; stdin is used when omitted\n");
+    printf("Options:\n");
+    printf("  -get, --get          Read the stored value\n");
+    printf("  -set, --set [value]  Store value (stdin when omitted)\n");
+    printf("  -del, --del          Delete the stored value\n");
+    printf("  -h, --help           Show this help\n");
+    printf("  -v, --version        Show version\n");
 }
 
 /**
