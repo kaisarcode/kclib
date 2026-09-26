@@ -112,15 +112,35 @@ static int expect_str(const char *name, const char *expected,
 #endif
 
 /**
- * Sets the isolated trust state directory for a test.
- * @param dir State directory.
+ * Sets one isolated trust state directory under the system temp path.
+ * @param dir Test directory name.
  * @return 0 on success, or a platform error code.
  */
 static int test_set_dir(const char *dir) {
+    char path[4096];
+    const char *name = dir;
+
+    if (!dir || !dir[0]) return 1;
+    if (name[0] == '.') name++;
+
 #ifdef _WIN32
-    return _putenv_s("KC_TRUST_DIR", dir);
+    {
+        char temp[MAX_PATH];
+        DWORD len = GetTempPathA((DWORD)sizeof(temp), temp);
+
+        if (len == 0 || len >= sizeof(temp)) return 1;
+        if (snprintf(path, sizeof(path), "%strust-%lu-%s",
+            temp, (unsigned long)GetCurrentProcessId(), name) < 0) {
+            return 1;
+        }
+    }
+    return _putenv_s("KC_TRUST_DIR", path);
 #else
-    return setenv("KC_TRUST_DIR", dir, 1);
+    if (snprintf(path, sizeof(path), "/tmp/trust-%ld-%s",
+        (long)getpid(), name) < 0) {
+        return 1;
+    }
+    return setenv("KC_TRUST_DIR", path, 1);
 #endif
 }
 
