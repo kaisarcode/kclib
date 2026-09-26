@@ -59,8 +59,11 @@ typedef enum {
     KC_WVW_OP_NAVIGATE, KC_WVW_OP_ADD_INIT_SCRIPT, KC_WVW_OP_ENABLE_BRIDGE,
     KC_WVW_OP_POST_BRIDGE_EVENT, KC_WVW_OP_HIDE, KC_WVW_OP_SHOW,
     KC_WVW_OP_MINIMIZE, KC_WVW_OP_MAXIMIZE, KC_WVW_OP_RESTORE,
-    KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE,
-    KC_WVW_OP_GET_SIZE, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
+    KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE, KC_WVW_OP_GET_SIZE, KC_WVW_OP_SET_POSITION, KC_WVW_OP_GET_POSITION,
+    KC_WVW_OP_SET_POSITION,
+    KC_WVW_OP_GET_POSITION,
+    KC_WVW_OP_SET_POSITION,
+    KC_WVW_OP_GET_POSITION, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
     KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN, KC_WVW_OP_CLOSE
 } kc_wvw_op_kind_t;
 
@@ -2471,6 +2474,38 @@ static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
     return KC_WVW_OK;
 }
 
+static int kc_wvw_set_position_impl(kc_wvw_t *ctx, int x, int y) {
+    RECT rect;
+
+    if (!ctx || !ctx->hwnd) return KC_WVW_ERROR;
+    if (!GetWindowRect(ctx->hwnd, &rect)) return KC_WVW_ERROR;
+    if (!SetWindowPos(ctx->hwnd, NULL, x, y,
+            rect.right - rect.left, rect.bottom - rect.top,
+            SWP_NOZORDER | SWP_NOSIZE)) {
+        return KC_WVW_ERROR;
+    }
+    ctx->opts.posx = x;
+    ctx->opts.posy = y;
+    ctx->opts.has_posx = 1;
+    ctx->opts.has_posy = 1;
+    return KC_WVW_OK;
+}
+
+static int kc_wvw_get_position_impl(kc_wvw_t *ctx, int *out_x, int *out_y) {
+    RECT rect;
+
+    if (!ctx || !ctx->hwnd || !out_x || !out_y) return KC_WVW_ERROR;
+    if (!GetWindowRect(ctx->hwnd, &rect)) return KC_WVW_ERROR;
+    ctx->opts.posx = rect.left;
+    ctx->opts.posy = rect.top;
+    ctx->opts.has_posx = 1;
+    ctx->opts.has_posy = 1;
+    *out_x = ctx->opts.posx;
+    *out_y = ctx->opts.posy;
+    return KC_WVW_OK;
+}
+
+
 /**
  * Query the current window state.
  * @param ctx Window context.
@@ -2923,8 +2958,11 @@ typedef enum {
     KC_WVW_OP_NAVIGATE, KC_WVW_OP_ADD_INIT_SCRIPT, KC_WVW_OP_ENABLE_BRIDGE,
     KC_WVW_OP_POST_BRIDGE_EVENT, KC_WVW_OP_HIDE, KC_WVW_OP_SHOW,
     KC_WVW_OP_MINIMIZE, KC_WVW_OP_MAXIMIZE, KC_WVW_OP_RESTORE,
-    KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE,
-    KC_WVW_OP_GET_SIZE, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
+    KC_WVW_OP_SET_TITLE, KC_WVW_OP_GET_TITLE, KC_WVW_OP_SET_SIZE, KC_WVW_OP_GET_SIZE, KC_WVW_OP_SET_POSITION, KC_WVW_OP_GET_POSITION,
+    KC_WVW_OP_SET_POSITION,
+    KC_WVW_OP_GET_POSITION,
+    KC_WVW_OP_SET_POSITION,
+    KC_WVW_OP_GET_POSITION, KC_WVW_OP_IS_VISIBLE, KC_WVW_OP_IS_MINIMIZED,
     KC_WVW_OP_IS_MAXIMIZED, KC_WVW_OP_IS_FULLSCREEN, KC_WVW_OP_CLOSE
 } kc_wvw_op_kind_t;
 
@@ -2991,6 +3029,8 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
 static void kc_wvw_request_close(kc_wvw_t *ctx);
 static int kc_wvw_navigate_impl(kc_wvw_t *ctx, const char *url);
 static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state);
+static int kc_wvw_set_position_impl(kc_wvw_t *ctx, int x, int y);
+static int kc_wvw_get_position_impl(kc_wvw_t *ctx, int *out_x, int *out_y);
 
 /**
  * Sets an error message on the context.
@@ -4714,6 +4754,42 @@ static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
     return KC_WVW_OK;
 }
 
+static int kc_wvw_set_position_impl(kc_wvw_t *ctx, int x, int y) {
+    if (!ctx || !ctx->ns_window) return KC_WVW_ERROR;
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        NSRect frame = [window frame];
+        NSScreen *screen = [window screen] ?: [NSScreen mainScreen];
+        NSRect visible = [screen visibleFrame];
+        frame.origin.x = (CGFloat)x;
+        frame.origin.y = NSMaxY(visible) - (CGFloat)y - frame.size.height;
+        [window setFrameOrigin:frame.origin];
+    }
+    ctx->opts.posx = x;
+    ctx->opts.posy = y;
+    ctx->opts.has_posx = 1;
+    ctx->opts.has_posy = 1;
+    return KC_WVW_OK;
+}
+
+static int kc_wvw_get_position_impl(kc_wvw_t *ctx, int *out_x, int *out_y) {
+    if (!ctx || !ctx->ns_window || !out_x || !out_y) return KC_WVW_ERROR;
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        NSRect frame = [window frame];
+        NSScreen *screen = [window screen] ?: [NSScreen mainScreen];
+        NSRect visible = [screen visibleFrame];
+        ctx->opts.posx = (int)frame.origin.x;
+        ctx->opts.posy = (int)(NSMaxY(visible) - frame.origin.y - frame.size.height);
+    }
+    ctx->opts.has_posx = 1;
+    ctx->opts.has_posy = 1;
+    *out_x = ctx->opts.posx;
+    *out_y = ctx->opts.posy;
+    return KC_WVW_OK;
+}
+
+
 /**
  * Query the current window state.
  * @param ctx Window context.
@@ -5336,6 +5412,31 @@ static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
     return KC_WVW_OK;
 }
 
+static int kc_wvw_set_position_impl(kc_wvw_t *ctx, int x, int y) {
+    if (!ctx || !ctx->window) return KC_WVW_ERROR;
+    gtk_window_move(GTK_WINDOW(ctx->window), x, y);
+    ctx->opts.posx = x;
+    ctx->opts.posy = y;
+    ctx->opts.has_posx = 1;
+    ctx->opts.has_posy = 1;
+    return KC_WVW_OK;
+}
+
+static int kc_wvw_get_position_impl(kc_wvw_t *ctx, int *out_x, int *out_y) {
+    int x, y;
+
+    if (!ctx || !ctx->window || !out_x || !out_y) return KC_WVW_ERROR;
+    gtk_window_get_position(GTK_WINDOW(ctx->window), &x, &y);
+    ctx->opts.posx = x;
+    ctx->opts.posy = y;
+    ctx->opts.has_posx = 1;
+    ctx->opts.has_posy = 1;
+    *out_x = x;
+    *out_y = y;
+    return KC_WVW_OK;
+}
+
+
 /**
  * Query the current window state.
  * @param ctx Window context.
@@ -5381,6 +5482,8 @@ static int kc_wvw_execute_op(kc_wvw_t *ctx,kc_wvw_op_t *op){
     case KC_WVW_OP_SET_TITLE:return kc_wvw_set_title_impl(ctx,op->text);case KC_WVW_OP_GET_TITLE:op->out_text=ctx->opts.title;return op->out_text?KC_WVW_OK:KC_WVW_ERROR;
     case KC_WVW_OP_SET_SIZE:return kc_wvw_set_size_impl(ctx,op->a,op->b);
     case KC_WVW_OP_GET_SIZE:if(!op->out_a||!op->out_b||kc_wvw_get_state_impl(ctx,&state)!=KC_WVW_OK)return KC_WVW_ERROR;*op->out_a=state.width;*op->out_b=state.height;return KC_WVW_OK;
+    case KC_WVW_OP_SET_POSITION:return kc_wvw_set_position_impl(ctx,op->a,op->b);
+    case KC_WVW_OP_GET_POSITION:return kc_wvw_get_position_impl(ctx,op->out_a,op->out_b);
     case KC_WVW_OP_IS_VISIBLE:case KC_WVW_OP_IS_MINIMIZED:case KC_WVW_OP_IS_MAXIMIZED:case KC_WVW_OP_IS_FULLSCREEN:
         if(kc_wvw_get_state_impl(ctx,&state)!=KC_WVW_OK)return KC_WVW_ERROR;
         op->a=op->kind==KC_WVW_OP_IS_VISIBLE?state.visible:op->kind==KC_WVW_OP_IS_MINIMIZED?state.minimized:op->kind==KC_WVW_OP_IS_MAXIMIZED?state.maximized:state.fullscreen;return KC_WVW_OK;
@@ -5399,5 +5502,7 @@ int kc_wvw_set_title(kc_wvw_t *ctx,const char *title){kc_wvw_op_t op={0};op.kind
 const char *kc_wvw_get_title(const kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_TITLE;if(kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op)!=KC_WVW_OK)return NULL;return op.out_text;}
 int kc_wvw_set_size(kc_wvw_t *ctx,int w,int h){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_SIZE;op.a=w;op.b=h;return kc_wvw_dispatch_op(ctx,&op);}
 int kc_wvw_get_size(const kc_wvw_t *ctx,int *w,int *h){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_SIZE;op.out_a=w;op.out_b=h;return kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op);}
+int kc_wvw_set_position(kc_wvw_t *ctx,int x,int y){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_POSITION;op.a=x;op.b=y;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_get_position(const kc_wvw_t *ctx,int *x,int *y){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_POSITION;op.out_a=x;op.out_b=y;return kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op);}
 static int kc_wvw_bool_query(const kc_wvw_t *ctx,kc_wvw_op_kind_t k){kc_wvw_op_t op={0};op.kind=k;if(kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op)!=KC_WVW_OK)return 0;return !!op.a;}
 int kc_wvw_is_visible(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_VISIBLE);}int kc_wvw_is_minimized(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_MINIMIZED);}int kc_wvw_is_maximized(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_MAXIMIZED);}int kc_wvw_is_fullscreen(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_FULLSCREEN);}
