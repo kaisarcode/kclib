@@ -86,7 +86,13 @@ static int expect_true(const char *label, int value) {
  */
 static int expect_int(const char *label, int expected, int actual) {
     if (expected == actual) return 0;
-    fprintf(stderr, "FAIL: %s expected=%d actual=%d\n", label, expected, actual);
+    fprintf(
+        stderr,
+        "FAIL: %s expected=%d actual=%d\n",
+        label,
+        expected,
+        actual
+    );
     return 1;
 }
 
@@ -382,7 +388,10 @@ static int case_kc_netl_open(void) {
         kc_netl_open(&listener, &options, on_input, on_close, on_error, &state)
     );
     fail += expect_true("listener allocated", listener != NULL);
-    fail += expect_true("ephemeral port selected", kc_netl_port(listener) != 0U);
+    fail += expect_true(
+        "ephemeral port selected",
+        kc_netl_port(listener) != 0U
+    );
     kc_netl_close(listener);
     kc_netl_close(NULL);
 
@@ -434,7 +443,11 @@ static int case_kc_netl_tcp(void) {
 
     (void)send(client_a, "A", 1, 0);
     (void)send(client_b, "B", 1, 0);
-    fail += expect_int("two TCP inputs", 0, wait_atomic_at_least(&state.input_count, 2));
+    fail += expect_int(
+        "two TCP inputs",
+        0,
+        wait_atomic_at_least(&state.input_count, 2)
+    );
 
     for (i = 0; i < 2; i++) {
         fail += expect_int("TCP protocol", KC_NETL_TCP, state.protocols[i]);
@@ -463,10 +476,20 @@ static int case_kc_netl_tcp(void) {
     }
 
     (void)send(client_b, "still", 5, 0);
-    fail += expect_int("third TCP input", 0, wait_atomic_at_least(&state.input_count, 3));
+    fail += expect_int(
+        "third TCP input",
+        0,
+        wait_atomic_at_least(&state.input_count, 3)
+    );
     if (atomic_load(&state.input_count) >= 3) {
         fail += expect_true("B peer retained", state.peers[2] == peer_b);
-        fail += expect_bytes("B next bytes", "still", 5U, state.data[2], state.sizes[2]);
+        fail += expect_bytes(
+            "B next bytes",
+            "still",
+            5U,
+            state.data[2],
+            state.sizes[2]
+        );
     }
 
     if (peer_a != NULL) {
@@ -477,13 +500,24 @@ static int case_kc_netl_tcp(void) {
         );
         kc_netl_peer_close(peer_a);
         fail += test_socket_expect(client_a, "bye", 3U);
-        fail += expect_int("A close callback", 0, wait_atomic_at_least(&state.close_count, 1));
+        fail += expect_int(
+            "A close callback",
+            0,
+            wait_atomic_at_least(&state.close_count, 1)
+        );
     }
 
     (void)send(client_b, "ok", 2, 0);
-    fail += expect_int("B stays active", 0, wait_atomic_at_least(&state.input_count, 4));
+    fail += expect_int(
+        "B stays active",
+        0,
+        wait_atomic_at_least(&state.input_count, 4)
+    );
     if (atomic_load(&state.input_count) >= 4) {
-        fail += expect_true("B identity still retained", state.peers[3] == peer_b);
+        fail += expect_true(
+            "B identity still retained",
+            state.peers[3] == peer_b
+        );
     }
 
     TEST_CLOSE(client_a);
@@ -492,7 +526,11 @@ static int case_kc_netl_tcp(void) {
     fail += expect_int("no listener error", 0, atomic_load(&state.error_count));
 
     kc_netl_close(listener);
-    case_result(fail, "kc_netl_tcp", "delivers peer-scoped TCP input and responses");
+    case_result(
+        fail,
+        "kc_netl_tcp",
+        "delivers peer-scoped TCP input and responses"
+    );
     return fail != 0;
 }
 
@@ -555,12 +593,22 @@ static int case_kc_netl_udp(void) {
         )
     );
 
-    fail += expect_int("UDP callback", 0, wait_atomic_at_least(&state.input_count, 1));
+    fail += expect_int(
+        "UDP callback",
+        0,
+        wait_atomic_at_least(&state.input_count, 1)
+    );
     fail += expect_int("UDP protocol", KC_NETL_UDP, state.protocols[0]);
     fail += expect_true("UDP peer present", state.peers[0] != NULL);
     fail += expect_true("UDP host present", state.hosts[0][0] != '\0');
     fail += expect_true("UDP port present", state.ports[0] != 0U);
-    fail += expect_bytes("UDP input bytes", "ping", 4U, state.data[0], state.sizes[0]);
+    fail += expect_bytes(
+        "UDP input bytes",
+        "ping",
+        4U,
+        state.data[0],
+        state.sizes[0]
+    );
 
     received = recv(client, response, (int)sizeof(response), 0);
     fail += expect_int("UDP response size", 4, received);
@@ -568,12 +616,20 @@ static int case_kc_netl_udp(void) {
         fail += expect_bytes("UDP response", "pong", 4U, response, 4U);
     }
 
-    fail += expect_int("UDP has no close callback", 0, atomic_load(&state.close_count));
+    fail += expect_int(
+        "UDP has no close callback",
+        0,
+        atomic_load(&state.close_count)
+    );
     fail += expect_int("no listener error", 0, atomic_load(&state.error_count));
 
     TEST_CLOSE(client);
     kc_netl_close(listener);
-    case_result(fail, "kc_netl_udp", "responds to the exact UDP origin without sendto");
+    case_result(
+        fail,
+        "kc_netl_udp",
+        "responds to the exact UDP origin without sendto"
+    );
     return fail != 0;
 }
 
@@ -603,7 +659,11 @@ static int case_kc_netl_status(void) {
     );
     (void)kc_netl_version();
 
-    case_result(fail, "kc_netl_status", "maps status values and exposes build version");
+    case_result(
+        fail,
+        "kc_netl_status",
+        "maps status values and exposes build version"
+    );
     return fail != 0;
 }
 
@@ -854,7 +914,11 @@ static int case_kc_netl_cli(void) {
     free(out);
     free(err);
 
-    case_result(fail, "kc_netl_cli", "preserves help, version, and argument contract");
+    case_result(
+        fail,
+        "kc_netl_cli",
+        "preserves help, version, and argument contract"
+    );
     return fail != 0;
 }
 
