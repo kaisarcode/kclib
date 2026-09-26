@@ -1,6 +1,6 @@
 /**
- * flow.h - Branch-oriented flow runtime API.
- * Summary: Public API for opening flows and running independent branches.
+ * libflow.h - Branch-oriented flow runtime API.
+ * Summary: Public API for reusable flow templates and cancellable executions.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -25,7 +25,27 @@ typedef struct kc_flow_run kc_flow_run_t;
 #define KC_FLOW_ESTOP -2
 
 /**
- * Open one flow from an existing flow file.
+ * Receive the terminal result of one flow run.
+ * A successful non-empty data buffer is caller-owned and released with
+ * kc_flow_free(). Empty success and non-success statuses provide NULL data with
+ * size zero. Error is borrowed for the callback duration and is NULL on success.
+ * @param status KC_FLOW_OK, KC_FLOW_ESTOP, or KC_FLOW_ERROR.
+ * @param data Owned successful output, or NULL.
+ * @param data_size Output size.
+ * @param error Borrowed contextual error for non-success, or NULL.
+ * @param userdata Caller-provided callback data.
+ * @return None.
+ */
+typedef void (*kc_flow_handler_t)(
+    int status,
+    void *data,
+    size_t data_size,
+    const char *error,
+    void *userdata
+);
+
+/**
+ * Open one reusable flow template from an existing flow file.
  * The path is copied. Ordered set/unset overrides remain local to this flow
  * and do not modify the source file.
  * @param out Pointer to receive flow pointer.
@@ -54,12 +74,16 @@ int kc_flow_unset(kc_flow_t *flow, const char *key);
 /**
  * Start one independent run of the opened flow.
  * The run snapshots the opened path, ordered overrides, optional entry, and
- * input before returning. Execution continues in its own context.
+ * input before returning. A successful launch produces exactly one terminal
+ * callback. The handler and userdata must remain valid until that callback
+ * returns.
  * @param flow Flow pointer.
  * @param out_run Pointer to receive run pointer.
  * @param entry Optional entry node reference, or NULL for declared entries.
  * @param input Optional input buffer.
  * @param input_size Input buffer size.
+ * @param handler Required terminal result handler.
+ * @param userdata Caller data passed unchanged to handler.
  * @return KC_FLOW_OK when the run starts, or KC_FLOW_ERROR.
  */
 int kc_flow_run(
@@ -67,7 +91,9 @@ int kc_flow_run(
     kc_flow_run_t **out_run,
     const char *entry,
     const void *input,
-    size_t input_size
+    size_t input_size,
+    kc_flow_handler_t handler,
+    void *userdata
 );
 
 /**
@@ -80,38 +106,16 @@ int kc_flow_run(
 int kc_flow_run_stop(kc_flow_run_t *run);
 
 /**
- * Wait for one run to complete and receive its final output.
- * Successful non-empty output is caller-owned and released with kc_flow_free.
- * Empty success and non-success statuses return NULL with size zero.
- * @param run Run pointer.
- * @param out_data Pointer to receive owned output.
- * @param out_size Pointer to receive output size.
- * @return KC_FLOW_OK, KC_FLOW_ESTOP, or KC_FLOW_ERROR.
- */
-int kc_flow_run_wait(
-    kc_flow_run_t *run,
-    void **out_data,
-    size_t *out_size
-);
-
-/**
- * Return the contextual error for one run.
- * The string is borrowed until the run is closed.
- * @param run Run pointer.
- * @return Borrowed error string, or NULL for NULL.
- */
-const char *kc_flow_run_error(const kc_flow_run_t *run);
-
-/**
  * Release one run. NULL is safe.
- * An unfinished run is cooperatively stopped and joined before release.
+ * An unfinished run is cooperatively stopped and joined before release. Call
+ * this only outside the terminal callback.
  * @param run Run pointer.
  * @return None.
  */
 void kc_flow_run_close(kc_flow_run_t *run);
 
 /**
- * Release one output buffer returned by kc_flow_run_wait. NULL is safe.
+ * Release one successful output buffer received by a run handler. NULL is safe.
  * @param ptr Owned output buffer.
  * @return None.
  */
