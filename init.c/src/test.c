@@ -260,7 +260,7 @@ static int fixture_create(char *out, size_t cap) {
  */
 static int case_kc_init_create(void) {
     const char *name = "kc_init_create";
-    const char *detail = "validates startup registration input";
+    const char *detail = "validates create-or-replace registration input";
     kc_init_options_t options;
     int fail;
 
@@ -282,43 +282,70 @@ static int case_kc_init_create(void) {
         KC_INIT_ERROR,
         kc_init_create("../bad", &options)
     );
+    options.cmd = "echo a\necho b";
+    fail += expect_int(
+        "multiline command rejected",
+        KC_INIT_ERROR,
+        kc_init_create("entry", &options)
+    );
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Test kc_init_open.
+ * Test kc_init_get.
  * @return Zero on success, nonzero on failure.
  */
-static int case_kc_init_open(void) {
-    const char *name = "kc_init_open";
-    const char *detail = "opens one persistent registration";
-    kc_init_t *init;
+static int case_kc_init_get(void) {
+    const char *name = "kc_init_get";
+    const char *detail = "gets one complete registration by persistent name";
+    kc_init_entry_t *entry;
     char dir[1024] = {0};
     int fail;
 
-    init = NULL;
+    entry = NULL;
     fail = fixture_create(dir, sizeof(dir));
     if (!fail) {
         fail += expect_int(
-            "existing entry opens",
+            "existing entry gets",
             KC_INIT_OK,
-            kc_init_open(&init, "test-entry")
+            kc_init_get("test-entry", &entry)
         );
     }
-    fail += expect_true("handle exists", init != NULL);
-    kc_init_close(init);
-    init = NULL;
+    fail += expect_true("entry allocation exists", entry != NULL);
+    if (entry) {
+        fail += expect_true(
+            "name matches",
+            strcmp(entry->name, "test-entry") == 0
+        );
+        fail += expect_true(
+            "user matches",
+            strcmp(entry->user, "tester") == 0
+        );
+        fail += expect_true(
+            "command matches",
+            strcmp(entry->cmd, "echo init-test") == 0
+        );
+    }
+    kc_init_free(entry);
+    entry = NULL;
+
     fail += expect_int(
         "missing entry reports NOT_FOUND",
         KC_INIT_NOT_FOUND,
-        kc_init_open(&init, "missing-entry")
+        kc_init_get("missing-entry", &entry)
     );
+    fail += expect_true("missing entry stays NULL", entry == NULL);
     fail += expect_int(
         "invalid name rejected",
         KC_INIT_ERROR,
-        kc_init_open(&init, "../bad")
+        kc_init_get("../bad", &entry)
+    );
+    fail += expect_int(
+        "NULL output rejected",
+        KC_INIT_ERROR,
+        kc_init_get("test-entry", NULL)
     );
 
     fixture_remove(dir);
@@ -400,160 +427,22 @@ static int case_kc_init_delete(void) {
 }
 
 /**
- * Test kc_init_set_cmd.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_init_set_cmd(void) {
-    const char *name = "kc_init_set_cmd";
-    const char *detail = "validates command updates on an opened entry";
-    kc_init_t *init;
-    char dir[1024] = {0};
-    int fail;
-
-    init = NULL;
-    fail = fixture_create(dir, sizeof(dir));
-    if (!fail) fail += kc_init_open(&init, "test-entry") != KC_INIT_OK;
-    if (init) {
-        fail += expect_int(
-            "NULL command rejected",
-            KC_INIT_ERROR,
-            kc_init_set_cmd(init, NULL)
-        );
-        fail += expect_int(
-            "multiline command rejected",
-            KC_INIT_ERROR,
-            kc_init_set_cmd(init, "echo a\necho b")
-        );
-    }
-    fail += expect_int(
-        "NULL handle rejected",
-        KC_INIT_ERROR,
-        kc_init_set_cmd(NULL, "echo ok")
-    );
-
-    kc_init_close(init);
-    fixture_remove(dir);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test kc_init_get_cmd.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_init_get_cmd(void) {
-    const char *name = "kc_init_get_cmd";
-    const char *detail = "returns the persisted startup command";
-    kc_init_t *init;
-    char dir[1024] = {0};
-    int fail;
-
-    init = NULL;
-    fail = fixture_create(dir, sizeof(dir));
-    if (!fail) fail += kc_init_open(&init, "test-entry") != KC_INIT_OK;
-    fail += expect_true(
-        "command matches",
-        init && strcmp(kc_init_get_cmd(init), "echo init-test") == 0
-    );
-    fail += expect_true("NULL handle", kc_init_get_cmd(NULL) == NULL);
-
-    kc_init_close(init);
-    fixture_remove(dir);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test kc_init_get_user.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_init_get_user(void) {
-    const char *name = "kc_init_get_user";
-    const char *detail = "returns the persisted registration user";
-    kc_init_t *init;
-    char dir[1024] = {0};
-    int fail;
-
-    init = NULL;
-    fail = fixture_create(dir, sizeof(dir));
-    if (!fail) fail += kc_init_open(&init, "test-entry") != KC_INIT_OK;
-    fail += expect_true(
-        "user matches",
-        init && strcmp(kc_init_get_user(init), "tester") == 0
-    );
-    fail += expect_true("NULL handle", kc_init_get_user(NULL) == NULL);
-
-    kc_init_close(init);
-    fixture_remove(dir);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test kc_init_error.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_init_error(void) {
-    const char *name = "kc_init_error";
-    const char *detail = "returns NULL for a fresh valid handle";
-    kc_init_t *init;
-    char dir[1024] = {0};
-    int fail;
-
-    init = NULL;
-    fail = fixture_create(dir, sizeof(dir));
-    if (!fail) fail += kc_init_open(&init, "test-entry") != KC_INIT_OK;
-    fail += expect_true("fresh error NULL", kc_init_error(init) == NULL);
-    fail += expect_true("NULL handle", kc_init_error(NULL) == NULL);
-
-    kc_init_close(init);
-    fixture_remove(dir);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Test kc_init_free.
  * @return Zero on success, nonzero on failure.
  */
 static int case_kc_init_free(void) {
     const char *name = "kc_init_free";
-    const char *detail = "releases list allocations and accepts NULL";
-    kc_init_entry_t *entries;
+    const char *detail = "releases returned allocations and accepts NULL";
+    kc_init_entry_t *entry;
     char dir[1024] = {0};
-    size_t count;
     int fail;
 
-    entries = NULL;
-    count = 0U;
+    entry = NULL;
     fail = fixture_create(dir, sizeof(dir));
-    if (!fail) fail += kc_init_list(&entries, &count) != KC_INIT_OK;
-    fail += expect_true("allocation exists", entries != NULL && count == 1U);
-    kc_init_free(entries);
+    if (!fail) fail += kc_init_get("test-entry", &entry) != KC_INIT_OK;
+    fail += expect_true("allocation exists", entry != NULL);
+    kc_init_free(entry);
     kc_init_free(NULL);
-    fixture_remove(dir);
-
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test kc_init_close.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_init_close(void) {
-    const char *name = "kc_init_close";
-    const char *detail = "releases a local handle and accepts NULL";
-    kc_init_t *init;
-    char dir[1024] = {0};
-    int fail;
-
-    init = NULL;
-    fail = fixture_create(dir, sizeof(dir));
-    if (!fail) fail += kc_init_open(&init, "test-entry") != KC_INIT_OK;
-    fail += expect_true("handle exists", init != NULL);
-    kc_init_close(init);
-    kc_init_close(NULL);
     fixture_remove(dir);
 
     case_result(fail, name, detail);
@@ -644,9 +533,8 @@ static int case_kc_init_cli(void) {
                     (size_t)snprintf(
                         command_line,
                         sizeof(command_line),
-                        "\"%s\" --dir \"%s\" --list",
-                        INIT_TEST_CLI,
-                        dir
+                        "\"%s\" --list",
+                        INIT_TEST_CLI
                     ) >= sizeof(command_line) ||
                     !CreateProcessA(
                         NULL,
@@ -680,9 +568,8 @@ static int case_kc_init_cli(void) {
         snprintf(
             command,
             sizeof(command),
-            "\"%s\" --dir \"%s\" --list > /dev/null 2>&1",
-            INIT_TEST_CLI,
-            dir
+            "\"%s\" --list > /dev/null 2>&1",
+            INIT_TEST_CLI
         );
         rc = system(command);
 #endif
@@ -702,18 +589,13 @@ static int case_all(void) {
     int rc;
 
     rc = 0;
-    test_case_total = 12;
+    test_case_total = 7;
     test_case_current = 0;
     run_case(&rc, case_kc_init_create);
-    run_case(&rc, case_kc_init_open);
+    run_case(&rc, case_kc_init_get);
     run_case(&rc, case_kc_init_list);
     run_case(&rc, case_kc_init_delete);
-    run_case(&rc, case_kc_init_set_cmd);
-    run_case(&rc, case_kc_init_get_cmd);
-    run_case(&rc, case_kc_init_get_user);
-    run_case(&rc, case_kc_init_error);
     run_case(&rc, case_kc_init_free);
-    run_case(&rc, case_kc_init_close);
     run_case(&rc, case_kc_init_version);
     run_case(&rc, case_kc_init_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
@@ -730,15 +612,10 @@ int main(int argc, char **argv) {
     if (argc != 2) return 2;
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_init_create") == 0) return case_kc_init_create();
-    if (strcmp(argv[1], "kc_init_open") == 0) return case_kc_init_open();
+    if (strcmp(argv[1], "kc_init_get") == 0) return case_kc_init_get();
     if (strcmp(argv[1], "kc_init_list") == 0) return case_kc_init_list();
     if (strcmp(argv[1], "kc_init_delete") == 0) return case_kc_init_delete();
-    if (strcmp(argv[1], "kc_init_set_cmd") == 0) return case_kc_init_set_cmd();
-    if (strcmp(argv[1], "kc_init_get_cmd") == 0) return case_kc_init_get_cmd();
-    if (strcmp(argv[1], "kc_init_get_user") == 0) return case_kc_init_get_user();
-    if (strcmp(argv[1], "kc_init_error") == 0) return case_kc_init_error();
     if (strcmp(argv[1], "kc_init_free") == 0) return case_kc_init_free();
-    if (strcmp(argv[1], "kc_init_close") == 0) return case_kc_init_close();
     if (strcmp(argv[1], "kc_init_version") == 0) return case_kc_init_version();
     if (strcmp(argv[1], "kc_init_cli") == 0) return case_kc_init_cli();
     return 2;
