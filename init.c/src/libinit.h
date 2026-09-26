@@ -1,6 +1,6 @@
 /**
  * libinit.h - Persistent Startup Registration
- * Summary: Public API for the init library.
+ * Summary: Public API for name-keyed startup registrations.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -16,8 +16,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct kc_init kc_init_t;
 
 typedef struct {
     const char *cmd;
@@ -46,15 +44,17 @@ int kc_init_create(
 );
 
 /**
- * Open one persistent startup registration.
- * @param out Output location for the caller-owned handle.
+ * Get one persistent startup registration by name.
+ * The returned entry and its strings share one allocation released with
+ * kc_init_free().
  * @param name Registration name.
+ * @param out_entry Receives the allocated entry, or NULL when absent.
  * @return KC_INIT_OK on success, KC_INIT_NOT_FOUND when absent,
  *         or KC_INIT_ERROR on failure.
  */
-int kc_init_open(
-    kc_init_t **out,
-    const char *name
+int kc_init_get(
+    const char *name,
+    kc_init_entry_t **out_entry
 );
 
 /**
@@ -79,50 +79,11 @@ int kc_init_list(
 int kc_init_delete(const char *name);
 
 /**
- * Replace the command of one persistent startup registration.
- * @param init Startup entry handle.
- * @param cmd New one-line startup command.
- * @return KC_INIT_OK on success, or KC_INIT_ERROR on failure.
- */
-int kc_init_set_cmd(
-    kc_init_t *init,
-    const char *cmd
-);
-
-/**
- * Return the command of one opened startup registration.
- * @param init Startup entry handle.
- * @return Borrowed command string, or NULL on invalid input.
- */
-const char *kc_init_get_cmd(const kc_init_t *init);
-
-/**
- * Return the recorded user of one opened startup registration.
- * @param init Startup entry handle.
- * @return Borrowed user string, or NULL on invalid input.
- */
-const char *kc_init_get_user(const kc_init_t *init);
-
-/**
- * Return the last handle error message.
- * @param init Startup entry handle.
- * @return Borrowed error text, or NULL when unset.
- */
-const char *kc_init_error(const kc_init_t *init);
-
-/**
  * Release memory returned by the init library.
  * @param ptr Allocation returned by the init library, or NULL.
  * @return None.
  */
 void kc_init_free(void *ptr);
-
-/**
- * Release one local startup entry handle.
- * @param init Startup entry handle, or NULL.
- * @return None.
- */
-void kc_init_close(kc_init_t *init);
 
 /**
  * Return the build version generated at compile time.
