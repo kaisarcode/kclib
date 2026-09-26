@@ -1,18 +1,15 @@
 # netl.c - Incoming Network Listener
 
-`netl.c` is a small C library and CLI for accepting inbound TCP connections
-and UDP datagrams.
+`netl.c` is a small C library and CLI for listening for inbound TCP or UDP
+traffic.
 
-The reusable library does not know about HTTP, templates, routing, registries,
-daemons, commands, or application protocols. It exposes network input as
-connections and datagrams so higher layers can compose it with any protocol.
+The library delivers incoming bytes through a callback together with the remote
+peer that sent them. The application may process the input directly or pass it
+to another protocol library, and may optionally respond to the same peer.
 
 ---
 
 ## CLI
-
-The CLI keeps shell composition without exposing the old persistent
-registry/process-manager model.
 
 Start a TCP listener and dispatch each accepted connection to a command:
 
@@ -43,119 +40,94 @@ Common options are `-h` / `--help` and `-v` / `--version`.
 ```c
 #include "libnetl.h"
 
-int max_pending_connections = 128;
-kc_netl_options_t options = {
-    .host = "0.0.0.0",
-    .port = 8080,
-    .protocol = KC_NETL_TCP,
-    .max_pending_connections = &max_pending_connections
-};
+static void on_input(
+    const kc_netl_input_t *input,
+    void *userdata
+) {
+    (void)userdata;
 
-kc_netl_t *server = NULL;
-kc_netl_event_t event;
+    if (should_respond(input->data, input->data_size)) {
+        static const char reply[] = "ok";
 
-if (kc_netl_open(&server, &options) != KC_NETL_OK) {
-    return 1;
-}
-
-for (;;) {
-    int status = kc_netl_poll(server, &event, -1);
-
-if (status != KC_NETL_OK) {
-        break;
-    }
-
-if (event.type == KC_NETL_EVENT_CONNECTION) {
-        /* event.connection identifies exactly one accepted TCP stream. */
-    } else if (event.type == KC_NETL_EVENT_DATA) {
-        size_t sent = 0U;
-
-(void)kc_netl_send(
-            event.connection,
-            event.data,
-            event.data_size,
-            &sent
+        (void)kc_netl_respond(
+            input->peer,
+            reply,
+            sizeof(reply) - 1U
         );
-    } else if (event.type == KC_NETL_EVENT_CLOSE) {
     }
 }
 
-kc_netl_close(server);
+int main(void) {
+    kc_netl_options_t options = {
+        .host = "0.0.0.0",
+        .port = 8080,
+        .protocol = KC_NETL_TCP
+    };
+    kc_netl_t *listener = NULL;
+
+    if (
+        kc_netl_open(
+            &listener,
+            &options,
+            on_input,
+            NULL,
+            NULL,
+            NULL
+        ) != KC_NETL_OK
+    ) {
+        return 1;
+    }
+
+    /* The listener is operational until the application closes it. */
+
+    kc_netl_close(listener);
+    return 0;
+}
 ```
 
-The public lifecycle is:
+Each input contains:
 
-- `kc_netl_open()` binds one TCP or UDP listener.
-- `kc_netl_poll()` returns one connection, data, writable, close, or datagram event.
-- `kc_netl_send()` attempts a non-blocking TCP write to one exact connection.
-- `kc_netl_sendto()` sends one UDP datagram to one peer.
-- `kc_netl_connection_close()` closes one TCP connection independently.
-- `kc_netl_port()` reports the actual bound port, including ephemeral ports.
-- `kc_netl_close()` closes the listener and all remaining connections.
+- the remote `peer`;
+- `KC_NETL_TCP` or `KC_NETL_UDP`;
+- the remote host and port;
+- the bytes that arrived.
 
-### Model
+A TCP peer keeps the same identity across successive input callbacks, so an
+application can associate incremental protocol state with that peer. A UDP input
+represents one datagram and its origin.
 
-TCP listeners own many simultaneous connections:
+`kc_netl_respond()` replies to the supplied peer. The application does not
+choose a separate destination for the response.
+
+`kc_netl_peer_close()` stops communication with one peer without closing the
+listener. `kc_netl_port()` reports the actual bound port, including an
+ephemeral port selected by the operating system.
+
+### Protocol composition
+
+`netl.c` does not interpret application protocols. For example, TCP bytes can
+be passed incrementally to an HTTP parser while keeping one parser per peer:
 
 ```text
-listener
-  +-- connection
-  |     +-- data
-  |     +-- send
-  |     +-- close
-  +-- connection
-        +-- data
-        +-- send
-        +-- close
+incoming bytes
+      |
+      v
+    netl
+      |
+      v
+per-peer HTTP parser
+      |
+      v
+application handling
 ```
 
-UDP remains datagram-oriented:
-
-```text
-listener
-  +-- datagram
-        +-- data
-        +-- peer host
-        +-- peer port
-```
-
-There is no single active TCP client. `kc_netl_poll()` multiplexes all active
-connections with `poll()` on POSIX and `WSAPoll()` on Windows. A slow or idle
-connection does not hold a global lock or prevent other connections from making
-progress.
-
-Sockets are non-blocking. `kc_netl_send()` may send fewer bytes than requested,
-and returns `KC_NETL_EAGAIN` when the socket cannot currently accept more data.
-When a send is partial or returns `KC_NETL_EAGAIN`, that connection is watched
-for write readiness and later produces `KC_NETL_EVENT_WRITABLE`. The caller
-decides what unsent bytes to retain and when to retry; the library does not hide
-unbounded output queues.
-
-### Composition
-
-`netl` and `http` are independent capabilities. One possible composition is:
-
-```text
-TCP connection bytes
-        |
-        v
-      netl
-        |
-        v
-      http parser
-        |
-        v
- application request handling
-```
-
-The same listener can carry a different protocol or raw bytes without involving
-`http.c`.
+This keeps transport listening independent from the protocol carried by the
+connection.
 
 ### Platform scope
 
-The native listener requires operating-system TCP/UDP server sockets. It is
-intended for native platforms supported by the project, including POSIX systems
-and Windows.
+The listener uses native operating-system TCP/UDP support and is intended for
+the native platforms built by the project.
 
 ---
 
@@ -170,8 +142,7 @@ make
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+Build project artifacts first, then run the portable test entry point:
 
 ```bash
 make
