@@ -1,6 +1,6 @@
 #!/bin/bash
 # kclib test tool
-# Summary: Tests one or all kclib projects natively and through Wine.
+# Summary: Tests one or all kclib projects natively, through Wine, and through WASM when supported.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
 # License: GNU General Public License v3.0
@@ -21,6 +21,9 @@ test_project() {
         cd "$project_dir"
         make test
         make test wine
+        if grep -Fq 'filter wasm,$(MAKECMDGOALS)' Makefile; then
+            make test wasm
+        fi
     )
 }
 
