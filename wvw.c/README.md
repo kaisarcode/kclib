@@ -47,7 +47,6 @@ wvw \
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
-
 The same settings can be supplied through environment variables:
 
 ```text
@@ -157,8 +156,6 @@ uint64_t kc_wvw_version(void);
 Actions remain actions. Named properties use `set_*` and `get_*`.
 Boolean window properties use `is_*`.
 
-
-
 ### Native Bridge
 
 The bridge is disabled by default. Applications can install document-start
@@ -256,7 +253,6 @@ make x86_64/macos
 make aarch64/macos
 ```
 
-
 ---
 
 ## Development Requirements
@@ -289,7 +285,6 @@ and shared library.
 - WebKit
 - Foundation
 - `osxcross` with a compatible Apple SDK when cross-compiling from Linux
-
 
 ---
 
