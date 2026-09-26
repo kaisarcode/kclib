@@ -82,8 +82,8 @@ static char *kc_init_strdup(const char *text) {
 
 /**
  * Resolve the active per-user metadata directory.
- * KC_INIT_DIR is an advanced process-level override. Otherwise the directory
- * follows the platform user-data convention under kaisarcode/init.c.
+ * KC_INIT_DIR is reserved for isolated tests. Normal callers follow the
+ * platform user-data convention under kaisarcode/init.c.
  * @param out Output path buffer.
  * @param cap Output buffer capacity.
  * @return Zero on success, nonzero on failure.
