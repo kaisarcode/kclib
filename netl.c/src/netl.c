@@ -17,6 +17,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
+#ifndef _WIN32
+#include <time.h>
+#endif
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -34,12 +38,21 @@
 #define NETL_CLI_COMMAND_SIZE 4096
 
 /**
- * Transfer an accepted TCP socket from the public listener to CLI dispatch.
- * This symbol exists only in the netl executable build.
- * @param connection Accepted TCP connection.
- * @return Native socket value, or -1 on failure.
+ * Open the listener with one private accepted-peer callback used only by the CLI.
  */
-intptr_t kc_netl_cli_take_connection(kc_netl_connection_t *connection);
+int kc_netl_cli_open(
+    kc_netl_t **out,
+    const kc_netl_options_t *options,
+    kc_netl_handler_t handler,
+    void *userdata,
+    void (*accept_handler)(kc_netl_peer_t *peer, void *userdata),
+    void *accept_userdata
+);
+
+/**
+ * Transfer an accepted TCP socket to the CLI dispatcher.
+ */
+intptr_t kc_netl_cli_take_peer(kc_netl_peer_t *peer);
 
 /**
  * Print command usage.
@@ -589,13 +602,71 @@ static int cli_dispatch_udp(
 }
 #endif
 
+typedef struct {
+    const char *command;
+    atomic_int failed;
+} cli_listener_state_t;
+
+/**
+ * Dispatch one received UDP datagram.
+ */
+static void cli_on_input(
+    const kc_netl_input_t *input,
+    void *userdata
+) {
+    cli_listener_state_t *state = (cli_listener_state_t *)userdata;
+
+    if (input->protocol != KC_NETL_UDP) return;
+    if (cli_dispatch_udp(state->command, input->data, input->data_size) != 0) {
+        fprintf(stderr, "netl: failed to dispatch datagram\n");
+    }
+}
+
+/**
+ * Dispatch one accepted TCP peer through the private CLI socket handoff.
+ */
+static void cli_on_accept(
+    kc_netl_peer_t *peer,
+    void *userdata
+) {
+    cli_listener_state_t *state = (cli_listener_state_t *)userdata;
+    intptr_t native_socket = kc_netl_cli_take_peer(peer);
+
+    if (
+        native_socket == (intptr_t)-1 ||
+        cli_dispatch_tcp(native_socket, state->command) != 0
+    ) {
+        fprintf(stderr, "netl: failed to dispatch connection\n");
+    }
+}
+
+/**
+ * Record a terminal listener failure.
+ */
+static void cli_on_error(int status, void *userdata) {
+    cli_listener_state_t *state = (cli_listener_state_t *)userdata;
+
+    fprintf(stderr, "netl: %s\n", kc_netl_strerror(status));
+    atomic_store(&state->failed, 1);
+}
+
+/**
+ * Sleep briefly while the private listener worker owns network dispatch.
+ */
+static void cli_wait_tick(void) {
+#ifdef _WIN32
+    Sleep(100);
+#else
+    struct timespec delay;
+
+    delay.tv_sec = 0;
+    delay.tv_nsec = 100000000L;
+    (void)nanosleep(&delay, NULL);
+#endif
+}
+
 /**
  * Run the foreground command-dispatch listener.
- * @param host Bind host.
- * @param port Bind port.
- * @param protocol KC_NETL_TCP or KC_NETL_UDP.
- * @param command Command to dispatch.
- * @return Process status.
  */
 static int cli_run(
     const char *host,
@@ -605,7 +676,7 @@ static int cli_run(
 ) {
     kc_netl_options_t options;
     kc_netl_t *listener = NULL;
-    kc_netl_event_t event;
+    cli_listener_state_t state;
     int rc;
 
     memset(&options, 0, sizeof(options));
@@ -613,44 +684,36 @@ static int cli_run(
     options.port = port;
     options.protocol = protocol;
 
-    rc = kc_netl_open(&listener, &options);
-    if (rc != KC_NETL_OK) {
-        fprintf(stderr, "netl: %s\n", kc_netl_strerror(rc));
-        return 1;
-    }
+    state.command = command;
+    atomic_init(&state.failed, 0);
 
 #ifndef _WIN32
     signal(SIGCHLD, cli_reap);
 #endif
 
-    for (;;) {
-        rc = kc_netl_poll(listener, &event, -1);
-        if (rc != KC_NETL_OK) {
-            fprintf(stderr, "netl: %s\n", kc_netl_strerror(rc));
-            kc_netl_close(listener);
-            return 1;
-        }
-
-        if (event.type == KC_NETL_EVENT_CONNECTION) {
-            intptr_t native_socket = kc_netl_cli_take_connection(
-                event.connection
-            );
-            if (
-                native_socket == (intptr_t)-1 ||
-                cli_dispatch_tcp(native_socket, command) != 0
-            ) {
-                fprintf(stderr, "netl: failed to dispatch connection\n");
-            }
-        } else if (event.type == KC_NETL_EVENT_DATAGRAM) {
-            if (cli_dispatch_udp(
-                    command,
-                    event.data,
-                    event.data_size
-                ) != 0) {
-                fprintf(stderr, "netl: failed to dispatch datagram\n");
-            }
-        }
+    rc = kc_netl_cli_open(
+        &listener,
+        &options,
+        cli_on_input,
+        &state,
+        protocol == KC_NETL_TCP ? cli_on_accept : NULL,
+        &state
+    );
+    if (rc != KC_NETL_OK) {
+        fprintf(stderr, "netl: %s\n", kc_netl_strerror(rc));
+        return 1;
     }
+
+    /*
+     * The executable keeps the public CLI foreground contract while libnetl
+     * owns all socket polling and dispatch in its private worker.
+     */
+    while (!atomic_load(&state.failed)) {
+        cli_wait_tick();
+    }
+
+    kc_netl_close(listener);
+    return 1;
 }
 
 /**
