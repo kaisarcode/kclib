@@ -1,28 +1,21 @@
 /**
- * wvw.c - Native WebView window wrapper.
- * Summary: Command line interface for opening one native WebView window.
+ * wvw.c - Native WebView window CLI.
+ * Summary: Adapts terminal configuration to the public wvw API and blocks
+ *          until the native window closes.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
-#ifndef _WIN32
-#define _POSIX_C_SOURCE 200809L
-#endif
-
 #include "libwvw.h"
+#include "libwvw_internal.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/**
- * Prints command usage information.
- * @param name Program executable name.
- * @return None.
- */
 static void kc_wvw_help(const char *name) {
     printf("Usage: %s [options]\n", name);
     printf("\n");
@@ -43,29 +36,6 @@ static void kc_wvw_help(const char *name) {
     printf("    -v, --version       Show build version\n");
 }
 
-/**
- * Replaces one owned option string.
- * @param field Destination option field.
- * @param value New string value.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on allocation failure.
- */
-static int kc_wvw_set_string(char **field, const char *value) {
-    char *copy;
-
-    if (!field || !value) return KC_WVW_ERROR;
-    copy = strdup(value);
-    if (!copy) return KC_WVW_ERROR;
-    free(*field);
-    *field = copy;
-    return KC_WVW_OK;
-}
-
-/**
- * Parses one decimal integer option.
- * @param text Decimal input text.
- * @param out_value Destination integer.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on invalid input.
- */
 static int kc_wvw_parse_int(const char *text, int *out_value) {
     char *end;
     long value;
@@ -79,99 +49,117 @@ static int kc_wvw_parse_int(const char *text, int *out_value) {
     return KC_WVW_OK;
 }
 
-/**
- * Executes the command line interface through the public C API.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return Process status code.
- */
+static void kc_wvw_env_int(const char *name, int *value) {
+    const char *text = getenv(name);
+    int parsed;
+    if (text && kc_wvw_parse_int(text, &parsed) == KC_WVW_OK) *value = parsed;
+}
+
 int main(int argc, char **argv) {
-    kc_wvw_options_t opts;
-    kc_wvw_t *ctx = NULL;
+    kc_wvw_t *wvw = NULL;
+    kc_wvw_options_t options = {0};
+    const char *url = getenv("KC_WVW_URL");
+    const char *title = getenv("KC_WVW_TITLE");
+    const char *background = getenv("KC_WVW_BACKGROUND");
+    int width = 1280;
+    int height = 720;
+    int posx = 0;
+    int posy = 0;
+    int fullscreen = 0;
+    int borderless = 0;
+    int always_on_top = 0;
+    int click_through = 0;
+    int no_focus = 0;
     int status = 0;
     int i;
 
-    opts = kc_wvw_options_default();
-    kc_wvw_options_load_env(&opts);
+    kc_wvw_env_int("KC_WVW_WIDTH", &width);
+    kc_wvw_env_int("KC_WVW_HEIGHT", &height);
+    kc_wvw_env_int("KC_WVW_POSX", &posx);
+    kc_wvw_env_int("KC_WVW_POSY", &posy);
+    kc_wvw_env_int("KC_WVW_FULLSCREEN", &fullscreen);
+    kc_wvw_env_int("KC_WVW_BORDERLESS", &borderless);
+    kc_wvw_env_int("KC_WVW_ALWAYS_ON_TOP", &always_on_top);
+    kc_wvw_env_int("KC_WVW_CLICK_THROUGH", &click_through);
+    kc_wvw_env_int("KC_WVW_NO_FOCUS", &no_focus);
 
     for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             kc_wvw_help(argv[0]);
-            goto cleanup;
+            return 0;
         }
-        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+        if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--version")) {
             printf("wvw build %llu\n", (unsigned long long)kc_wvw_version());
-            goto cleanup;
+            return 0;
         }
-        if (strcmp(argv[i], "--url") == 0 || strcmp(argv[i], "--title") == 0 ||
-            strcmp(argv[i], "--background") == 0) {
-            const char *option = argv[i];
-            char **field;
-            if (++i >= argc) {
-                fprintf(stderr, "wvw: missing value for %s\n", option);
-                status = 1;
-                goto cleanup;
+        if (!strcmp(argv[i], "--url") || !strcmp(argv[i], "--title") ||
+            !strcmp(argv[i], "--background")) {
+            const char *flag = argv[i++];
+            if (i >= argc) {
+                fprintf(stderr, "wvw: missing value for %s\n", flag);
+                return 1;
             }
-            if (strcmp(option, "--url") == 0) field = &opts.url;
-            else if (strcmp(option, "--title") == 0) field = &opts.title;
-            else field = &opts.background;
-            if (kc_wvw_set_string(field, argv[i]) != KC_WVW_OK) {
-                fprintf(stderr, "wvw: allocation failed\n");
-                status = 1;
-                goto cleanup;
-            }
+            if (!strcmp(flag, "--url")) url = argv[i];
+            else if (!strcmp(flag, "--title")) title = argv[i];
+            else background = argv[i];
             continue;
         }
-        if (strcmp(argv[i], "--width") == 0 || strcmp(argv[i], "--height") == 0 ||
-            strcmp(argv[i], "--posx") == 0 || strcmp(argv[i], "--posy") == 0) {
-            const char *option = argv[i];
+        if (!strcmp(argv[i], "--width") || !strcmp(argv[i], "--height") ||
+            !strcmp(argv[i], "--posx") || !strcmp(argv[i], "--posy")) {
+            const char *flag = argv[i++];
             int *field;
-            if (++i >= argc) {
-                fprintf(stderr, "wvw: invalid value for %s\n", option);
-                status = 1;
-                goto cleanup;
+            if (i >= argc) {
+                fprintf(stderr, "wvw: invalid value for %s\n", flag);
+                return 1;
             }
-            if (strcmp(option, "--width") == 0) field = &opts.width;
-            else if (strcmp(option, "--height") == 0) field = &opts.height;
-            else if (strcmp(option, "--posx") == 0) field = &opts.posx;
-            else field = &opts.posy;
+            if (!strcmp(flag, "--width")) field = &width;
+            else if (!strcmp(flag, "--height")) field = &height;
+            else if (!strcmp(flag, "--posx")) field = &posx;
+            else field = &posy;
             if (kc_wvw_parse_int(argv[i], field) != KC_WVW_OK) {
-                fprintf(stderr, "wvw: invalid value for %s\n", option);
-                status = 1;
-                goto cleanup;
+                fprintf(stderr, "wvw: invalid value for %s\n", flag);
+                return 1;
             }
             continue;
         }
-        if (strcmp(argv[i], "--fullscreen") == 0) opts.fullscreen = 1;
-        else if (strcmp(argv[i], "--borderless") == 0) opts.borderless = 1;
-        else if (strcmp(argv[i], "--always-on-top") == 0) opts.always_on_top = 1;
-        else if (strcmp(argv[i], "--click-through") == 0) opts.click_through = 1;
-        else if (strcmp(argv[i], "--no-focus") == 0) opts.no_focus = 1;
+        if (!strcmp(argv[i], "--fullscreen")) fullscreen = 1;
+        else if (!strcmp(argv[i], "--borderless")) borderless = 1;
+        else if (!strcmp(argv[i], "--always-on-top")) always_on_top = 1;
+        else if (!strcmp(argv[i], "--click-through")) click_through = 1;
+        else if (!strcmp(argv[i], "--no-focus")) no_focus = 1;
         else {
             fprintf(stderr, "wvw: unknown option '%s'\n", argv[i]);
-            status = 1;
-            goto cleanup;
+            return 1;
         }
     }
 
-    if (!opts.url || !opts.url[0]) {
+    if (!url || !url[0]) {
         fprintf(stderr, "wvw: missing URL\n");
-        status = 1;
-        goto cleanup;
+        return 1;
     }
-    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
-        const char *error = kc_wvw_get_error(ctx);
+
+    options.url = url;
+    options.title = title;
+    options.background = background;
+    options.width = &width;
+    options.height = &height;
+    options.posx = &posx;
+    options.posy = &posy;
+    options.fullscreen = &fullscreen;
+    options.borderless = &borderless;
+    options.always_on_top = &always_on_top;
+    options.click_through = &click_through;
+    options.no_focus = &no_focus;
+
+    if (kc_wvw_open(&wvw, &options) != KC_WVW_OK) {
+        const char *error = kc_wvw_get_error(wvw);
         fprintf(stderr, "wvw: %s\n", error ? error : "open failed");
         status = 1;
-        goto cleanup;
-    }
-    if (kc_wvw_loop(ctx) != KC_WVW_OK) {
-        fprintf(stderr, "wvw: event loop failed\n");
+    } else if (kc_wvw_cli_wait(wvw) != KC_WVW_OK) {
+        fprintf(stderr, "wvw: wait failed\n");
         status = 1;
     }
 
-cleanup:
-    kc_wvw_close(ctx);
-    kc_wvw_options_free(&opts);
+    kc_wvw_close(wvw);
     return status;
 }
