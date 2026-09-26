@@ -627,10 +627,10 @@ static void kc_ngram_help(void) {
     printf("Usage:\n");
     printf("  ngram [options] [text]\n\n");
     printf("Options:\n");
-    printf("  --max, -max <n>     Maximum tokens per block\n");
-    printf("  --min, -min <n>     Minimum tokens per block\n");
-    printf("  --sep, -sep      Custom separator characters\n");
-    printf("  --cmd, -cmd <cmd>   Execute command for each chunk\n");
+    printf("  -max, --max <n>     Maximum tokens per block\n");
+    printf("  -min, --min <n>     Minimum tokens per block\n");
+    printf("  -sep, --sep      Custom separator characters\n");
+    printf("  -cmd, --cmd <cmd>   Execute command for each chunk\n");
     printf("  -h, --help          Show help\n");
     printf("  -v, --version       Show version\n");
 }
