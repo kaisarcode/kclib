@@ -5319,20 +5319,24 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
 }
 
 typedef struct {kc_wvw_t *ctx;kc_wvw_op_t *op;GMutex mutex;GCond cond;int done;} kc_wvw_linux_call_t;
-static gsize kc_wvw_gtk_once;static GMainContext *kc_wvw_gtk_context;static GThread *kc_wvw_gtk_thread;static GMutex kc_wvw_gtk_mutex;static GCond kc_wvw_gtk_cond;static int kc_wvw_gtk_ready,kc_wvw_gtk_started;
+static gsize kc_wvw_gtk_once;static GMainContext *kc_wvw_gtk_context;static GMainLoop *kc_wvw_gtk_loop;static GThread *kc_wvw_gtk_thread;static GMutex kc_wvw_gtk_mutex;static GCond kc_wvw_gtk_cond;static int kc_wvw_gtk_ready,kc_wvw_gtk_started;
 
 /**
  * Run the process-wide GTK event loop.
  * @param data Unused callback data.
  * @return Worker thread result.
  */
-static gpointer kc_wvw_linux_worker(gpointer data){GMainLoop *loop;(void)data;kc_wvw_gtk_started=gtk_init_check(NULL,NULL);g_mutex_lock(&kc_wvw_gtk_mutex);kc_wvw_gtk_ready=1;g_cond_signal(&kc_wvw_gtk_cond);g_mutex_unlock(&kc_wvw_gtk_mutex);if(!kc_wvw_gtk_started)return NULL;loop=g_main_loop_new(kc_wvw_gtk_context,FALSE);g_main_loop_run(loop);g_main_loop_unref(loop);return NULL;}
+static gpointer kc_wvw_linux_worker(gpointer data){(void)data;kc_wvw_gtk_started=gtk_init_check(NULL,NULL);if(kc_wvw_gtk_started)kc_wvw_gtk_loop=g_main_loop_new(kc_wvw_gtk_context,FALSE);g_mutex_lock(&kc_wvw_gtk_mutex);kc_wvw_gtk_ready=1;g_cond_signal(&kc_wvw_gtk_cond);g_mutex_unlock(&kc_wvw_gtk_mutex);if(!kc_wvw_gtk_loop)return NULL;g_main_loop_run(kc_wvw_gtk_loop);g_main_loop_unref(kc_wvw_gtk_loop);kc_wvw_gtk_loop=NULL;return NULL;}
 
 /**
  * Initialize the process-wide GTK event service.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-static int kc_wvw_linux_service(void){if(g_once_init_enter(&kc_wvw_gtk_once)){g_mutex_init(&kc_wvw_gtk_mutex);g_cond_init(&kc_wvw_gtk_cond);kc_wvw_gtk_context=g_main_context_default();g_mutex_lock(&kc_wvw_gtk_mutex);kc_wvw_gtk_thread=g_thread_new("kc-wvw",kc_wvw_linux_worker,NULL);if(kc_wvw_gtk_thread)while(!kc_wvw_gtk_ready)g_cond_wait(&kc_wvw_gtk_cond,&kc_wvw_gtk_mutex);g_mutex_unlock(&kc_wvw_gtk_mutex);g_once_init_leave(&kc_wvw_gtk_once,1);}return kc_wvw_gtk_started?KC_WVW_OK:KC_WVW_ERROR;}
+static gboolean kc_wvw_linux_quit_loop(gpointer data){(void)data;if(kc_wvw_gtk_loop)g_main_loop_quit(kc_wvw_gtk_loop);return G_SOURCE_REMOVE;}
+
+static void kc_wvw_linux_shutdown(void){if(!kc_wvw_gtk_thread)return;if(kc_wvw_gtk_context&&kc_wvw_gtk_loop)g_main_context_invoke(kc_wvw_gtk_context,kc_wvw_linux_quit_loop,NULL);g_thread_join(kc_wvw_gtk_thread);kc_wvw_gtk_thread=NULL;}
+
+static int kc_wvw_linux_service(void){if(g_once_init_enter(&kc_wvw_gtk_once)){g_mutex_init(&kc_wvw_gtk_mutex);g_cond_init(&kc_wvw_gtk_cond);kc_wvw_gtk_context=g_main_context_default();g_mutex_lock(&kc_wvw_gtk_mutex);kc_wvw_gtk_thread=g_thread_new("kc-wvw",kc_wvw_linux_worker,NULL);if(kc_wvw_gtk_thread)while(!kc_wvw_gtk_ready)g_cond_wait(&kc_wvw_gtk_cond,&kc_wvw_gtk_mutex);g_mutex_unlock(&kc_wvw_gtk_mutex);if(kc_wvw_gtk_thread&&kc_wvw_gtk_started)atexit(kc_wvw_linux_shutdown);g_once_init_leave(&kc_wvw_gtk_once,1);}return kc_wvw_gtk_started?KC_WVW_OK:KC_WVW_ERROR;}
 
 /**
  * Apply one queued GTK operation.
