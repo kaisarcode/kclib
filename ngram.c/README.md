@@ -106,9 +106,9 @@ int rc = kc_ngram_traverse(
 );
 \`\`\`
 
-### Options and defaults
+### Options
 
-| Option | Omitted value | Explicit behavior |
+| Option | Default | Behavior |
 | :--- | :--- | :--- |
 | \`max_tokens\` | \`10\` | \`0\` means use all available tokens; otherwise the maximum window size |
 | \`min_tokens\` | \`1\` | Must be at least \`1\` |
@@ -129,7 +129,6 @@ Each \`kc_ngram_chunk_t\` describes the original input span:
 - \`token_start\` is the zero-based index of the first token;
 - \`token_count\` is the number of tokens in the window.
 
-The callback runs synchronously and is never retained. \`chunk\`, \`chunk->data\`, the input, the options, and \`userdata\` are borrowed only for the duration implied by the call. The library does not allocate an owned chunk value for the caller.
 
 Visitor return semantics are deliberately numeric:
 
