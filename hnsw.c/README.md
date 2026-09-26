@@ -109,11 +109,11 @@ kc_hnsw_free(results);
 }
 ```
 
-### Options and defaults
+### Options
 
 `kc_hnsw_options_t` represents the required dimension plus independently optional configuration:
 
-| Option | Meaning | Internal default |
+| Option | Meaning | Default |
 | :--- | :--- | :--- |
 | `dimension` | Number of values in every vector | Required |
 | `metric` | How vectors are compared | `KC_HNSW_METRIC_COSINE` |
@@ -121,7 +121,6 @@ kc_hnsw_free(results);
 | `build_effort` | Work spent building a higher-quality search graph | `64` |
 | `search_effort` | Work spent finding better matches during a search | `64` |
 
-Optional scalar fields are nullable pointers. A NULL pointer means the option is omitted and the library applies its internal default. A non-NULL pointer means the pointed value is explicit and is interpreted literally.
 
 For example, to override only search effort:
 
@@ -133,14 +132,14 @@ options.dimension = 384;
 options.search_effort = &search_effort;
 ```
 
-### Lifecycle and ownership
+### Usage
 
 - `kc_hnsw_open()` creates one reusable in-memory index. `dimension` must be greater than zero.
 - `kc_hnsw_add()` copies both the identifier and vector values into the index.
 - Adding a vector after a build invalidates the graph; call `kc_hnsw_build()` again before searching.
 - `kc_hnsw_build()` explicitly constructs the approximate-neighbor graph.
 - `kc_hnsw_search()` queries a built graph. Searches may run concurrently after build.
-- Search result arrays are caller-owned and must be released with `kc_hnsw_free()`.
+- Use `kc_hnsw_free()` to release search results.
 - Each result `id` borrows index storage and remains valid only while the index remains alive and unmodified.
 - `kc_hnsw_dimension()`, `kc_hnsw_metric()`, and `kc_hnsw_count()` expose stable index properties.
 - `kc_hnsw_close()` releases the index. Do not mutate or close it while searches are running.
