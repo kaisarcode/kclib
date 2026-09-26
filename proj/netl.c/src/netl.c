@@ -63,8 +63,8 @@ intptr_t kc_netl_cli_take_peer(kc_netl_peer_t *peer);
  * @return None.
  */
 static void cli_help(const char *name) {
-    printf("Usage:\n");
-    printf("  %s <addr>[:port] [--tcp|--udp] <command>\n\n", name);
+    printf("Usage: %s <addr>[:port] <command> [options]\n", name);
+    printf("\n");
     printf("Options:\n");
     printf("  --tcp          Listen for TCP connections (default)\n");
     printf("  --udp          Listen for UDP datagrams\n");
