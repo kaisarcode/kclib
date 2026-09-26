@@ -46,7 +46,6 @@ static void complete(
     (void)userdata;
 
 if (status == KC_NETS_OK && data != NULL) {
-        /* data[0..size) is the borrowed response */
     }
 }
 
@@ -79,11 +78,11 @@ if (kc_nets_send(
 
 ### Transfer semantics
 
-`kc_nets_send()` starts one asynchronous transfer and returns after the operation has been launched. The library copies the host string and input bytes before returning, so the caller may immediately reuse or release its input storage.
+`kc_nets_send()` starts one asynchronous transfer and reports completion through the callback.
 
 A successfully launched transfer invokes its handler exactly once with the terminal result.
 
-For TCP and TLS, `KC_NETS_OK` may include response bytes. The callback owns neither the response pointer nor its storage. Response bytes remain valid only for the callback duration.
+For TCP and TLS, a successful callback may include response bytes.
 
 UDP sends the complete input as one datagram and reports success with no response bytes.
 
@@ -95,7 +94,7 @@ UDP sends the complete input as one datagram and reports success with no respons
 
 `kc_nets_tls_available()` reports whether TLS support is compiled into the current build.
 
-`kc_nets_version()` returns the generated build version.
+`kc_nets_version()` returns the library build version.
 
 ### Protocol behavior
 
