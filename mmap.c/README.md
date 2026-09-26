@@ -104,7 +104,6 @@ KC_MMAP_OK + N bytes   -> string / byte value
 KC_MMAP_ERROR          -> binding error
 ```
 
-
 ---
 
 ### Storage
