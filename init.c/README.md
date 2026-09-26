@@ -21,7 +21,6 @@ Commands:
 Options:
   -l, --list           List registrations
   -d, --delete         Remove a registration
-  --dir <path>         Override metadata directory
   -h, --help           Show this help
   -v, --version        Show version
 ```
@@ -33,8 +32,6 @@ Registering or replacing an entry updates only the startup registration. init.c 
 ## Public API
 
 ```c
-typedef struct kc_init kc_init_t;
-
 typedef struct {
     const char *cmd;
 } kc_init_options_t;
@@ -50,9 +47,9 @@ int kc_init_create(
     const kc_init_options_t *options
 );
 
-int kc_init_open(
-    kc_init_t **out,
-    const char *name
+int kc_init_get(
+    const char *name,
+    kc_init_entry_t **out_entry
 );
 
 int kc_init_list(
@@ -62,24 +59,20 @@ int kc_init_list(
 
 int kc_init_delete(const char *name);
 
-int kc_init_set_cmd(
-    kc_init_t *init,
-    const char *cmd
-);
-
-const char *kc_init_get_cmd(const kc_init_t *init);
-const char *kc_init_get_user(const kc_init_t *init);
-const char *kc_init_error(const kc_init_t *init);
-
 void kc_init_free(void *ptr);
-void kc_init_close(kc_init_t *init);
 uint64_t kc_init_version(void);
 ```
 
 ### Public Model
 
-Entries can be created, queried, listed, enabled, disabled, and removed by
-name.
+A startup registration is identified by its persistent name.
+
+`kc_init_create()` creates or replaces that registration. `kc_init_get()`
+returns one complete entry, `kc_init_list()` returns all entries in the current
+user namespace, and `kc_init_delete()` removes one by name.
+
+Entries returned by `kc_init_get()` and `kc_init_list()` are caller-owned
+allocations released with `kc_init_free()`.
 
 ### Metadata namespace
 
@@ -97,9 +90,11 @@ When `XDG_DATA_HOME` is not set:
 $HOME/.local/share/kaisarcode/init.c
 ```
 
-On Windows, init.c uses the corresponding per-user application-data directory under `kaisarcode\init.c`.
+On Windows, init.c uses the corresponding per-user application-data directory
+under `kaisarcode\init.c`.
 
-`KC_INIT_DIR` is an advanced process-level override. The CLI exposes the same capability through `--dir <path>`. Normal callers do not need to select a directory.
+Normal API and CLI callers do not select a storage directory. The user
+namespace is resolved automatically from the platform convention.
 
 ### Platform Scope
 
