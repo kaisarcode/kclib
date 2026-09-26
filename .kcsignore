@@ -1,6 +1,6 @@
 bin/
 lib/
+dist/
 .build
 PLAN.md
 AGENTS.md
-dist/
