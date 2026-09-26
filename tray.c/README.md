@@ -80,13 +80,7 @@ callbacks.
 `kc_tray_set_tooltip()` update the native object. `NULL` clears the icon or
 tooltip; item text must be nonempty.
 
-The string getters return borrowed pointers. A tray property's string is
-invalidated by its next setter or tray close; an item's text is invalidated by
-its next setter, removal, or tray close. `kc_tray_get_error()` returns `NULL`
-if no error, otherwise a borrowed message invalidated by the next operation on
-that tray or close. Do not use any tray or child pointer after its lifetime
-ends. Synchronize concurrent calls by the application when sharing a tray
-across caller threads.
+
 
 ---
 
@@ -96,7 +90,7 @@ across caller threads.
 | :--- | :--- |
 | Windows | Icon values are `.ico` file paths; tooltips are limited to 127 UTF-16 units. A message window and loop run on a worker thread. |
 | Linux | Icons may be file paths or icon names. GTK status-icon and event-context work run on a worker thread; applications already using GTK should not access GTK objects from other threads concurrently. A notification-area host is required for visibility. |
-| macOS | Icons may be file paths or named AppKit images. AppKit objects are created and mutated on the main thread; the hosting process must run its AppKit event loop to receive menu actions. The CLI starts that loop itself. |
+| macOS | Icons may be file paths or named AppKit images. |
 
 An unset icon uses the platform default. Browser WASM is not a target because
 this library requires native desktop status-area facilities.
@@ -122,7 +116,7 @@ make
 make test
 ```
 
-`make test` runs the native C contract and one grouped CLI case; a desktop
+`make test` runs the native API tests and one grouped CLI case; a desktop
 session is needed for native cases. To run through Wine:
 
 ```bash
@@ -130,10 +124,7 @@ make x86_64/windows
 make test wine
 ```
 
-To check actual native callback dispatch, run the built `tray_contract_test
-interactive` in a desktop session and select its three menu items in order.
-macOS requires an AppKit desktop session. Cross-compilation establishes
-compilation, not runtime correctness.
+
 
 ### Multiarch Builds
 
