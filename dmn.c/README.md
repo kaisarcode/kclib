@@ -2,7 +2,7 @@
 
 `dmn.c` creates named local daemons, opens them for interaction, exchanges binary data, exposes raw streams when needed, lists registrations, sends platform signals, and deletes daemons.
 
-The public API is designed around daemon identities rather than sockets or pipes. Unix Domain Sockets and Windows Named Pipes are implementation details.
+`dmn.c` manages persistent named local daemons and their command exchanges.
 
 ---
 
@@ -86,7 +86,7 @@ int kc_dmn_delete(
 );
 ```
 
-`kc_dmn_create()` creates or replaces a named daemon. `options->cmd` is required. The runtime directory is resolved automatically. `options->eot == NULL` with `eot_size == 0` uses the default EOT byte `0x04`.
+`kc_dmn_create()` creates or replaces a named daemon. `options->cmd` is required. The default response terminator is byte `0x04`.
 
 `kc_dmn_open()` creates a local handle bound to a daemon name and uses the automatically resolved runtime directory.
 
@@ -116,9 +116,8 @@ Each mutable public property has a matching getter.
 
 `set_cmd` replaces the running daemon command.
 
-`set_eot` changes the response-cycle marker. Passing `NULL, 0` restores the default single byte `0x04`. EOT values are binary and may contain any byte sequence.
+`set_eot` changes the response-cycle marker. With no custom value, the default marker is byte `0x04`.
 
-Getter results are borrowed from the daemon handle and remain valid until the corresponding value changes or the handle closes.
 
 ### Data events and complete exchanges
 
@@ -151,7 +150,6 @@ The supported event is `"data"`. Its handler receives response chunks directly a
 6. finish when the configured EOT is received, or when the platform stream ends;
 7. return the complete response without the EOT marker.
 
-The returned response is owned by the caller and must be released with `kc_dmn_free()`.
 
 ### Raw stream
 
@@ -190,7 +188,7 @@ int kc_dmn_send_signal(
 );
 ```
 
-On POSIX, the numeric signal is sent to the managed backend process. Windows uses the daemon's existing platform signal mechanism.
+`signal` sends a signal request to the managed daemon.
 
 ### Listing
 
@@ -203,7 +201,6 @@ int kc_dmn_list(
 void kc_dmn_free(void *ptr);
 ```
 
-The returned entries and their strings live in one allocation and are released with one `kc_dmn_free()`.
 
 ### Version
 
@@ -211,15 +208,10 @@ The returned entries and their strings live in one allocation and are released w
 uint64_t kc_dmn_version(void);
 ```
 
-### Runtime model
+### Runtime Model
 
-Runtime state is local and temporary. On POSIX, dmn prefers `XDG_RUNTIME_DIR`, then `/run/user/<uid>`, with `/tmp` only as a fallback. Windows uses the system temporary directory. These locations are runtime state, not persistent registration storage.
-
-POSIX uses Unix Domain Sockets plus manager/backend PID files. The backend can remain resident across response cycles. The configured EOT marks the end of one cycle while preserving the resident backend.
-
-Windows uses Named Pipes and the existing detached server process model. Platform process mechanics are intentionally allowed to differ; the public API describes daemon operations rather than requiring identical internals.
-
-Registered commands are trusted local operator input and execute through the platform shell.
+Created daemons continue running independently of the process that created or
+opened them. Commands can be exchanged repeatedly until the daemon is removed.
 
 ---
 
