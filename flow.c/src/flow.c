@@ -13,14 +13,17 @@
 
 #include "libflow.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifndef _WIN32
+#include <time.h>
 #include <unistd.h>
 #else
 #include <io.h>
+#include <windows.h>
 #endif
 
 #define KC_FLOW_CLI_MAX_OVERLAYS 256
@@ -35,6 +38,57 @@ typedef struct {
     char *key;
     char *value;
 } kc_flow_cli_op;
+
+typedef struct {
+    void *output;
+    size_t output_size;
+    char *error;
+    int status;
+    atomic_int done;
+} kc_flow_cli_result;
+
+/**
+ * Receive one terminal library result for the synchronous CLI adapter.
+ * @param status Run completion status.
+ * @param data Owned successful output.
+ * @param data_size Output byte count.
+ * @param error Borrowed contextual error.
+ * @param userdata CLI result state.
+ * @return None.
+ */
+static void kc_flow_cli_result_handler(
+    int status,
+    void *data,
+    size_t data_size,
+    const char *error,
+    void *userdata
+) {
+    kc_flow_cli_result *result = (kc_flow_cli_result *)userdata;
+
+    result->status = status;
+    result->output = data;
+    result->output_size = data_size;
+    result->error = error ? strdup(error) : NULL;
+    atomic_store_explicit(&result->done, 1, memory_order_release);
+}
+
+/**
+ * Wait privately for the asynchronous library run to finish.
+ * @param result CLI result state.
+ * @return None.
+ */
+static void kc_flow_cli_wait(kc_flow_cli_result *result) {
+    while (!atomic_load_explicit(&result->done, memory_order_acquire)) {
+#ifndef _WIN32
+        struct timespec delay;
+        delay.tv_sec = 0;
+        delay.tv_nsec = 1000000L;
+        (void)nanosleep(&delay, NULL);
+#else
+        Sleep(1);
+#endif
+    }
+}
 
 /**
  * Read standard input into memory.
@@ -160,10 +214,14 @@ int main(int argc, char **argv) {
     size_t input_size = 0;
     void *output = NULL;
     size_t output_size = 0;
+    kc_flow_cli_result result;
     kc_flow_t *ctx = NULL;
     kc_flow_run_t *run = NULL;
     int i;
     int rc = 0;
+
+    memset(&result, 0, sizeof(result));
+    atomic_init(&result.done, 0);
 
     if (argc == 1) {
         kc_flow_cli_help(argv[0]);
@@ -275,16 +333,26 @@ int main(int argc, char **argv) {
         }
     }
 
-    rc = kc_flow_run(ctx, &run, link, input, input_size);
+    rc = kc_flow_run(
+        ctx,
+        &run,
+        link,
+        input,
+        input_size,
+        kc_flow_cli_result_handler,
+        &result
+    );
     if (rc != KC_FLOW_OK) {
         rc = kc_flow_cli_fail("unable to start flow");
         goto cleanup;
     }
 
-    rc = kc_flow_run_wait(run, &output, &output_size);
-    if (rc != KC_FLOW_OK) {
-        const char *err = kc_flow_run_error(run);
-        fprintf(stderr, "flow: %s\n", err && *err ? err : "run failed");
+    kc_flow_cli_wait(&result);
+    output = result.output;
+    output_size = result.output_size;
+    if (result.status != KC_FLOW_OK) {
+        fprintf(stderr, "flow: %s\n",
+            result.error && *result.error ? result.error : "run failed");
         rc = 1;
         goto cleanup;
     }
@@ -305,6 +373,7 @@ cleanup:
     }
     if (input) free(input);
     if (output) kc_flow_free(output);
+    free(result.error);
     kc_flow_run_close(run);
     kc_flow_close(ctx);
     return rc;
