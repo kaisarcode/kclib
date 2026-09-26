@@ -176,6 +176,11 @@ Do not narrate development decisions or justify why an implementation was
 designed a certain way. A reader should not need context from the development
 process to understand the README.
 
+Treat every kclib README as independent and self-contained. Do not compare one
+kclib with another, explain a capability by contrasting it with another project,
+or reference what other kclibs do or support. The reader may know nothing about
+the rest of the monorepo and should never need that context.
+
 Do not explain why a kclib does not support a platform or build target. Document
 supported targets only. If WebAssembly is supported, document how to build and
 test it. If it is not supported, omit WebAssembly entirely.
