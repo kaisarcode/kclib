@@ -21,18 +21,17 @@
  * @return None.
  */
 static void kc_print_help(const char *name) {
-    printf("Usage: %s <encode|decode> [text]\n", name);
-    printf("       %s [--encode|-e|--decode|-d] [text]\n", name);
+    printf("Usage: %s <command> [text] [options]\n", name);
     printf("\n");
     printf("Commands:\n");
-    printf("    encode              Encode text or stdin to base64\n");
-    printf("    decode              Decode text or stdin to binary\n");
+    printf("  encode          Encode text or stdin to base64\n");
+    printf("  decode          Decode text or stdin to binary\n");
     printf("\n");
     printf("Options:\n");
-    printf("    -e, --encode        Encode text or stdin to base64\n");
-    printf("    -d, --decode        Decode text or stdin to binary\n");
-    printf("    -h, --help          Show this help\n");
-    printf("    -v, --version       Show version\n");
+    printf("  -e, --encode    Encode text or stdin to base64\n");
+    printf("  -d, --decode    Decode text or stdin to binary\n");
+    printf("  -h, --help      Show this help\n");
+    printf("  -v, --version   Show version\n");
     printf("\n");
     printf("A text argument takes precedence over stdin.\n");
 }
