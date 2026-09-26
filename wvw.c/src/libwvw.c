@@ -2883,7 +2883,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         JSON_Object *ro;
         JSON_Value *sv;
         JSON_Object *so;
-        rc = kc_wvw_get_state(ctx, &st);
+        rc = kc_wvw_get_state_impl(ctx, &st);
         if (rc == KC_WVW_OK) {
             rv = json_value_init_object();
             ro = json_value_get_object(rv);
@@ -4086,7 +4086,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         JSON_Object *ro;
         JSON_Value *sv;
         JSON_Object *so;
-        rc = kc_wvw_get_state(ctx, &st);
+        rc = kc_wvw_get_state_impl(ctx, &st);
         if (rc == KC_WVW_OK) {
             rv = json_value_init_object();
             ro = json_value_get_object(rv);
