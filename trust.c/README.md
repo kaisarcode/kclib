@@ -245,8 +245,7 @@ be passed to `kc_trust_unseal()` more than once.
 
 Messages may contain arbitrary binary data up to `KC_TRUST_MAX_MESSAGE`.
 
-Strings and buffers returned through `out_*` are owned by the caller and must
-be released with `kc_trust_free()`. `kc_trust_free()` accepts `NULL`.
+Use `kc_trust_free()` to release strings and buffers returned by the library.
 
 `kc_trust_close()` releases the local handle. It does not delete persistent
 trust relationships.
