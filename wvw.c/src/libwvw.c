@@ -45,6 +45,15 @@ typedef struct {
     int has_posx, has_posy;
     int fullscreen, borderless, always_on_top, click_through, no_focus;
 } kc_wvw_config_t;
+typedef struct {
+    int width;
+    int height;
+    int minimized;
+    int maximized;
+    int fullscreen;
+    int visible;
+} kc_wvw_window_state_t;
+
 
 typedef enum {
     KC_WVW_OP_NAVIGATE, KC_WVW_OP_ADD_INIT_SCRIPT, KC_WVW_OP_ENABLE_BRIDGE,
@@ -75,6 +84,15 @@ typedef struct {
     int has_posx, has_posy;
     int fullscreen, borderless, always_on_top, click_through, no_focus;
 } kc_wvw_config_t;
+typedef struct {
+    int width;
+    int height;
+    int minimized;
+    int maximized;
+    int fullscreen;
+    int visible;
+} kc_wvw_window_state_t;
+
 
 typedef enum {
     KC_WVW_OP_NAVIGATE, KC_WVW_OP_ADD_INIT_SCRIPT, KC_WVW_OP_ENABLE_BRIDGE,
