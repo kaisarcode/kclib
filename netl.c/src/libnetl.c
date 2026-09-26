@@ -285,6 +285,10 @@ static void kc_netl_output_free(kc_netl_output_t *output) {
     }
 }
 
+/**
+ * Allocate one queued output buffer.
+ * @return Output buffer, or NULL on allocation failure.
+ */
 static kc_netl_output_t *kc_netl_output_new(
     const void *data,
     size_t size
@@ -952,6 +956,10 @@ static DWORD WINAPI kc_netl_worker_entry(LPVOID arg) {
     return 0;
 }
 #else
+/**
+ * Run the listener worker thread.
+ * @return NULL when the worker exits.
+ */
 static void *kc_netl_worker_entry(void *arg) {
     kc_netl_t *listener = (kc_netl_t *)arg;
 
@@ -1326,6 +1334,10 @@ intptr_t kc_netl_cli_take_peer(kc_netl_peer_t *peer) {
 }
 #endif
 
+/**
+ * Return a static message for one public status code.
+ * @return Static error string.
+ */
 const char *kc_netl_strerror(int status) {
     switch (status) {
         case KC_NETL_OK: return "ok";
