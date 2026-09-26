@@ -251,7 +251,6 @@ if (kc_flow_run_wait(run, &output, &output_size) != KC_FLOW_OK) {
     (void)error;
 }
 
-/* Successful non-empty output is caller-owned. */
 kc_flow_free(output);
 kc_flow_run_close(run);
 kc_flow_close(flow);
@@ -280,19 +279,16 @@ request and completes with `KC_FLOW_ESTOP`.
 - `kc_flow_set()` and `kc_flow_unset()` append ordered temporary overrides to the opened flow.
 - `kc_flow_run()` starts one independent non-blocking run from a snapshot of the opened flow, optional entry, and input.
 - `kc_flow_run_stop()` cooperatively stops that run after its current step finishes.
-- `kc_flow_run_wait()` waits for completion and returns `KC_FLOW_OK`, `KC_FLOW_ESTOP`, or `KC_FLOW_ERROR`. Successful non-empty output is caller-owned and released with `kc_flow_free()`.
-- `kc_flow_run_error()` returns the borrowed contextual error for that run.
+- `kc_flow_run_wait()` waits for completion and returns the final status.
+- `kc_flow_run_error()` returns the contextual error for that run.
 - `kc_flow_run_close()` releases the run. If it is still active, close requests a cooperative stop and joins it before release.
-- `kc_flow_free()` releases successful output transferred to the caller.
+- `kc_flow_free()` releases output returned by a completed run.
 - `kc_flow_close()` releases the opened flow. Existing runs remain valid because they own independent snapshots.
 - `kc_flow_version()` returns the build version.
 
 Multiple runs created from one opened flow are independent. Each run owns its
 stop request, execution error, branch traversal, and final result.
 
-WebAssembly is not a supported target. Executing local commands and child
-flows through native process facilities is the core capability of `flow.c`,
-so a WASM build would not provide the same runtime contract.
 
 ### Visualization
 
