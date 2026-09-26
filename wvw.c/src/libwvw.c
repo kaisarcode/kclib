@@ -1883,6 +1883,12 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
     case WM_SIZE:
+        if (ctx && wparam != SIZE_MINIMIZED) {
+            int width = (int)LOWORD(lparam);
+            int height = (int)HIWORD(lparam);
+            if (width > 0) ctx->opts.width = width;
+            if (height > 0) ctx->opts.height = height;
+        }
         kc_wvw_update_bounds(ctx);
         return 0;
     case WM_ERASEBKGND:
@@ -2460,6 +2466,8 @@ static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
     SetWindowPos(ctx->hwnd, NULL, 0, 0,
         rect.right - rect.left, rect.bottom - rect.top,
         SWP_NOMOVE | SWP_NOZORDER);
+    ctx->opts.width = width;
+    ctx->opts.height = height;
     return KC_WVW_OK;
 }
 
@@ -2470,7 +2478,6 @@ static int kc_wvw_set_size_impl(kc_wvw_t *ctx, int width, int height) {
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
-    RECT rect;
     LONG style;
 
     if (!ctx || !ctx->hwnd || !state) {
@@ -2483,10 +2490,8 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
     state->minimized = !!(style & WS_MINIMIZE);
     state->fullscreen = ctx->opts.fullscreen;
     state->visible = IsWindowVisible(ctx->hwnd);
-    if (GetClientRect(ctx->hwnd, &rect)) {
-        state->width = rect.right - rect.left;
-        state->height = rect.bottom - rect.top;
-    }
+    state->width = ctx->opts.width;
+    state->height = ctx->opts.height;
     return KC_WVW_OK;
 }
 
