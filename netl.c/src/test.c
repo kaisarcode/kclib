@@ -613,7 +613,6 @@ static int test_cli_run(
     char cli[1024];
     char out_path[128];
     char err_path[128];
-    char command[4096];
     long pid = (long)TEST_GETPID();
     int rc;
 
@@ -626,28 +625,92 @@ static int test_cli_run(
     snprintf(out_path, sizeof(out_path), "netl-cli-%ld-out.tmp", pid);
     snprintf(err_path, sizeof(err_path), "netl-cli-%ld-err.tmp", pid);
 
-    if (arg != NULL && arg[0] != '\0') {
-        snprintf(
-            command,
-            sizeof(command),
-            "\"%s\" %s > \"%s\" 2> \"%s\"",
-            cli,
-            arg,
-            out_path,
-            err_path
-        );
-    } else {
-        snprintf(
-            command,
-            sizeof(command),
-            "\"%s\" > \"%s\" 2> \"%s\"",
-            cli,
-            out_path,
-            err_path
-        );
-    }
+#ifdef _WIN32
+    {
+        const char *argv[3];
+        int out_fd;
+        int err_fd;
+        int save_out;
+        int save_err;
 
-    rc = system(command);
+        argv[0] = cli;
+        argv[1] = arg != NULL && arg[0] != '\0' ? arg : NULL;
+        argv[2] = NULL;
+
+        out_fd = _open(
+            out_path,
+            _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+            _S_IREAD | _S_IWRITE
+        );
+        err_fd = _open(
+            err_path,
+            _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+            _S_IREAD | _S_IWRITE
+        );
+        if (out_fd < 0 || err_fd < 0) {
+            if (out_fd >= 0) _close(out_fd);
+            if (err_fd >= 0) _close(err_fd);
+            return -1;
+        }
+
+        save_out = _dup(1);
+        save_err = _dup(2);
+        if (save_out < 0 || save_err < 0) {
+            if (save_out >= 0) _close(save_out);
+            if (save_err >= 0) _close(save_err);
+            _close(out_fd);
+            _close(err_fd);
+            return -1;
+        }
+
+        fflush(stdout);
+        fflush(stderr);
+        _dup2(out_fd, 1);
+        _dup2(err_fd, 2);
+        _close(out_fd);
+        _close(err_fd);
+
+        rc = (int)_spawnv(
+            _P_WAIT,
+            cli,
+            (const char * const *)argv
+        );
+
+        fflush(stdout);
+        fflush(stderr);
+        _dup2(save_out, 1);
+        _dup2(save_err, 2);
+        _close(save_out);
+        _close(save_err);
+    }
+#else
+    {
+        char command[4096];
+
+        if (arg != NULL && arg[0] != '\0') {
+            snprintf(
+                command,
+                sizeof(command),
+                "\"%s\" %s > \"%s\" 2> \"%s\"",
+                cli,
+                arg,
+                out_path,
+                err_path
+            );
+        } else {
+            snprintf(
+                command,
+                sizeof(command),
+                "\"%s\" > \"%s\" 2> \"%s\"",
+                cli,
+                out_path,
+                err_path
+            );
+        }
+        rc = system(command);
+    }
+#endif
+
     if (
         test_read_file(out_path, out, out_size) != 0 ||
         test_read_file(err_path, err, err_size) != 0
