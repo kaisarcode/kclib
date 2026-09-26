@@ -67,7 +67,7 @@ The public lifecycle is:
 - `kc_mdp_meta()` returns the stored raw frontmatter view without reparsing.
 - `kc_mdp_html()` renders the stored body on first use and caches the HTML for later calls.
 - `kc_mdp_close()` releases the document, including cached HTML.
-- `kc_mdp_version()` returns the generated build version.
+- `kc_mdp_version()` returns the library build version.
 
 The input string is borrowed only for the duration of `kc_mdp_open()`.
 Successful open owns its split body and metadata independently of the original
