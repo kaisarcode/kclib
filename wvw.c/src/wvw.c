@@ -9,7 +9,9 @@
  */
 
 #include "libwvw.h"
-#include "libwvw_internal.h"
+
+/* Private CLI-only wait helper implemented by libwvw.c. */
+int kc_wvw_cli_wait(kc_wvw_t *wvw);
 
 #include <errno.h>
 #include <stdio.h>
