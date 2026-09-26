@@ -502,6 +502,18 @@ static int case_kc_init_cli(void) {
 #endif
     fail += expect_true("unknown option fails", system(command) != 0);
 
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"%s\" --dir x > NUL 2>&1", INIT_TEST_CLI);
+#else
+    snprintf(
+        command,
+        sizeof(command),
+        "\"%s\" --dir x > /dev/null 2>&1",
+        INIT_TEST_CLI
+    );
+#endif
+    fail += expect_true("removed --dir fails", system(command) != 0);
+
     fail += fixture_create(dir, sizeof(dir));
     if (!fail) {
 #ifdef _WIN32
