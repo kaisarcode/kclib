@@ -93,7 +93,6 @@ The public lifecycle is:
 - `kc_netl_port()` reports the actual bound port, including ephemeral ports.
 - `kc_netl_close()` closes the listener and all remaining connections.
 
-
 ### Model
 
 TCP listeners own many simultaneous connections:
@@ -157,7 +156,6 @@ The same listener can carry a different protocol or raw bytes without involving
 The native listener requires operating-system TCP/UDP server sockets. It is
 intended for native platforms supported by the project, including POSIX systems
 and Windows.
-
 
 ---
 
