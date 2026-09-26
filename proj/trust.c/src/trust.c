@@ -26,17 +26,17 @@ static void kc_print_help(const char *name) {
     printf("Usage: %s <command> [arguments]\n", name);
     printf("\n");
     printf("Commands:\n");
-    printf("    init                    Ensure the local trust store exists\n");
+    printf("  init                    Ensure the local trust store exists\n");
     printf("    invite                  Create a one-use trust invitation\n");
     printf("    join <code>             Join from an invitation code\n");
     printf("    confirm <confirmation>  Confirm a joined invitation\n");
-    printf("    seal <remote_uid>       Encrypt stdin for a remote UID\n");
-    printf("    unseal <local_uid>      Decrypt stdin addressed to a local UID\n");
-    printf("    revoke <remote_uid>     Revoke an established or pending remote UID\n");
+    printf("  seal <remote_uid>       Encrypt stdin for a remote UID\n");
+    printf("  unseal <local_uid>      Decrypt stdin addressed to a local UID\n");
+    printf("  revoke <remote_uid>     Revoke an established or pending remote UID\n");
     printf("\n");
     printf("Options:\n");
-    printf("    -h, --help              Show this help\n");
-    printf("    -v, --version           Show version\n");
+    printf("  -h, --help              Show this help\n");
+    printf("  -v, --version           Show version\n");
 }
 
 /**
