@@ -135,7 +135,6 @@ if (kc_tpm_open(&profile, map_text, NULL) == KC_TPM_OK) {
 A successful `kc_tpm_open()` always returns a complete profile that can be
 scored immediately and repeatedly. There is no separate build phase.
 
-
 The n-gram size defaults to 3 and accepts values from 1 through 8.
 
 `kc_tpm_score()` returns `KC_TPM_ERROR` for invalid arguments, allocation
