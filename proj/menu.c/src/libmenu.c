@@ -305,12 +305,16 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
     HRESULT hr;
     int argc = 0;
     int coinit = 0;
+    int found;
     int rc = KC_MENU_ERROR;
     size_t len;
 
     if (!kc_menu_valid_entry(entry) || !kc_menu_windows_name_valid(entry->name)) {
         return KC_MENU_ERROR;
     }
+
+    found = kc_menu_meta_read(entry->id, &old);
+    if (found != 0) goto done;
 
     wname = kc_menu_wide(entry->name);
     wcommand = kc_menu_wide(entry->command);
@@ -341,10 +345,7 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
     swprintf(filename, len, L"%ls.lnk", wname);
     shortcut = kc_menu_join_wide(target_dir ? target_dir : programs, filename);
     if (!shortcut) goto done;
-
-    if (kc_menu_meta_read(entry->id, &old) > 0 && wcscmp(old, shortcut) != 0) {
-        DeleteFileW(old);
-    }
+    if (GetFileAttributesW(shortcut) != INVALID_FILE_ATTRIBUTES) goto done;
 
     hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     if (SUCCEEDED(hr)) coinit = 1;
@@ -530,6 +531,10 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
     if (!kc_menu_valid_entry(entry)) return KC_MENU_ERROR;
     path = kc_menu_path(entry->id);
     if (!path) return KC_MENU_ERROR;
+    if (access(path, F_OK) == 0 || errno != ENOENT) {
+        free(path);
+        return KC_MENU_ERROR;
+    }
     len = strlen(path) + 5U;
     tmp = (char *)malloc(len);
     if (!tmp) {
