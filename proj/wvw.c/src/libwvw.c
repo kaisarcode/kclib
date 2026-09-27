@@ -1887,7 +1887,7 @@ static void kc_wvw_request_close(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-static int kc_wvw_cli_wait_for_ready(kc_wvw_t *ctx) {
+static int kc_wvw_wait_for_ready(kc_wvw_t *ctx) {
     MSG message;
 
     while (ctx->init_state == KC_WVW_INIT_PENDING && !ctx->closing) {
@@ -2214,7 +2214,7 @@ static DWORD WINAPI kc_wvw_windows_worker(LPVOID data) {
     if(!ctx->pending_url){kc_wvw_set_error(ctx,"memory allocation failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
     if(kc_wvw_load_loader(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2Loader.dll not found");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
     if(kc_wvw_create_window(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
-    if(kc_wvw_start_webview(ctx)!=KC_WVW_OK||kc_wvw_cli_wait_for_ready(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2 initialization failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
+    if(kc_wvw_start_webview(ctx)!=KC_WVW_OK||kc_wvw_wait_for_ready(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2 initialization failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
     ctx->started=1;ctx->running=1;SetEvent(ctx->ready);
     while(ctx->running&&GetMessageW(&message,NULL,0,0)>0){TranslateMessage(&message);DispatchMessageW(&message);}
     ctx->running=0;
