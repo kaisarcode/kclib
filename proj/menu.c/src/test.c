@@ -35,6 +35,13 @@ static int test_case_current;
 
 typedef int (*case_fn)(void);
 
+/**
+ * Print one top-level test result.
+ * @param fail Failure count.
+ * @param name Canonical case name.
+ * @param detail Case detail.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail) {
     printf(
         "[%d/%d] [%s] %s: %s\n",
@@ -46,11 +53,23 @@ static void case_result(int fail, const char *name, const char *detail) {
     );
 }
 
+/**
+ * Run one top-level contract case.
+ * @param rc Failure accumulator.
+ * @param fn Case function.
+ * @return None.
+ */
 static void run_case(int *rc, case_fn fn) {
     test_case_current++;
     *rc += fn();
 }
 
+/**
+ * Verify one boolean condition.
+ * @param label Check label.
+ * @param condition Condition to verify.
+ * @return Failure count.
+ */
 static int expect_true(const char *label, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", label);
@@ -62,6 +81,10 @@ static int expect_true(const char *label, int condition) {
 #ifndef _WIN32
 static char test_data_home[512];
 
+/**
+ * Create and activate an isolated XDG data home.
+ * @return Zero on success, nonzero on failure.
+ */
 static int test_prepare_home(void) {
     char pattern[] = "/tmp/kc-menu-test-XXXXXX";
     char *dir = mkdtemp(pattern);
@@ -72,6 +95,11 @@ static int test_prepare_home(void) {
     return setenv("XDG_DATA_HOME", test_data_home, 1) == 0 ? 0 : 1;
 }
 
+/**
+ * Check whether one Linux desktop entry exists.
+ * @param id Menu entry identifier.
+ * @return Nonzero when the desktop entry exists.
+ */
 static int test_linux_entry_exists(const char *id) {
     char path[1024];
     struct stat st;
@@ -81,6 +109,11 @@ static int test_linux_entry_exists(const char *id) {
 }
 #endif
 
+/**
+ * Build one valid menu test entry.
+ * @param id Menu entry identifier.
+ * @return Initialized menu entry.
+ */
 static kc_menu_entry_t test_entry(const char *id) {
     kc_menu_entry_t entry = {
         id,
@@ -99,6 +132,12 @@ static kc_menu_entry_t test_entry(const char *id) {
 }
 
 #ifdef _WIN32
+/**
+ * Check whether one categorized Windows shortcut exists.
+ * @param category Start Menu category folder.
+ * @param name Shortcut display name.
+ * @return Nonzero when the shortcut exists.
+ */
 static int test_windows_entry_exists(
     const char *category,
     const char *name
@@ -145,6 +184,12 @@ static int test_windows_entry_exists(
 #endif
 
 #ifndef _WIN32
+/**
+ * Check whether one Linux desktop entry contains text.
+ * @param id Menu entry identifier.
+ * @param text Expected text.
+ * @return Nonzero when the text is present.
+ */
 static int test_linux_entry_contains(const char *id, const char *text) {
     char path[1024];
     char buffer[4096];
@@ -161,6 +206,10 @@ static int test_linux_entry_contains(const char *id, const char *text) {
 }
 #endif
 
+/**
+ * Test kc_menu_add.
+ * @return Zero on success, nonzero on failure.
+ */
 static int case_kc_menu_add(void) {
     const char *name = "kc_menu_add";
     const char *detail = "adds one application menu entry";
@@ -217,6 +266,10 @@ static int case_kc_menu_add(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test kc_menu_delete.
+ * @return Zero on success, nonzero on failure.
+ */
 static int case_kc_menu_delete(void) {
     const char *name = "kc_menu_delete";
     const char *detail = "deletes entries and treats missing ids as a no-op";
@@ -253,6 +306,10 @@ static int case_kc_menu_delete(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test menu input validation.
+ * @return Zero on success, nonzero on failure.
+ */
 static int case_kc_menu_validation(void) {
     const char *name = "kc_menu_validation";
     const char *detail = "rejects invalid identifiers and required values";
@@ -358,6 +415,10 @@ static int case_kc_menu_validation(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test kc_menu_version.
+ * @return Zero on success, nonzero on failure.
+ */
 static int case_kc_menu_version(void) {
     int fail = expect_true("version is nonzero", kc_menu_version() != 0U);
 
@@ -370,6 +431,13 @@ static int case_kc_menu_version(void) {
 }
 
 #ifdef _WIN32
+/**
+ * Convert one UTF-8 test string to UTF-16.
+ * @param input UTF-8 input string.
+ * @param output Destination wide-string buffer.
+ * @param capacity Destination capacity in wchar_t units.
+ * @return Zero on success, nonzero on failure.
+ */
 static int test_to_wide(const char *input, wchar_t *output, size_t capacity) {
     return MultiByteToWideChar(
         CP_UTF8,
@@ -381,6 +449,13 @@ static int test_to_wide(const char *input, wchar_t *output, size_t capacity) {
     ) > 0 ? 0 : 1;
 }
 
+/**
+ * Append one quoted argument to a Windows command line.
+ * @param command Destination command line.
+ * @param capacity Destination capacity in wchar_t units.
+ * @param arg Argument to append.
+ * @return Zero on success, nonzero on failure.
+ */
 static int test_append_arg(
     wchar_t *command,
     size_t capacity,
@@ -403,6 +478,13 @@ static int test_append_arg(
     return 0;
 }
 
+/**
+ * Read one Windows pipe into a NUL-terminated buffer.
+ * @param pipe Pipe read handle.
+ * @param buffer Destination buffer.
+ * @param size Destination buffer size.
+ * @return None.
+ */
 static void test_read_pipe(HANDLE pipe, char *buffer, size_t size) {
     DWORD count;
     size_t used = 0;
@@ -422,6 +504,16 @@ static void test_read_pipe(HANDLE pipe, char *buffer, size_t size) {
 }
 #endif
 
+/**
+ * Run the menu CLI and capture output and process status.
+ * @param argv NULL-terminated argument vector.
+ * @param out Captured stdout buffer.
+ * @param out_size Stdout buffer size.
+ * @param err Captured stderr buffer.
+ * @param err_size Stderr buffer size.
+ * @param out_status Destination process status.
+ * @return Zero on execution success, nonzero on harness failure.
+ */
 static int test_cli_run(
     char *const argv[],
     char *out,
@@ -552,6 +644,10 @@ static int test_cli_run(
 #endif
 }
 
+/**
+ * Test the grouped menu CLI contract.
+ * @return Zero on success, nonzero on failure.
+ */
 static int case_kc_menu_cli(void) {
     const char *name = "kc_menu_cli";
     const char *detail = "add, delete, help, version, and diagnostics";
@@ -668,6 +764,10 @@ static int case_kc_menu_cli(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Run all menu contract cases.
+ * @return Failure count.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -684,6 +784,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Test executable entry point.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process status.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(
