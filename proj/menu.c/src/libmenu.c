@@ -45,13 +45,26 @@ static int kc_menu_valid_id(const char *id) {
     return 1;
 }
 
+static int kc_menu_valid_category(const char *category) {
+    static const char *bad = "<>:\"/\\|?*;";
+    const unsigned char *p = (const unsigned char *)category;
+
+    if (!category) return 1;
+    if (!kc_menu_nonempty(category) || !kc_menu_single_line(category)) return 0;
+    for (; *p; p++) {
+        if (*p < 32 || strchr(bad, (int)*p)) return 0;
+    }
+    return 1;
+}
+
 static int kc_menu_valid_entry(const kc_menu_entry_t *entry) {
     return entry && kc_menu_valid_id(entry->id) &&
         kc_menu_nonempty(entry->name) && kc_menu_nonempty(entry->command) &&
         kc_menu_single_line(entry->name) &&
         kc_menu_single_line(entry->description) &&
         kc_menu_single_line(entry->command) &&
-        kc_menu_single_line(entry->icon);
+        kc_menu_single_line(entry->icon) &&
+        kc_menu_valid_category(entry->category);
 }
 
 #ifdef _WIN32
@@ -284,6 +297,7 @@ static wchar_t *kc_menu_arguments(int argc, wchar_t **argv) {
 int kc_menu_add(const kc_menu_entry_t *entry) {
     PWSTR programs = NULL;
     wchar_t *wname = NULL, *wcommand = NULL, *wdescription = NULL, *wicon = NULL;
+    wchar_t *wcategory = NULL, *target_dir = NULL;
     wchar_t *filename = NULL, *shortcut = NULL, *args = NULL, *old = NULL;
     wchar_t **argv = NULL;
     IShellLinkW *link = NULL;
@@ -302,8 +316,11 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
     wcommand = kc_menu_wide(entry->command);
     wdescription = entry->description ? kc_menu_wide(entry->description) : NULL;
     wicon = entry->icon ? kc_menu_wide(entry->icon) : NULL;
+    wcategory = entry->category ? kc_menu_wide(entry->category) : NULL;
     if (!wname || !wcommand || (entry->description && !wdescription) ||
-            (entry->icon && !wicon)) goto done;
+            (entry->icon && !wicon) || (entry->category && !wcategory)) {
+        goto done;
+    }
 
     argv = CommandLineToArgvW(wcommand, &argc);
     if (!argv || argc < 1 || argv[0][0] == L'\0') goto done;
@@ -313,11 +330,16 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
     if (FAILED(SHGetKnownFolderPath(&FOLDERID_Programs, KF_FLAG_CREATE,
             NULL, &programs))) goto done;
 
+    if (wcategory) {
+        target_dir = kc_menu_join_wide(programs, wcategory);
+        if (!target_dir || kc_menu_mkdir(target_dir) != 0) goto done;
+    }
+
     len = wcslen(wname) + 5U;
     filename = (wchar_t *)calloc(len, sizeof(wchar_t));
     if (!filename) goto done;
     swprintf(filename, len, L"%ls.lnk", wname);
-    shortcut = kc_menu_join_wide(programs, filename);
+    shortcut = kc_menu_join_wide(target_dir ? target_dir : programs, filename);
     if (!shortcut) goto done;
 
     if (kc_menu_meta_read(entry->id, &old) > 0 && wcscmp(old, shortcut) != 0) {
@@ -359,6 +381,8 @@ done:
     free(args);
     free(shortcut);
     free(filename);
+    free(target_dir);
+    free(wcategory);
     free(wicon);
     free(wdescription);
     free(wcommand);
@@ -527,6 +551,8 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
             kc_menu_write_value(file, "Comment", entry->description) == 0) &&
         kc_menu_write_value(file, "Exec", entry->command) == 0 &&
         (!entry->icon || kc_menu_write_value(file, "Icon", entry->icon) == 0) &&
+        (!entry->category ||
+            fprintf(file, "Categories=%s;\n", entry->category) >= 0) &&
         fprintf(file, "Terminal=false\n") >= 0 &&
         fclose(file) == 0;
 
