@@ -1887,7 +1887,7 @@ static void kc_wvw_request_close(kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-static int kc_wvw_wait_for_ready(kc_wvw_t *ctx) {
+static int kc_wvw_cli_wait_for_ready(kc_wvw_t *ctx) {
     MSG message;
 
     while (ctx->init_state == KC_WVW_INIT_PENDING && !ctx->closing) {
@@ -2214,7 +2214,7 @@ static DWORD WINAPI kc_wvw_windows_worker(LPVOID data) {
     if(!ctx->pending_url){kc_wvw_set_error(ctx,"memory allocation failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
     if(kc_wvw_load_loader(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2Loader.dll not found");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
     if(kc_wvw_create_window(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
-    if(kc_wvw_start_webview(ctx)!=KC_WVW_OK||kc_wvw_wait_for_ready(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2 initialization failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
+    if(kc_wvw_start_webview(ctx)!=KC_WVW_OK||kc_wvw_cli_wait_for_ready(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2 initialization failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
     ctx->started=1;ctx->running=1;SetEvent(ctx->ready);
     while(ctx->running&&GetMessageW(&message,NULL,0,0)>0){TranslateMessage(&message);DispatchMessageW(&message);}
     ctx->running=0;
@@ -2277,7 +2277,7 @@ const char *kc_wvw_get_error(const kc_wvw_t *ctx) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_wait(kc_wvw_t *ctx){if(!ctx||!ctx->closed_event)return KC_WVW_ERROR;WaitForSingleObject(ctx->closed_event,INFINITE);return KC_WVW_OK;}
+int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx||!ctx->closed_event)return KC_WVW_ERROR;WaitForSingleObject(ctx->closed_event,INFINITE);return KC_WVW_OK;}
 
 /**
  * Close the WebView and release its public lifetime.
@@ -4921,7 +4921,7 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_wait(kc_wvw_t *ctx){if(!ctx||![NSThread isMainThread])return KC_WVW_ERROR;if(ctx->closed)return KC_WVW_OK;ctx->cli_waiting=1;@autoreleasepool{[NSApp run];}ctx->cli_waiting=0;return KC_WVW_OK;}
+int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx||![NSThread isMainThread])return KC_WVW_ERROR;if(ctx->closed)return KC_WVW_OK;ctx->cli_waiting=1;@autoreleasepool{[NSApp run];}ctx->cli_waiting=0;return KC_WVW_OK;}
 
 /**
  * Close the WebView and release its public lifetime.
@@ -5453,7 +5453,7 @@ int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){kc_wvw_t *ctx;if
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_wait(kc_wvw_t *ctx){if(!ctx)return KC_WVW_ERROR;g_mutex_lock(&ctx->mutex);while(!ctx->closed)g_cond_wait(&ctx->cond,&ctx->mutex);g_mutex_unlock(&ctx->mutex);return KC_WVW_OK;}
+int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx)return KC_WVW_ERROR;g_mutex_lock(&ctx->mutex);while(!ctx->closed)g_cond_wait(&ctx->cond,&ctx->mutex);g_mutex_unlock(&ctx->mutex);return KC_WVW_OK;}
 
 /**
  * Close the WebView and release its public lifetime.
