@@ -29,7 +29,7 @@ typedef struct {
 } kc_menu_entry_t;
 
 /**
- * Add or replace one application menu entry.
+ * Add one application menu entry.
  * Platform-specific menu registration is selected internally.
  * @param entry Application menu entry.
  * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
