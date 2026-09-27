@@ -86,16 +86,20 @@ If a binding must reinterpret what an operation means, invent application-level 
 
 Prefer opaque handles only when persistent identity or state is a real capability-level concept. Prefer simple public value structs, explicit arrays, plain scalar types, and clear ownership.
 
-When C requires lower-level representation details, keep them as mechanical as possible so bindings can erase them cleanly. Do not let C representation constraints define the conceptual API. Avoid public ABI complexity that does not serve an actual kclib consumer.
+The private C implementation may use whatever machinery is necessary: pointers, allocations, native handles, buffers, threads, queues, platform APIs, state machines, or other low-level techniques. That complexity belongs behind the public header.
+
+Exported symbols should stay simple and capability-oriented. Do not make consumers manually shuttle pointers, manage internal allocations, coordinate buffer ownership, or reproduce private lifecycle mechanics when the library can own those responsibilities itself.
+
+When some low-level C representation is unavoidable at the ABI boundary, keep it minimal, explicit, and mechanical so bindings can erase it cleanly. Do not let C representation constraints define the conceptual API. Avoid public ABI complexity that does not serve an actual kclib consumer.
 
 ## Represent intent, not mechanism
 
 The public API must represent the user's intent and the capability being
 offered, not the low-level mechanism used to implement it.
 
-This rule applies to the public surface only: public headers, exported symbols,
-and the semantics directly exposed to consumers. It does not restrict internal
-implementation design.
+This rule applies to the public surface only: public headers, exported symbols, and the semantics directly exposed to consumers. It does not restrict internal implementation design.
+
+Private implementation complexity is expected when the capability requires it. Prefer absorbing that complexity inside the library instead of pushing it into every caller.
 
 Inside a kclib, use any private mechanisms required to implement the capability
 correctly and efficiently, including private helpers, state machines, threads,
