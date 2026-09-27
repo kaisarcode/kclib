@@ -79,6 +79,71 @@ A good public API should remain recognizable across languages. The operation
 names, object boundaries, values, and lifecycle should describe the same
 capability whether consumed from C, Lua, JavaScript, or another binding.
 
+Use concrete scripting shapes as a design check.
+
+For a stateless operation, prefer a direct value-oriented shape:
+
+```lua
+local html = mdp.render(markdown)
+```
+
+```js
+const html = await mdp.render(markdown);
+```
+
+Do not force a scripting consumer to mirror C-only mechanics such as:
+
+```text
+allocate options
+prepare output pointer
+call function
+check integer status
+read output pointer
+free temporary result
+```
+
+For a capability with persistent identity or state, expose an object naturally:
+
+```lua
+local document, status = mdp.open(markdown)
+if not document then
+    error(status)
+end
+
+local html = document:html()
+document:close()
+```
+
+```js
+const document = await mdp.open(markdown);
+const html = await document.html();
+await document.close();
+```
+
+For structured input, prefer ordinary language values:
+
+```lua
+listener = netl.open({
+    host = "127.0.0.1",
+    port = 8080
+})
+```
+
+```js
+const listener = await netl.open({
+    host: "127.0.0.1",
+    port: 8080
+});
+```
+
+A binding may mechanically translate these values to public C structs, arrays,
+handles, or other ABI representations. The scripting user should not need to
+recreate those representations manually.
+
+When reviewing a proposed public API, imagine writing its Lua and JavaScript
+forms first. If those forms look like translated C plumbing instead of a natural
+capability API, redesign the public C surface.
+
 Design from that consumer experience inward:
 
 ```text
