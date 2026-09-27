@@ -22,14 +22,29 @@
 #define KC_MENU_BUILD_VERSION 0
 #endif
 
+/**
+ * Check whether one string is nonempty.
+ * @param value String to inspect.
+ * @return Nonzero when the string contains data.
+ */
 static int kc_menu_nonempty(const char *value) {
     return value && value[0] != '\0';
 }
 
+/**
+ * Check whether one optional string is single-line.
+ * @param value String to inspect.
+ * @return Nonzero when valid.
+ */
 static int kc_menu_single_line(const char *value) {
     return !value || (strchr(value, '\n') == NULL && strchr(value, '\r') == NULL);
 }
 
+/**
+ * Validate one persistent menu entry identifier.
+ * @param id Menu entry identifier.
+ * @return Nonzero when valid.
+ */
 static int kc_menu_valid_id(const char *id) {
     const unsigned char *p = (const unsigned char *)id;
 
@@ -45,6 +60,11 @@ static int kc_menu_valid_id(const char *id) {
     return 1;
 }
 
+/**
+ * Validate one optional menu category.
+ * @param category Category name.
+ * @return Nonzero when valid.
+ */
 static int kc_menu_valid_category(const char *category) {
     static const char *bad = "<>:\"/\\|?*;";
     const unsigned char *p = (const unsigned char *)category;
@@ -57,6 +77,11 @@ static int kc_menu_valid_category(const char *category) {
     return 1;
 }
 
+/**
+ * Validate one complete menu entry.
+ * @param entry Menu entry.
+ * @return Nonzero when valid.
+ */
 static int kc_menu_valid_entry(const kc_menu_entry_t *entry) {
     return entry && kc_menu_valid_id(entry->id) &&
         kc_menu_nonempty(entry->name) && kc_menu_nonempty(entry->command) &&
@@ -76,6 +101,11 @@ static int kc_menu_valid_entry(const kc_menu_entry_t *entry) {
 #include <shobjidl.h>
 #include <shellapi.h>
 
+/**
+ * Convert one UTF-8 string to UTF-16.
+ * @param value UTF-8 source string.
+ * @return Allocated wide string, or NULL on failure.
+ */
 static wchar_t *kc_menu_wide(const char *value) {
     int count;
     wchar_t *out;
@@ -92,6 +122,11 @@ static wchar_t *kc_menu_wide(const char *value) {
     return out;
 }
 
+/**
+ * Convert one UTF-16 string to UTF-8.
+ * @param value Wide source string.
+ * @return Allocated UTF-8 string, or NULL on failure.
+ */
 static char *kc_menu_utf8(const wchar_t *value) {
     int count;
     char *out;
@@ -107,6 +142,11 @@ static char *kc_menu_utf8(const wchar_t *value) {
     return out;
 }
 
+/**
+ * Ensure one Windows directory exists.
+ * @param path Directory path.
+ * @return Zero on success, nonzero on failure.
+ */
 static int kc_menu_mkdir(const wchar_t *path) {
     DWORD attr = GetFileAttributesW(path);
     if (attr != INVALID_FILE_ATTRIBUTES) {
@@ -115,6 +155,11 @@ static int kc_menu_mkdir(const wchar_t *path) {
     return CreateDirectoryW(path, NULL) ? 0 : -1;
 }
 
+/**
+ * Validate one Windows shortcut display name.
+ * @param name Shortcut name.
+ * @return Nonzero when valid.
+ */
 static int kc_menu_windows_name_valid(const char *name) {
     static const char *bad = "<>:\"/\\|?*";
     const unsigned char *p = (const unsigned char *)name;
@@ -126,6 +171,12 @@ static int kc_menu_windows_name_valid(const char *name) {
     return 1;
 }
 
+/**
+ * Join two Windows path components.
+ * @param a Parent path.
+ * @param b Child component.
+ * @return Allocated joined path, or NULL on failure.
+ */
 static wchar_t *kc_menu_join_wide(const wchar_t *a, const wchar_t *b) {
     size_t alen = wcslen(a);
     size_t blen = wcslen(b);
@@ -138,6 +189,10 @@ static wchar_t *kc_menu_join_wide(const wchar_t *a, const wchar_t *b) {
     return out;
 }
 
+/**
+ * Resolve and create the Windows metadata directory.
+ * @return Allocated directory path, or NULL on failure.
+ */
 static wchar_t *kc_menu_meta_dir(void) {
     PWSTR base = NULL;
     wchar_t *kaisar = NULL;
@@ -164,6 +219,11 @@ static wchar_t *kc_menu_meta_dir(void) {
     return menu;
 }
 
+/**
+ * Resolve one Windows metadata file path.
+ * @param id Menu entry identifier.
+ * @return Allocated metadata path, or NULL on failure.
+ */
 static wchar_t *kc_menu_meta_path(const char *id) {
     wchar_t *dir = kc_menu_meta_dir();
     wchar_t *wid = kc_menu_wide(id);
@@ -180,6 +240,12 @@ static wchar_t *kc_menu_meta_path(const char *id) {
     return path;
 }
 
+/**
+ * Read the stored shortcut path for one Windows entry.
+ * @param id Menu entry identifier.
+ * @param out_path Destination shortcut path.
+ * @return One when found, zero when missing, or negative on failure.
+ */
 static int kc_menu_meta_read(const char *id, wchar_t **out_path) {
     wchar_t *meta = kc_menu_meta_path(id);
     FILE *file;
@@ -215,6 +281,12 @@ static int kc_menu_meta_read(const char *id, wchar_t **out_path) {
     return 1;
 }
 
+/**
+ * Store the shortcut path for one Windows entry.
+ * @param id Menu entry identifier.
+ * @param shortcut Shortcut path.
+ * @return Zero on success, nonzero on failure.
+ */
 static int kc_menu_meta_write(const char *id, const wchar_t *shortcut) {
     wchar_t *meta = kc_menu_meta_path(id);
     char *utf8 = kc_menu_utf8(shortcut);
@@ -240,6 +312,12 @@ static int kc_menu_meta_write(const char *id, const wchar_t *shortcut) {
     return ok ? 0 : -1;
 }
 
+/**
+ * Append one quoted Windows command argument.
+ * @param cursor Destination cursor.
+ * @param arg Argument to quote.
+ * @return None.
+ */
 static void kc_menu_quote_arg(wchar_t **cursor, const wchar_t *arg) {
     const wchar_t *p;
     wchar_t *out = *cursor;
@@ -275,6 +353,12 @@ static void kc_menu_quote_arg(wchar_t **cursor, const wchar_t *arg) {
     *cursor = out;
 }
 
+/**
+ * Build the Windows shortcut argument string.
+ * @param argc Parsed command argument count.
+ * @param argv Parsed command arguments.
+ * @return Allocated argument string, or NULL on failure.
+ */
 static wchar_t *kc_menu_arguments(int argc, wchar_t **argv) {
     size_t total = 1U;
     int i;
@@ -294,6 +378,16 @@ static wchar_t *kc_menu_arguments(int argc, wchar_t **argv) {
     return out;
 }
 
+/**
+ * Add one Windows application menu entry.
+ * @param entry Application menu entry.
+ * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
+ */
+/**
+ * Add one Linux application menu entry.
+ * @param entry Application menu entry.
+ * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
+ */
 int kc_menu_add(const kc_menu_entry_t *entry) {
     PWSTR programs = NULL;
     wchar_t *wname = NULL, *wcommand = NULL, *wdescription = NULL, *wicon = NULL;
@@ -391,6 +485,16 @@ done:
     return rc;
 }
 
+/**
+ * Delete one Windows application menu entry.
+ * @param id Application menu entry identifier.
+ * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
+ */
+/**
+ * Delete one Linux application menu entry.
+ * @param id Application menu entry identifier.
+ * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
+ */
 int kc_menu_delete(const char *id) {
     wchar_t *shortcut = NULL;
     wchar_t *meta;
@@ -424,6 +528,11 @@ int kc_menu_delete(const char *id) {
 #include <sys/types.h>
 #include <unistd.h>
 
+/**
+ * Ensure one Linux directory exists.
+ * @param path Directory path.
+ * @return Zero on success, nonzero on failure.
+ */
 static int kc_menu_mkdir(const char *path) {
     struct stat st;
 
@@ -432,6 +541,10 @@ static int kc_menu_mkdir(const char *path) {
     return errno == EEXIST ? 0 : -1;
 }
 
+/**
+ * Resolve the current user's XDG data directory.
+ * @return Allocated directory path, or NULL on failure.
+ */
 static char *kc_menu_data_home(void) {
     const char *xdg = getenv("XDG_DATA_HOME");
     const char *home;
@@ -448,6 +561,10 @@ static char *kc_menu_data_home(void) {
     return out;
 }
 
+/**
+ * Resolve and create the Linux applications directory.
+ * @return Allocated directory path, or NULL on failure.
+ */
 static char *kc_menu_app_dir(void) {
     char *base = kc_menu_data_home();
     size_t len;
@@ -488,6 +605,11 @@ static char *kc_menu_app_dir(void) {
     return dir;
 }
 
+/**
+ * Resolve one Linux desktop entry path.
+ * @param id Menu entry identifier.
+ * @return Allocated desktop entry path, or NULL on failure.
+ */
 static char *kc_menu_path(const char *id) {
     char *dir = kc_menu_app_dir();
     size_t len;
@@ -505,6 +627,13 @@ static char *kc_menu_path(const char *id) {
     return path;
 }
 
+/**
+ * Write one escaped desktop entry key value.
+ * @param file Destination desktop entry file.
+ * @param key Desktop entry key.
+ * @param value Optional value.
+ * @return Zero on success, nonzero on failure.
+ */
 static int kc_menu_write_value(FILE *file, const char *key, const char *value) {
     const unsigned char *p;
 
@@ -589,6 +718,10 @@ int kc_menu_delete(const char *id) {
 
 #endif
 
+/**
+ * Return the generated menu build version.
+ * @return Unix timestamp for the current build.
+ */
 uint64_t kc_menu_version(void) {
     return (uint64_t)KC_MENU_BUILD_VERSION;
 }
