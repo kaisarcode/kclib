@@ -1,22 +1,19 @@
 # kclib
 
-`kclib` is the public development repository for a collection of small,
-independent, and composable native primitives. Each project solves one specific
-problem through a reusable C library and, usually, a thin CLI built on the same
-public API.
+`kclib` is the public development repository for the native primitives of the KaisarCode ecosystem. Each project provides one concrete capability through an independent reusable C library and, usually, a thin CLI built on the same public API.
 
 All kclib projects are developed together in this monorepo under `proj/NAME.c/`
 directories.
 
-It is not a framework or a monolithic library. The tools work independently or
-compose through stdin, stdout, files, sockets, and explicit text protocols. The
-goal is to preserve local control, inspectable state, and minimal
-infrastructure.
+It is not a framework or a monolithic library. Every kclib is independent: no kclib depends on another kclib. Capabilities compose outside the libraries through applications, processes, stdin/stdout, files, sockets, and explicit protocols.
+
+The goal is to provide durable native building blocks with local control, inspectable state, explicit dependencies, and minimal infrastructure.
 
 ## Principles
 
 - Library first; the CLI only adapts arguments, input, and output.
-- Small tools with clear boundaries instead of a general-purpose platform.
+- One concrete capability per library, with clear boundaries.
+- No dependencies between kclibs.
 - Unix composition through pipes, files, processes, and sockets.
 - Simple, legible, stable protocols instead of RPC or opaque formats.
 - Local, durable, portable, and inspectable state.
@@ -63,25 +60,25 @@ publication artifacts are written to the ignored `dist/` directory.
 Justified exceptions exist for protocols, platform backends, embedded models,
 or external dependencies.
 
-## API and execution
+## Public API and CLI
 
-The APIs usually use the `kc_NAME_` prefix, opaque contexts, explicit options,
-and a lifecycle similar to:
+Each kclib defines the API that best matches its capability. There is no common lifecycle or required `open/exec/close` pattern.
+
+Public C symbols normally use the `kc_NAME_` prefix. Some libraries expose simple functions, while stateful capabilities may use opaque handles, options, callbacks, or explicit lifecycle operations where those concepts are actually required.
+
+For example, the demo blueprint exposes a direct capability-oriented API:
 
 ```c
-#include "libNAME.h"
+#include "libdemo.h"
 
-kc_NAME_options_t opts = kc_NAME_options_default();
-kc_NAME_t *ctx = NULL;
+char *greeting = kc_demo_greet("John");
 
-kc_NAME_open(&ctx, &opts);
-kc_NAME_exec(ctx, input);
-kc_NAME_close(ctx);
-kc_NAME_options_free(&opts);
+if (greeting != NULL) {
+    kc_demo_free(greeting);
+}
 ```
 
-This is a conceptual pattern, not a common ABI. Consult each library header and
-README for exact signatures and ownership rules.
+The public header and project README are the contract for each individual library. Consult `proj/NAME.c/README.md` and `proj/NAME.c/src/libNAME.h` for its exact API, ownership, errors, and supported behavior.
 
 The CLIs normally:
 
