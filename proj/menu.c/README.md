@@ -9,7 +9,7 @@ internally.
 
 ## CLI
 
-Add or replace an application menu entry:
+Add an application menu entry:
 
 ```bash
 menu myapp \
@@ -40,7 +40,8 @@ menu --delete myapp
 | `-v`, `--version` | Show the build version. |
 
 `id`, `name`, and `command` are required when adding an entry. Adding an
-existing id replaces that entry. Deleting a missing id succeeds without error.
+existing id fails without changing the existing entry. Delete it first when a
+new definition is needed. Deleting a missing id succeeds without error.
 
 ---
 
