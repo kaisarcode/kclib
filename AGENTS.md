@@ -2,9 +2,7 @@
 
 ## Kclib
 
-This repository is the public development monorepo for the kclib family.
-
-Read the workspace-level `AGENTS.md` first. These rules add kclib-specific conventions.
+This repository is the public development monorepo for the native primitive libraries of the KaisarCode ecosystem.
 
 Individual kclibs live as project directories under `proj/`, using the
 `proj/NAME.c/` form. They are not separate Git repositories.
@@ -15,7 +13,9 @@ belong at the monorepo root rather than inside each kclib project.
 Repository-wide tooling lives under `scripts/`. Generated distribution artifacts
 live under `dist/`; that directory is build output and is not versioned.
 
-A kclib is a small, independent native library built around one concrete capability, usually with a thin CLI.
+A kclib is an independent native library built around one concrete capability, usually with a thin CLI.
+
+No kclib depends on another kclib. Each library must remain independently buildable, usable, and distributable. Composition between capabilities belongs in consumers, applications, processes, or explicit higher-level tooling rather than through kclib-to-kclib dependencies.
 
 ## Project form
 
@@ -197,6 +197,8 @@ Keep public headers, library source, CLI source, tests, vendored code, and platf
 Do not restructure stable code solely to match another kclib.
 
 Do not add shared runtimes, frameworks, registries, daemons, service layers, or common infrastructure merely to remove small duplication.
+
+Do not introduce a dependency from one kclib to another. If two capabilities need to be combined, keep that composition outside the libraries themselves.
 
 Small project-local or platform-specific duplication is acceptable when it keeps behavior easier to inspect.
 
