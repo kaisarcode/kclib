@@ -25,6 +25,7 @@ typedef struct {
     const char *description;
     const char *command;
     const char *icon;
+    const char *category;
 } kc_menu_entry_t;
 
 /**
