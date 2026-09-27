@@ -11,7 +11,7 @@
 #include "libwvw.h"
 
 /* Private CLI-only wait helper implemented by libwvw.c. */
-int kc_wvw_cli_wait(kc_wvw_t *wvw);
+int kc_wvw_wait(kc_wvw_t *wvw);
 
 #include <errno.h>
 #include <stdio.h>
@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
         const char *error = kc_wvw_get_error(wvw);
         fprintf(stderr, "wvw: %s\n", error ? error : "open failed");
         status = 1;
-    } else if (kc_wvw_cli_wait(wvw) != KC_WVW_OK) {
+    } else if (kc_wvw_wait(wvw) != KC_WVW_OK) {
         fprintf(stderr, "wvw: wait failed\n");
         status = 1;
     }

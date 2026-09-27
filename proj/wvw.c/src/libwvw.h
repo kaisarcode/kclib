@@ -226,6 +226,14 @@ int kc_wvw_is_maximized(const kc_wvw_t *wvw);
 int kc_wvw_is_fullscreen(const kc_wvw_t *wvw);
 
 /**
+ * Wait until the WebView window closes.
+ * This blocks the caller while the native window remains operational.
+ * @param wvw WebView handle.
+ * @return KC_WVW_OK when the window has closed, or KC_WVW_ERROR on invalid input.
+ */
+int kc_wvw_wait(kc_wvw_t *wvw);
+
+/**
  * Close the WebView and end its public lifetime. NULL is safe.
  * @param wvw WebView handle, or NULL.
  * @return None.
