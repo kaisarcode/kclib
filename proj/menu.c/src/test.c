@@ -19,6 +19,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <shlobj.h>
 #else
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -90,11 +91,58 @@ static kc_menu_entry_t test_entry(const char *id) {
 #else
         "/bin/true --contract",
 #endif
+        NULL,
         NULL
     };
 
     return entry;
 }
+
+#ifdef _WIN32
+static int test_windows_entry_exists(
+    const char *category,
+    const char *name
+) {
+    PWSTR programs = NULL;
+    wchar_t path[MAX_PATH * 2];
+    wchar_t wcategory[256];
+    wchar_t wname[256];
+    int exists = 0;
+
+    if (MultiByteToWideChar(
+            CP_UTF8, 0, category, -1, wcategory, 256
+        ) <= 0) {
+        return 0;
+    }
+    if (MultiByteToWideChar(
+            CP_UTF8, 0, name, -1, wname, 256
+        ) <= 0) {
+        return 0;
+    }
+    if (FAILED(SHGetKnownFolderPath(
+            &FOLDERID_Programs,
+            0,
+            NULL,
+            &programs
+        ))) {
+        return 0;
+    }
+    if (swprintf(
+            path,
+            sizeof(path) / sizeof(path[0]),
+            L"%ls\\%ls\\%ls.lnk",
+            programs,
+            wcategory,
+            wname
+        ) > 0) {
+        DWORD attr = GetFileAttributesW(path);
+        exists = attr != INVALID_FILE_ATTRIBUTES &&
+            !(attr & FILE_ATTRIBUTE_DIRECTORY);
+    }
+    CoTaskMemFree(programs);
+    return exists;
+}
+#endif
 
 #ifndef _WIN32
 static int test_linux_entry_contains(const char *id, const char *text) {
@@ -119,6 +167,8 @@ static int case_kc_menu_add(void) {
     kc_menu_entry_t entry = test_entry("kc-menu-add");
     int fail = 0;
 
+    entry.category = "Network";
+
 #ifndef _WIN32
     if (test_data_home[0] == '\0') {
         fail += expect_true(
@@ -130,7 +180,12 @@ static int case_kc_menu_add(void) {
 
     (void)kc_menu_delete(entry.id);
     fail += expect_true("add succeeds", kc_menu_add(&entry) == KC_MENU_OK);
-#ifndef _WIN32
+#ifdef _WIN32
+    fail += expect_true(
+        "shortcut exists in category",
+        test_windows_entry_exists(entry.category, entry.name)
+    );
+#else
     fail += expect_true(
         "desktop entry exists",
         test_linux_entry_exists(entry.id)
@@ -147,6 +202,10 @@ static int case_kc_menu_add(void) {
         "desktop entry stores command",
         test_linux_entry_contains(entry.id, "Exec=/bin/true --contract")
     );
+    fail += expect_true(
+        "desktop entry stores category",
+        test_linux_entry_contains(entry.id, "Categories=Network;")
+    );
 #endif
     (void)kc_menu_delete(entry.id);
 
@@ -159,6 +218,8 @@ static int case_kc_menu_replace(void) {
     const char *detail = "replaces an existing entry with the same id";
     kc_menu_entry_t entry = test_entry("kc-menu-replace");
     int fail = 0;
+
+    entry.category = "Network";
 
 #ifndef _WIN32
     if (test_data_home[0] == '\0') {
@@ -174,6 +235,7 @@ static int case_kc_menu_replace(void) {
 
     entry.name = "KC Menu Replacement";
     entry.description = "Replacement description";
+    entry.category = "Development";
 #ifdef _WIN32
     entry.command = "cmd.exe /C exit 1";
 #else
@@ -184,7 +246,16 @@ static int case_kc_menu_replace(void) {
         kc_menu_add(&entry) == KC_MENU_OK
     );
 
-#ifndef _WIN32
+#ifdef _WIN32
+    fail += expect_true(
+        "replacement shortcut moved to new category",
+        test_windows_entry_exists("Development", "KC Menu Replacement")
+    );
+    fail += expect_true(
+        "old shortcut removed",
+        !test_windows_entry_exists("Network", "KC Menu Contract")
+    );
+#else
     fail += expect_true(
         "replacement name stored",
         test_linux_entry_contains(entry.id, "Name=KC Menu Replacement")
@@ -196,6 +267,10 @@ static int case_kc_menu_replace(void) {
     fail += expect_true(
         "replacement command stored",
         test_linux_entry_contains(entry.id, "Exec=/bin/false --replacement")
+    );
+    fail += expect_true(
+        "replacement category stored",
+        test_linux_entry_contains(entry.id, "Categories=Development;")
     );
     fail += expect_true(
         "old name removed",
@@ -312,6 +387,27 @@ static int case_kc_menu_validation(void) {
     entry.description = "one\ntwo";
     fail += expect_true(
         "multiline description rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.category = "";
+    fail += expect_true(
+        "empty category rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.category = "Bad/Category";
+    fail += expect_true(
+        "category path rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.category = "One;Two";
+    fail += expect_true(
+        "multiple categories rejected",
         kc_menu_add(&entry) == KC_MENU_ERROR
     );
 
@@ -545,6 +641,8 @@ static int case_kc_menu_cli(void) {
         "KC Menu CLI",
         "--description",
         "CLI contract test",
+        "--category",
+        "Network",
         "--command",
 #ifdef _WIN32
         "cmd.exe /C exit 0",
@@ -603,10 +701,19 @@ static int case_kc_menu_cli(void) {
 
     fail += test_cli_run(add, out, sizeof(out), err, sizeof(err), &status);
     fail += expect_true("CLI add exits 0", status == 0);
-#ifndef _WIN32
+#ifdef _WIN32
+    fail += expect_true(
+        "CLI add creates categorized shortcut",
+        test_windows_entry_exists("Network", "KC Menu CLI")
+    );
+#else
     fail += expect_true(
         "CLI add creates desktop entry",
         test_linux_entry_exists("kc-menu-cli")
+    );
+    fail += expect_true(
+        "CLI add stores category",
+        test_linux_entry_contains("kc-menu-cli", "Categories=Network;")
     );
 #endif
 
