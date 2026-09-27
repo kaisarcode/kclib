@@ -1,0 +1,110 @@
+# CMakeLists.txt
+# Summary: Cross-compilation builder for menu.
+#
+# Author:  KaisarCode
+# Website: https://kaisarcode.com
+# License: https://www.gnu.org/licenses/gpl-3.0.html
+
+cmake_minimum_required(VERSION 3.14)
+project(menu C)
+
+set(CMAKE_C_STANDARD 11)
+
+if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "menu supports Linux and Windows only")
+endif()
+
+if(NOT DEFINED MENU_BUILD_VERSION)
+    set(MENU_BUILD_VERSION 0)
+endif()
+
+option(MENU_NATIVE "Enable native hardware optimizations" OFF)
+option(MENU_BUILD_TESTS "Build menu tests" OFF)
+set(MENU_TEST_CLI "" CACHE STRING "Path to the menu CLI used by contract tests")
+
+set(MENU_TEST_EXTERNAL_ARTIFACTS OFF)
+if(MENU_BUILD_TESTS AND MENU_TEST_SHARED_LIBRARY)
+    set(MENU_TEST_EXTERNAL_ARTIFACTS ON)
+endif()
+
+if(NOT MSVC)
+    add_compile_options(-O3 -Wall -Wextra -Werror)
+    if(MENU_NATIVE)
+        add_compile_options(-march=native)
+    endif()
+    if(NOT WIN32)
+        add_definitions(-D_GNU_SOURCE)
+    endif()
+else()
+    add_compile_options(/O2 /W3 /WX)
+endif()
+
+set_source_files_properties(src/libmenu.c PROPERTIES
+    COMPILE_DEFINITIONS KC_MENU_BUILD_VERSION=${MENU_BUILD_VERSION}
+)
+
+set(MENU_CORE_SOURCES src/libmenu.c)
+
+if(NOT MENU_TEST_EXTERNAL_ARTIFACTS)
+    add_executable(menu src/menu.c ${MENU_CORE_SOURCES})
+    target_include_directories(menu PRIVATE src)
+
+    add_library(menu_static STATIC ${MENU_CORE_SOURCES})
+    set_target_properties(menu_static PROPERTIES OUTPUT_NAME "menu")
+    target_include_directories(menu_static PRIVATE src)
+
+    add_library(menu_shared SHARED ${MENU_CORE_SOURCES})
+    set_target_properties(menu_shared PROPERTIES OUTPUT_NAME "menu")
+    set_target_properties(menu_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    target_include_directories(menu_shared PRIVATE src)
+
+    if(WIN32)
+        target_link_libraries(menu PRIVATE ole32 shell32 uuid)
+        target_link_libraries(menu_static PRIVATE ole32 shell32 uuid)
+        target_link_libraries(menu_shared PRIVATE ole32 shell32 uuid)
+    endif()
+endif()
+
+if(MENU_BUILD_TESTS)
+    enable_testing()
+
+    if(MENU_TEST_SHARED_LIBRARY)
+        add_library(menu_test_shared SHARED IMPORTED)
+        set_target_properties(menu_test_shared PROPERTIES
+            IMPORTED_LOCATION "${MENU_TEST_SHARED_LIBRARY}"
+        )
+        if(MENU_TEST_IMPORT_LIBRARY)
+            set_target_properties(menu_test_shared PROPERTIES
+                IMPORTED_IMPLIB "${MENU_TEST_IMPORT_LIBRARY}"
+            )
+        endif()
+        set(MENU_TEST_SHARED_TARGET menu_test_shared)
+    else()
+        set(MENU_TEST_SHARED_TARGET menu_shared)
+    endif()
+
+    if(MENU_TEST_CLI)
+        set(MENU_TEST_CLI_TARGET_PATH "${MENU_TEST_CLI}")
+    elseif(TARGET menu)
+        set(MENU_TEST_CLI_TARGET_PATH "$<TARGET_FILE:menu>")
+    else()
+        set(MENU_TEST_CLI_TARGET_PATH "")
+    endif()
+
+    add_executable(menu_contract_test src/test.c)
+    target_include_directories(menu_contract_test PRIVATE src)
+    target_link_libraries(menu_contract_test PRIVATE ${MENU_TEST_SHARED_TARGET})
+    target_compile_definitions(menu_contract_test PRIVATE
+        KC_MENU_TEST_CLI="${MENU_TEST_CLI_TARGET_PATH}"
+    )
+
+    if(WIN32)
+        target_link_libraries(menu_contract_test PRIVATE ole32 shell32 uuid)
+    endif()
+
+    add_custom_command(TARGET menu_contract_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:${MENU_TEST_SHARED_TARGET}>
+            $<TARGET_FILE_DIR:menu_contract_test>
+    )
+endif()
