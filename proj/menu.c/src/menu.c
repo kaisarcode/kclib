@@ -68,7 +68,11 @@ int main(int argc, char **argv) {
             fprintf(stderr, "menu: expected one id for %s\n", argv[1]);
             return 1;
         }
-        return kc_menu_delete(argv[2]) == KC_MENU_OK ? 0 : 1;
+        if (kc_menu_delete(argv[2]) != KC_MENU_OK) {
+            fprintf(stderr, "menu: delete failed\n");
+            return 1;
+        }
+        return 0;
     }
 
     entry.id = argv[1];
@@ -110,5 +114,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    return kc_menu_add(&entry) == KC_MENU_OK ? 0 : 1;
+    if (kc_menu_add(&entry) != KC_MENU_OK) {
+        fprintf(stderr, "menu: add failed\n");
+        return 1;
+    }
+    return 0;
 }
