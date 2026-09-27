@@ -173,7 +173,7 @@ generate_manifest() {
             echo "$sha256  $rel_path" >> "$project_sha_file"
 
             case "$filename" in
-                *.h|*.cdef) continue ;;
+                *.h) continue ;;
             esac
 
             IFS="/" read -r arch platform bin_name <<< "$rel_path"
@@ -237,7 +237,6 @@ restore_root_files() {
     find "$stash_dir" -maxdepth 1 -type f \
         -exec cp -p {} "$dist_dir"/ \;
 }
-
 
 
 # Checks the build state and rebuilds the dist directory when binaries change.
