@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #ifndef KC_MENU_BUILD_VERSION
 #define KC_MENU_BUILD_VERSION 0
@@ -177,7 +178,7 @@ static int kc_menu_meta_read(const char *id, wchar_t **out_path) {
     if (!meta) return -1;
     file = _wfopen(meta, L"rb");
     free(meta);
-    if (!file) return GetLastError() == ERROR_FILE_NOT_FOUND ? 0 : 0;
+    if (!file) return 0;
     if (fseek(file, 0, SEEK_END) != 0 || (size = ftell(file)) < 0 ||
             fseek(file, 0, SEEK_SET) != 0) {
         fclose(file);
