@@ -12,7 +12,8 @@ The goal is to provide durable native building blocks with local control, inspec
 ## Principles
 
 - Public APIs express intent, not implementation mechanism.
-- Public APIs should project naturally into higher-level languages such as Lua and JavaScript.
+- Design the capability first as it should feel from languages such as Lua or JavaScript, then map that shape to C.
+- Public consumers should not need to reason about pointers, out-parameters, buffer/size choreography, allocation details, or similar ABI mechanics unless they are part of the capability itself.
 - Bindings should translate representation and ownership, not invent semantics.
 - Library first; the CLI only adapts arguments, input, and output.
 - One concrete capability per library, with clear boundaries.
@@ -67,7 +68,11 @@ or external dependencies.
 
 Each kclib defines the API that best matches its capability. There is no common lifecycle or required `open/exec/close` pattern.
 
-The public API is intentionally capability-oriented. It should describe what the caller wants to do rather than the lower-level machinery used to do it. The same conceptual API should be straightforward to represent from other languages, including the Lua and JavaScript projections used elsewhere in the KaisarCode ecosystem.
+The public API is intentionally capability-oriented. It should describe what the caller wants to do rather than the lower-level machinery used to do it.
+
+A kclib API is designed from the consumer experience inward: first consider how the capability should feel in languages such as Lua or JavaScript, then express that model through a minimal C ABI. C-level necessities such as pointers, output parameters, buffer sizes, or explicit memory release should remain representation details where possible, not concepts the user has to carry across language boundaries.
+
+The same conceptual API should therefore remain recognizable when projected into other languages.
 
 Public C symbols normally use the `kc_NAME_` prefix. Some libraries expose simple functions, while stateful capabilities may use opaque handles, options, callbacks, or explicit lifecycle operations where those concepts are actually required.
 
