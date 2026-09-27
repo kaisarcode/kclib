@@ -39,10 +39,13 @@ same concept -> same convention
 different concept -> capability-specific design
 ```
 
-## Consumer-first public ABI
+## Public API philosophy
 
-Design the public ABI for kclibs and their supported consumption paths, not for
-arbitrary C programs or maximal general-purpose C expressiveness.
+A kclib public API must express the user's intent and the capability being offered, not the mechanism used internally to implement it.
+
+Design the public ABI for kclibs and their supported consumption paths, not for arbitrary C programs or maximal general-purpose C expressiveness.
+
+The public surface should be easy to project mechanically into higher-level languages such as Lua and JavaScript without inventing new semantics in the binding layer.
 
 Before closing a public API, ask:
 
@@ -51,8 +54,9 @@ If this capability had been designed directly for a JavaScript programmer,
 what would the natural API look like?
 ```
 
-Use that JavaScript shape as the primary consumer-design test. Lua should
-normally project the same capability model idiomatically.
+Use that JavaScript shape as the primary consumer-design test. Lua should normally project the same capability model idiomatically.
+
+A good public API should remain recognizable across languages. The operation names, object boundaries, values, and lifecycle should describe the same capability whether consumed from C, Lua, JavaScript, or another binding.
 
 Design from that consumer experience inward:
 
@@ -72,9 +76,9 @@ The C ABI remains canonical, but it is the stable native bridge surface for the
 kclib ecosystem. It is not an attempt to design a universal C API for every
 program or embedding scenario.
 
-Bindings must remain mechanical adapters. They may translate calling mechanics,
-ownership, tables or objects into public value structures, and platform
-transport details. They should not need semantic glue to make the API pleasant.
+Bindings must remain mechanical adapters. They may translate calling mechanics, ownership, tables or objects into public value structures, and platform transport details. They should not need semantic glue to make the API pleasant.
+
+If a binding must reinterpret what an operation means, invent application-level behavior, expose internal transport details, or compensate for a mechanism-shaped C API, the public API is probably wrong.
 
 Prefer opaque handles only when persistent identity or state is a real
 capability-level concept. Prefer simple public value structs, explicit arrays,
