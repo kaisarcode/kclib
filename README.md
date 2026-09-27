@@ -6,7 +6,7 @@ problem through a reusable C library and, usually, a thin CLI built on the same
 public API.
 
 All kclib projects are developed together in this monorepo under `proj/NAME.c/`
-directories. They are not maintained as separate Git repositories.
+directories.
 
 It is not a framework or a monolithic library. The tools work independently or
 compose through stdin, stdout, files, sockets, and explicit text protocols. The
