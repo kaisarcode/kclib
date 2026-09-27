@@ -80,11 +80,9 @@ static int test_linux_entry_exists(const char *id) {
 }
 #endif
 
-static int case_kc_menu_add_delete(void) {
-    const char *name = "kc_menu_add_delete";
-    const char *detail = "adds, replaces, and deletes one application menu entry";
+static kc_menu_entry_t test_entry(const char *id) {
     kc_menu_entry_t entry = {
-        "kc-menu-contract",
+        id,
         "KC Menu Contract",
         "Contract test entry",
 #ifdef _WIN32
@@ -94,6 +92,31 @@ static int case_kc_menu_add_delete(void) {
 #endif
         NULL
     };
+
+    return entry;
+}
+
+#ifndef _WIN32
+static int test_linux_entry_contains(const char *id, const char *text) {
+    char path[1024];
+    char buffer[4096];
+    FILE *file;
+    size_t size;
+
+    snprintf(path, sizeof(path), "%s/applications/%s.desktop", test_data_home, id);
+    file = fopen(path, "rb");
+    if (!file) return 0;
+    size = fread(buffer, 1, sizeof(buffer) - 1U, file);
+    fclose(file);
+    buffer[size] = '\0';
+    return strstr(buffer, text) != NULL;
+}
+#endif
+
+static int case_kc_menu_add(void) {
+    const char *name = "kc_menu_add";
+    const char *detail = "adds one application menu entry";
+    kc_menu_entry_t entry = test_entry("kc-menu-add");
     int fail = 0;
 
 #ifndef _WIN32
@@ -105,40 +128,201 @@ static int case_kc_menu_add_delete(void) {
     }
 #endif
 
-    fail += expect_true("add rejects NULL", kc_menu_add(NULL) == KC_MENU_ERROR);
+    (void)kc_menu_delete(entry.id);
+    fail += expect_true("add succeeds", kc_menu_add(&entry) == KC_MENU_OK);
+#ifndef _WIN32
     fail += expect_true(
-        "delete rejects invalid id",
-        kc_menu_delete("../bad") == KC_MENU_ERROR
+        "desktop entry exists",
+        test_linux_entry_exists(entry.id)
+    );
+    fail += expect_true(
+        "desktop entry stores name",
+        test_linux_entry_contains(entry.id, "Name=KC Menu Contract")
+    );
+    fail += expect_true(
+        "desktop entry stores description",
+        test_linux_entry_contains(entry.id, "Comment=Contract test entry")
+    );
+    fail += expect_true(
+        "desktop entry stores command",
+        test_linux_entry_contains(entry.id, "Exec=/bin/true --contract")
+    );
+#endif
+    (void)kc_menu_delete(entry.id);
+
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+static int case_kc_menu_replace(void) {
+    const char *name = "kc_menu_replace";
+    const char *detail = "replaces an existing entry with the same id";
+    kc_menu_entry_t entry = test_entry("kc-menu-replace");
+    int fail = 0;
+
+#ifndef _WIN32
+    if (test_data_home[0] == '\0') {
+        fail += expect_true(
+            "prepare isolated XDG data home",
+            test_prepare_home() == 0
+        );
+    }
+#endif
+
+    (void)kc_menu_delete(entry.id);
+    fail += expect_true("initial add succeeds", kc_menu_add(&entry) == KC_MENU_OK);
+
+    entry.name = "KC Menu Replacement";
+    entry.description = "Replacement description";
+#ifdef _WIN32
+    entry.command = "cmd.exe /C exit 1";
+#else
+    entry.command = "/bin/false --replacement";
+#endif
+    fail += expect_true(
+        "replacement add succeeds",
+        kc_menu_add(&entry) == KC_MENU_OK
     );
 
-    if (!fail) {
-        fail += expect_true("add succeeds", kc_menu_add(&entry) == KC_MENU_OK);
 #ifndef _WIN32
-        fail += expect_true(
-            "desktop entry exists",
-            test_linux_entry_exists(entry.id)
-        );
+    fail += expect_true(
+        "replacement name stored",
+        test_linux_entry_contains(entry.id, "Name=KC Menu Replacement")
+    );
+    fail += expect_true(
+        "replacement description stored",
+        test_linux_entry_contains(entry.id, "Comment=Replacement description")
+    );
+    fail += expect_true(
+        "replacement command stored",
+        test_linux_entry_contains(entry.id, "Exec=/bin/false --replacement")
+    );
+    fail += expect_true(
+        "old name removed",
+        !test_linux_entry_contains(entry.id, "Name=KC Menu Contract")
+    );
 #endif
-        entry.description = "Replacement description";
-        fail += expect_true(
-            "replacement add succeeds",
-            kc_menu_add(&entry) == KC_MENU_OK
-        );
-        fail += expect_true(
-            "delete succeeds",
-            kc_menu_delete(entry.id) == KC_MENU_OK
-        );
-        fail += expect_true(
-            "missing delete is a no-op",
-            kc_menu_delete(entry.id) == KC_MENU_OK
-        );
+    (void)kc_menu_delete(entry.id);
+
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+static int case_kc_menu_delete(void) {
+    const char *name = "kc_menu_delete";
+    const char *detail = "deletes entries and treats missing ids as a no-op";
+    kc_menu_entry_t entry = test_entry("kc-menu-delete");
+    int fail = 0;
+
 #ifndef _WIN32
+    if (test_data_home[0] == '\0') {
         fail += expect_true(
-            "desktop entry is gone",
-            !test_linux_entry_exists(entry.id)
+            "prepare isolated XDG data home",
+            test_prepare_home() == 0
         );
-#endif
     }
+#endif
+
+    (void)kc_menu_delete(entry.id);
+    fail += expect_true("fixture add succeeds", kc_menu_add(&entry) == KC_MENU_OK);
+    fail += expect_true(
+        "delete existing succeeds",
+        kc_menu_delete(entry.id) == KC_MENU_OK
+    );
+#ifndef _WIN32
+    fail += expect_true(
+        "desktop entry is gone",
+        !test_linux_entry_exists(entry.id)
+    );
+#endif
+    fail += expect_true(
+        "delete missing succeeds",
+        kc_menu_delete(entry.id) == KC_MENU_OK
+    );
+
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+static int case_kc_menu_validation(void) {
+    const char *name = "kc_menu_validation";
+    const char *detail = "rejects invalid identifiers and required values";
+    kc_menu_entry_t entry = test_entry("kc-menu-validation");
+    int fail = 0;
+
+    fail += expect_true(
+        "NULL entry rejected",
+        kc_menu_add(NULL) == KC_MENU_ERROR
+    );
+
+    entry.id = NULL;
+    fail += expect_true(
+        "NULL id rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("");
+    fail += expect_true(
+        "empty id rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("../bad");
+    fail += expect_true(
+        "invalid id rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.name = NULL;
+    fail += expect_true(
+        "NULL name rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.name = "";
+    fail += expect_true(
+        "empty name rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.command = NULL;
+    fail += expect_true(
+        "NULL command rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.command = "";
+    fail += expect_true(
+        "empty command rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.command = "one\ntwo";
+    fail += expect_true(
+        "multiline command rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    entry = test_entry("kc-menu-validation");
+    entry.description = "one\ntwo";
+    fail += expect_true(
+        "multiline description rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
+
+    fail += expect_true(
+        "delete NULL id rejected",
+        kc_menu_delete(NULL) == KC_MENU_ERROR
+    );
+    fail += expect_true(
+        "delete invalid id rejected",
+        kc_menu_delete("../bad") == KC_MENU_ERROR
+    );
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -444,10 +628,13 @@ static int case_kc_menu_cli(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 3;
+    test_case_total = 6;
     test_case_current = 0;
 
-    run_case(&rc, case_kc_menu_add_delete);
+    run_case(&rc, case_kc_menu_add);
+    run_case(&rc, case_kc_menu_replace);
+    run_case(&rc, case_kc_menu_delete);
+    run_case(&rc, case_kc_menu_validation);
     run_case(&rc, case_kc_menu_version);
     run_case(&rc, case_kc_menu_cli);
 
@@ -466,8 +653,17 @@ int main(int argc, char **argv) {
     }
 
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_menu_add_delete") == 0) {
-        return case_kc_menu_add_delete();
+    if (strcmp(argv[1], "kc_menu_add") == 0) {
+        return case_kc_menu_add();
+    }
+    if (strcmp(argv[1], "kc_menu_replace") == 0) {
+        return case_kc_menu_replace();
+    }
+    if (strcmp(argv[1], "kc_menu_delete") == 0) {
+        return case_kc_menu_delete();
+    }
+    if (strcmp(argv[1], "kc_menu_validation") == 0) {
+        return case_kc_menu_validation();
     }
     if (strcmp(argv[1], "kc_menu_version") == 0) {
         return case_kc_menu_version();
