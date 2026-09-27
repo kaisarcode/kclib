@@ -1,10 +1,3 @@
-# CMakeLists.txt
-# Summary: Cross-compilation builder for menu.
-#
-# Author:  KaisarCode
-# Website: https://kaisarcode.com
-# License: https://www.gnu.org/licenses/gpl-3.0.html
-
 cmake_minimum_required(VERSION 3.14)
 project(menu C)
 
@@ -43,17 +36,19 @@ set_source_files_properties(src/libmenu.c PROPERTIES
     COMPILE_DEFINITIONS KC_MENU_BUILD_VERSION=${MENU_BUILD_VERSION}
 )
 
-set(MENU_CORE_SOURCES src/libmenu.c)
-
 if(NOT MENU_TEST_EXTERNAL_ARTIFACTS)
-    add_executable(menu src/menu.c ${MENU_CORE_SOURCES})
+    add_executable(menu
+        src/menu.c
+        src/libmenu.c
+    )
+
     target_include_directories(menu PRIVATE src)
 
-    add_library(menu_static STATIC ${MENU_CORE_SOURCES})
+    add_library(menu_static STATIC src/libmenu.c)
     set_target_properties(menu_static PROPERTIES OUTPUT_NAME "menu")
     target_include_directories(menu_static PRIVATE src)
 
-    add_library(menu_shared SHARED ${MENU_CORE_SOURCES})
+    add_library(menu_shared SHARED src/libmenu.c)
     set_target_properties(menu_shared PROPERTIES OUTPUT_NAME "menu")
     set_target_properties(menu_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_include_directories(menu_shared PRIVATE src)
@@ -78,25 +73,23 @@ if(MENU_BUILD_TESTS)
                 IMPORTED_IMPLIB "${MENU_TEST_IMPORT_LIBRARY}"
             )
         endif()
-        set(MENU_TEST_SHARED_TARGET menu_test_shared)
     else()
         set(MENU_TEST_SHARED_TARGET menu_shared)
     endif()
 
-    if(MENU_TEST_CLI)
-        set(MENU_TEST_CLI_TARGET_PATH "${MENU_TEST_CLI}")
-    elseif(TARGET menu)
-        set(MENU_TEST_CLI_TARGET_PATH "$<TARGET_FILE:menu>")
-    else()
-        set(MENU_TEST_CLI_TARGET_PATH "")
+    if(TARGET menu_test_shared)
+        set(MENU_TEST_SHARED_TARGET menu_test_shared)
     endif()
 
     add_executable(menu_contract_test src/test.c)
     target_include_directories(menu_contract_test PRIVATE src)
     target_link_libraries(menu_contract_test PRIVATE ${MENU_TEST_SHARED_TARGET})
-    target_compile_definitions(menu_contract_test PRIVATE
-        KC_MENU_TEST_CLI="${MENU_TEST_CLI_TARGET_PATH}"
-    )
+
+    if(MENU_TEST_CLI)
+        target_compile_definitions(menu_contract_test PRIVATE MENU_TEST_CLI="${MENU_TEST_CLI}")
+    elseif(TARGET menu)
+        target_compile_definitions(menu_contract_test PRIVATE MENU_TEST_CLI="$<TARGET_FILE:menu>")
+    endif()
 
     if(WIN32)
         target_link_libraries(menu_contract_test PRIVATE ole32 shell32 uuid)
