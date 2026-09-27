@@ -12,7 +12,6 @@ ROOT_DIR=$(dirname "$SCRIPT_DIR")
 PROJ_DIR="$ROOT_DIR/proj"
 DIST_DIR="$ROOT_DIR/dist"
 CACHE_FILE="$DIST_DIR/.build_state"
-CDEF_SCRIPT="$SCRIPT_DIR/cdef.sh"
 readonly EXCLUDED_PROJECTS=("libr.c")
 
 # Computes a digest of all binary artifact paths, sizes, and mtimes.
@@ -93,12 +92,7 @@ compute_sha256() {
 collect_artifacts() {
     local proj_dir="$1"
     local dist_dir="$2"
-    local project_path project_name project_dist name header target_dir target_header target_cdef
-
-    [ -x "$CDEF_SCRIPT" ] || {
-        echo "error: cdef generator not found or not executable: $CDEF_SCRIPT" >&2
-        return 1
-    }
+    local project_path project_name project_dist name header target_dir target_header
 
     for project_path in "$proj_dir"/*/; do
         project_name=$(basename "$project_path")
@@ -124,13 +118,7 @@ collect_artifacts() {
 
         while IFS= read -r -d '' target_dir; do
             target_header="$target_dir/lib${name}.h"
-            target_cdef="$target_dir/lib${name}.cdef"
             cp "$header" "$target_header"
-            "$CDEF_SCRIPT" "$target_header" "$(basename "$target_dir")" > "$target_cdef" || {
-                echo "error: failed to generate cdef: $target_header" >&2
-                rm -f "$target_cdef"
-                return 1
-            }
         done < <(find "$project_dist" -mindepth 2 -maxdepth 2 -type d -print0)
 
         echo "    [+] Conflicts purged and artifacts collected in $project_dist/"
@@ -251,33 +239,6 @@ restore_root_files() {
 }
 
 
-# Generates missing LuaJIT cdef files from already distributed public headers.
-# @return 0 on success.
-generate_missing_cdefs() {
-    local header cdef platform
-
-    [ -x "$CDEF_SCRIPT" ] || {
-        echo "error: cdef generator not found or not executable: $CDEF_SCRIPT" >&2
-        return 1
-    }
-
-    [ -d "$DIST_DIR" ] || return 0
-
-    while IFS= read -r -d '' header; do
-        cdef="${header%.h}.cdef"
-        if [ ! -f "$cdef" ]; then
-            platform=$(basename "$(dirname "$header")")
-            echo "Generating ${cdef#"$DIST_DIR/"}..."
-            "$CDEF_SCRIPT" "$header" "$platform" > "$cdef" || {
-                echo "error: failed to generate cdef: $header" >&2
-                rm -f "$cdef"
-                return 1
-            }
-        fi
-    done < <(find "$DIST_DIR" -type f -name 'lib*.h' -print0)
-
-    return 0
-}
 
 # Checks the build state and rebuilds the dist directory when binaries change.
 # @return 0 on success.
@@ -291,7 +252,6 @@ main() {
         prev_state=$(cat "$CACHE_FILE")
         if [ "$current_state" = "$prev_state" ]; then
             echo "No changes detected in binaries or public headers."
-            generate_missing_cdefs
             echo "Done."
             return 0
         fi
