@@ -12,6 +12,34 @@ BUILD_DIR := .build
 BIN_DIR   := bin
 BUILD_VERSION ?= $(shell date +%s)
 
+define cmake_build
+	@prelog=$(mktemp); \
+	if ! $(3) cmake --build $(1) -- -n > "$prelog" 2>&1; then \
+		cat "$prelog"; \
+		rm -f "$prelog"; \
+		exit 1; \
+	fi; \
+	if grep -q "ninja: no work to do." "$prelog"; then \
+		rm -f "$prelog"; \
+		out=$(mktemp); \
+		$(3) cmake --build $(1) 2>"$out"; \
+		r=$?; \
+		if [ -s "$out" ]; then grep -v 'skipping incompatible' < "$out"; fi; \
+		rm -f "$out"; \
+		exit $r; \
+	fi; \
+	rm -f "$prelog"; \
+	out=$(mktemp); \
+	$(3) cmake --build $(1) 2>"$out"; \
+	r=$?; \
+	if [ -s "$out" ]; then grep -v 'skipping incompatible' < "$out"; fi; \
+	rm -f "$out"; \
+	if [ $r -ne 0 ]; then \
+		exit 1; \
+	fi; \
+	:
+endef
+
 HOST_ARCH       := $(shell uname -m)
 HOST_SYSTEM     := $(shell uname -s)
 NATIVE_ARCH     := unsupported
@@ -70,16 +98,19 @@ all: \
 
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
-	@cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Linux \
-		-DMENU_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_C_COMPILER=$(2) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(subst /,-,$(1))-linux
+	@cache=$(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; \
+	if [ ! -f "$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/linux' "$cache"; then \
+		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Linux \
+			-DMENU_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,)
 	@echo "OK $(1)/linux"
 endef
 
@@ -110,16 +141,19 @@ loongarch64/linux:
 
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@cmake -S . -B $(BUILD_DIR)/$(1)-windows \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Windows \
-		-DMENU_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_C_COMPILER=$(2) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-windows
+	@cache=$(BUILD_DIR)/$(1)-windows/CMakeCache.txt; \
+	if [ ! -f "$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/windows' "$cache"; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DMENU_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,)
 	@echo "OK $(1)/windows"
 endef
 
