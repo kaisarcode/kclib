@@ -13,7 +13,8 @@ The goal is to provide durable native building blocks with local control, inspec
 
 - Public APIs express intent, not implementation mechanism.
 - Design the capability first as it should feel from languages such as Lua or JavaScript, then map that shape to C.
-- Public consumers should not need to reason about pointers, out-parameters, buffer/size choreography, allocation details, or similar ABI mechanics unless they are part of the capability itself.
+- Public consumers should not need to reason about pointers, out-parameters, buffer/size choreography, allocation details, or private lifecycle mechanics when the library can encapsulate them.
+- Internal C code may be as low-level or complex as necessary; that complexity belongs behind the public header.
 - Bindings should translate representation and ownership, not invent semantics.
 - Library first; the CLI only adapts arguments, input, and output.
 - One concrete capability per library, with clear boundaries.
@@ -70,9 +71,11 @@ Each kclib defines the API that best matches its capability. There is no common 
 
 The public API is intentionally capability-oriented. It should describe what the caller wants to do rather than the lower-level machinery used to do it.
 
-A kclib API is designed from the consumer experience inward: first consider how the capability should feel in languages such as Lua or JavaScript, then express that model through a minimal C ABI. C-level necessities such as pointers, output parameters, buffer sizes, or explicit memory release should remain representation details where possible, not concepts the user has to carry across language boundaries.
+A kclib API is designed from the consumer experience inward: first consider how the capability should feel in languages such as Lua or JavaScript, then express that model through a minimal C ABI.
 
-The same conceptual API should therefore remain recognizable when projected into other languages.
+Internally, the C implementation may allocate memory, manage pointers, coordinate buffers, keep native handles, run threads, maintain queues, or use platform-specific machinery. Those are implementation details. The public header should expose simple capability-level operations and keep ownership and lifetime work inside the library whenever practical.
+
+The same conceptual API should therefore remain recognizable when projected into other languages, without requiring each consumer to recreate the library's internal memory or pointer management.
 
 Public C symbols normally use the `kc_NAME_` prefix. Some libraries expose simple functions, while stateful capabilities may use opaque handles, options, callbacks, or explicit lifecycle operations where those concepts are actually required.
 
