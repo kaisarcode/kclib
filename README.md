@@ -11,6 +11,9 @@ The goal is to provide durable native building blocks with local control, inspec
 
 ## Principles
 
+- Public APIs express intent, not implementation mechanism.
+- Public APIs should project naturally into higher-level languages such as Lua and JavaScript.
+- Bindings should translate representation and ownership, not invent semantics.
 - Library first; the CLI only adapts arguments, input, and output.
 - One concrete capability per library, with clear boundaries.
 - No dependencies between kclibs.
@@ -64,7 +67,11 @@ or external dependencies.
 
 Each kclib defines the API that best matches its capability. There is no common lifecycle or required `open/exec/close` pattern.
 
+The public API is intentionally capability-oriented. It should describe what the caller wants to do rather than the lower-level machinery used to do it. The same conceptual API should be straightforward to represent from other languages, including the Lua and JavaScript projections used elsewhere in the KaisarCode ecosystem.
+
 Public C symbols normally use the `kc_NAME_` prefix. Some libraries expose simple functions, while stateful capabilities may use opaque handles, options, callbacks, or explicit lifecycle operations where those concepts are actually required.
+
+For example, an internal implementation may use sockets, polling, queues, native handles, or platform APIs, but the public surface should expose capability-level operations such as `listen`, `receive`, `respond`, `render`, `search`, or `stop` when those are the user-visible actions.
 
 For example, the demo blueprint exposes a direct capability-oriented API:
 
