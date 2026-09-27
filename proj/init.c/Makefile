@@ -7,6 +7,12 @@
 
 WINE ?= wine
 WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
+XDG_DATA_HOME ?= $(HOME)/.local/share
+OSXCROSS_ROOT ?= $(XDG_DATA_HOME)/osxcross/target
+MACOSX_DEPLOYMENT_TARGET ?= 11.0
+MACOSX_SDK ?= $(lastword $(sort $(wildcard $(OSXCROSS_ROOT)/SDK/MacOSX*.sdk)))
+OSXCROSS_X86_64_CC := $(OSXCROSS_ROOT)/bin/o64-clang
+OSXCROSS_AARCH64_CC := $(OSXCROSS_ROOT)/bin/oa64-clang
 
 BUILD_DIR := .build
 BIN_DIR   := bin
@@ -102,17 +108,17 @@ endif
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
 .PHONY: all test wine clean \
-	x86_64/linux x86_64/windows \
+	x86_64/linux x86_64/windows x86_64/macos \
 	i686/linux i686/windows \
-	aarch64/linux armv7/linux armv7hf/linux \
+	aarch64/linux aarch64/macos armv7/linux armv7hf/linux \
 	riscv64/linux powerpc64le/linux \
 	mips/linux mipsel/linux mips64el/linux \
 	s390x/linux loongarch64/linux
 
 all: \
-	x86_64/linux x86_64/windows \
+	x86_64/linux x86_64/windows x86_64/macos \
 	i686/linux i686/windows \
-	aarch64/linux armv7/linux armv7hf/linux \
+	aarch64/linux aarch64/macos armv7/linux armv7hf/linux \
 	riscv64/linux powerpc64le/linux \
 	mips/linux mipsel/linux mips64el/linux \
 	s390x/linux loongarch64/linux
@@ -196,6 +202,45 @@ x86_64/windows:
 
 i686/windows:
 	$(call windows_target,i686,i686-w64-mingw32-gcc)
+
+## macOS
+
+define macos_target
+	@mkdir -p $(BIN_DIR)/$(1)/macos
+	@if ! $(2) --version > /dev/null 2>&1; then \
+		echo "Missing macOS cross-compiler wrapper: $(2)" >&2; \
+		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
+		exit 1; \
+	fi
+	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
+	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
+	export OSXCROSS_TARGET=darwin25.1 && \
+	export OSXCROSS_SDK=$(MACOSX_SDK) && \
+	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
+	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-macos \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Darwin \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
+			-DINIT_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
+			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi && \
+	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
+	echo "OK $(1)/macos"
+endef
+
+x86_64/macos:
+	$(call macos_target,x86_64,$(OSXCROSS_X86_64_CC))
+
+aarch64/macos:
+	$(call macos_target,aarch64,$(OSXCROSS_AARCH64_CC))
 
 ## Utility
 

@@ -93,13 +93,19 @@ $HOME/.local/share/kaisarcode/init.c
 On Windows, init.c uses the corresponding per-user application-data directory
 under `kaisarcode\init.c`.
 
+On macOS, init.c stores metadata under:
+
+```text
+$HOME/Library/Application Support/kaisarcode/init.c
+```
+
 Normal API and CLI callers do not select a storage directory. The user
 namespace is resolved automatically from the platform convention.
 
 ### Platform Scope
 
-Linux and Windows are supported. Linux uses the available system startup
-mechanism automatically.
+Linux, macOS, and Windows are supported. Linux uses the available system
+startup mechanism automatically. macOS registers per-user LaunchAgents.
 
 ---
 

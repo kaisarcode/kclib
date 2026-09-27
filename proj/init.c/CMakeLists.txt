@@ -3,8 +3,9 @@ project(init C)
 
 set(CMAKE_C_STANDARD 11)
 
-if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "init supports Linux and Windows only")
+if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+        NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    message(FATAL_ERROR "init supports Linux, macOS, and Windows only")
 endif()
 
 if(NOT DEFINED INIT_BUILD_VERSION)

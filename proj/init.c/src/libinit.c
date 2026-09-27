@@ -41,7 +41,8 @@ typedef enum {
     KC_INIT_BACKEND_SYSTEMD,
     KC_INIT_BACKEND_RUNIT,
     KC_INIT_BACKEND_OPENRC,
-    KC_INIT_BACKEND_SYSV
+    KC_INIT_BACKEND_SYSV,
+    KC_INIT_BACKEND_LAUNCHD
 } kc_init_backend_t;
 
 typedef void (*kc_init_row_handler_t)(
@@ -108,6 +109,18 @@ static int kc_init_resolve_dir(char *out, size_t cap) {
             cap,
             "%s\\kaisarcode\\init.c",
             base
+        ) < cap ? 0 : 1;
+    }
+#elif defined(__APPLE__)
+    {
+        const char *home = getenv("HOME");
+
+        if (!home || !home[0]) return 1;
+        return (size_t)snprintf(
+            out,
+            cap,
+            "%s/Library/Application Support/kaisarcode/init.c",
+            home
         ) < cap ? 0 : 1;
     }
 #else
@@ -441,6 +454,7 @@ static kc_init_backend_t kc_init_read_backend(const char *path) {
 #endif
 
 #ifndef _WIN32
+#ifndef __APPLE__
 /**
  * Checks if a command exists and is executable.
  * @param cmd Command name.
@@ -456,12 +470,16 @@ static int kc_init_cmd_exists(const char *cmd) {
     }
     return found;
 }
+#endif
 
 /**
  * Detects the active init system backend.
  * @return Backend enum value.
  */
 static kc_init_backend_t kc_init_detect_backend(void) {
+#ifdef __APPLE__
+    return KC_INIT_BACKEND_LAUNCHD;
+#else
     char buf[KC_INIT_PATH];
     ssize_t len;
 
@@ -491,6 +509,7 @@ static kc_init_backend_t kc_init_detect_backend(void) {
         return KC_INIT_BACKEND_SYSV;
 
     return KC_INIT_BACKEND_NONE;
+#endif
 }
 #endif
 
@@ -1094,6 +1113,188 @@ static int kc_init_run_delete_openrc(
 
 #endif
 
+#ifdef __APPLE__
+
+/**
+ * Resolves the LaunchAgents directory for the current user.
+ * @param dir Metadata directory.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_launch_agents_dir(
+    const char *dir, char *out, size_t cap
+) {
+    const char *home;
+
+    if (getenv("KC_INIT_DIR")) {
+        return (size_t)snprintf(out, cap, "%s/launch-agents", dir) < cap
+            ? 0 : 1;
+    }
+
+    home = getenv("HOME");
+    if (!home || !home[0]) return 1;
+    return (size_t)snprintf(out, cap, "%s/Library/LaunchAgents", home) < cap
+        ? 0 : 1;
+}
+
+/**
+ * Builds one launchd property-list path.
+ * @param agents LaunchAgents directory.
+ * @param key Registration key.
+ * @param out Output path buffer.
+ * @param cap Output buffer capacity.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_launch_agent_path(
+    const char *agents, const char *key, char *out, size_t cap
+) {
+    return (size_t)snprintf(
+        out,
+        cap,
+        "%s/com.kaisarcode.init.%s.plist",
+        agents,
+        key
+    ) < cap ? 0 : 1;
+}
+
+/**
+ * Writes text escaped for a launchd property-list string.
+ * @param file Destination stream.
+ * @param text Text to escape.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_write_plist_text(FILE *file, const char *text) {
+    const unsigned char *p;
+
+    for (p = (const unsigned char *)text; *p; p++) {
+        switch (*p) {
+            case '&':
+                fputs("&amp;", file);
+                break;
+            case '<':
+                fputs("&lt;", file);
+                break;
+            case '>':
+                fputs("&gt;", file);
+                break;
+            case '\"':
+                fputs("&quot;", file);
+                break;
+            case '\'':
+                fputs("&apos;", file);
+                break;
+            default:
+                fputc(*p, file);
+                break;
+        }
+        if (ferror(file)) return 1;
+    }
+    return 0;
+}
+
+/**
+ * Writes the launchd property list for one startup registration.
+ * @param path Property-list path.
+ * @param key Registration key.
+ * @param cmd Startup command.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_write_launch_agent(
+    const char *path, const char *key, const char *cmd
+) {
+    FILE *file;
+
+    file = fopen(path, "w");
+    if (!file) return 1;
+    fputs("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n", file);
+    fputs("<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" ", file);
+    fputs("\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n", file);
+    fputs("<plist version=\"1.0\"><dict>\n", file);
+    fputs("<key>Label</key><string>com.kaisarcode.init.", file);
+    if (kc_init_write_plist_text(file, key) != 0) {
+        fclose(file);
+        return 1;
+    }
+    fputs("</string>\n<key>ProgramArguments</key><array>", file);
+    fputs("<string>/bin/sh</string><string>-c</string><string>", file);
+    if (kc_init_write_plist_text(file, cmd) != 0) {
+        fclose(file);
+        return 1;
+    }
+    fputs("</string></array>\n<key>RunAtLoad</key><true/>\n", file);
+    fputs("</dict></plist>\n", file);
+    if (fclose(file) != 0) return 1;
+    return chmod(path, 0644) == 0 ? 0 : 1;
+}
+
+/**
+ * Creates or replaces one launchd startup registration.
+ * @param dir Metadata directory.
+ * @param key Registration key.
+ * @param cmd Startup command.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_update_launchd(
+    const char *dir, const char *key, const char *cmd
+) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char agents[KC_INIT_PATH];
+    char plist[KC_INIT_PATH];
+    const char *user_name;
+
+    if (kc_init_ensure_dir(dir) != 0) return 1;
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) != 0) return 1;
+    if (kc_init_write_meta(meta, cmd) != 0) return 1;
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0)
+        (void)kc_init_write_backend(bmeta, KC_INIT_BACKEND_LAUNCHD);
+
+    user_name = kc_init_detect_user();
+    if (strcmp(user_name, "root") != 0) {
+        char umeta[KC_INIT_PATH];
+        if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta))
+            (void)kc_init_write_user(umeta, user_name);
+    }
+
+    if (kc_init_launch_agents_dir(dir, agents, sizeof(agents)) != 0 ||
+            kc_init_ensure_dir(agents) != 0 ||
+            kc_init_launch_agent_path(agents, key, plist, sizeof(plist)) != 0 ||
+            kc_init_write_launch_agent(plist, key, cmd) != 0) {
+        (void)remove(meta);
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Removes one launchd startup registration.
+ * @param dir Metadata directory.
+ * @param key Registration key.
+ * @return 0 on success, 1 on failure.
+ */
+static int kc_init_run_delete_launchd(const char *dir, const char *key) {
+    char meta[KC_INIT_PATH];
+    char bmeta[KC_INIT_PATH];
+    char umeta[KC_INIT_PATH];
+    char agents[KC_INIT_PATH];
+    char plist[KC_INIT_PATH];
+
+    if (kc_init_meta_path(dir, key, meta, sizeof(meta)) == 0) {
+        (void)remove(meta);
+        if ((size_t)snprintf(umeta, sizeof(umeta), "%s.user", meta) < sizeof(umeta))
+            (void)remove(umeta);
+    }
+    if (kc_init_backend_path(dir, key, bmeta, sizeof(bmeta)) == 0)
+        (void)remove(bmeta);
+    if (kc_init_launch_agents_dir(dir, agents, sizeof(agents)) == 0 &&
+            kc_init_launch_agent_path(agents, key, plist, sizeof(plist)) == 0)
+        (void)remove(plist);
+    return 0;
+}
+
+#endif
+
 #ifdef _WIN32
 
 /**
@@ -1362,6 +1563,22 @@ static int kc_init_run_update(
 #ifdef _WIN32
     return kc_init_run_update_win32(ctx->dir, key, cmd);
 #else
+#ifdef __APPLE__
+    switch (ctx->backend) {
+        case KC_INIT_BACKEND_SYSTEMD:
+            return kc_init_run_update_systemd(ctx->dir, key, cmd);
+        case KC_INIT_BACKEND_RUNIT:
+            return kc_init_run_update_runit(ctx->dir, key, cmd);
+        case KC_INIT_BACKEND_OPENRC:
+            return kc_init_run_update_openrc(ctx->dir, key, cmd);
+        case KC_INIT_BACKEND_SYSV:
+            return kc_init_run_update_sysv(ctx->dir, key, cmd);
+        case KC_INIT_BACKEND_LAUNCHD:
+            return kc_init_run_update_launchd(ctx->dir, key, cmd);
+        default:
+            return 1;
+    }
+#else
     if (!kc_init_is_admin()) {
         return 1;
     }
@@ -1379,6 +1596,7 @@ static int kc_init_run_update(
             return 1;
     }
 #endif
+#endif
 }
 
 /**
@@ -1390,6 +1608,28 @@ static int kc_init_run_update(
 static int kc_init_run_delete(kc_init_t *ctx, const char *key) {
 #ifdef _WIN32
     return kc_init_run_delete_win32(ctx->dir, key);
+#else
+#ifdef __APPLE__
+    kc_init_backend_t b = KC_INIT_BACKEND_NONE;
+    char bmeta[KC_INIT_PATH];
+
+    if (kc_init_backend_path(ctx->dir, key, bmeta, sizeof(bmeta)) == 0)
+        b = kc_init_read_backend(bmeta);
+    if (b == KC_INIT_BACKEND_NONE) b = ctx->backend;
+
+    switch (b) {
+        case KC_INIT_BACKEND_SYSTEMD:
+            return kc_init_run_delete_systemd(ctx->dir, key);
+        case KC_INIT_BACKEND_RUNIT:
+            return kc_init_run_delete_runit(ctx->dir, key);
+        case KC_INIT_BACKEND_OPENRC:
+            return kc_init_run_delete_openrc(ctx->dir, key);
+        case KC_INIT_BACKEND_SYSV:
+            return kc_init_run_delete_sysv(ctx->dir, key);
+        case KC_INIT_BACKEND_LAUNCHD:
+        default:
+            return kc_init_run_delete_launchd(ctx->dir, key);
+    }
 #else
     if (!kc_init_is_admin()) {
         return 1;
@@ -1417,6 +1657,7 @@ static int kc_init_run_delete(kc_init_t *ctx, const char *key) {
         default:
             return kc_init_run_delete_sysv(ctx->dir, key);
     }
+#endif
 #endif
 }
 
