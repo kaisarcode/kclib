@@ -65,7 +65,7 @@ minimal public C ABI expressing that same model
     ↓
 public header
     ↓
-generated cdef / JNI / WASM mechanical bridge
+consumer-generated cdef / JNI / WASM mechanical bridge
 ```
 
 The C ABI remains canonical, but it is the stable native bridge surface for the
