@@ -220,7 +220,8 @@ static int kc_menu_meta_write(const char *id, const wchar_t *shortcut) {
         return -1;
     }
     len = strlen(utf8);
-    ok = fwrite(utf8, 1, len, file) == len && fclose(file) == 0;
+    ok = fwrite(utf8, 1, len, file) == len;
+    if (fclose(file) != 0) ok = 0;
     free(utf8);
     return ok ? 0 : -1;
 }
@@ -288,6 +289,7 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
     IPersistFile *persist = NULL;
     HRESULT hr;
     int argc = 0;
+    int coinit = 0;
     int rc = KC_MENU_ERROR;
     size_t len;
 
@@ -322,7 +324,8 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
     }
 
     hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) goto done;
+    if (SUCCEEDED(hr)) coinit = 1;
+    else if (hr != RPC_E_CHANGED_MODE) goto done;
 
     hr = CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
         &IID_IShellLinkW, (void **)&link);
@@ -346,9 +349,7 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
 com_done:
     if (persist) IPersistFile_Release(persist);
     if (link) IShellLinkW_Release(link);
-    if (SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE) {
-        if (hr != RPC_E_CHANGED_MODE) CoUninitialize();
-    }
+    if (coinit) CoUninitialize();
 
 done:
     if (argv) LocalFree(argv);
