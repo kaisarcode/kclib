@@ -180,6 +180,10 @@ static int case_kc_menu_add(void) {
 
     (void)kc_menu_delete(entry.id);
     fail += expect_true("add succeeds", kc_menu_add(&entry) == KC_MENU_OK);
+    fail += expect_true(
+        "duplicate id is rejected",
+        kc_menu_add(&entry) == KC_MENU_ERROR
+    );
 #ifdef _WIN32
     fail += expect_true(
         "shortcut exists in category",
@@ -205,76 +209,6 @@ static int case_kc_menu_add(void) {
     fail += expect_true(
         "desktop entry stores category",
         test_linux_entry_contains(entry.id, "Categories=Network;")
-    );
-#endif
-    (void)kc_menu_delete(entry.id);
-
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-static int case_kc_menu_replace(void) {
-    const char *name = "kc_menu_replace";
-    const char *detail = "replaces an existing entry with the same id";
-    kc_menu_entry_t entry = test_entry("kc-menu-replace");
-    int fail = 0;
-
-    entry.category = "Network";
-
-#ifndef _WIN32
-    if (test_data_home[0] == '\0') {
-        fail += expect_true(
-            "prepare isolated XDG data home",
-            test_prepare_home() == 0
-        );
-    }
-#endif
-
-    (void)kc_menu_delete(entry.id);
-    fail += expect_true("initial add succeeds", kc_menu_add(&entry) == KC_MENU_OK);
-
-    entry.name = "KC Menu Replacement";
-    entry.description = "Replacement description";
-    entry.category = "Development";
-#ifdef _WIN32
-    entry.command = "cmd.exe /C exit 1";
-#else
-    entry.command = "/bin/false --replacement";
-#endif
-    fail += expect_true(
-        "replacement add succeeds",
-        kc_menu_add(&entry) == KC_MENU_OK
-    );
-
-#ifdef _WIN32
-    fail += expect_true(
-        "replacement shortcut moved to new category",
-        test_windows_entry_exists("Development", "KC Menu Replacement")
-    );
-    fail += expect_true(
-        "old shortcut removed",
-        !test_windows_entry_exists("Network", "KC Menu Contract")
-    );
-#else
-    fail += expect_true(
-        "replacement name stored",
-        test_linux_entry_contains(entry.id, "Name=KC Menu Replacement")
-    );
-    fail += expect_true(
-        "replacement description stored",
-        test_linux_entry_contains(entry.id, "Comment=Replacement description")
-    );
-    fail += expect_true(
-        "replacement command stored",
-        test_linux_entry_contains(entry.id, "Exec=/bin/false --replacement")
-    );
-    fail += expect_true(
-        "replacement category stored",
-        test_linux_entry_contains(entry.id, "Categories=Development;")
-    );
-    fail += expect_true(
-        "old name removed",
-        !test_linux_entry_contains(entry.id, "Name=KC Menu Contract")
     );
 #endif
     (void)kc_menu_delete(entry.id);
@@ -701,6 +635,8 @@ static int case_kc_menu_cli(void) {
 
     fail += test_cli_run(add, out, sizeof(out), err, sizeof(err), &status);
     fail += expect_true("CLI add exits 0", status == 0);
+    fail += test_cli_run(add, out, sizeof(out), err, sizeof(err), &status);
+    fail += expect_true("CLI duplicate add exits 1", status == 1);
 #ifdef _WIN32
     fail += expect_true(
         "CLI add creates categorized shortcut",
@@ -735,11 +671,10 @@ static int case_kc_menu_cli(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 6;
+    test_case_total = 5;
     test_case_current = 0;
 
     run_case(&rc, case_kc_menu_add);
-    run_case(&rc, case_kc_menu_replace);
     run_case(&rc, case_kc_menu_delete);
     run_case(&rc, case_kc_menu_validation);
     run_case(&rc, case_kc_menu_version);
@@ -762,9 +697,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_menu_add") == 0) {
         return case_kc_menu_add();
-    }
-    if (strcmp(argv[1], "kc_menu_replace") == 0) {
-        return case_kc_menu_replace();
     }
     if (strcmp(argv[1], "kc_menu_delete") == 0) {
         return case_kc_menu_delete();
