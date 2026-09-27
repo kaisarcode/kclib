@@ -49,6 +49,7 @@ index is the summary, not the contract.
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
 | [`init`](https://github.com/kaisarcode/kclib/tree/master/proj/init.c) | Registers persistent startup commands through native system mechanisms. | Automatic startup at boot or login. |
+| [`menu`](https://github.com/kaisarcode/kclib/tree/master/proj/menu.c) | Adds and deletes applications from the native application menu. | Registering application launchers in the user's desktop menu. |
 | [`wch`](https://github.com/kaisarcode/kclib/tree/master/proj/wch.c) | Watches files and directories and emits `add`, `upd`, and `del` without polling. | Reacting to filesystem changes. |
 | [`mmap`](https://github.com/kaisarcode/kclib/tree/master/proj/mmap.c) | Stores bytes in files and later exposes them as mapped memory. | File-backed storage or shared memory. |
 | [`wvw`](https://github.com/kaisarcode/kclib/tree/master/proj/wvw.c) | Opens a native WebView window with an explicit optional JavaScript bridge. | A GUI window that renders HTML. |
