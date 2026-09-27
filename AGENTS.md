@@ -47,12 +47,16 @@ Design the public ABI for kclibs and their supported consumption paths, not for 
 
 The public surface should be easy to project mechanically into higher-level languages such as Lua and JavaScript without inventing new semantics in the binding layer.
 
+Do not design the public API around C calling mechanics. A consumer should not be forced to think in pointers, out-parameters, buffer/size pairs, allocation choreography, nullable pointer conventions, or other ABI-shaped details unless those concepts are themselves meaningful parts of the capability.
+
 Before closing a public API, ask:
 
 ```text
-If this capability had been designed directly for a JavaScript programmer,
-what would the natural API look like?
+If this capability had been designed directly for a JavaScript or Lua programmer,
+what would the natural API feel like?
 ```
+
+Start from that user-facing shape, then express it through the smallest practical C ABI.
 
 Use that JavaScript shape as the primary consumer-design test. Lua should normally project the same capability model idiomatically.
 
@@ -80,10 +84,9 @@ Bindings must remain mechanical adapters. They may translate calling mechanics, 
 
 If a binding must reinterpret what an operation means, invent application-level behavior, expose internal transport details, or compensate for a mechanism-shaped C API, the public API is probably wrong.
 
-Prefer opaque handles only when persistent identity or state is a real
-capability-level concept. Prefer simple public value structs, explicit arrays,
-plain scalar types, and clear ownership. Avoid public ABI complexity that does
-not serve an actual kclib consumer.
+Prefer opaque handles only when persistent identity or state is a real capability-level concept. Prefer simple public value structs, explicit arrays, plain scalar types, and clear ownership.
+
+When C requires lower-level representation details, keep them as mechanical as possible so bindings can erase them cleanly. Do not let C representation constraints define the conceptual API. Avoid public ABI complexity that does not serve an actual kclib consumer.
 
 ## Represent intent, not mechanism
 
