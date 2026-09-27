@@ -16,7 +16,8 @@ menu myapp \
   --name "My App" \
   --description "My application" \
   --command "/path/to/myapp --foo bar" \
-  --icon "/path/to/icon.png"
+  --icon "/path/to/icon.png" \
+  --category "Network"
 ```
 
 Delete an entry:
@@ -33,6 +34,7 @@ menu --delete myapp
 | `-D`, `--description <text>` | Set the optional description. |
 | `-c`, `--command <command>` | Set the command executed by the entry. |
 | `-i`, `--icon <path>` | Set the optional icon. |
+| `-C`, `--category <category>` | Set the optional menu category. |
 | `-d`, `--delete <id>` | Delete an entry by id. |
 | `-h`, `--help` | Show help and usage. |
 | `-v`, `--version` | Show the build version. |
@@ -52,7 +54,8 @@ kc_menu_entry_t entry = {
     .name = "My App",
     .description = "My application",
     .command = "/path/to/myapp --foo bar",
-    .icon = "/path/to/icon.png"
+    .icon = "/path/to/icon.png",
+    .category = "Network"
 };
 
 if (kc_menu_add(&entry) != KC_MENU_OK) {
@@ -71,7 +74,7 @@ int kc_menu_delete(const char *id);
 uint64_t kc_menu_version(void);
 ```
 
-`description` and `icon` may be `NULL`.
+`description`, `icon`, and `category` may be `NULL`.
 
 ---
 
@@ -79,8 +82,8 @@ uint64_t kc_menu_version(void);
 
 | Platform | Behavior |
 | :--- | :--- |
-| Linux | Adds a desktop application entry in the current user's XDG application menu. |
-| Windows | Adds a shortcut in the current user's Start Menu Programs folder. |
+| Linux | Adds a desktop application entry in the current user's XDG application menu; category maps to the desktop entry category. |
+| Windows | Adds a shortcut in the current user's Start Menu Programs folder; category maps to a Programs subfolder. |
 
 ---
 
