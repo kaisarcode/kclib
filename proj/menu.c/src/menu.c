@@ -27,6 +27,7 @@ static void kc_menu_help(const char *name) {
     printf("  -D, --description <text>        Set description\n");
     printf("  -c, --command <command>         Set command to execute\n");
     printf("  -i, --icon <path>               Set icon\n");
+    printf("  -C, --category <category>       Set menu category\n");
     printf("  -d, --delete <id>               Delete menu entry\n");
     printf("  -h, --help                      Show this help\n");
     printf("  -v, --version                   Show version\n");
@@ -97,6 +98,9 @@ int main(int argc, char **argv) {
             target = &entry.command;
         } else if (strcmp(argv[i], "-i") == 0 || strcmp(argv[i], "--icon") == 0) {
             target = &entry.icon;
+        } else if (strcmp(argv[i], "-C") == 0 ||
+                strcmp(argv[i], "--category") == 0) {
+            target = &entry.category;
         } else {
             fprintf(stderr, "menu: unknown option '%s'\n", argv[i]);
             return 1;
