@@ -1,6 +1,6 @@
 # menu.c - Native Application Menu Entries
 
-`menu.c` adds and deletes applications from the native application menu.
+`menu.c` adds applications to the native application menu.
 
 It uses the current user's application menu and selects the platform mechanism
 internally.
@@ -152,5 +152,6 @@ to guarantee long-term stability for these projects.
 
 ## License
 
-This project is distributed under the **GNU General Public License version 3
-(GPLv3)**.
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
