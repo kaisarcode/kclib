@@ -383,11 +383,6 @@ static wchar_t *kc_menu_arguments(int argc, wchar_t **argv) {
  * @param entry Application menu entry.
  * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
  */
-/**
- * Add one Linux application menu entry.
- * @param entry Application menu entry.
- * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
- */
 int kc_menu_add(const kc_menu_entry_t *entry) {
     PWSTR programs = NULL;
     wchar_t *wname = NULL, *wcommand = NULL, *wdescription = NULL, *wicon = NULL;
@@ -487,11 +482,6 @@ done:
 
 /**
  * Delete one Windows application menu entry.
- * @param id Application menu entry identifier.
- * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
- */
-/**
- * Delete one Linux application menu entry.
  * @param id Application menu entry identifier.
  * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
  */
@@ -650,6 +640,11 @@ static int kc_menu_write_value(FILE *file, const char *key, const char *value) {
     return fputc('\n', file) == EOF ? -1 : 0;
 }
 
+/**
+ * Add one Linux application menu entry.
+ * @param entry Application menu entry.
+ * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
+ */
 int kc_menu_add(const kc_menu_entry_t *entry) {
     char *path;
     char *tmp;
@@ -702,6 +697,11 @@ int kc_menu_add(const kc_menu_entry_t *entry) {
     return KC_MENU_OK;
 }
 
+/**
+ * Delete one Linux application menu entry.
+ * @param id Application menu entry identifier.
+ * @return KC_MENU_OK on success, or KC_MENU_ERROR on failure.
+ */
 int kc_menu_delete(const char *id) {
     char *path;
 
