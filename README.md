@@ -109,7 +109,6 @@ kclib/
 |   `-- NAME.c/
 |-- scripts/
 |   |-- build.sh
-|   |-- cdef.sh
 |   |-- dist.sh
 |   `-- link.sh
 `-- dist/              # generated, not versioned
