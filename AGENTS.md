@@ -79,7 +79,12 @@ A good public API should remain recognizable across languages. The operation
 names, object boundaries, values, and lifecycle should describe the same
 capability whether consumed from C, Lua, JavaScript, or another binding.
 
-Use concrete scripting shapes as a design check.
+Use concrete JavaScript shapes as the main design check. The goal is for a
+developer to use a kclib without needing systems-programming expertise merely
+because its implementation happens to be written in C.
+
+The public API should feel closer to an ordinary JavaScript library than to a
+traditional low-level C interface.
 
 For a stateless operation, prefer a direct value-oriented shape:
 
@@ -140,9 +145,18 @@ A binding may mechanically translate these values to public C structs, arrays,
 handles, or other ABI representations. The scripting user should not need to
 recreate those representations manually.
 
-When reviewing a proposed public API, imagine writing its Lua and JavaScript
-forms first. If those forms look like translated C plumbing instead of a natural
-capability API, redesign the public C surface.
+When reviewing a proposed public API, write the JavaScript form first.
+
+If the JavaScript version requires the developer to understand pointer
+ownership, memory layout, native handles, output parameters, buffer accounting,
+or internal lifecycle machinery, the public API is exposing too much mechanism.
+
+The C implementation may remain sophisticated and systems-level internally.
+That complexity should be absorbed by the library so the exported capability
+stays approachable to an application developer.
+
+If the JavaScript form looks like translated C plumbing instead of a natural
+library API, redesign the public C surface.
 
 Design from that consumer experience inward:
 
