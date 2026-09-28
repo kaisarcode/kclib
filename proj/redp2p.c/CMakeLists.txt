@@ -149,7 +149,7 @@ if(REDP2P_BUILD_TESTS)
     endif()
 
     add_executable(redp2p_contract_test
-        src/test.c
+        tests/test.c
         ${REDP2P_ENGINE_SOURCES}
     )
     target_include_directories(redp2p_contract_test PRIVATE
