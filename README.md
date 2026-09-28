@@ -20,12 +20,12 @@ inspectable state, explicit dependencies, and minimal infrastructure.
 
 -  Public APIs express intent, not implementation mechanism.
 -  Design the capability first as it should feel from languages such as Lua or
-  JavaScript, then map that shape to C.
+    JavaScript, then map that shape to C.
 -  Public consumers should not need to reason about pointers, out-parameters,
-  buffer/size choreography, allocation details, or private lifecycle mechanics
-  when the library can encapsulate them.
+    buffer/size choreography, allocation details, or private lifecycle mechanics
+    when the library can encapsulate them.
 -  Internal C code may be as low-level or complex as necessary; that complexity
-  belongs behind the public header.
+    belongs behind the public header.
 -  Bindings should translate representation and ownership, not invent semantics.
 -  Library first; the CLI only adapts arguments, input, and output.
 -  One concrete capability per library, with clear boundaries.
@@ -193,7 +193,7 @@ Important special dependencies:
 -  `emb.c` embeds the GGML runtime and the weights required by its model.
 -  `wvw.c` uses the native WebView backend available on each platform.
 -  `redp2p.c` uses the index only for coordination; data travels directly
-  between
+    between
 peers and no data relay exists.
 
 Each project declares its requirements and supported targets in its own README
