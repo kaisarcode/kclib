@@ -44,8 +44,8 @@
 int kc_netl_cli_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
-    kc_netl_handler_t handler,
-    kc_netl_error_handler_t error_handler,
+    kc_netl_receive_fn receive,
+    kc_netl_error_fn error,
     void *userdata,
     void (*accept_handler)(kc_netl_peer_t *peer, void *userdata),
     void *accept_userdata
