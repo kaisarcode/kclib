@@ -41,12 +41,36 @@ struct kc_redp2p_idx {
     uint16_t port;
 };
 
+struct kc_redp2p_client {
+    struct kc_redp2p_pub *pub;
+    redp2p_fd_t fd;
+    struct sockaddr_storage address;
+    socklen_t address_len;
+    int udp;
+    _Atomic int closed;
+};
+
 struct kc_redp2p_pub {
     kc_redp2p_runtime_t runtime;
     char index_host[256];
     uint16_t index_port;
     char id[KC_REDP2P_ID_MAX + 1];
     uint16_t port;
+    int direct;
+    int adapter_platform;
+    redp2p_fd_t adapter_fd;
+#ifdef _WIN32
+    HANDLE adapter_thread;
+#else
+    pthread_t adapter_thread;
+#endif
+    int adapter_thread_started;
+    _Atomic int adapter_stop;
+    kc_redp2p_pub_receive_fn receive;
+    void *userdata;
+    kc_redp2p_client_t **clients;
+    size_t client_count;
+    size_t client_cap;
 };
 
 struct kc_redp2p_con {
@@ -56,7 +80,353 @@ struct kc_redp2p_con {
     char id[KC_REDP2P_ID_MAX + 1];
     char self_id[KC_REDP2P_ID_MAX + 1];
     uint16_t port;
+    int direct;
+    int adapter_platform;
+    redp2p_fd_t adapter_fd;
+#ifdef _WIN32
+    HANDLE adapter_thread;
+#else
+    pthread_t adapter_thread;
+#endif
+    int adapter_thread_started;
+    _Atomic int adapter_stop;
+    kc_redp2p_con_receive_fn receive;
+    void *userdata;
 };
+
+/**
+ * Opens a loopback socket and lets the OS choose a private port when requested.
+ * @param type SOCK_STREAM or SOCK_DGRAM.
+ * @param listen_socket Whether a stream socket should listen.
+ * @param requested Requested port, zero for an ephemeral port.
+ * @param port_out Effective bound port.
+ * @return Bound socket or REDP2P_FD_INVALID.
+ */
+static redp2p_fd_t kc_redp2p_loopback_socket(int type, int listen_socket,
+    uint16_t requested, uint16_t *port_out)
+{
+    redp2p_fd_t fd;
+    struct sockaddr_in address;
+    socklen_t length;
+    int reuse;
+
+    fd = socket(AF_INET, type, 0);
+    if (REDP2P_ISERR(fd)) return REDP2P_FD_INVALID;
+    reuse = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void *)&reuse,
+        sizeof(reuse));
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(requested);
+    address.sin_addr.s_addr = htonl(0x7f000001u);
+    if (bind(fd, (const struct sockaddr *)&address, sizeof(address)) != 0) {
+        REDP2P_FD_CLOSE(fd);
+        return REDP2P_FD_INVALID;
+    }
+    if (listen_socket && listen(fd, 32) != 0) {
+        REDP2P_FD_CLOSE(fd);
+        return REDP2P_FD_INVALID;
+    }
+    length = sizeof(address);
+    if (getsockname(fd, (struct sockaddr *)&address, &length) != 0) {
+        REDP2P_FD_CLOSE(fd);
+        return REDP2P_FD_INVALID;
+    }
+    if (port_out) *port_out = ntohs(address.sin_port);
+    return fd;
+}
+
+/**
+ * Reserves and releases one OS-selected loopback port for direct consumption.
+ * @param port_out Effective port.
+ * @return KC_REDP2P_OK on success or KC_REDP2P_ENET.
+ */
+static int kc_redp2p_ephemeral_port(uint16_t *port_out)
+{
+    redp2p_fd_t fd;
+
+    if (!port_out) return KC_REDP2P_EINVAL;
+    fd = kc_redp2p_loopback_socket(SOCK_STREAM, 0, 0, port_out);
+    if (REDP2P_ISERR(fd)) return KC_REDP2P_ENET;
+    REDP2P_FD_CLOSE(fd);
+    return KC_REDP2P_OK;
+}
+
+/** Adds one stable publisher client object to the adapter-owned list. */
+static kc_redp2p_client_t *kc_redp2p_pub_add_client(kc_redp2p_pub_t *pub,
+    redp2p_fd_t fd, int udp, const struct sockaddr_storage *address,
+    socklen_t address_len)
+{
+    kc_redp2p_client_t **grown;
+    kc_redp2p_client_t *client;
+    size_t cap;
+
+    if (!pub) return NULL;
+    if (pub->client_count >= pub->client_cap) {
+        cap = pub->client_cap ? pub->client_cap * 2U : 8U;
+        if (cap < pub->client_cap ||
+            cap > SIZE_MAX / sizeof(pub->clients[0]))
+            return NULL;
+        grown = (kc_redp2p_client_t **)realloc(pub->clients,
+            cap * sizeof(pub->clients[0]));
+        if (!grown) return NULL;
+        pub->clients = grown;
+        pub->client_cap = cap;
+    }
+    client = (kc_redp2p_client_t *)calloc(1, sizeof(*client));
+    if (!client) return NULL;
+    client->pub = pub;
+    client->fd = fd;
+    client->udp = udp;
+    if (address) client->address = *address;
+    client->address_len = address_len;
+    pub->clients[pub->client_count++] = client;
+    return client;
+}
+
+/** Finds or creates the stable client identity for one UDP backend endpoint. */
+static kc_redp2p_client_t *kc_redp2p_pub_udp_client(kc_redp2p_pub_t *pub,
+    const struct sockaddr_storage *address, socklen_t address_len)
+{
+    size_t i;
+
+    for (i = 0; i < pub->client_count; i++) {
+        kc_redp2p_client_t *client = pub->clients[i];
+        if (client && client->udp && !atomic_load(&client->closed) &&
+            redp2p_sockaddr_equal(&client->address, address))
+            return client;
+    }
+    return kc_redp2p_pub_add_client(pub, pub->adapter_fd, 1, address,
+        address_len);
+}
+
+/** Emits one publisher receive event. */
+static void kc_redp2p_pub_emit(kc_redp2p_pub_t *pub,
+    kc_redp2p_client_t *client, const void *data, size_t size)
+{
+    kc_redp2p_pub_input_t input;
+
+    if (!pub || !pub->receive || !client || atomic_load(&client->closed))
+        return;
+    input.client = client;
+    input.data = data;
+    input.size = size;
+    pub->receive(&input, pub->userdata);
+}
+
+/** Runs the direct publisher loopback adapter. */
+#ifdef _WIN32
+static DWORD WINAPI kc_redp2p_pub_adapter_worker(LPVOID arg)
+#else
+static void *kc_redp2p_pub_adapter_worker(void *arg)
+#endif
+{
+    kc_redp2p_pub_t *pub = (kc_redp2p_pub_t *)arg;
+    unsigned char buffer[REDP2P_BUF];
+    redp2p_pollfd_t *fds = NULL;
+
+    while (!atomic_load(&pub->adapter_stop)) {
+        size_t count = 1;
+        size_t i;
+        int ready;
+
+        if (!pub->direct || REDP2P_ISERR(pub->adapter_fd)) break;
+        if (pub->runtime.ctx->proto == REDP2P_PROTO_TCP) {
+            for (i = 0; i < pub->client_count; i++) {
+                kc_redp2p_client_t *client = pub->clients[i];
+                if (client && !client->udp && !atomic_load(&client->closed) &&
+                    !REDP2P_ISERR(client->fd))
+                    count++;
+            }
+        }
+        fds = (redp2p_pollfd_t *)realloc(fds, count * sizeof(*fds));
+        if (!fds) break;
+        memset(fds, 0, count * sizeof(*fds));
+        fds[0].fd = pub->adapter_fd;
+        fds[0].events = REDP2P_POLLIN;
+        count = 1;
+        if (pub->runtime.ctx->proto == REDP2P_PROTO_TCP) {
+            for (i = 0; i < pub->client_count; i++) {
+                kc_redp2p_client_t *client = pub->clients[i];
+                if (!client || client->udp || atomic_load(&client->closed) ||
+                    REDP2P_ISERR(client->fd))
+                    continue;
+                fds[count].fd = client->fd;
+                fds[count].events = REDP2P_POLLIN;
+                count++;
+            }
+        }
+        ready = redp2p_poll_wait(fds, count, 100);
+        if (ready <= 0) continue;
+
+        if (redp2p_poll_readable(&fds[0])) {
+            if (pub->runtime.ctx->proto == REDP2P_PROTO_TCP) {
+                struct sockaddr_storage address;
+                socklen_t length = sizeof(address);
+                redp2p_fd_t fd = accept(pub->adapter_fd,
+                    (struct sockaddr *)&address, &length);
+                if (!REDP2P_ISERR(fd))
+                    (void)kc_redp2p_pub_add_client(pub, fd, 0, &address,
+                        length);
+            } else {
+                struct sockaddr_storage address;
+                socklen_t length = sizeof(address);
+                int n = (int)recvfrom(pub->adapter_fd, (char *)buffer,
+                    sizeof(buffer), 0, (struct sockaddr *)&address, &length);
+                if (n >= 0) {
+                    kc_redp2p_client_t *client =
+                        kc_redp2p_pub_udp_client(pub, &address, length);
+                    if (client)
+                        kc_redp2p_pub_emit(pub, client, buffer, (size_t)n);
+                }
+            }
+        }
+        if (pub->runtime.ctx->proto == REDP2P_PROTO_TCP) {
+            size_t p = 1;
+            for (i = 0; i < pub->client_count && p < count; i++) {
+                kc_redp2p_client_t *client = pub->clients[i];
+                int n;
+                if (!client || client->udp || atomic_load(&client->closed) ||
+                    REDP2P_ISERR(client->fd))
+                    continue;
+                if (!redp2p_poll_readable(&fds[p++])) continue;
+                n = redp2p_sock_read(client->fd, (char *)buffer,
+                    (int)sizeof(buffer));
+                if (n <= 0) {
+                    kc_redp2p_client_close(client);
+                    continue;
+                }
+                kc_redp2p_pub_emit(pub, client, buffer, (size_t)n);
+            }
+        }
+    }
+    free(fds);
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+/** Runs the direct consumer receive adapter. */
+#ifdef _WIN32
+static DWORD WINAPI kc_redp2p_con_adapter_worker(LPVOID arg)
+#else
+static void *kc_redp2p_con_adapter_worker(void *arg)
+#endif
+{
+    kc_redp2p_con_t *con = (kc_redp2p_con_t *)arg;
+    unsigned char buffer[REDP2P_BUF];
+    redp2p_pollfd_t fd;
+
+    while (!atomic_load(&con->adapter_stop) &&
+        !REDP2P_ISERR(con->adapter_fd))
+    {
+        int ready;
+        int n;
+
+        memset(&fd, 0, sizeof(fd));
+        fd.fd = con->adapter_fd;
+        fd.events = REDP2P_POLLIN;
+        ready = redp2p_poll_wait(&fd, 1, 100);
+        if (ready <= 0 || !redp2p_poll_readable(&fd)) continue;
+        n = redp2p_sock_read(con->adapter_fd, (char *)buffer,
+            (int)sizeof(buffer));
+        if (n <= 0) break;
+        if (con->receive)
+            con->receive(buffer, (size_t)n, con->userdata);
+    }
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+/** Starts a platform thread for the publisher data adapter. */
+static int kc_redp2p_pub_adapter_thread_start(kc_redp2p_pub_t *pub)
+{
+#ifdef _WIN32
+    pub->adapter_thread = CreateThread(NULL, 0, kc_redp2p_pub_adapter_worker,
+        pub, 0, NULL);
+    if (!pub->adapter_thread) return KC_REDP2P_ERROR;
+#else
+    if (pthread_create(&pub->adapter_thread, NULL,
+        kc_redp2p_pub_adapter_worker, pub) != 0)
+        return KC_REDP2P_ERROR;
+#endif
+    pub->adapter_thread_started = 1;
+    return KC_REDP2P_OK;
+}
+
+/** Starts a platform thread for the consumer data adapter. */
+static int kc_redp2p_con_adapter_thread_start(kc_redp2p_con_t *con)
+{
+#ifdef _WIN32
+    con->adapter_thread = CreateThread(NULL, 0, kc_redp2p_con_adapter_worker,
+        con, 0, NULL);
+    if (!con->adapter_thread) return KC_REDP2P_ERROR;
+#else
+    if (pthread_create(&con->adapter_thread, NULL,
+        kc_redp2p_con_adapter_worker, con) != 0)
+        return KC_REDP2P_ERROR;
+#endif
+    con->adapter_thread_started = 1;
+    return KC_REDP2P_OK;
+}
+
+/** Joins a publisher adapter thread if one was started. */
+static void kc_redp2p_pub_adapter_join(kc_redp2p_pub_t *pub)
+{
+    if (!pub || !pub->adapter_thread_started) return;
+#ifdef _WIN32
+    WaitForSingleObject(pub->adapter_thread, INFINITE);
+    CloseHandle(pub->adapter_thread);
+    pub->adapter_thread = NULL;
+#else
+    pthread_join(pub->adapter_thread, NULL);
+#endif
+    pub->adapter_thread_started = 0;
+}
+
+/** Joins a consumer adapter thread if one was started. */
+static void kc_redp2p_con_adapter_join(kc_redp2p_con_t *con)
+{
+    if (!con || !con->adapter_thread_started) return;
+#ifdef _WIN32
+    WaitForSingleObject(con->adapter_thread, INFINITE);
+    CloseHandle(con->adapter_thread);
+    con->adapter_thread = NULL;
+#else
+    pthread_join(con->adapter_thread, NULL);
+#endif
+    con->adapter_thread_started = 0;
+}
+
+/** Opens the direct consumer's connection to its private local adapter. */
+static int kc_redp2p_con_adapter_open(kc_redp2p_con_t *con)
+{
+    struct sockaddr_in address;
+    int type;
+
+    if (!con || !con->runtime.ctx) return KC_REDP2P_EINVAL;
+    type = con->runtime.ctx->proto == REDP2P_PROTO_TCP
+        ? SOCK_STREAM : SOCK_DGRAM;
+    con->adapter_fd = socket(AF_INET, type, 0);
+    if (REDP2P_ISERR(con->adapter_fd)) return KC_REDP2P_ENET;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons(con->port);
+    address.sin_addr.s_addr = htonl(0x7f000001u);
+    if (connect(con->adapter_fd, (const struct sockaddr *)&address,
+        sizeof(address)) != 0)
+    {
+        REDP2P_FD_CLOSE(con->adapter_fd);
+        con->adapter_fd = REDP2P_FD_INVALID;
+        return KC_REDP2P_ENET;
+    }
+    return KC_REDP2P_OK;
+}
 
 /**
  * Sleeps briefly while waiting for a public runtime to become ready.
