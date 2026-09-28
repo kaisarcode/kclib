@@ -185,6 +185,9 @@ static int redp2p_http_write_response(redp2p_fd_t fd, int status,
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
         "Content-Length: %d\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Headers: Content-Type\r\n"
+        "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
         "Connection: close\r\n"
         "\r\n",
         status, reason, content_type, (int)strlen(body));
@@ -574,6 +577,7 @@ static int redp2p_add_peer(redp2p_t *ctx, const char *id, const char *key)
     ctx->peers[ctx->n_peers].peer.last_seen = redp2p_now_s();
     memcpy(ctx->peers[ctx->n_peers].peer.key, key, REDP2P_KEY_SZ + 1);
     ctx->peers[ctx->n_peers].peer.sequence = 0;
+    ctx->peers[ctx->n_peers].peer.transport = 0;
     ctx->peers[ctx->n_peers].peer.proto = 0;
     ctx->peers[ctx->n_peers].peer.udp_port = 0;
     ctx->peers[ctx->n_peers].peer.n_candidates = 0;
@@ -841,24 +845,31 @@ static void redp2p_index_conn_remove(redp2p_t *ctx, int index) {
 static int redp2p_index_respond(redp2p_fd_t fd, int status,
     const char *reason, JSON_Value *value)
 {
-    char buf[REDP2P_BUF];
+    char *buf;
     size_t size;
     int result;
 
     if (!value) return REDP2P_ERROR;
     size = json_serialization_size(value);
-    if (size == 0 || size >= sizeof(buf)) {
+    if (size == 0 || size > REDP2P_HTTP_BODY_MAX) {
         json_value_free(value);
         return REDP2P_EFULL;
     }
-    if (json_serialize_to_buffer(value, buf, sizeof(buf)) != JSONSuccess) {
+    buf = (char *)malloc(size);
+    if (!buf) {
         json_value_free(value);
+        return REDP2P_ERROR;
+    }
+    if (json_serialize_to_buffer(value, buf, size) != JSONSuccess) {
+        json_value_free(value);
+        free(buf);
         return REDP2P_ERROR;
     }
     json_value_free(value);
     result = redp2p_http_write_response(fd, status, reason,
         "application/json", buf);
-    crypto_wipe(buf, sizeof(buf));
+    crypto_wipe(buf, size);
+    free(buf);
     return result;
 }
 
@@ -880,6 +891,7 @@ static void redp2p_index_respond_error(redp2p_fd_t fd, int status,
         case 400: reason = "Bad Request"; break;
         case 403: reason = "Forbidden"; break;
         case 404: reason = "Not Found"; break;
+        case 409: reason = "Conflict"; break;
         case 429: reason = "Too Many Requests"; break;
         case 500: reason = "Internal Server Error"; break;
         case 503: reason = "Service Unavailable"; break;
@@ -1316,6 +1328,7 @@ static void redp2p_index_handle_register(redp2p_t *ctx, redp2p_fd_t fd,
             JSON_Value *reply;
             JSON_Object *out;
 
+            ctx->peers[peer_index].peer.transport = (int)proto;
             ctx->peers[peer_index].peer.proto = (int)proto;
             ctx->peers[peer_index].peer.udp_port = udp_port;
             ctx->peers[peer_index].peer.n_candidates = n_candidates;
@@ -2114,7 +2127,7 @@ static int redp2p_index_request_parse(redp2p_index_conn_t *conn,
     cursor = line;
     if (!redp2p_parse_field(&cursor, method, (size_t)method_cap, ' '))
         goto malformed;
-    if (strcmp(method, "POST") != 0) {
+    if (strcmp(method, "POST") != 0 && strcmp(method, "OPTIONS") != 0) {
         if (http_status_out) *http_status_out = 405;
         return 1;
     }
@@ -2399,7 +2412,10 @@ static void redp2p_index_process_connections(redp2p_index_runtime_t *runtime) {
             (int)sizeof(method), path, (int)sizeof(path), body,
             (int)sizeof(body), &http_status))
         {
-            if (http_status == 0) {
+            if (http_status == 0 && strcmp(method, "OPTIONS") == 0) {
+                redp2p_http_write_response(ctx->conns[i].fd, 204,
+                    "No Content", "text/plain", "");
+            } else if (http_status == 0) {
                 redp2p_index_dispatch(ctx, ctx->conns[i].fd, path, body,
                     &ctx->conns[i].peer_addr);
             } else {
