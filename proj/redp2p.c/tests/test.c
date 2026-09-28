@@ -2119,7 +2119,7 @@ static int expect_string(const char *name, const char *expected, const char *act
     return 0;
 }
 
-static int test_case_total = 0;
+static int test_case_total = 1;
 static int test_case_current = 0;
 static int test_grouped = 0;
 
@@ -5988,6 +5988,261 @@ static int case_kc_redp2p_heartbeat(void) {
     return fail == 0 ? 0 : 1;
 }
 
+
+/**
+ * Builds a browser-compatible RTC registration request against a live C index.
+ * @param port Index port.
+ * @param id Publisher identifier.
+ * @param secret Sixteen-character browser control secret.
+ * @return 0 on success, 1 on failure.
+ */
+static int test_rtc_register(unsigned short port, const char *id,
+    const char *secret)
+{
+    char response[4096], nonce_hex[65], mac_hex[65], proof_hex[65], body[4096];
+    unsigned char nonce[32], solution[8], hash[32], message[512];
+    uint64_t issued_at, expires_at;
+    size_t used, id_len, secret_len;
+    int n;
+    int shift;
+
+    n = snprintf(body, sizeof(body),
+        "{\"op\":\"challenge\",\"id\":\"%s\"}", id);
+    if (n < 0 || (size_t)n >= sizeof(body) ||
+        test_http_response(port, body, (size_t)n, response,
+            sizeof(response)) != 0 ||
+        !test_json_string(response, "nonce", nonce_hex, sizeof(nonce_hex)) ||
+        !test_json_string(response, "mac", mac_hex, sizeof(mac_hex)) ||
+        !test_json_u64(response, "issued_at", &issued_at) ||
+        !test_json_u64(response, "expires_at", &expires_at) ||
+        !test_hex_decode(nonce_hex, nonce, sizeof(nonce)))
+        return 1;
+
+    memset(solution, 0, sizeof(solution));
+    used = 0;
+    memcpy(message + used, "REDP2P-WEB-REGISTER",
+        sizeof("REDP2P-WEB-REGISTER") - 1);
+    used += sizeof("REDP2P-WEB-REGISTER") - 1;
+    memcpy(message + used, nonce, sizeof(nonce));
+    used += sizeof(nonce);
+    for (shift = 56; shift >= 0; shift -= 8)
+        message[used++] = (unsigned char)(issued_at >> shift);
+    for (shift = 56; shift >= 0; shift -= 8)
+        message[used++] = (unsigned char)(expires_at >> shift);
+    id_len = strlen(id);
+    secret_len = strlen(secret);
+    message[used++] = (unsigned char)(id_len >> 8);
+    message[used++] = (unsigned char)id_len;
+    memcpy(message + used, id, id_len);
+    used += id_len;
+    message[used++] = (unsigned char)(secret_len >> 8);
+    message[used++] = (unsigned char)secret_len;
+    memcpy(message + used, secret, secret_len);
+    used += secret_len;
+    memcpy(message + used, solution, sizeof(solution));
+    used += sizeof(solution);
+
+    test_hmac_sha256((const unsigned char *)secret, secret_len,
+        message, used, hash);
+    test_hex_encode(hash, sizeof(hash), proof_hex);
+
+    n = snprintf(body, sizeof(body),
+        "{\"op\":\"register\",\"id\":\"%s\",\"transport\":\"rtc\","
+        "\"nonce\":\"%s\",\"issued_at\":%llu,\"expires_at\":%llu,"
+        "\"mac\":\"%s\",\"secret\":\"%s\","
+        "\"pow_solution\":\"0000000000000000\",\"proof\":\"%s\"}",
+        id, nonce_hex, (unsigned long long)issued_at,
+        (unsigned long long)expires_at, mac_hex, secret, proof_hex);
+    return n < 0 || (size_t)n >= sizeof(body) ? 1 :
+        test_http_request(port, body, (size_t)n, 200, "\"ok\":true");
+}
+
+/**
+ * Computes the browser RTC publisher control proof.
+ * @param secret Publisher control secret.
+ * @param op Control operation.
+ * @param id Publisher identifier.
+ * @param sequence Monotonic sequence.
+ * @param extra1 Optional first canonical field.
+ * @param extra2 Optional second canonical field.
+ * @param out Output HMAC hex.
+ * @return 1 on success, 0 on formatting failure.
+ */
+static int test_rtc_control_proof(const char *secret, const char *op,
+    const char *id, uint64_t sequence, const char *extra1,
+    const char *extra2, char out[65])
+{
+    char message[512];
+    unsigned char hash[32];
+    int n;
+
+    if (extra1 && extra2)
+        n = snprintf(message, sizeof(message), "%s\n%s\n%llu\n%s\n%s",
+            op, id, (unsigned long long)sequence, extra1, extra2);
+    else if (extra1)
+        n = snprintf(message, sizeof(message), "%s\n%s\n%llu\n%s",
+            op, id, (unsigned long long)sequence, extra1);
+    else
+        n = snprintf(message, sizeof(message), "%s\n%s\n%llu",
+            op, id, (unsigned long long)sequence);
+    if (n < 0 || (size_t)n >= sizeof(message)) return 0;
+    test_hmac_sha256((const unsigned char *)secret, strlen(secret),
+        (const unsigned char *)message, (size_t)n, hash);
+    test_hex_encode(hash, sizeof(hash), out);
+    return 1;
+}
+
+/**
+ * Verifies the browser RTC lifecycle against the native C index.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_redp2p_rtc_index(void)
+{
+    const char *id = "rtcsite";
+    const char *secret = "0123456789abcdef";
+    const char *offer = "offer-sdp";
+    const char *answer = "answer-sdp";
+    test_index_t index;
+    unsigned short port;
+    char body[4096], response[8192];
+    char connection[33], capability[65], proof[65], digest_hex[65];
+    unsigned char digest[32];
+    char digest_input[128];
+    int n;
+    int fail = 0;
+
+    memset(&index, 0, sizeof(index));
+    port = (unsigned short)(test_port_base() + 391U);
+    fail += expect_int("start RTC C index", 0, test_index_start(&index, port));
+    if (fail == 0)
+        fail += expect_int("register RTC publisher", 0,
+            test_rtc_register(port, id, secret));
+
+    if (fail == 0)
+        fail += expect_int("lookup RTC transport", 0,
+            test_http_request(port,
+                "{\"op\":\"lookup\",\"id\":\"rtcsite\"}",
+                strlen("{\"op\":\"lookup\",\"id\":\"rtcsite\"}"),
+                200, "\"transport\":\"rtc\""));
+
+    if (fail == 0)
+        fail += expect_int("native punch rejects RTC publisher", 0,
+            test_http_request(port,
+                "{\"op\":\"punch_req\",\"self_id\":\"native\","
+                "\"target_id\":\"rtcsite\",\"session\":\"s\","
+                "\"udp_port\":1234,\"candidates\":[]}",
+                strlen("{\"op\":\"punch_req\",\"self_id\":\"native\","
+                    "\"target_id\":\"rtcsite\",\"session\":\"s\","
+                    "\"udp_port\":1234,\"candidates\":[]}"),
+                409, "\"error\":\"unsupported_transport\""));
+
+    n = snprintf(body, sizeof(body),
+        "{\"op\":\"connect\",\"id\":\"%s\","
+        "\"offer\":{\"type\":\"offer\",\"sdp\":\"%s\"}}", id, offer);
+    if (fail == 0) {
+        fail += expect_true("RTC connect request fits",
+            n >= 0 && (size_t)n < sizeof(body));
+        if (fail == 0)
+            fail += expect_int("RTC connect", 0,
+                test_http_response(port, body, (size_t)n, response,
+                    sizeof(response)));
+        if (fail == 0) {
+            fail += expect_true("RTC connect ok",
+                strstr(response, "\"ok\":true") != NULL);
+            fail += expect_true("RTC connection id",
+                test_json_string(response, "connection", connection,
+                    sizeof(connection)));
+            fail += expect_true("RTC capability",
+                test_json_string(response, "capability", capability,
+                    sizeof(capability)));
+        }
+    }
+
+    if (fail == 0) {
+        fail += expect_true("RTC poll proof",
+            test_rtc_control_proof(secret, "poll", id, 1, NULL, NULL, proof));
+        n = snprintf(body, sizeof(body),
+            "{\"op\":\"poll\",\"id\":\"%s\",\"seq\":1,\"proof\":\"%s\"}",
+            id, proof);
+        fail += expect_true("RTC publisher poll fits",
+            n >= 0 && (size_t)n < sizeof(body));
+        if (fail == 0)
+            fail += expect_int("RTC publisher poll", 0,
+                test_http_response(port, body, (size_t)n, response,
+                    sizeof(response)));
+        if (fail == 0) {
+            fail += expect_true("RTC publisher receives connection",
+                strstr(response, connection) != NULL);
+            fail += expect_true("RTC publisher receives offer",
+                strstr(response, offer) != NULL);
+        }
+    }
+
+    if (fail == 0) {
+        n = snprintf(digest_input, sizeof(digest_input), "answer\n%s", answer);
+        fail += expect_true("RTC answer digest input fits",
+            n >= 0 && (size_t)n < sizeof(digest_input));
+        if (fail == 0) {
+            test_sha256((const unsigned char *)digest_input, (size_t)n, digest);
+            test_hex_encode(digest, sizeof(digest), digest_hex);
+            fail += expect_true("RTC answer proof",
+                test_rtc_control_proof(secret, "answer", id, 2,
+                    connection, digest_hex, proof));
+        }
+        n = snprintf(body, sizeof(body),
+            "{\"op\":\"answer\",\"id\":\"%s\",\"seq\":2,"
+            "\"proof\":\"%s\",\"connection\":\"%s\","
+            "\"answer\":{\"type\":\"answer\",\"sdp\":\"%s\"}}",
+            id, proof, connection, answer);
+        fail += expect_true("RTC answer request fits",
+            n >= 0 && (size_t)n < sizeof(body));
+        if (fail == 0)
+            fail += expect_int("RTC answer", 0,
+                test_http_request(port, body, (size_t)n, 200, "\"ok\":true"));
+    }
+
+    if (fail == 0) {
+        n = snprintf(body, sizeof(body),
+            "{\"op\":\"poll\",\"connection\":\"%s\","
+            "\"capability\":\"%s\"}", connection, capability);
+        fail += expect_true("RTC consumer poll fits",
+            n >= 0 && (size_t)n < sizeof(body));
+        if (fail == 0)
+            fail += expect_int("RTC consumer poll", 0,
+                test_http_response(port, body, (size_t)n, response,
+                    sizeof(response)));
+        if (fail == 0) {
+            fail += expect_true("RTC consumer receives answer",
+                strstr(response, answer) != NULL);
+        }
+    }
+
+    if (fail == 0) {
+        fail += expect_true("RTC deregister proof",
+            test_rtc_control_proof(secret, "deregister", id, 3,
+                NULL, NULL, proof));
+        n = snprintf(body, sizeof(body),
+            "{\"op\":\"deregister\",\"id\":\"%s\",\"seq\":3,"
+            "\"proof\":\"%s\"}", id, proof);
+        fail += expect_true("RTC deregister fits",
+            n >= 0 && (size_t)n < sizeof(body));
+        if (fail == 0)
+            fail += expect_int("RTC deregister", 0,
+                test_http_request(port, body, (size_t)n, 200, "\"ok\":true"));
+        if (fail == 0)
+            fail += expect_int("RTC publisher removed", 0,
+                test_http_request(port,
+                    "{\"op\":\"lookup\",\"id\":\"rtcsite\"}",
+                    strlen("{\"op\":\"lookup\",\"id\":\"rtcsite\"}"),
+                    404, "\"error\":\"not_found\""));
+    }
+
+    test_index_stop(&index);
+    case_result(fail, "kc_redp2p_rtc_index",
+        "native index coordinates browser RTC signaling and transport routing");
+    return fail == 0 ? 0 : 1;
+}
+
 /**
  * Verifies publisher TTL expiration against the private index engine.
  * Keeps protocol expiry coverage independent from CLI configuration.
@@ -6512,6 +6767,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_redp2p_wait);
     run_case(&rc, case_kc_redp2p_connect);
     run_case(&rc, case_kc_redp2p_heartbeat);
+    run_case(&rc, case_kc_redp2p_rtc_index);
     run_case(&rc, case_redp2p_protocol_ttl);
     run_case(&rc, case_kc_redp2p_udp_tunnel);
     run_case(&rc, case_kc_redp2p_tcp_stream);
@@ -6540,6 +6796,7 @@ static int dispatch_case(const char *name) {
     if (strcmp(name, "kc_redp2p_wait") == 0) return case_kc_redp2p_wait();
     if (strcmp(name, "kc_redp2p_connect") == 0) return case_kc_redp2p_connect();
     if (strcmp(name, "kc_redp2p_heartbeat") == 0) return case_kc_redp2p_heartbeat();
+    if (strcmp(name, "kc_redp2p_rtc_index") == 0) return case_kc_redp2p_rtc_index();
     if (strcmp(name, "kc_redp2p_ttl_expiry") == 0) return case_redp2p_protocol_ttl();
     if (strcmp(name, "kc_redp2p_udp_tunnel") == 0) return case_kc_redp2p_udp_tunnel();
     if (strcmp(name, "kc_redp2p_tcp_stream") == 0) return case_kc_redp2p_tcp_stream();
