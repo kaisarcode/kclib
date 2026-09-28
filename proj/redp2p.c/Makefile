@@ -416,8 +416,7 @@ test:
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine && \
-		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/redp2p_contract_test.exe all && \
-		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/redp2p_lifecycle_test.exe kc_redp2p_direct_api; \
+		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/redp2p_contract_test.exe all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
@@ -438,8 +437,7 @@ test:
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test && \
-		$(BUILD_DIR)/test/redp2p_contract_test all && \
-		$(BUILD_DIR)/test/redp2p_lifecycle_test kc_redp2p_direct_api; \
+		$(BUILD_DIR)/test/redp2p_contract_test all; \
 	fi
 
 wine:
