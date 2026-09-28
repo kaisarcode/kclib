@@ -112,7 +112,19 @@ struct kc_redp2p_con {
     void *userdata;
 };
 
+/**
+ * Finishes publisher destruction from its adapter thread.
+ * Summary: Releases adapter, runtime, private mutex, and handle after callback exit.
+ * @param pub Publisher capability.
+ * @return None.
+ */
 static void kc_redp2p_pub_destroy_deferred(kc_redp2p_pub_t *pub);
+/**
+ * Finishes consumer destruction from its adapter thread.
+ * Summary: Releases adapter, runtime, private mutex, and handle after callback exit.
+ * @param con Consumer capability.
+ * @return None.
+ */
 static void kc_redp2p_con_destroy_deferred(kc_redp2p_con_t *con);
 static void kc_redp2p_sleep_tick(void);
 
@@ -122,28 +134,55 @@ static _Atomic int kc_redp2p_test_io_entered_flag;
 static _Atomic int kc_redp2p_test_port_hold_flag;
 static _Atomic unsigned int kc_redp2p_test_port_value;
 
+/**
+ * Sets the test-only I/O hold gate.
+ * Summary: Allows lifecycle tests to pause an operation inside its I/O lock.
+ * @param hold Nonzero to hold, zero to release.
+ * @return None.
+ */
 void redp2p_test_api_io_hold(int hold)
 {
     if (hold) atomic_store(&kc_redp2p_test_io_entered_flag, 0);
     atomic_store(&kc_redp2p_test_io_hold_flag, hold ? 1 : 0);
 }
 
+/**
+ * Reports whether a test-only I/O hold point was entered.
+ * Summary: Lets lifecycle tests synchronize a concurrent close operation.
+ * @return Nonzero after the held I/O path is reached.
+ */
 int redp2p_test_api_io_entered(void)
 {
     return atomic_load(&kc_redp2p_test_io_entered_flag);
 }
 
+/**
+ * Sets the test-only ephemeral-port hold gate.
+ * Summary: Pauses direct consumer startup after choosing an ephemeral port.
+ * @param hold Nonzero to hold, zero to release.
+ * @return None.
+ */
 void redp2p_test_api_port_hold(int hold)
 {
     if (hold) atomic_store(&kc_redp2p_test_port_value, 0U);
     atomic_store(&kc_redp2p_test_port_hold_flag, hold ? 1 : 0);
 }
 
+/**
+ * Returns the test-only selected ephemeral port.
+ * Summary: Exposes the held port only to the private regression harness.
+ * @return Selected port, or zero before selection.
+ */
 unsigned short redp2p_test_api_port_value(void)
 {
     return (unsigned short)atomic_load(&kc_redp2p_test_port_value);
 }
 
+/**
+ * Waits at the test-only I/O synchronization point when enabled.
+ * Summary: Keeps production behavior unchanged when REDP2P_TESTING is absent.
+ * @return None.
+ */
 static void kc_redp2p_test_io_point(void)
 {
     if (!atomic_load(&kc_redp2p_test_io_hold_flag)) return;
@@ -152,6 +191,12 @@ static void kc_redp2p_test_io_point(void)
         kc_redp2p_sleep_tick();
 }
 
+/**
+ * Waits at the test-only ephemeral-port synchronization point when enabled.
+ * Summary: Publishes the selected port before the private bind-race test.
+ * @param port Selected direct consumer port.
+ * @return None.
+ */
 static void kc_redp2p_test_port_point(uint16_t port)
 {
     if (!atomic_load(&kc_redp2p_test_port_hold_flag)) return;
@@ -164,6 +209,13 @@ static void kc_redp2p_test_port_point(uint16_t port)
 #define kc_redp2p_test_port_point(port) ((void)(port))
 #endif
 
+/**
+ * Initializes one private capability I/O mutex.
+ * Summary: Serializes socket operations against capability teardown.
+ * @param mutex Platform mutex storage.
+ * @param initialized Initialization-state flag.
+ * @return KC_REDP2P_OK on success or an error code.
+ */
 static int kc_redp2p_io_mutex_init(kc_redp2p_io_mutex_t *mutex,
     int *initialized)
 {
@@ -177,6 +229,13 @@ static int kc_redp2p_io_mutex_init(kc_redp2p_io_mutex_t *mutex,
     return KC_REDP2P_OK;
 }
 
+/**
+ * Locks one initialized private capability I/O mutex.
+ * Summary: No-ops for missing or uninitialized mutex storage.
+ * @param mutex Platform mutex storage.
+ * @param initialized Whether the mutex is initialized.
+ * @return None.
+ */
 static void kc_redp2p_io_mutex_lock(kc_redp2p_io_mutex_t *mutex,
     int initialized)
 {
@@ -188,6 +247,13 @@ static void kc_redp2p_io_mutex_lock(kc_redp2p_io_mutex_t *mutex,
 #endif
 }
 
+/**
+ * Unlocks one initialized private capability I/O mutex.
+ * Summary: No-ops for missing or uninitialized mutex storage.
+ * @param mutex Platform mutex storage.
+ * @param initialized Whether the mutex is initialized.
+ * @return None.
+ */
 static void kc_redp2p_io_mutex_unlock(kc_redp2p_io_mutex_t *mutex,
     int initialized)
 {
@@ -199,6 +265,13 @@ static void kc_redp2p_io_mutex_unlock(kc_redp2p_io_mutex_t *mutex,
 #endif
 }
 
+/**
+ * Destroys one initialized private capability I/O mutex.
+ * Summary: Clears the initialization flag after platform cleanup.
+ * @param mutex Platform mutex storage.
+ * @param initialized Initialization-state flag.
+ * @return None.
+ */
 static void kc_redp2p_io_mutex_destroy(kc_redp2p_io_mutex_t *mutex,
     int *initialized)
 {
@@ -546,6 +619,12 @@ static int kc_redp2p_con_adapter_thread_start(kc_redp2p_con_t *con)
  * @param pub Publisher capability.
  * @return None.
  */
+/**
+ * Reports whether the caller is the publisher adapter thread.
+ * Summary: Prevents a callback-triggered close from joining itself.
+ * @param pub Publisher capability.
+ * @return Nonzero when called on the publisher adapter thread.
+ */
 static int kc_redp2p_pub_adapter_is_current(kc_redp2p_pub_t *pub)
 {
     if (!pub || !pub->adapter_thread_started) return 0;
@@ -556,6 +635,12 @@ static int kc_redp2p_pub_adapter_is_current(kc_redp2p_pub_t *pub)
 #endif
 }
 
+/**
+ * Reports whether the caller is the consumer adapter thread.
+ * Summary: Prevents a callback-triggered close from joining itself.
+ * @param con Consumer capability.
+ * @return Nonzero when called on the consumer adapter thread.
+ */
 static int kc_redp2p_con_adapter_is_current(kc_redp2p_con_t *con)
 {
     if (!con || !con->adapter_thread_started) return 0;
@@ -1337,8 +1422,8 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
                 attempt + 1 < KC_REDP2P_DIRECT_PORT_ATTEMPTS &&
                 (strcmp(con->runtime.ctx->err_buf,
                     "connect: local UDP bind failed") == 0 ||
-                 strcmp(con->runtime.ctx->err_buf,
-                    "connect: local TCP bind/listen failed") == 0);
+                    strcmp(con->runtime.ctx->err_buf,
+                        "connect: local TCP bind/listen failed") == 0);
             kc_redp2p_runtime_close(&con->runtime);
             con->runtime.ctx = NULL;
             if (retry_bind) continue;
