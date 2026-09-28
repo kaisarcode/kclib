@@ -2330,6 +2330,378 @@ static int redp2p_punch_rate_allow(redp2p_t *ctx,
 }
 
 /**
+ * Starts one RTC signaling exchange for a browser consumer.
+ * @param ctx Locked index context.
+ * @param fd Request socket.
+ * @param req Request JSON object.
+ * @param peer Trusted HTTP source.
+ * @return None.
+ */
+static void redp2p_index_handle_rtc_connect(redp2p_t *ctx, redp2p_fd_t fd,
+    JSON_Object *req, const struct sockaddr_storage *peer)
+{
+    char id[REDP2P_ID_MAX + 1];
+    char capability[REDP2P_RTC_CAPABILITY_HEX + 1];
+    const char *offer_sdp;
+    size_t peer_index;
+    uint64_t expires_at;
+    int rate_result;
+    JSON_Value *reply;
+    JSON_Object *out;
+
+    if (!redp2p_index_require_id_response(req, fd, id, sizeof(id))) return;
+    offer_sdp = redp2p_rtc_description(req, "offer", "offer");
+    if (!offer_sdp) {
+        redp2p_index_respond_error(fd, 400, "bad_request");
+        return;
+    }
+    redp2p_evict_stale(ctx);
+    peer_index = redp2p_find_peer(ctx, id);
+    if (peer_index == SIZE_MAX || redp2p_peer_is_stale(ctx, peer_index)) {
+        if (peer_index != SIZE_MAX) redp2p_remove_peer(ctx, id);
+        redp2p_index_respond_error(fd, 404, "not_found");
+        return;
+    }
+    if (ctx->peers[peer_index].peer.transport != REDP2P_PROTO_RTC) {
+        redp2p_index_respond_error(fd, 409, "unsupported_transport");
+        return;
+    }
+    rate_result = redp2p_punch_rate_allow(ctx, peer, peer_index);
+    if (rate_result != 1) {
+        redp2p_index_respond_error(fd, rate_result == 0 ? 429 : 400,
+            rate_result == 0 ? "rate_limited" : "bad_request");
+        return;
+    }
+    redp2p_pending_call_evict_stale(ctx);
+    redp2p_rtc_pending_evict_stale(ctx);
+    if ((size_t)(redp2p_pending_call_count_for_target(ctx, id) +
+        redp2p_rtc_pending_count_for_publisher(ctx, id)) >=
+        ctx->max_consumers_per_publisher)
+    {
+        redp2p_index_respond_error(fd, 429, "pending_limit_publisher");
+        return;
+    }
+    if (ctx->n_pending_calls + ctx->n_rtc_pending >=
+        REDP2P_MAX_PENDING_CALLS_GLOBAL)
+    {
+        redp2p_index_respond_error(fd, 429, "pending_limit_global");
+        return;
+    }
+    memset(capability, 0, sizeof(capability));
+    if (!redp2p_rtc_pending_add(ctx, id, offer_sdp, capability, &expires_at)) {
+        redp2p_index_respond_error(fd, 500, "internal");
+        return;
+    }
+    reply = json_value_init_object();
+    if (!reply) {
+        redp2p_rtc_pending_remove(ctx, ctx->n_rtc_pending - 1);
+        crypto_wipe(capability, sizeof(capability));
+        redp2p_index_respond_error(fd, 500, "internal");
+        return;
+    }
+    out = json_value_get_object(reply);
+    json_object_set_boolean(out, "ok", 1);
+    json_object_set_string(out, "connection",
+        ctx->rtc_pending[ctx->n_rtc_pending - 1].connection);
+    json_object_set_string(out, "capability", capability);
+    json_object_set_number(out, "expires_at", (double)expires_at);
+    crypto_wipe(capability, sizeof(capability));
+    redp2p_index_respond(fd, 200, "OK", reply);
+}
+
+/**
+ * Returns up to four unanswered RTC offers to their publisher.
+ * @return None.
+ */
+static void redp2p_index_handle_rtc_publisher_poll(redp2p_t *ctx,
+    redp2p_fd_t fd, JSON_Object *req)
+{
+    char id[REDP2P_ID_MAX + 1];
+    char proof[65], expected[65];
+    size_t peer_index;
+    uint64_t sequence;
+    JSON_Value *reply;
+    JSON_Object *out;
+    JSON_Value *connections_value;
+    JSON_Array *connections;
+    int i;
+    int count;
+
+    memset(proof, 0, sizeof(proof));
+    memset(expected, 0, sizeof(expected));
+    if (!redp2p_index_require_id_response(req, fd, id, sizeof(id))) return;
+    if (!redp2p_index_require_sequence(req, &sequence) ||
+        !redp2p_json_require_lower_hex(req, "proof", proof, sizeof(proof), 64))
+    {
+        redp2p_index_respond_error(fd, 400, "bad_request");
+        return;
+    }
+    redp2p_evict_stale(ctx);
+    peer_index = redp2p_find_peer(ctx, id);
+    if (peer_index == SIZE_MAX) {
+        redp2p_index_respond_error(fd, 404, "not_found");
+        return;
+    }
+    if (ctx->peers[peer_index].peer.transport != REDP2P_PROTO_RTC ||
+        sequence <= ctx->peers[peer_index].peer.sequence ||
+        !redp2p_rtc_control_proof(ctx->peers[peer_index].peer.key, "poll", id,
+            sequence, NULL, NULL, expected) ||
+        !redp2p_constant_time_equal((const unsigned char *)proof,
+            (const unsigned char *)expected, 64))
+    {
+        crypto_wipe(proof, sizeof(proof));
+        crypto_wipe(expected, sizeof(expected));
+        redp2p_index_respond_error(fd, 403, "invalid_proof");
+        return;
+    }
+    ctx->peers[peer_index].peer.sequence = sequence;
+    ctx->peers[peer_index].peer.last_seen = redp2p_now_s();
+    crypto_wipe(proof, sizeof(proof));
+    crypto_wipe(expected, sizeof(expected));
+    redp2p_rtc_pending_evict_stale(ctx);
+
+    reply = json_value_init_object();
+    connections_value = json_value_init_array();
+    if (!reply || !connections_value) {
+        json_value_free(reply);
+        json_value_free(connections_value);
+        redp2p_index_respond_error(fd, 500, "internal");
+        return;
+    }
+    out = json_value_get_object(reply);
+    connections = json_value_get_array(connections_value);
+    count = 0;
+    for (i = 0; i < ctx->n_rtc_pending && count < REDP2P_PUNCH_POLL_MAX; i++) {
+        JSON_Value *item_value;
+        JSON_Object *item;
+        JSON_Value *offer_value;
+        JSON_Object *offer;
+
+        if (strcmp(ctx->rtc_pending[i].publisher_id, id) != 0 ||
+            ctx->rtc_pending[i].answer_sdp != NULL)
+            continue;
+        item_value = json_value_init_object();
+        offer_value = json_value_init_object();
+        if (!item_value || !offer_value) {
+            json_value_free(item_value);
+            json_value_free(offer_value);
+            json_value_free(connections_value);
+            json_value_free(reply);
+            redp2p_index_respond_error(fd, 500, "internal");
+            return;
+        }
+        item = json_value_get_object(item_value);
+        offer = json_value_get_object(offer_value);
+        json_object_set_string(item, "connection",
+            ctx->rtc_pending[i].connection);
+        json_object_set_string(offer, "type", "offer");
+        json_object_set_string(offer, "sdp", ctx->rtc_pending[i].offer_sdp);
+        json_object_set_value(item, "offer", offer_value);
+        json_array_append_value(connections, item_value);
+        count++;
+    }
+    json_object_set_value(out, "connections", connections_value);
+    json_object_set_boolean(out, "ok", 1);
+    redp2p_index_respond(fd, 200, "OK", reply);
+}
+
+/**
+ * Stores one RTC answer submitted by an authenticated publisher.
+ * @return None.
+ */
+static void redp2p_index_handle_rtc_answer(redp2p_t *ctx, redp2p_fd_t fd,
+    JSON_Object *req)
+{
+    char id[REDP2P_ID_MAX + 1];
+    char connection[REDP2P_RTC_CONNECTION_HEX + 1];
+    char proof[65], expected[65], digest_hex[65];
+    char *answer_copy;
+    const char *answer_sdp;
+    unsigned char digest[32];
+    redp2p_sha256_t sha;
+    size_t peer_index;
+    uint64_t sequence;
+    int pending_index;
+    size_t answer_len;
+
+    memset(connection, 0, sizeof(connection));
+    memset(proof, 0, sizeof(proof));
+    memset(expected, 0, sizeof(expected));
+    memset(digest_hex, 0, sizeof(digest_hex));
+    memset(digest, 0, sizeof(digest));
+    if (!redp2p_index_require_id_response(req, fd, id, sizeof(id))) return;
+    if (!redp2p_index_require_sequence(req, &sequence) ||
+        !redp2p_json_require_lower_hex(req, "proof", proof, sizeof(proof), 64) ||
+        !redp2p_json_require_lower_hex(req, "connection", connection,
+            sizeof(connection), REDP2P_RTC_CONNECTION_HEX))
+    {
+        redp2p_index_respond_error(fd, 400, "bad_request");
+        return;
+    }
+    answer_sdp = redp2p_rtc_description(req, "answer", "answer");
+    if (!answer_sdp) {
+        redp2p_index_respond_error(fd, 400, "bad_request");
+        return;
+    }
+    redp2p_sha256_init(&sha);
+    redp2p_sha256_update(&sha, (const unsigned char *)"answer\n", 7);
+    redp2p_sha256_update(&sha, (const unsigned char *)answer_sdp,
+        strlen(answer_sdp));
+    redp2p_sha256_final(&sha, digest);
+    if (!redp2p_hex_encode(digest, sizeof(digest), digest_hex,
+        sizeof(digest_hex)))
+    {
+        redp2p_index_respond_error(fd, 500, "internal");
+        return;
+    }
+
+    redp2p_evict_stale(ctx);
+    peer_index = redp2p_find_peer(ctx, id);
+    if (peer_index == SIZE_MAX) {
+        redp2p_index_respond_error(fd, 404, "not_found");
+        return;
+    }
+    if (ctx->peers[peer_index].peer.transport != REDP2P_PROTO_RTC ||
+        sequence <= ctx->peers[peer_index].peer.sequence ||
+        !redp2p_rtc_control_proof(ctx->peers[peer_index].peer.key, "answer",
+            id, sequence, connection, digest_hex, expected) ||
+        !redp2p_constant_time_equal((const unsigned char *)proof,
+            (const unsigned char *)expected, 64))
+    {
+        redp2p_index_respond_error(fd, 403, "invalid_proof");
+        goto cleanup;
+    }
+    pending_index = redp2p_rtc_pending_find(ctx, connection);
+    if (pending_index < 0 ||
+        strcmp(ctx->rtc_pending[pending_index].publisher_id, id) != 0 ||
+        ctx->rtc_pending[pending_index].answer_sdp != NULL)
+    {
+        redp2p_index_respond_error(fd, 404, "not_found");
+        goto cleanup;
+    }
+    answer_len = strlen(answer_sdp);
+    answer_copy = (char *)malloc(answer_len + 1);
+    if (!answer_copy) {
+        redp2p_index_respond_error(fd, 500, "internal");
+        goto cleanup;
+    }
+    memcpy(answer_copy, answer_sdp, answer_len + 1);
+    ctx->rtc_pending[pending_index].answer_sdp = answer_copy;
+    ctx->peers[peer_index].peer.sequence = sequence;
+    ctx->peers[peer_index].peer.last_seen = redp2p_now_s();
+    {
+        JSON_Value *reply = json_value_init_object();
+        JSON_Object *out;
+        if (!reply) {
+            free(ctx->rtc_pending[pending_index].answer_sdp);
+            ctx->rtc_pending[pending_index].answer_sdp = NULL;
+            redp2p_index_respond_error(fd, 500, "internal");
+            goto cleanup;
+        }
+        out = json_value_get_object(reply);
+        json_object_set_boolean(out, "ok", 1);
+        redp2p_index_respond(fd, 200, "OK", reply);
+    }
+
+cleanup:
+    crypto_wipe(connection, sizeof(connection));
+    crypto_wipe(proof, sizeof(proof));
+    crypto_wipe(expected, sizeof(expected));
+    crypto_wipe(digest_hex, sizeof(digest_hex));
+    crypto_wipe(digest, sizeof(digest));
+    crypto_wipe(&sha, sizeof(sha));
+}
+
+/**
+ * Retrieves an RTC answer using the consumer's temporary capability.
+ * @return None.
+ */
+static void redp2p_index_handle_rtc_consumer_poll(redp2p_t *ctx,
+    redp2p_fd_t fd, JSON_Object *req)
+{
+    char connection[REDP2P_RTC_CONNECTION_HEX + 1];
+    char capability[REDP2P_RTC_CAPABILITY_HEX + 1];
+    unsigned char digest[32];
+    redp2p_sha256_t sha;
+    int pending_index;
+    int consume;
+    JSON_Value *reply;
+    JSON_Object *out;
+
+    memset(connection, 0, sizeof(connection));
+    memset(capability, 0, sizeof(capability));
+    memset(digest, 0, sizeof(digest));
+    if (!redp2p_json_require_lower_hex(req, "connection", connection,
+        sizeof(connection), REDP2P_RTC_CONNECTION_HEX) ||
+        !redp2p_json_require_lower_hex(req, "capability", capability,
+            sizeof(capability), REDP2P_RTC_CAPABILITY_HEX))
+    {
+        redp2p_index_respond_error(fd, 400, "bad_request");
+        return;
+    }
+    pending_index = redp2p_rtc_pending_find(ctx, connection);
+    if (pending_index < 0) {
+        redp2p_index_respond_error(fd, 404, "not_found");
+        goto cleanup;
+    }
+    redp2p_sha256_init(&sha);
+    redp2p_sha256_update(&sha, (const unsigned char *)capability,
+        strlen(capability));
+    redp2p_sha256_final(&sha, digest);
+    if (!redp2p_constant_time_equal(digest,
+        ctx->rtc_pending[pending_index].capability_hash, sizeof(digest)))
+    {
+        redp2p_index_respond_error(fd, 403, "auth_failed");
+        goto cleanup;
+    }
+    reply = json_value_init_object();
+    if (!reply) {
+        redp2p_index_respond_error(fd, 500, "internal");
+        goto cleanup;
+    }
+    out = json_value_get_object(reply);
+    json_object_set_boolean(out, "ok", 1);
+    consume = ctx->rtc_pending[pending_index].answer_sdp != NULL;
+    if (!consume) {
+        json_object_set_value(out, "answer", json_value_init_null());
+    } else {
+        JSON_Value *answer_value = json_value_init_object();
+        JSON_Object *answer;
+        if (!answer_value) {
+            json_value_free(reply);
+            redp2p_index_respond_error(fd, 500, "internal");
+            goto cleanup;
+        }
+        answer = json_value_get_object(answer_value);
+        json_object_set_string(answer, "type", "answer");
+        json_object_set_string(answer, "sdp",
+            ctx->rtc_pending[pending_index].answer_sdp);
+        json_object_set_value(out, "answer", answer_value);
+    }
+    redp2p_index_respond(fd, 200, "OK", reply);
+    if (consume) redp2p_rtc_pending_remove(ctx, pending_index);
+
+cleanup:
+    crypto_wipe(connection, sizeof(connection));
+    crypto_wipe(capability, sizeof(capability));
+    crypto_wipe(digest, sizeof(digest));
+    crypto_wipe(&sha, sizeof(sha));
+}
+
+/**
+ * Dispatches the overloaded RTC poll operation.
+ * @return None.
+ */
+static void redp2p_index_handle_rtc_poll(redp2p_t *ctx, redp2p_fd_t fd,
+    JSON_Object *req)
+{
+    if (json_object_has_value(req, "id"))
+        redp2p_index_handle_rtc_publisher_poll(ctx, fd, req);
+    else
+        redp2p_index_handle_rtc_consumer_poll(ctx, fd, req);
+}
+
+/**
  * Handles one punch request, storing a bounded pending call.
  * @param ctx Locked index context.
  * @param fd  Request socket.
