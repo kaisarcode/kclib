@@ -142,6 +142,45 @@ static char test_home_path[512];
 static char test_port_reservation[512];
 static const char *test_case_name;
 
+typedef struct {
+    _Atomic int received;
+    unsigned char data[256];
+    size_t size;
+} test_direct_receive_t;
+
+static test_direct_receive_t test_direct_receive;
+
+/**
+ * Echoes direct publisher data back through the stable client capability.
+ * @param input Publisher input.
+ * @param userdata Unused.
+ * @return None.
+ */
+static void test_direct_pub_receive(const kc_redp2p_pub_input_t *input,
+    void *userdata)
+{
+    (void)userdata;
+    if (!input || !input->client) return;
+    (void)kc_redp2p_client_respond(input->client, input->data, input->size);
+}
+
+/**
+ * Captures one direct consumer receive event.
+ * @param data Received bytes.
+ * @param size Byte count.
+ * @param userdata Unused.
+ * @return None.
+ */
+static void test_direct_con_receive(const void *data, size_t size,
+    void *userdata)
+{
+    (void)userdata;
+    if (!data || size > sizeof(test_direct_receive.data)) return;
+    memcpy(test_direct_receive.data, data, size);
+    test_direct_receive.size = size;
+    atomic_store(&test_direct_receive.received, 1);
+}
+
 static const unsigned char REDP2P_CHALLENGE_DOMAIN[] = "REDP2P-CHALLENGE";
 static const unsigned char REDP2P_POW_DOMAIN[] = "REDP2P-POW";
 static const unsigned char REDP2P_REGISTER_DOMAIN[] = "REDP2P-REGISTER";
@@ -6324,6 +6363,50 @@ static int case_kc_redp2p_api(void)
     if (fail == 0) {
         fail += expect_int("public TCP roundtrip", (int)sizeof(payload),
             test_tcp_roundtrip(con_port, payload, sizeof(payload)));
+    }
+
+    kc_redp2p_con_close(con);
+    con = NULL;
+    kc_redp2p_pub_close(pub);
+    pub = NULL;
+
+    memset(&test_direct_receive, 0, sizeof(test_direct_receive));
+    memset(&pub_options, 0, sizeof(pub_options));
+    pub_options.id = "direct";
+    pub_options.index = index;
+    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.receive = test_direct_pub_receive;
+    if (fail == 0) {
+        status = kc_redp2p_pub(&pub, &pub_options);
+        fail += expect_int("direct pub create", KC_REDP2P_OK, status);
+        fail += expect_true("direct pub handle", pub != NULL);
+    }
+
+    memset(&con_options, 0, sizeof(con_options));
+    con_options.id = "direct";
+    con_options.index = index;
+    con_options.receive = test_direct_con_receive;
+    if (fail == 0) {
+        status = kc_redp2p_con(&con, &con_options);
+        fail += expect_int("direct con create", KC_REDP2P_OK, status);
+        fail += expect_true("direct con handle", con != NULL);
+    }
+    if (fail == 0) {
+        status = kc_redp2p_con_send(con, payload, sizeof(payload));
+        fail += expect_int("direct con send", KC_REDP2P_OK, status);
+    }
+    if (fail == 0) {
+        uint64_t deadline = test_now_ms() + 10000U;
+        while (!atomic_load(&test_direct_receive.received) &&
+            test_now_ms() < deadline)
+            test_sleep_ms(10);
+        fail += expect_true("direct receive completed",
+            atomic_load(&test_direct_receive.received));
+        fail += expect_true("direct receive size",
+            test_direct_receive.size == sizeof(payload));
+        fail += expect_true("direct receive bytes",
+            test_direct_receive.size == sizeof(payload) &&
+            memcmp(test_direct_receive.data, payload, sizeof(payload)) == 0);
     }
 
     kc_redp2p_con_close(con);
