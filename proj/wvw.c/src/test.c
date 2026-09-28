@@ -280,11 +280,14 @@ static void case_kc_wvw_title(void) {
         ok = kc_wvw_set_title(wvw, "changed") == KC_WVW_OK;
         title = kc_wvw_get_title(wvw);
         ok &= title && !strcmp(title, "changed");
+        ok &= kc_wvw_get_icon(wvw) == NULL;
+        ok &= kc_wvw_set_icon(wvw, NULL) == KC_WVW_OK;
+        ok &= kc_wvw_get_icon(wvw) == NULL;
     }
     kc_wvw_close(wvw);
     free(url);
     result("kc_wvw_title",
-        "set_title and get_title expose one named property", ok);
+        "title and icon expose named window properties", ok);
 }
 
 /**
@@ -399,6 +402,7 @@ static void case_kc_wvw_cli(void) {
     ok &= run_cli("-v", 1);
     ok &= run_cli("--hide --help", 1);
     ok &= run_cli("--unlist --help", 1);
+    ok &= run_cli("--icon app.ico --help", 1);
     ok &= run_cli("--hidden --help", 0);
     ok &= run_cli("", 0);
     ok &= run_cli("--invalid", 0);

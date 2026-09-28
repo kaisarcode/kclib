@@ -41,6 +41,7 @@ typedef struct {
     char *url;
     char *title;
     char *background;
+    char *icon;
     int width;
     int height;
     int posx;
@@ -80,6 +81,8 @@ typedef enum {
     KC_WVW_OP_RESTORE,
     KC_WVW_OP_SET_TITLE,
     KC_WVW_OP_GET_TITLE,
+    KC_WVW_OP_SET_ICON,
+    KC_WVW_OP_GET_ICON,
     KC_WVW_OP_SET_SIZE,
     KC_WVW_OP_GET_SIZE,
     KC_WVW_OP_SET_POSITION,
@@ -123,6 +126,7 @@ struct kc_wvw {
     HANDLE thread, ready, closed_event;
     HWND hwnd;
     HBRUSH background_brush;
+    HICON window_icon;
     HINSTANCE hinstance;
     HMODULE loader;
     ICoreWebView2Environment *environment;
@@ -146,6 +150,7 @@ static void kc_wvw_context_release(kc_wvw_t *ctx);
 static void kc_wvw_context_destroy(kc_wvw_t *ctx);
 static void kc_wvw_config_free(kc_wvw_config_t *config);
 static void kc_wvw_set_error(kc_wvw_t *ctx, const char *fmt, ...);
+static int kc_wvw_set_icon_impl(kc_wvw_t *ctx, const char *icon);
 
 /**
  * Retains one context while an asynchronous operation may use it.
@@ -693,7 +698,7 @@ static char *kc_wvw_strdup(const char *text) {
  */
 static void kc_wvw_config_free(kc_wvw_config_t *config) {
     if (!config) return;
-    free(config->url); free(config->title); free(config->background);
+    free(config->url); free(config->title); free(config->background); free(config->icon);
     memset(config, 0, sizeof(*config));
 }
 
@@ -726,7 +731,10 @@ static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *o
     config->url = kc_wvw_strdup(options->url);
     config->title = kc_wvw_strdup(options->title ? options->title : "wvw");
     config->background = options->background ? kc_wvw_strdup(options->background) : NULL;
-    if (!config->url || !config->title || (options->background && !config->background)) {
+    config->icon = options->icon ? kc_wvw_strdup(options->icon) : NULL;
+    if (!config->url || !config->title ||
+        (options->background && !config->background) ||
+        (options->icon && !config->icon)) {
         kc_wvw_config_free(config); return KC_WVW_ERROR;
     }
     config->width = options->width ? *options->width : 1280;
@@ -2061,6 +2069,9 @@ static int kc_wvw_create_window(kc_wvw_t *ctx) {
     if (kc_wvw_background_transparent(ctx->opts.background)) {
         SetLayeredWindowAttributes(ctx->hwnd, 0, 255, LWA_ALPHA);
     }
+    if (ctx->opts.icon && kc_wvw_set_icon_impl(ctx, ctx->opts.icon) != KC_WVW_OK) {
+        return KC_WVW_ERROR;
+    }
     kc_wvw_windows_apply_window_modes(ctx);
 
     if (!ctx->opts.hidden) {
@@ -2326,6 +2337,10 @@ cleanup:
     if (ctx->background_brush) {
         DeleteObject(ctx->background_brush);
         ctx->background_brush = NULL;
+    }
+    if (ctx->window_icon) {
+        DestroyIcon(ctx->window_icon);
+        ctx->window_icon = NULL;
     }
     if (ctx->com_initialized) {
         CoUninitialize();
@@ -2633,6 +2648,43 @@ static int kc_wvw_set_title_impl(kc_wvw_t *ctx, const char *title) {
     }
 
     SetWindowTextW(ctx->hwnd,wtitle);free(wtitle);{char *copy=kc_wvw_strdup(title);if(!copy)return KC_WVW_ERROR;free(ctx->opts.title);ctx->opts.title=copy;}return KC_WVW_OK;
+}
+
+/**
+ * Update the native Win32 window icon.
+ * @param ctx Window context.
+ * @param icon Icon file path, or NULL for the default application icon.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_set_icon_impl(kc_wvw_t *ctx, const char *icon) {
+    wchar_t *path = NULL;
+    HICON next = NULL;
+    HICON shown;
+    char *copy = NULL;
+
+    if (!ctx || !ctx->hwnd) return KC_WVW_ERROR;
+    if (icon) {
+        path = kc_wvw_utf16_from_utf8(icon);
+        if (!path) return KC_WVW_ERROR;
+        next = (HICON)LoadImageW(NULL, path, IMAGE_ICON, 0, 0,
+            LR_LOADFROMFILE | LR_DEFAULTSIZE);
+        free(path);
+        if (!next) return KC_WVW_ERROR;
+        copy = kc_wvw_strdup(icon);
+        if (!copy) {
+            DestroyIcon(next);
+            return KC_WVW_ERROR;
+        }
+    }
+
+    shown = next ? next : LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+    SendMessageW(ctx->hwnd, WM_SETICON, ICON_BIG, (LPARAM)shown);
+    SendMessageW(ctx->hwnd, WM_SETICON, ICON_SMALL, (LPARAM)shown);
+    if (ctx->window_icon) DestroyIcon(ctx->window_icon);
+    ctx->window_icon = next;
+    free(ctx->opts.icon);
+    ctx->opts.icon = copy;
+    return KC_WVW_OK;
 }
 
 /**
@@ -3147,6 +3199,7 @@ typedef struct {
     char *url;
     char *title;
     char *background;
+    char *icon;
     int width, height, posx, posy;
     int has_posx, has_posy;
     int fullscreen, borderless, always_on_top, click_through, no_focus, hidden, unlist;
@@ -3175,6 +3228,8 @@ typedef enum {
     KC_WVW_OP_RESTORE,
     KC_WVW_OP_SET_TITLE,
     KC_WVW_OP_GET_TITLE,
+    KC_WVW_OP_SET_ICON,
+    KC_WVW_OP_GET_ICON,
     KC_WVW_OP_SET_SIZE,
     KC_WVW_OP_GET_SIZE,
     KC_WVW_OP_SET_POSITION,
@@ -3256,6 +3311,7 @@ static int kc_wvw_navigate_impl(kc_wvw_t *ctx, const char *url);
 static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state);
 static int kc_wvw_set_position_impl(kc_wvw_t *ctx, int x, int y);
 static int kc_wvw_get_position_impl(kc_wvw_t *ctx, int *out_x, int *out_y);
+static int kc_wvw_set_icon_impl(kc_wvw_t *ctx, const char *icon);
 
 /**
  * Sets an error message on the context.
@@ -3315,7 +3371,7 @@ static char *kc_wvw_strdup(const char *text) {
  */
 static void kc_wvw_config_free(kc_wvw_config_t *config) {
     if (!config) return;
-    free(config->url); free(config->title); free(config->background);
+    free(config->url); free(config->title); free(config->background); free(config->icon);
     memset(config, 0, sizeof(*config));
 }
 
@@ -3331,7 +3387,10 @@ static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *o
     config->url = kc_wvw_strdup(options->url);
     config->title = kc_wvw_strdup(options->title ? options->title : "wvw");
     config->background = options->background ? kc_wvw_strdup(options->background) : NULL;
-    if (!config->url || !config->title || (options->background && !config->background)) {
+    config->icon = options->icon ? kc_wvw_strdup(options->icon) : NULL;
+    if (!config->url || !config->title ||
+        (options->background && !config->background) ||
+        (options->icon && !config->icon)) {
         kc_wvw_config_free(config); return KC_WVW_ERROR;
     }
     config->width = options->width ? *options->width : 1280;
@@ -4843,6 +4902,10 @@ static int kc_wvw_macos_create_window(kc_wvw_t *ctx) {
         }
         [window setExcludedFromWindowsMenu:ctx->opts.unlist ? YES : NO];
 
+        if (ctx->opts.icon && kc_wvw_set_icon_impl(ctx, ctx->opts.icon) != KC_WVW_OK) {
+            return KC_WVW_ERROR;
+        }
+
         KCWvwWindowDelegate *windowDelegate = [[KCWvwWindowDelegate alloc] init];
         windowDelegate.ctx = ctx;
         [window setDelegate:windowDelegate];
@@ -5001,6 +5064,41 @@ static int kc_wvw_set_title_impl(kc_wvw_t *ctx, const char *title) {
         NSString *nsTitle = [NSString stringWithUTF8String:title];
         [window setTitle:nsTitle];
     }{char *copy=kc_wvw_strdup(title);if(!copy)return KC_WVW_ERROR;free(ctx->opts.title);ctx->opts.title=copy;}return KC_WVW_OK;
+}
+
+/**
+ * Update the macOS application icon used by native app surfaces.
+ * @param ctx Window context.
+ * @param icon Icon file path or named image, or NULL for the default icon.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_set_icon_impl(kc_wvw_t *ctx, const char *icon) {
+    NSImage *image = nil;
+    char *copy = NULL;
+
+    if (!ctx) return KC_WVW_ERROR;
+    @autoreleasepool {
+        if (icon) {
+            NSString *name = [NSString stringWithUTF8String:icon];
+            if (!name) return KC_WVW_ERROR;
+            image = strchr(icon, '/') ?
+                [[NSImage alloc] initWithContentsOfFile:name] :
+                [NSImage imageNamed:name];
+            if (!image) return KC_WVW_ERROR;
+            copy = kc_wvw_strdup(icon);
+            if (!copy) {
+                if (strchr(icon, '/')) [image release];
+                return KC_WVW_ERROR;
+            }
+        } else {
+            image = [NSImage imageNamed:NSImageNameApplicationIcon];
+        }
+        [NSApp setApplicationIconImage:image];
+        if (icon && strchr(icon, '/')) [image release];
+    }
+    free(ctx->opts.icon);
+    ctx->opts.icon = copy;
+    return KC_WVW_OK;
 }
 
 /**
@@ -5481,6 +5579,9 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
 
     gtk_window_set_default_size(GTK_WINDOW(ctx->window), ctx->opts.width, ctx->opts.height);
     gtk_window_set_title(GTK_WINDOW(ctx->window), ctx->opts.title ? ctx->opts.title : "wvw");
+    if (ctx->opts.icon && kc_wvw_set_icon_impl(ctx, ctx->opts.icon) != KC_WVW_OK) {
+        return KC_WVW_ERROR;
+    }
     gtk_window_set_skip_taskbar_hint(
         GTK_WINDOW(ctx->window), ctx->opts.unlist ? TRUE : FALSE);
     if (ctx->opts.has_posx || ctx->opts.has_posy) {
@@ -5870,6 +5971,37 @@ static int kc_wvw_set_title_impl(kc_wvw_t *ctx, const char *title) {
 }
 
 /**
+ * Update the GTK window icon.
+ * @param ctx Window context.
+ * @param icon Icon file path or icon theme name, or NULL for the default.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_set_icon_impl(kc_wvw_t *ctx, const char *icon) {
+    GError *error = NULL;
+    char *copy = NULL;
+
+    if (!ctx || !ctx->window) return KC_WVW_ERROR;
+    if (icon) {
+        if (strchr(icon, '/')) {
+            if (!gtk_window_set_icon_from_file(GTK_WINDOW(ctx->window), icon, &error)) {
+                if (error) g_error_free(error);
+                return KC_WVW_ERROR;
+            }
+        } else {
+            gtk_window_set_icon_name(GTK_WINDOW(ctx->window), icon);
+        }
+        copy = kc_wvw_strdup(icon);
+        if (!copy) return KC_WVW_ERROR;
+    } else {
+        gtk_window_set_icon(GTK_WINDOW(ctx->window), NULL);
+    }
+
+    free(ctx->opts.icon);
+    ctx->opts.icon = copy;
+    return KC_WVW_OK;
+}
+
+/**
  * Resize the native window content area.
  * @param ctx Window context.
  * @param width Width in pixels.
@@ -5973,6 +6105,7 @@ static int kc_wvw_execute_op(kc_wvw_t *ctx,kc_wvw_op_t *op){
     case KC_WVW_OP_LIST:return kc_wvw_set_listed_impl(ctx,1);case KC_WVW_OP_UNLIST:return kc_wvw_set_listed_impl(ctx,0);
     case KC_WVW_OP_MINIMIZE:return kc_wvw_minimize_impl(ctx);case KC_WVW_OP_MAXIMIZE:return kc_wvw_maximize_impl(ctx);case KC_WVW_OP_RESTORE:return kc_wvw_restore_impl(ctx);
     case KC_WVW_OP_SET_TITLE:return kc_wvw_set_title_impl(ctx,op->text);case KC_WVW_OP_GET_TITLE:op->out_text=ctx->opts.title;return op->out_text?KC_WVW_OK:KC_WVW_ERROR;
+    case KC_WVW_OP_SET_ICON:return kc_wvw_set_icon_impl(ctx,op->text);case KC_WVW_OP_GET_ICON:op->out_text=ctx->opts.icon;return KC_WVW_OK;
     case KC_WVW_OP_SET_SIZE:return kc_wvw_set_size_impl(ctx,op->a,op->b);
     case KC_WVW_OP_GET_SIZE:if(!op->out_a||!op->out_b||kc_wvw_get_state_impl(ctx,&state)!=KC_WVW_OK)return KC_WVW_ERROR;*op->out_a=state.width;*op->out_b=state.height;return KC_WVW_OK;
     case KC_WVW_OP_SET_POSITION:return kc_wvw_set_position_impl(ctx,op->a,op->b);
@@ -5994,6 +6127,8 @@ int kc_wvw_list(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_LIST;return 
 int kc_wvw_minimize(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_MINIMIZE;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_maximize(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_MAXIMIZE;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_restore(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_RESTORE;return kc_wvw_dispatch_op(ctx,&op);}
 int kc_wvw_set_title(kc_wvw_t *ctx,const char *title){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_TITLE;op.text=title;return kc_wvw_dispatch_op(ctx,&op);}
 const char *kc_wvw_get_title(const kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_TITLE;if(kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op)!=KC_WVW_OK)return NULL;return op.out_text;}
+int kc_wvw_set_icon(kc_wvw_t *ctx,const char *icon){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_ICON;op.text=icon;return kc_wvw_dispatch_op(ctx,&op);}
+const char *kc_wvw_get_icon(const kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_ICON;if(kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op)!=KC_WVW_OK)return NULL;return op.out_text;}
 int kc_wvw_set_size(kc_wvw_t *ctx,int w,int h){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_SIZE;op.a=w;op.b=h;return kc_wvw_dispatch_op(ctx,&op);}
 int kc_wvw_get_size(const kc_wvw_t *ctx,int *w,int *h){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_SIZE;op.out_a=w;op.out_b=h;return kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op);}
 int kc_wvw_set_position(kc_wvw_t *ctx,int x,int y){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_POSITION;op.a=x;op.b=y;return kc_wvw_dispatch_op(ctx,&op);}

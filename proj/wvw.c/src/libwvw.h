@@ -38,6 +38,7 @@ typedef struct {
     const char *url;
     const char *title;
     const char *background;
+    const char *icon;
     const int *width;
     const int *height;
     const int *posx;
@@ -176,6 +177,21 @@ int kc_wvw_set_title(kc_wvw_t *wvw, const char *title);
  * @return Borrowed title, invalidated by set_title or close, or NULL.
  */
 const char *kc_wvw_get_title(const kc_wvw_t *wvw);
+
+/**
+ * Update the native window icon, or restore its default with NULL.
+ * @param wvw WebView handle.
+ * @param icon Icon file path or platform icon name, or NULL.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_set_icon(kc_wvw_t *wvw, const char *icon);
+
+/**
+ * Return the configured icon string.
+ * @param wvw WebView handle.
+ * @return Borrowed icon, or NULL when unset; invalidated by set or close.
+ */
+const char *kc_wvw_get_icon(const kc_wvw_t *wvw);
 
 /**
  * Resize the native window content area.

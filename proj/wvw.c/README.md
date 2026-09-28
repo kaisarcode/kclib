@@ -35,6 +35,7 @@ wvw \
 | `--url <url>` | Initial URL |
 | `--title <title>` | Window title |
 | `--background <hex>` | Background as `RRGGBB` or `AARRGGBB` |
+| `--icon <icon>` | Window icon file path or platform icon name |
 | `--width <px>` | Initial window width |
 | `--height <px>` | Initial window height |
 | `--posx <px>` | Initial horizontal position |
@@ -55,6 +56,7 @@ The same settings can be supplied through environment variables:
 KC_WVW_URL
 KC_WVW_TITLE
 KC_WVW_BACKGROUND
+KC_WVW_ICON
 KC_WVW_WIDTH
 KC_WVW_HEIGHT
 KC_WVW_POSX
@@ -135,6 +137,8 @@ int kc_wvw_restore(kc_wvw_t *wvw);
 
 int kc_wvw_set_title(kc_wvw_t *wvw, const char *title);
 const char *kc_wvw_get_title(const kc_wvw_t *wvw);
+int kc_wvw_set_icon(kc_wvw_t *wvw, const char *icon);
+const char *kc_wvw_get_icon(const kc_wvw_t *wvw);
 
 int kc_wvw_set_size(kc_wvw_t *wvw, int width, int height);
 int kc_wvw_get_size(
@@ -212,6 +216,9 @@ bridge options.
 ### Window Options
 
 `background` accepts `RRGGBB` and `AARRGGBB`.
+
+`icon` accepts an icon file path or platform icon name, following the same
+convention as `tray.c`. NULL leaves the platform default icon in use.
 
 `always_on_top`, `click_through`, and `no_focus` configure the native host
 window at startup.

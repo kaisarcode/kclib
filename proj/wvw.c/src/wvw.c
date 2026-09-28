@@ -30,6 +30,7 @@ static void kc_wvw_help(const char *name) {
     printf("  --url <url>         Set initial URL\n");
     printf("  --title <title>     Set window title\n");
     printf("  --background <hex>  Set WebView background as RRGGBB or AARRGGBB\n");
+    printf("  --icon <icon>        Set window icon path or platform icon name\n");
     printf("  --width <px>        Set window width\n");
     printf("  --height <px>       Set window height\n");
     printf("  --posx <px>         Set window x position\n");
@@ -88,6 +89,7 @@ int main(int argc, char **argv) {
     const char *url = getenv("KC_WVW_URL");
     const char *title = getenv("KC_WVW_TITLE");
     const char *background = getenv("KC_WVW_BACKGROUND");
+    const char *icon = getenv("KC_WVW_ICON");
     int width = 1280;
     int height = 720;
     int posx = 0;
@@ -124,7 +126,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (!strcmp(argv[i], "--url") || !strcmp(argv[i], "--title") ||
-            !strcmp(argv[i], "--background")) {
+            !strcmp(argv[i], "--background") || !strcmp(argv[i], "--icon")) {
             const char *flag = argv[i++];
             if (i >= argc) {
                 fprintf(stderr, "wvw: missing value for %s\n", flag);
@@ -132,7 +134,8 @@ int main(int argc, char **argv) {
             }
             if (!strcmp(flag, "--url")) url = argv[i];
             else if (!strcmp(flag, "--title")) title = argv[i];
-            else background = argv[i];
+            else if (!strcmp(flag, "--background")) background = argv[i];
+            else icon = argv[i];
             continue;
         }
         if (!strcmp(argv[i], "--width") || !strcmp(argv[i], "--height") ||
@@ -174,6 +177,7 @@ int main(int argc, char **argv) {
     options.url = url;
     options.title = title;
     options.background = background;
+    options.icon = icon;
     options.width = &width;
     options.height = &height;
     options.posx = &posx;
