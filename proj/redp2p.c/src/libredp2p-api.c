@@ -114,14 +114,17 @@ struct kc_redp2p_con {
 
 /**
  * Finishes publisher destruction from its adapter thread.
- * Summary: Releases adapter, runtime, private mutex, and handle after callback exit.
+ * Summary: Releases adapter, runtime, private mutex, and handle after
+ *          callback exit.
  * @param pub Publisher capability.
  * @return None.
  */
 static void kc_redp2p_pub_destroy_deferred(kc_redp2p_pub_t *pub);
+
 /**
  * Finishes consumer destruction from its adapter thread.
- * Summary: Releases adapter, runtime, private mutex, and handle after callback exit.
+ * Summary: Releases adapter, runtime, private mutex, and handle after
+ *          callback exit.
  * @param con Consumer capability.
  * @return None.
  */
@@ -615,11 +618,6 @@ static int kc_redp2p_con_adapter_thread_start(kc_redp2p_con_t *con)
 }
 
 /**
- * Joins a publisher adapter thread if one was started.
- * @param pub Publisher capability.
- * @return None.
- */
-/**
  * Reports whether the caller is the publisher adapter thread.
  * Summary: Prevents a callback-triggered close from joining itself.
  * @param pub Publisher capability.
@@ -651,6 +649,12 @@ static int kc_redp2p_con_adapter_is_current(kc_redp2p_con_t *con)
 #endif
 }
 
+/**
+ * Joins a publisher adapter thread if one was started.
+ * Summary: Waits for the direct adapter worker to finish.
+ * @param pub Publisher capability.
+ * @return None.
+ */
 static void kc_redp2p_pub_adapter_join(kc_redp2p_pub_t *pub)
 {
     if (!pub || !pub->adapter_thread_started) return;
@@ -1558,6 +1562,12 @@ static void kc_redp2p_pub_destroy_deferred(kc_redp2p_pub_t *pub)
     free(pub);
 }
 
+/**
+ * Finishes consumer destruction from its adapter thread.
+ * Summary: Releases the deferred consumer resources after callback exit.
+ * @param con Consumer capability.
+ * @return None.
+ */
 static void kc_redp2p_con_destroy_deferred(kc_redp2p_con_t *con)
 {
     if (!con) return;
@@ -1577,6 +1587,12 @@ static void kc_redp2p_con_destroy_deferred(kc_redp2p_con_t *con)
     free(con);
 }
 
+/**
+ * Stops and releases one publisher runtime.
+ * Summary: Defers final destruction when invoked by the adapter callback.
+ * @param pub Publisher handle.
+ * @return None.
+ */
 void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
 {
     if (!pub || atomic_exchange(&pub->closing, 1)) return;
@@ -1595,6 +1611,12 @@ void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
 
 /**
  * Stops and releases one consumer runtime.
+ * @param con Consumer handle.
+ * @return None.
+ */
+/**
+ * Stops and releases one consumer runtime.
+ * Summary: Defers final destruction when invoked by the adapter callback.
  * @param con Consumer handle.
  * @return None.
  */
