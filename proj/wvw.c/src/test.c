@@ -80,7 +80,7 @@ static char *test_url(void) {
  * @param url_out Destination owned URL string.
  * @return 1 on success, 0 on failure.
  */
-static int open_test(kc_wvw_t **out, char **url_out) {
+static int open_test(kc_wvw_t **out, char **url_out, const int *hidden) {
     kc_wvw_options_t options = {0};
     int width = 640;
     int height = 480;
@@ -91,6 +91,7 @@ static int open_test(kc_wvw_t **out, char **url_out) {
     options.title = "wvw test";
     options.width = &width;
     options.height = &height;
+    options.hidden = hidden;
     if (kc_wvw_open(out, &options) != KC_WVW_OK) {
         kc_wvw_close(*out);
         *out = NULL;
@@ -155,7 +156,7 @@ static void case_kc_wvw_open(void) {
 static void case_kc_wvw_navigation(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int ok = open_test(&wvw, &url);
+    int ok = open_test(&wvw, &url, NULL);
 
     if (ok) ok = kc_wvw_navigate(wvw, url) == KC_WVW_OK;
     kc_wvw_close(wvw);
@@ -173,7 +174,7 @@ static void case_kc_wvw_bridge(void) {
     char *url = NULL;
     const char *methods[] = { "ping" };
     kc_wvw_bridge_options_t bridge = {0};
-    int ok = open_test(&wvw, &url);
+    int ok = open_test(&wvw, &url, NULL);
 
     if (ok) {
         bridge.methods = methods;
@@ -201,7 +202,7 @@ static void case_kc_wvw_bridge(void) {
 static void case_kc_wvw_visibility(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int ok = open_test(&wvw, &url);
+    int ok = open_test(&wvw, &url, NULL);
 
     if (ok) {
         ok =
@@ -216,13 +217,38 @@ static void case_kc_wvw_visibility(void) {
 }
 
 /**
+ * Test opening hidden and toggling the same window visibility.
+ * @return None.
+ */
+static void case_kc_wvw_hidden(void) {
+    kc_wvw_t *wvw = NULL;
+    char *url = NULL;
+    int hidden = 1;
+    int ok = open_test(&wvw, &url, &hidden);
+
+    if (ok) {
+        ok =
+            kc_wvw_is_visible(wvw) == 0 &&
+            kc_wvw_show(wvw) == KC_WVW_OK &&
+            kc_wvw_is_visible(wvw) == 1 &&
+            kc_wvw_hide(wvw) == KC_WVW_OK &&
+            kc_wvw_is_visible(wvw) == 0 &&
+            kc_wvw_show(wvw) == KC_WVW_OK;
+    }
+    kc_wvw_close(wvw);
+    free(url);
+    result("kc_wvw_hidden",
+        "hidden startup preserves the window for later show and hide", ok);
+}
+
+/**
  * Test minimize, maximize, and restore actions.
  * @return None.
  */
 static void case_kc_wvw_actions(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int ok = open_test(&wvw, &url);
+    int ok = open_test(&wvw, &url, NULL);
 
     if (ok) {
         ok =
@@ -245,7 +271,7 @@ static void case_kc_wvw_title(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
     const char *title;
-    int ok = open_test(&wvw, &url);
+    int ok = open_test(&wvw, &url, NULL);
 
     if (ok) {
         ok = kc_wvw_set_title(wvw, "changed") == KC_WVW_OK;
@@ -267,7 +293,7 @@ static void case_kc_wvw_size(void) {
     char *url = NULL;
     int width = 0;
     int height = 0;
-    int ok = open_test(&wvw, &url);
+    int ok = open_test(&wvw, &url, NULL);
 
     if (ok) {
         ok =
@@ -291,7 +317,7 @@ static void case_kc_wvw_position(void) {
     char *url = NULL;
     int x = 0;
     int y = 0;
-    int ok = open_test(&wvw, &url);
+    int ok = open_test(&wvw, &url, NULL);
 
     if (ok) {
         ok =
@@ -313,7 +339,7 @@ static void case_kc_wvw_position(void) {
 static void case_kc_wvw_booleans(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int ok = open_test(&wvw, &url);
+    int ok = open_test(&wvw, &url, NULL);
 
     if (ok) {
         int visible = kc_wvw_is_visible(wvw);
@@ -366,6 +392,7 @@ static void case_kc_wvw_cli(void) {
     ok &= run_cli("-h", 1);
     ok &= run_cli("--version", 1);
     ok &= run_cli("-v", 1);
+    ok &= run_cli("--hidden --help", 1);
     ok &= run_cli("", 0);
     ok &= run_cli("--invalid", 0);
     ok &= run_cli("--url", 0);
@@ -381,12 +408,13 @@ static void case_kc_wvw_cli(void) {
  * @return None.
  */
 static void run_all(void) {
-    total = 11;
+    total = 12;
     case_kc_wvw_version();
     case_kc_wvw_open();
     case_kc_wvw_navigation();
     case_kc_wvw_bridge();
     case_kc_wvw_visibility();
+    case_kc_wvw_hidden();
     case_kc_wvw_actions();
     case_kc_wvw_title();
     case_kc_wvw_size();

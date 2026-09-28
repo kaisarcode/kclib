@@ -52,6 +52,7 @@ typedef struct {
     int always_on_top;
     int click_through;
     int no_focus;
+    int hidden;
 } kc_wvw_config_t;
 
 typedef struct {
@@ -731,6 +732,7 @@ static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *o
     config->always_on_top = options->always_on_top ? !!*options->always_on_top : 0;
     config->click_through = options->click_through ? !!*options->click_through : 0;
     config->no_focus = options->no_focus ? !!*options->no_focus : 0;
+    config->hidden = options->hidden ? !!*options->hidden : 0;
     if (config->width <= 0 || config->height <= 0 ||
         config->width > KC_WVW_SIZE_MAX || config->height > KC_WVW_SIZE_MAX ||
         strlen(config->title) > KC_WVW_TITLE_MAX) {
@@ -2051,8 +2053,10 @@ static int kc_wvw_create_window(kc_wvw_t *ctx) {
     }
     kc_wvw_windows_apply_window_modes(ctx);
 
-    ShowWindow(ctx->hwnd, SW_SHOW);
-    UpdateWindow(ctx->hwnd);
+    if (!ctx->opts.hidden) {
+        ShowWindow(ctx->hwnd, SW_SHOW);
+        UpdateWindow(ctx->hwnd);
+    }
     return KC_WVW_OK;
 }
 
@@ -3001,7 +3005,7 @@ typedef struct {
     char *background;
     int width, height, posx, posy;
     int has_posx, has_posy;
-    int fullscreen, borderless, always_on_top, click_through, no_focus;
+    int fullscreen, borderless, always_on_top, click_through, no_focus, hidden;
 } kc_wvw_config_t;
 typedef struct {
     int width;
@@ -3191,6 +3195,7 @@ static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *o
     config->always_on_top = options->always_on_top ? !!*options->always_on_top : 0;
     config->click_through = options->click_through ? !!*options->click_through : 0;
     config->no_focus = options->no_focus ? !!*options->no_focus : 0;
+    config->hidden = options->hidden ? !!*options->hidden : 0;
     if (config->width <= 0 || config->height <= 0 ||
         config->width > KC_WVW_SIZE_MAX || config->height > KC_WVW_SIZE_MAX ||
         strlen(config->title) > KC_WVW_TITLE_MAX) {
@@ -4693,11 +4698,13 @@ static int kc_wvw_macos_create_window(kc_wvw_t *ctx) {
         [window setDelegate:windowDelegate];
         ctx->ns_window_delegate = (void *)CFBridgingRetain(windowDelegate);
 
-        if (ctx->opts.no_focus) {
-            [window orderFront:nil];
-        } else {
-            [window makeKeyAndOrderFront:nil];
-            [NSApp activateIgnoringOtherApps:YES];
+        if (!ctx->opts.hidden) {
+            if (ctx->opts.no_focus) {
+                [window orderFront:nil];
+            } else {
+                [window makeKeyAndOrderFront:nil];
+                [NSApp activateIgnoringOtherApps:YES];
+            }
         }
 
         ctx->ns_window = (void *)CFBridgingRetain(window);
@@ -5344,7 +5351,9 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     g_signal_connect(ctx->window, "destroy", G_CALLBACK(kc_wvw_linux_destroy), ctx);
     g_signal_connect(ctx->window, "size-allocate", G_CALLBACK(kc_wvw_linux_size_allocate), ctx);
     g_signal_connect(ctx->window, "configure-event", G_CALLBACK(kc_wvw_linux_configure), ctx);
-    gtk_widget_show_all(ctx->window);
+    if (!ctx->opts.hidden) {
+        gtk_widget_show_all(ctx->window);
+    }
     kc_wvw_linux_apply_window_modes(ctx);
     return KC_WVW_OK;
 }

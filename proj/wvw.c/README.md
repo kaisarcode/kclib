@@ -44,6 +44,7 @@ wvw \
 | `--always-on-top` | Keep the window above normal windows |
 | `--click-through` | Ignore mouse input on the host window |
 | `--no-focus` | Do not activate the window for keyboard focus |
+| `--hidden` | Start with the window hidden |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
@@ -62,6 +63,7 @@ KC_WVW_BORDERLESS
 KC_WVW_ALWAYS_ON_TOP
 KC_WVW_CLICK_THROUGH
 KC_WVW_NO_FOCUS
+KC_WVW_HIDDEN
 ```
 
 Command-line arguments override environment defaults.
@@ -208,6 +210,10 @@ bridge options.
 
 `always_on_top`, `click_through`, and `no_focus` configure the native host
 window at startup.
+
+`hidden` creates the WebView without initially presenting its native window.
+The same window can later be shown with `kc_wvw_show()` and hidden again with
+`kc_wvw_hide()`; hiding does not close the WebView.
 
 `KC_WVW_TITLE_MAX` is 4096 bytes and `KC_WVW_SIZE_MAX` is 16384 pixels.
 

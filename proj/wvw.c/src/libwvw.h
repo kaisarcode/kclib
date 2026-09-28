@@ -47,6 +47,7 @@ typedef struct {
     const int *always_on_top;
     const int *click_through;
     const int *no_focus;
+    const int *hidden;
 } kc_wvw_options_t;
 
 typedef struct {
