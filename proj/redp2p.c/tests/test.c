@@ -6620,19 +6620,16 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
     return fail == 0 ? 0 : 1;
 }
 
+#ifdef REDP2P_LIFECYCLE_TEST
 static int test_direct_api_wait_hook(uint64_t timeout_ms)
 {
-#ifdef REDP2P_LIFECYCLE_TEST
     uint64_t deadline = redp2p_now_ms() + timeout_ms;
 
     while (!redp2p_test_api_io_entered() && redp2p_now_ms() < deadline)
         test_sleep_ms(1U);
     return redp2p_test_api_io_entered() ? 0 : 1;
-#else
-    (void)timeout_ms;
-    return 0;
-#endif
 }
+#endif
 
 static int test_direct_api_con_close_race(const char *index)
 {
