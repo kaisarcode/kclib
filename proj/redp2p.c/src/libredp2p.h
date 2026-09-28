@@ -33,6 +33,7 @@ typedef struct kc_redp2p_con kc_redp2p_con_t;
 #define KC_REDP2P_EVERSION   -9
 #define KC_REDP2P_EPUNCH    -10
 #define KC_REDP2P_EEXIST    -11
+#define KC_REDP2P_EUNSUPPORTED -12
 
 #define KC_REDP2P_ID_MAX 63
 #define KC_REDP2P_PORT_DEFAULT 9876
