@@ -202,27 +202,6 @@ static void case_kc_wvw_bridge(void) {
 static void case_kc_wvw_visibility(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int ok = open_test(&wvw, &url, NULL);
-
-    if (ok) {
-        ok =
-            kc_wvw_hide(wvw) == KC_WVW_OK &&
-            kc_wvw_is_visible(wvw) == 0 &&
-            kc_wvw_show(wvw) == KC_WVW_OK;
-    }
-    kc_wvw_close(wvw);
-    free(url);
-    result("kc_wvw_visibility",
-        "show and hide are actions with an explicit boolean query", ok);
-}
-
-/**
- * Test opening hidden and toggling the same window visibility.
- * @return None.
- */
-static void case_kc_wvw_hidden(void) {
-    kc_wvw_t *wvw = NULL;
-    char *url = NULL;
     int hidden = 1;
     int ok = open_test(&wvw, &url, &hidden);
 
@@ -237,8 +216,8 @@ static void case_kc_wvw_hidden(void) {
     }
     kc_wvw_close(wvw);
     free(url);
-    result("kc_wvw_hidden",
-        "hidden startup preserves the window for later show and hide", ok);
+    result("kc_wvw_visibility",
+        "hidden startup and show/hide preserve one live window", ok);
 }
 
 /**
@@ -408,13 +387,12 @@ static void case_kc_wvw_cli(void) {
  * @return None.
  */
 static void run_all(void) {
-    total = 12;
+    total = 11;
     case_kc_wvw_version();
     case_kc_wvw_open();
     case_kc_wvw_navigation();
     case_kc_wvw_bridge();
     case_kc_wvw_visibility();
-    case_kc_wvw_hidden();
     case_kc_wvw_actions();
     case_kc_wvw_title();
     case_kc_wvw_size();
