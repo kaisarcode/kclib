@@ -47,10 +47,10 @@ typedef struct {
 
 /**
  * Receive bytes from one remote peer.
- * The input and its data/host values are borrowed for the callback duration.
- * TCP peer identity remains stable across callbacks until peer close.
+ * The input and its data/host values are borrowed for the receive duration.
+ * TCP peer identity remains stable across receives until peer close.
  * A UDP peer represents the origin of this datagram and is valid only for the
- * callback duration.
+ * notification duration.
  */
 typedef void (*kc_netl_receive_fn)(
     const kc_netl_input_t *input,
@@ -59,7 +59,7 @@ typedef void (*kc_netl_receive_fn)(
 
 /**
  * Receive notification that one TCP peer has closed.
- * The peer is borrowed and remains valid only for the callback duration.
+ * The peer is borrowed and remains valid only for the notification duration.
  */
 typedef void (*kc_netl_disconnect_fn)(
     kc_netl_peer_t *peer,
@@ -68,7 +68,7 @@ typedef void (*kc_netl_disconnect_fn)(
 
 /**
  * Receive an asynchronous listener failure.
- * After this callback no further input is delivered.
+ * After this notification no further input is delivered.
  */
 typedef void (*kc_netl_error_fn)(
     int status,
@@ -108,7 +108,7 @@ int kc_netl_respond(
 /**
  * Stop interacting with one peer.
  * For TCP this closes that peer without affecting other peers. For a UDP peer
- * this simply prevents further response through that callback-local peer.
+ * this simply prevents further response through that receive-local peer.
  * NULL and already-closed peers are accepted.
   * @return None.
  */
@@ -122,7 +122,7 @@ unsigned short kc_netl_port(const kc_netl_t *listener);
 
 /**
  * Stop the listener, close all TCP peers, and release it.
- * NULL is accepted. This may also be called from a netl callback.
+ * NULL is accepted. This may also be called while netl is delivering a receive, disconnect, or error.
   * @return None.
  */
 void kc_netl_close(kc_netl_t *listener);
