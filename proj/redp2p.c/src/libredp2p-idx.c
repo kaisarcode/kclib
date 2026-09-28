@@ -1213,7 +1213,7 @@ static int redp2p_rtc_control_proof(const char *key, const char *op,
     const char *id, uint64_t sequence, const char *extra1,
     const char *extra2, char proof[65])
 {
-    unsigned char message[REDP2P_RTC_SDP_MAX + 256];
+    unsigned char message[1024];
     unsigned char hash[32];
     int written;
     size_t used;
@@ -1597,8 +1597,17 @@ static int redp2p_index_handle_rtc_heartbeat(redp2p_t *ctx, redp2p_fd_t fd,
 
     redp2p_evict_stale(ctx);
     peer_index = redp2p_find_peer(ctx, id);
-    if (peer_index == SIZE_MAX ||
-        ctx->peers[peer_index].peer.transport != REDP2P_PROTO_RTC)
+    if (peer_index == SIZE_MAX) {
+        if (!json_object_has_value(req, "proto") &&
+            !json_object_has_value(req, "udp_port") &&
+            !json_object_has_value(req, "candidates"))
+        {
+            redp2p_index_respond_error(fd, 404, "not_found");
+            return 1;
+        }
+        return 0;
+    }
+    if (ctx->peers[peer_index].peer.transport != REDP2P_PROTO_RTC)
         return 0;
     memset(proof, 0, sizeof(proof));
     memset(expected, 0, sizeof(expected));
