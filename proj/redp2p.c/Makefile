@@ -157,7 +157,7 @@ endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
-.PHONY: all test test-php test-browser wine clean \
+.PHONY: all test wine clean \
 	x86_64/linux x86_64/windows x86_64/macos \
 	x86_64/iossim \
 	i686/linux i686/windows \
@@ -439,15 +439,6 @@ test:
 		cmake --build $(BUILD_DIR)/test && \
 		$(BUILD_DIR)/test/redp2p_contract_test all; \
 	fi
-
-test-php:
-	@command -v php >/dev/null 2>&1 || { echo "PHP is required." >&2; exit 1; }
-	@php -r 'exit(extension_loaded("pdo_sqlite") ? 0 : 1);' || { echo "PHP PDO SQLite is required." >&2; exit 1; }
-	@php -r 'exit(extension_loaded("sodium") ? 0 : 1);' || { echo "PHP Sodium is required." >&2; exit 1; }
-	@php tests/test.php
-
-test-browser:
-	@bash tests/test-browser.sh
 
 wine:
 	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
