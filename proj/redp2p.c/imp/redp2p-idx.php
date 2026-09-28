@@ -864,6 +864,7 @@ class Redp2pIndex
         if ($seq === null || $proof === null) {
             return $this->jsonError(400, 'bad_request');
         }
+        $proof = strtolower($proof);
 
         $lock = $this->beginPendingWrite();
         $active = true;
@@ -880,7 +881,7 @@ class Redp2pIndex
                     $this->simpleControlProof(
                         (string)$stored['key'], 'poll', $id, $seq
                     ),
-                    strtolower($proof)
+                    $proof
                 )) {
                 $this->endPendingWrite($lock, false);
                 $active = false;
@@ -943,6 +944,7 @@ class Redp2pIndex
             $answer === null) {
             return $this->jsonError(400, 'bad_request');
         }
+        $proof = strtolower($proof);
 
         $digest = hash('sha256', $answer['type'] . "\n" . $answer['sdp']);
         $lock = $this->beginPendingWrite();
@@ -961,7 +963,7 @@ class Redp2pIndex
                         (string)$stored['key'], 'answer', $id, $seq,
                         [$connection, $digest]
                     ),
-                    strtolower($proof)
+                    $proof
                 )) {
                 $this->endPendingWrite($lock, false);
                 $active = false;
