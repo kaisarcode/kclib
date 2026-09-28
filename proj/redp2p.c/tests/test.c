@@ -6411,6 +6411,12 @@ typedef struct {
 #define TEST_API_THREAD_RETURN() return NULL
 #endif
 
+/**
+ * Sends one byte from a direct consumer on a worker thread.
+ * Summary: Holds the operation open for deterministic close-race coverage.
+ * @param arg Direct race state.
+ * @return Platform thread result.
+ */
 TEST_API_THREAD(test_direct_send_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
@@ -6419,6 +6425,12 @@ TEST_API_THREAD(test_direct_send_thread)
     TEST_API_THREAD_RETURN();
 }
 
+/**
+ * Closes a direct consumer on a worker thread.
+ * Summary: Verifies close waits for an in-flight consumer send.
+ * @param arg Direct race state.
+ * @return Platform thread result.
+ */
 TEST_API_THREAD(test_direct_con_close_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
@@ -6427,6 +6439,12 @@ TEST_API_THREAD(test_direct_con_close_thread)
     TEST_API_THREAD_RETURN();
 }
 
+/**
+ * Responds through a publisher client on a worker thread.
+ * Summary: Holds the operation open for deterministic publisher-close coverage.
+ * @param arg Direct race state.
+ * @return Platform thread result.
+ */
 TEST_API_THREAD(test_direct_respond_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
@@ -6436,6 +6454,12 @@ TEST_API_THREAD(test_direct_respond_thread)
     TEST_API_THREAD_RETURN();
 }
 
+/**
+ * Closes a publisher client on a worker thread.
+ * Summary: Holds client teardown open while publisher close starts concurrently.
+ * @param arg Direct race state.
+ * @return Platform thread result.
+ */
 TEST_API_THREAD(test_direct_client_close_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
@@ -6444,6 +6468,12 @@ TEST_API_THREAD(test_direct_client_close_thread)
     TEST_API_THREAD_RETURN();
 }
 
+/**
+ * Closes a direct publisher on a worker thread.
+ * Summary: Verifies publisher teardown waits for in-flight client I/O.
+ * @param arg Direct race state.
+ * @return Platform thread result.
+ */
 TEST_API_THREAD(test_direct_pub_close_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
@@ -6452,6 +6482,12 @@ TEST_API_THREAD(test_direct_pub_close_thread)
     TEST_API_THREAD_RETURN();
 }
 
+/**
+ * Creates one direct consumer on a worker thread.
+ * Summary: Lets the port-race test steal the selected ephemeral port.
+ * @param arg Direct race state.
+ * @return Platform thread result.
+ */
 TEST_API_THREAD(test_direct_con_create_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
@@ -6472,6 +6508,13 @@ TEST_API_THREAD(test_direct_con_create_thread)
 #undef TEST_API_THREAD
 #undef TEST_API_THREAD_RETURN
 
+/**
+ * Captures the stable publisher client from one receive callback.
+ * Summary: Supplies a live client handle to concurrent lifecycle tests.
+ * @param input Publisher input.
+ * @param userdata Direct race state.
+ * @return None.
+ */
 static void test_direct_capture_client(const kc_redp2p_pub_input_t *input,
     void *userdata)
 {
@@ -6483,6 +6526,13 @@ static void test_direct_capture_client(const kc_redp2p_pub_input_t *input,
 }
 #endif
 
+/**
+ * Closes a publisher from inside its receive callback.
+ * Summary: Exercises deferred publisher destruction on the adapter thread.
+ * @param input Publisher input.
+ * @param userdata Direct close state.
+ * @return None.
+ */
 static void test_direct_pub_self_close(const kc_redp2p_pub_input_t *input,
     void *userdata)
 {
@@ -6495,6 +6545,13 @@ static void test_direct_pub_self_close(const kc_redp2p_pub_input_t *input,
     atomic_store(&state->closed, 1);
 }
 
+/**
+ * Echoes direct publisher input back to its client.
+ * Summary: Produces consumer receive traffic for lifecycle tests.
+ * @param input Publisher input.
+ * @param userdata Unused.
+ * @return None.
+ */
 static void test_direct_close_echo(const kc_redp2p_pub_input_t *input,
     void *userdata)
 {
@@ -6503,6 +6560,14 @@ static void test_direct_close_echo(const kc_redp2p_pub_input_t *input,
     (void)kc_redp2p_client_respond(input->client, input->data, input->size);
 }
 
+/**
+ * Closes a consumer from inside its receive callback.
+ * Summary: Exercises deferred consumer destruction on the adapter thread.
+ * @param data Received bytes.
+ * @param size Received byte count.
+ * @param userdata Direct close state.
+ * @return None.
+ */
 static void test_direct_con_self_close(const void *data, size_t size,
     void *userdata)
 {
@@ -6621,6 +6686,12 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
 }
 
 #ifdef REDP2P_TESTING
+/**
+ * Waits for a test-only I/O synchronization point.
+ * Summary: Bounds deterministic lifecycle-race synchronization.
+ * @param timeout_ms Maximum wait in milliseconds.
+ * @return 0 when entered, 1 on timeout.
+ */
 static int test_direct_api_wait_hook(uint64_t timeout_ms)
 {
     uint64_t deadline = redp2p_now_ms() + timeout_ms;
@@ -6631,6 +6702,12 @@ static int test_direct_api_wait_hook(uint64_t timeout_ms)
 }
 #endif
 
+/**
+ * Exercises consumer close against an in-flight send.
+ * Summary: Verifies teardown waits for the protected consumer I/O section.
+ * @param index Index endpoint.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_direct_api_con_close_race(const char *index)
 {
 #ifdef REDP2P_TESTING
@@ -6701,6 +6778,13 @@ static int test_direct_api_con_close_race(const char *index)
 #endif
 }
 
+/**
+ * Exercises publisher close against in-flight client I/O.
+ * Summary: Covers both respond and client-close serialization paths.
+ * @param index Index endpoint.
+ * @param close_client Nonzero to race client close, zero to race respond.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_direct_api_pub_close_race(const char *index, int close_client)
 {
 #ifdef REDP2P_TESTING
@@ -6786,6 +6870,12 @@ static int test_direct_api_pub_close_race(const char *index, int close_client)
 #endif
 }
 
+/**
+ * Exercises retry after an ephemeral direct-consumer port is stolen.
+ * Summary: Forces the local bind race and expects startup to recover.
+ * @param index Index endpoint.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_direct_api_port_retry(const char *index)
 {
 #ifdef REDP2P_TESTING
@@ -6865,6 +6955,12 @@ static int test_direct_api_port_retry(const char *index)
 #endif
 }
 
+/**
+ * Exercises publisher and consumer close from their own callbacks.
+ * Summary: Verifies adapter-thread self-close completes without self-join.
+ * @param index Index endpoint.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_direct_api_self_close(const char *index)
 {
     kc_redp2p_pub_options_t pub_options;
