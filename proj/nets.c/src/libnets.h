@@ -30,14 +30,14 @@ typedef struct kc_nets kc_nets_t;
 
 /**
  * Receives the terminal result of one network transfer.
- * Response bytes are borrowed and remain valid only for the callback duration.
+ * Response bytes are borrowed and remain valid only for the completion duration.
  * @param status   KC_NETS_OK or a negative status code.
  * @param data     Borrowed response bytes, or NULL when no response is present.
  * @param size     Response size in bytes.
- * @param userdata Caller-provided callback data.
+ * @param userdata Caller-provided completion data.
  * @return None.
  */
-typedef void (*kc_nets_handler_t)(
+typedef void (*kc_nets_complete_fn)(
     int status,
     const void *data,
     size_t size,
@@ -47,15 +47,15 @@ typedef void (*kc_nets_handler_t)(
 /**
  * Start one asynchronous network transfer.
  * The library copies host and data before returning. A successful launch causes
- * exactly one terminal callback.
+ * exactly one terminal completion.
  * @param out       Receives the transfer handle.
  * @param host      Destination host or IP address.
  * @param port      Destination port.
  * @param protocol  KC_NETS_TCP, KC_NETS_UDP, or KC_NETS_TLS.
  * @param data      Input bytes copied by the library.
  * @param data_size Input size in bytes.
- * @param handler   Terminal result callback.
- * @param userdata  Caller data passed unchanged to handler.
+ * @param complete  Terminal completion.
+ * @param userdata  Caller data passed unchanged to complete.
  * @return KC_NETS_OK when launched, or a negative status code.
  */
 int kc_nets_send(
@@ -65,7 +65,7 @@ int kc_nets_send(
     int protocol,
     const void *data,
     size_t data_size,
-    kc_nets_handler_t handler,
+    kc_nets_complete_fn complete,
     void *userdata
 );
 
@@ -78,7 +78,7 @@ int kc_nets_stop(kc_nets_t *nets);
 
 /**
  * Stop if necessary and release one transfer.
- * Call after the terminal callback has returned.
+ * Call after the terminal completion has returned.
  * @param nets Transfer handle, or NULL.
  * @return None.
  */
