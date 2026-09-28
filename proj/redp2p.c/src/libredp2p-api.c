@@ -756,6 +756,7 @@ const char *kc_redp2p_strerror(int status)
         case KC_REDP2P_EVERSION: return "unsupported protocol version";
         case KC_REDP2P_EPUNCH:   return "direct connectivity failed";
         case KC_REDP2P_EEXIST:   return "publisher already registered";
+        case KC_REDP2P_EUNSUPPORTED: return "unsupported publisher transport";
         default:                 return "unknown error";
     }
 }
