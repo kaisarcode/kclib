@@ -71,24 +71,24 @@ if (kc_nets_send(
      * Call kc_nets_stop(transfer) when graceful interruption is required.
      */
 
-/* Close the transfer after the terminal callback has completed. */
+/* Close the transfer after the terminal completion has completed. */
     return 0;
 }
 ```
 
 ### Transfer semantics
 
-`kc_nets_send()` starts one asynchronous transfer and reports completion through the callback.
+`kc_nets_send()` starts one asynchronous transfer and reports completion through the completion function.
 
-A successfully launched transfer invokes its handler exactly once with the terminal result.
+A successfully launched transfer invokes its completion exactly once with the terminal result.
 
-For TCP and TLS, a successful callback may include response bytes.
+For TCP and TLS, a successful completion may include response bytes.
 
 UDP sends the complete input as one datagram and reports success with no response bytes.
 
-`kc_nets_stop()` is an interruption command. It requests graceful termination of the active transfer and interrupts the active socket where the platform permits it. A stopped transfer completes through the normal terminal callback with `KC_NETS_ESTOP`. DNS resolution may not be immediately interruptible on every platform.
+`kc_nets_stop()` is an interruption command. It requests graceful termination of the active transfer and interrupts the active socket where the platform permits it. A stopped transfer completes through the normal terminal completion with `KC_NETS_ESTOP`. DNS resolution may not be immediately interruptible on every platform.
 
-`kc_nets_close()` releases the transfer. If the transfer is still active, close requests stop and waits for the worker to finish. Call it after the terminal callback has returned.
+`kc_nets_close()` releases the transfer. If the transfer is still active, close requests stop and waits for the worker to finish. Call it after the terminal completion has returned.
 
 `kc_nets_strerror()` returns static descriptions for public status codes.
 
