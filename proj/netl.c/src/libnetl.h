@@ -52,7 +52,7 @@ typedef struct {
  * A UDP peer represents the origin of this datagram and is valid only for the
  * callback duration.
  */
-typedef void (*kc_netl_handler_t)(
+typedef void (*kc_netl_receive_fn)(
     const kc_netl_input_t *input,
     void *userdata
 );
@@ -61,7 +61,7 @@ typedef void (*kc_netl_handler_t)(
  * Receive notification that one TCP peer has closed.
  * The peer is borrowed and remains valid only for the callback duration.
  */
-typedef void (*kc_netl_close_handler_t)(
+typedef void (*kc_netl_disconnect_fn)(
     kc_netl_peer_t *peer,
     void *userdata
 );
@@ -70,7 +70,7 @@ typedef void (*kc_netl_close_handler_t)(
  * Receive an asynchronous listener failure.
  * After this callback no further input is delivered.
  */
-typedef void (*kc_netl_error_handler_t)(
+typedef void (*kc_netl_error_fn)(
     int status,
     void *userdata
 );
@@ -79,17 +79,17 @@ typedef void (*kc_netl_error_handler_t)(
  * Open an operational TCP or UDP listener.
  * NULL or empty host binds all interfaces. Port zero requests an ephemeral
  * operating-system-selected port. NULL max_pending_connections uses the
- * default. The input handler is required; close/error handlers are
- * optional. Callbacks may respond, close peers, or close the listener.
+ * default. Receive is required; disconnect/error are optional.
+ * Receive may respond, close peers, or close the listener.
  *
   * @return KC_NETL_OK on success, otherwise a negative status.
  */
 int kc_netl_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
-    kc_netl_handler_t handler,
-    kc_netl_close_handler_t close_handler,
-    kc_netl_error_handler_t error_handler,
+    kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,
+    kc_netl_error_fn error,
     void *userdata
 );
 
