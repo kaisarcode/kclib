@@ -68,7 +68,7 @@ typedef struct {
     char hosts[8][128];
     unsigned char data[8][64];
     size_t sizes[8];
-} callback_state_t;
+} receive_state_t;
 
 /**
  * Expect true.
@@ -282,7 +282,7 @@ static int test_socket_expect(
  * @return None.
  */
 static void receive(const kc_netl_input_t *input, void *userdata) {
-    callback_state_t *state = (callback_state_t *)userdata;
+    receive_state_t *state = (receive_state_t *)userdata;
     int index = atomic_load(&state->receive_count);
 
     if (index < 8) {
@@ -315,7 +315,7 @@ static void receive(const kc_netl_input_t *input, void *userdata) {
  * @return None.
  */
 static void disconnect(kc_netl_peer_t *peer, void *userdata) {
-    callback_state_t *state = (callback_state_t *)userdata;
+    receive_state_t *state = (receive_state_t *)userdata;
     (void)peer;
     atomic_fetch_add(&state->disconnect_count, 1);
 }
@@ -325,7 +325,7 @@ static void disconnect(kc_netl_peer_t *peer, void *userdata) {
  * @return None.
  */
 static void error(int status, void *userdata) {
-    callback_state_t *state = (callback_state_t *)userdata;
+    receive_state_t *state = (receive_state_t *)userdata;
     (void)status;
     atomic_fetch_add(&state->error_count, 1);
 }
@@ -334,7 +334,7 @@ static void error(int status, void *userdata) {
  * State init.
  * @return None.
  */
-static void state_init(callback_state_t *state) {
+static void state_init(receive_state_t *state) {
     memset(state, 0, sizeof(*state));
     atomic_init(&state->receive_count, 0);
     atomic_init(&state->disconnect_count, 0);
@@ -349,7 +349,7 @@ static void state_init(callback_state_t *state) {
 static int case_kc_netl_open(void) {
     kc_netl_options_t options;
     kc_netl_t *listener = (kc_netl_t *)1;
-    callback_state_t state;
+    receive_state_t state;
     int fail = 0;
 
     state_init(&state);
@@ -406,7 +406,7 @@ static int case_kc_netl_open(void) {
 static int case_kc_netl_tcp(void) {
     kc_netl_options_t options;
     kc_netl_t *listener = NULL;
-    callback_state_t state;
+    receive_state_t state;
     TEST_FD client_a = TEST_FD_INVALID;
     TEST_FD client_b = TEST_FD_INVALID;
     kc_netl_peer_t *peer_a = NULL;
@@ -541,7 +541,7 @@ static int case_kc_netl_tcp(void) {
 static int case_kc_netl_udp(void) {
     kc_netl_options_t options;
     kc_netl_t *listener = NULL;
-    callback_state_t state;
+    receive_state_t state;
     struct sockaddr_in address;
     TEST_FD client = TEST_FD_INVALID;
     char response[8];
