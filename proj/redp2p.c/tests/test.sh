@@ -1,7 +1,6 @@
 #!/bin/bash
 # REDP2P browser integration test
 # Summary: Runs the local PHP index and browser-to-browser transport test.
-#
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
 # License: GNU General Public License v3.0
