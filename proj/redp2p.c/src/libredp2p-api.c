@@ -144,13 +144,26 @@ static redp2p_fd_t kc_redp2p_loopback_socket(int type, int listen_socket,
  */
 static int kc_redp2p_ephemeral_port(uint16_t *port_out)
 {
-    redp2p_fd_t fd;
+    redp2p_fd_t tcp_fd;
+    redp2p_fd_t udp_fd;
+    uint16_t port;
+    int attempt;
 
     if (!port_out) return KC_REDP2P_EINVAL;
-    fd = kc_redp2p_loopback_socket(SOCK_STREAM, 0, 0, port_out);
-    if (REDP2P_ISERR(fd)) return KC_REDP2P_ENET;
-    REDP2P_FD_CLOSE(fd);
-    return KC_REDP2P_OK;
+    for (attempt = 0; attempt < 32; attempt++) {
+        port = 0;
+        tcp_fd = kc_redp2p_loopback_socket(SOCK_STREAM, 0, 0, &port);
+        if (REDP2P_ISERR(tcp_fd)) continue;
+        udp_fd = kc_redp2p_loopback_socket(SOCK_DGRAM, 0, port, NULL);
+        if (!REDP2P_ISERR(udp_fd)) {
+            REDP2P_FD_CLOSE(udp_fd);
+            REDP2P_FD_CLOSE(tcp_fd);
+            *port_out = port;
+            return KC_REDP2P_OK;
+        }
+        REDP2P_FD_CLOSE(tcp_fd);
+    }
+    return KC_REDP2P_ENET;
 }
 
 /** Adds one stable publisher client object to the adapter-owned list. */
