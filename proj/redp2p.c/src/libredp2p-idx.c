@@ -1143,6 +1143,284 @@ static const char *redp2p_index_password(redp2p_t *ctx, const char *id) {
     return vip == SIZE_MAX ? ctx->pass : ctx->vips[vip].pass;
 }
 
+
+/**
+ * Returns the public transport name stored for one publisher.
+ * @param transport Internal transport value.
+ * @return Stable transport name, or NULL when invalid.
+ */
+static const char *redp2p_index_transport_name(int transport)
+{
+    if (transport == REDP2P_PROTO_TCP) return "tcp";
+    if (transport == REDP2P_PROTO_UDP) return "udp";
+    if (transport == REDP2P_PROTO_RTC) return "rtc";
+    return NULL;
+}
+
+/**
+ * Builds the browser RTC canonical registration message.
+ * @return 1 on success, 0 on invalid input or overflow.
+ */
+static int redp2p_rtc_register_message(const unsigned char nonce[32],
+    uint64_t issued_at, uint64_t expires_at, const char *id,
+    const char *secret, const unsigned char solution[8],
+    unsigned char out[384], size_t *out_len)
+{
+    static const unsigned char domain[] = "REDP2P-WEB-REGISTER";
+    size_t used;
+    size_t id_len;
+    size_t secret_len;
+    unsigned char u16[2];
+
+    if (!nonce || !id || !secret || !solution || !out || !out_len) return 0;
+    id_len = strlen(id);
+    secret_len = strlen(secret);
+    if (id_len == 0 || id_len > REDP2P_ID_MAX || id_len > 65535 ||
+        secret_len != 16) return 0;
+    used = 0;
+    if (!redp2p_append_bytes(out, 384, &used, domain, sizeof(domain) - 1) ||
+        !redp2p_append_bytes(out, 384, &used, nonce, 32) ||
+        !redp2p_append_u64_be(out, 384, &used, issued_at) ||
+        !redp2p_append_u64_be(out, 384, &used, expires_at))
+        return 0;
+    u16[0] = (unsigned char)(id_len >> 8);
+    u16[1] = (unsigned char)id_len;
+    if (!redp2p_append_bytes(out, 384, &used, u16, 2) ||
+        !redp2p_append_bytes(out, 384, &used,
+            (const unsigned char *)id, id_len))
+        return 0;
+    u16[0] = (unsigned char)(secret_len >> 8);
+    u16[1] = (unsigned char)secret_len;
+    if (!redp2p_append_bytes(out, 384, &used, u16, 2) ||
+        !redp2p_append_bytes(out, 384, &used,
+            (const unsigned char *)secret, secret_len) ||
+        !redp2p_append_bytes(out, 384, &used, solution, 8))
+        return 0;
+    *out_len = used;
+    return 1;
+}
+
+/**
+ * Builds one browser-style sequenced control proof.
+ * @return 1 on success, 0 on invalid input or overflow.
+ */
+static int redp2p_rtc_control_proof(const char *key, const char *op,
+    const char *id, uint64_t sequence, const char *extra1,
+    const char *extra2, char proof[65])
+{
+    unsigned char message[REDP2P_RTC_SDP_MAX + 256];
+    unsigned char hash[32];
+    int written;
+    size_t used;
+
+    if (!key || !op || !id || !proof) return 0;
+    written = snprintf((char *)message, sizeof(message), "%s\n%s\n%llu",
+        op, id, (unsigned long long)sequence);
+    if (written < 0 || (size_t)written >= sizeof(message)) return 0;
+    used = (size_t)written;
+    if (extra1) {
+        written = snprintf((char *)message + used, sizeof(message) - used,
+            "\n%s", extra1);
+        if (written < 0 || (size_t)written >= sizeof(message) - used) return 0;
+        used += (size_t)written;
+    }
+    if (extra2) {
+        written = snprintf((char *)message + used, sizeof(message) - used,
+            "\n%s", extra2);
+        if (written < 0 || (size_t)written >= sizeof(message) - used) return 0;
+        used += (size_t)written;
+    }
+    redp2p_hmac_sha256_bytes((const unsigned char *)key, strlen(key),
+        message, used, hash);
+    if (!redp2p_hex_encode(hash, sizeof(hash), proof, 65)) {
+        crypto_wipe(message, sizeof(message));
+        crypto_wipe(hash, sizeof(hash));
+        return 0;
+    }
+    crypto_wipe(message, sizeof(message));
+    crypto_wipe(hash, sizeof(hash));
+    return 1;
+}
+
+/**
+ * Validates one RTC description object and returns its SDP string.
+ * @return Borrowed SDP text on success, otherwise NULL.
+ */
+static const char *redp2p_rtc_description(JSON_Object *req,
+    const char *field, const char *type)
+{
+    JSON_Object *description;
+    const char *actual_type;
+    const char *sdp;
+    size_t len;
+
+    if (!req || !field || !type ||
+        !json_object_has_value_of_type(req, field, JSONObject))
+        return NULL;
+    description = json_object_get_object(req, field);
+    if (!description ||
+        !json_object_has_value_of_type(description, "type", JSONString) ||
+        !json_object_has_value_of_type(description, "sdp", JSONString))
+        return NULL;
+    actual_type = json_object_get_string(description, "type");
+    sdp = json_object_get_string(description, "sdp");
+    if (!actual_type || strcmp(actual_type, type) != 0 || !sdp) return NULL;
+    len = strlen(sdp);
+    if (len == 0 || len > REDP2P_RTC_SDP_MAX) return NULL;
+    return sdp;
+}
+
+/**
+ * Removes one RTC signaling record and releases its owned SDP.
+ * @return None.
+ */
+static void redp2p_rtc_pending_remove(redp2p_t *ctx, int index)
+{
+    redp2p_rtc_pending_t removed;
+
+    if (!ctx || index < 0 || index >= ctx->n_rtc_pending) return;
+    removed = ctx->rtc_pending[index];
+    if (index != ctx->n_rtc_pending - 1)
+        ctx->rtc_pending[index] = ctx->rtc_pending[ctx->n_rtc_pending - 1];
+    ctx->n_rtc_pending--;
+    memset(&ctx->rtc_pending[ctx->n_rtc_pending], 0,
+        sizeof(ctx->rtc_pending[ctx->n_rtc_pending]));
+    if (removed.offer_sdp) {
+        crypto_wipe(removed.offer_sdp, strlen(removed.offer_sdp));
+        free(removed.offer_sdp);
+    }
+    if (removed.answer_sdp) {
+        crypto_wipe(removed.answer_sdp, strlen(removed.answer_sdp));
+        free(removed.answer_sdp);
+    }
+    crypto_wipe(&removed, sizeof(removed));
+}
+
+/** Evicts expired RTC signaling records. */
+static void redp2p_rtc_pending_evict_stale(redp2p_t *ctx)
+{
+    uint64_t now;
+    int i;
+
+    now = (uint64_t)time(NULL);
+    for (i = 0; i < ctx->n_rtc_pending; ) {
+        if (ctx->rtc_pending[i].expires_at < now)
+            redp2p_rtc_pending_remove(ctx, i);
+        else
+            i++;
+    }
+}
+
+/** Removes RTC signaling state addressed to one publisher. */
+static void redp2p_rtc_pending_remove_publisher(redp2p_t *ctx,
+    const char *publisher_id)
+{
+    int i;
+
+    if (!ctx || !publisher_id) return;
+    for (i = 0; i < ctx->n_rtc_pending; ) {
+        if (strcmp(ctx->rtc_pending[i].publisher_id, publisher_id) == 0)
+            redp2p_rtc_pending_remove(ctx, i);
+        else
+            i++;
+    }
+}
+
+/** Counts fresh RTC signaling records for one publisher. */
+static int redp2p_rtc_pending_count_for_publisher(redp2p_t *ctx,
+    const char *publisher_id)
+{
+    int count;
+    int i;
+
+    redp2p_rtc_pending_evict_stale(ctx);
+    count = 0;
+    for (i = 0; i < ctx->n_rtc_pending; i++)
+        if (strcmp(ctx->rtc_pending[i].publisher_id, publisher_id) == 0)
+            count++;
+    return count;
+}
+
+/** Finds one fresh RTC signaling record by connection id. */
+static int redp2p_rtc_pending_find(redp2p_t *ctx, const char *connection)
+{
+    int i;
+
+    redp2p_rtc_pending_evict_stale(ctx);
+    for (i = 0; i < ctx->n_rtc_pending; i++)
+        if (strcmp(ctx->rtc_pending[i].connection, connection) == 0)
+            return i;
+    return -1;
+}
+
+/**
+ * Adds one RTC signaling offer and returns the consumer capability.
+ * @return 1 on success, 0 on allocation or random-source failure.
+ */
+static int redp2p_rtc_pending_add(redp2p_t *ctx, const char *publisher_id,
+    const char *offer_sdp, char capability[REDP2P_RTC_CAPABILITY_HEX + 1],
+    uint64_t *expires_at)
+{
+    unsigned char connection_raw[16];
+    unsigned char capability_raw[32];
+    unsigned char capability_hash[32];
+    redp2p_sha256_t sha;
+    redp2p_rtc_pending_t *grown;
+    redp2p_rtc_pending_t *pending;
+    size_t cap;
+    size_t offer_len;
+
+    if (!ctx || !publisher_id || !offer_sdp || !capability || !expires_at)
+        return 0;
+    if (ctx->n_rtc_pending >= REDP2P_MAX_PENDING_CALLS_GLOBAL) return 0;
+    if (ctx->n_rtc_pending >= (int)ctx->rtc_pending_cap) {
+        cap = ctx->rtc_pending_cap ? ctx->rtc_pending_cap * 2U : 16U;
+        if (cap > REDP2P_MAX_PENDING_CALLS_GLOBAL)
+            cap = REDP2P_MAX_PENDING_CALLS_GLOBAL;
+        if (cap > SIZE_MAX / sizeof(ctx->rtc_pending[0])) return 0;
+        grown = (redp2p_rtc_pending_t *)realloc(ctx->rtc_pending,
+            cap * sizeof(ctx->rtc_pending[0]));
+        if (!grown) return 0;
+        memset(grown + ctx->rtc_pending_cap, 0,
+            (cap - ctx->rtc_pending_cap) * sizeof(grown[0]));
+        ctx->rtc_pending = grown;
+        ctx->rtc_pending_cap = cap;
+    }
+    if (redp2p_fill_random(connection_raw, sizeof(connection_raw)) != 0 ||
+        redp2p_fill_random(capability_raw, sizeof(capability_raw)) != 0 ||
+        !redp2p_hex_encode(capability_raw, sizeof(capability_raw), capability,
+            REDP2P_RTC_CAPABILITY_HEX + 1))
+        return 0;
+    pending = &ctx->rtc_pending[ctx->n_rtc_pending];
+    memset(pending, 0, sizeof(*pending));
+    if (!redp2p_hex_encode(connection_raw, sizeof(connection_raw),
+        pending->connection, sizeof(pending->connection)))
+        return 0;
+    redp2p_bounded_copy(pending->publisher_id,
+        sizeof(pending->publisher_id), publisher_id);
+    redp2p_sha256_init(&sha);
+    redp2p_sha256_update(&sha, (const unsigned char *)capability,
+        strlen(capability));
+    redp2p_sha256_final(&sha, capability_hash);
+    memcpy(pending->capability_hash, capability_hash, sizeof(capability_hash));
+    offer_len = strlen(offer_sdp);
+    pending->offer_sdp = (char *)malloc(offer_len + 1);
+    if (!pending->offer_sdp) {
+        crypto_wipe(pending, sizeof(*pending));
+        return 0;
+    }
+    memcpy(pending->offer_sdp, offer_sdp, offer_len + 1);
+    pending->created_at = (uint64_t)time(NULL);
+    pending->expires_at = pending->created_at + ctx->pending_ttl_s;
+    *expires_at = pending->expires_at;
+    ctx->n_rtc_pending++;
+    crypto_wipe(connection_raw, sizeof(connection_raw));
+    crypto_wipe(capability_raw, sizeof(capability_raw));
+    crypto_wipe(capability_hash, sizeof(capability_hash));
+    crypto_wipe(&sha, sizeof(sha));
+    return 1;
+}
+
 /**
  * Handles one register request, verifying proof of work and upserting.
  * @param ctx Locked index context.
