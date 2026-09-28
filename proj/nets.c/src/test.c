@@ -249,7 +249,7 @@ static void run_case(int *rc, case_fn fn) {
 }
 
 /**
- * Initialize one callback result.
+ * Initialize one completion result.
  * @param result Result state.
  * @return 0 on success, 1 on failure.
  */
@@ -270,7 +270,7 @@ static int result_init(test_result_t *result) {
 }
 
 /**
- * Destroy one callback result.
+ * Destroy one completion result.
  * @param result Result state.
  * @return None.
  */
@@ -284,14 +284,14 @@ static void result_destroy(test_result_t *result) {
 }
 
 /**
- * Store one terminal callback result.
+ * Store one terminal completion result.
  * @param status Status.
  * @param data Borrowed bytes.
  * @param size Byte count.
  * @param userdata Result state.
  * @return None.
  */
-static void result_handler(
+static void complete(
     int status,
     const void *data,
     size_t size,
@@ -324,7 +324,7 @@ static void result_handler(
 }
 
 /**
- * Wait for one terminal callback.
+ * Wait for one terminal completion.
  * @param result Result state.
  * @return Status.
  */
@@ -505,7 +505,7 @@ static int server_join(test_server_t *server) {
  */
 static int case_kc_nets_send(void) {
     const char *name = "kc_nets_send";
-    const char *detail = "launches async TCP and UDP transfers with terminal callbacks";
+    const char *detail = "launches async TCP and UDP transfers with terminal completions";
     kc_nets_t *transfer;
     test_result_t result;
     test_server_t server;
@@ -521,27 +521,27 @@ static int case_kc_nets_send(void) {
     fail += expect_int(
         "send NULL out",
         KC_NETS_EINVAL,
-        kc_nets_send(NULL, TEST_HOST, 9, KC_NETS_TCP, "x", 1, result_handler, NULL)
+        kc_nets_send(NULL, TEST_HOST, 9, KC_NETS_TCP, "x", 1, complete, NULL)
     );
     fail += expect_int(
         "send NULL host",
         KC_NETS_EINVAL,
-        kc_nets_send(&transfer, NULL, 9, KC_NETS_TCP, "x", 1, result_handler, NULL)
+        kc_nets_send(&transfer, NULL, 9, KC_NETS_TCP, "x", 1, complete, NULL)
     );
     fail += expect_int(
         "send NULL data",
         KC_NETS_EINVAL,
-        kc_nets_send(&transfer, TEST_HOST, 9, KC_NETS_TCP, NULL, 1, result_handler, NULL)
+        kc_nets_send(&transfer, TEST_HOST, 9, KC_NETS_TCP, NULL, 1, complete, NULL)
     );
     fail += expect_int(
-        "send NULL handler",
+        "send NULL complete",
         KC_NETS_EINVAL,
         kc_nets_send(&transfer, TEST_HOST, 9, KC_NETS_TCP, "x", 1, NULL, NULL)
     );
     fail += expect_int(
         "send invalid protocol",
         KC_NETS_EINVAL,
-        kc_nets_send(&transfer, TEST_HOST, 9, 999, "x", 1, result_handler, NULL)
+        kc_nets_send(&transfer, TEST_HOST, 9, 999, "x", 1, complete, NULL)
     );
 
     if (socket_start() != 0 || result_init(&result) != 0) {
@@ -563,12 +563,12 @@ static int case_kc_nets_send(void) {
                 KC_NETS_TCP,
                 "hello tcp",
                 9,
-                result_handler,
+                complete,
                 &result
             )
         );
         if (transfer != NULL) {
-            fail += expect_int("TCP callback status", KC_NETS_OK, result_wait(&result));
+            fail += expect_int("TCP completion status", KC_NETS_OK, result_wait(&result));
             fail += expect_true("TCP response size", result.size == sizeof(test_response));
             if (result.size == sizeof(test_response)) {
                 fail += expect_true(
@@ -598,12 +598,12 @@ static int case_kc_nets_send(void) {
                 KC_NETS_UDP,
                 "hello udp",
                 9,
-                result_handler,
+                complete,
                 &result
             )
         );
         if (transfer != NULL) {
-            fail += expect_int("UDP callback status", KC_NETS_OK, result_wait(&result));
+            fail += expect_int("UDP completion status", KC_NETS_OK, result_wait(&result));
             fail += expect_true("UDP response empty", result.size == 0U);
             kc_nets_close(transfer);
         }
@@ -653,7 +653,7 @@ static int case_kc_nets_stop(void) {
                 KC_NETS_TCP,
                 "stop",
                 4,
-                result_handler,
+                complete,
                 &result
             )
         );
@@ -662,7 +662,7 @@ static int case_kc_nets_stop(void) {
             fail += expect_int("stop transfer", KC_NETS_OK, kc_nets_stop(transfer));
             fail += expect_int("stop repeated", KC_NETS_OK, kc_nets_stop(transfer));
             fail += expect_int(
-                "stopped callback status",
+                "stopped completion status",
                 KC_NETS_ESTOP,
                 result_wait(&result)
             );
@@ -713,7 +713,7 @@ static int case_kc_nets_close(void) {
                 KC_NETS_UDP,
                 "close",
                 5,
-                result_handler,
+                complete,
                 &result
             )
         );
