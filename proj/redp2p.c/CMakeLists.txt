@@ -173,6 +173,7 @@ if(REDP2P_BUILD_TESTS)
     target_compile_definitions(redp2p_lifecycle_test PRIVATE
         REDP2P_TEST_CLI=""
         REDP2P_TESTING=1
+        REDP2P_LIFECYCLE_TEST=1
     )
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
