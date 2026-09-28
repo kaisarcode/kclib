@@ -1,7 +1,8 @@
-# redp2p.c - Peer-to-Peer Port Tunneling
+# redp2p.c - Peer-to-Peer Transport
 
-`redp2p.c` is a small C library and CLI for creating direct peer-to-peer TCP
-or UDP tunnels between local ports.
+`redp2p.c` provides REDP2P transport for native applications and the CLI.
+Native peers use TCP or UDP; the browser implementation under `imp/` uses
+WebRTC. Both share the same index protocol and capability model.
 
 Applications describe the tunnel they want. REDP2P owns registration,
 heartbeats, lookup, candidate exchange, hole punching, session setup, retries,
@@ -115,6 +116,46 @@ curl http://127.0.0.1:9000/
 nc 127.0.0.1 9000
 ```
 
+Native applications can also use REDP2P directly without exposing an
+application-facing local port. Set `port` to zero and provide `receive`.
+
+```c
+static void pub_receive(const kc_redp2p_pub_input_t *input, void *userdata)
+{
+    (void)userdata;
+    kc_redp2p_client_respond(input->client, "pong", 4);
+}
+
+static void con_receive(const void *data, size_t size, void *userdata)
+{
+    (void)data;
+    (void)size;
+    (void)userdata;
+}
+
+kc_redp2p_pub_options_t pub_options = {0};
+pub_options.id = "service";
+pub_options.index = "idx.example.com:9876";
+pub_options.protocol = KC_REDP2P_TCP;
+pub_options.receive = pub_receive;
+
+kc_redp2p_con_options_t con_options = {0};
+con_options.id = "service";
+con_options.index = "idx.example.com:9876";
+con_options.receive = con_receive;
+
+kc_redp2p_pub_t *pub = NULL;
+kc_redp2p_con_t *con = NULL;
+
+kc_redp2p_pub(&pub, &pub_options);
+kc_redp2p_con(&con, &con_options);
+kc_redp2p_con_send(con, "ping", 4);
+```
+
+With direct mode, REDP2P owns the private loopback adapter and its ephemeral
+port. TCP callbacks receive stream chunks; UDP callbacks receive one datagram
+per delivery.
+
 Inspect publisher IDs known by a live index:
 
 ```c
@@ -143,6 +184,7 @@ The public API is:
 typedef struct kc_redp2p_idx kc_redp2p_idx_t;
 typedef struct kc_redp2p_pub kc_redp2p_pub_t;
 typedef struct kc_redp2p_con kc_redp2p_con_t;
+typedef struct kc_redp2p_client kc_redp2p_client_t;
 
 int kc_redp2p_idx(
     kc_redp2p_idx_t **out,
@@ -168,6 +210,20 @@ int kc_redp2p_idx_list(
 void kc_redp2p_idx_close(kc_redp2p_idx_t *idx);
 void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
 void kc_redp2p_con_close(kc_redp2p_con_t *con);
+
+int kc_redp2p_con_send(
+    kc_redp2p_con_t *con,
+    const void *data,
+    size_t size
+);
+
+int kc_redp2p_client_respond(
+    kc_redp2p_client_t *client,
+    const void *data,
+    size_t size
+);
+
+void kc_redp2p_client_close(kc_redp2p_client_t *client);
 void kc_redp2p_free(void *ptr);
 
 const char *kc_redp2p_strerror(int status);
@@ -175,8 +231,8 @@ uint64_t kc_redp2p_version(void);
 ```
 
 The public API intentionally does not expose registration, heartbeat, lookup,
-punching, candidates, KCP state, session keys, control sequences, or
-application-data I/O.
+punching, candidates, KCP state, session keys, control sequences, SDP, ICE, or
+internal adapter ports.
 
 ### Model
 
@@ -189,16 +245,19 @@ idx
   +-- lists active publisher IDs
 
 pub
-  +-- publishes one local TCP or UDP port
+  +-- publishes TCP or UDP
+  +-- either adapts a local port or receives data directly
   +-- maintains its registration automatically
 
 con
-  +-- exposes one announced publisher through one local port
+  +-- selects only a publisher ID
   +-- derives TCP or UDP from the publisher record
+  +-- either exposes a local port or sends/receives directly
 ```
 
-The tunnel is only a byte or datagram path. REDP2P does not provide
-`onData`, `read`, `write`, or application-stream callbacks.
+The CLI remains port-oriented for compatibility. The library can use the same
+transport through direct capability-level `receive`, `respond`, and `send`
+operations.
 
 ### Options
 
@@ -213,20 +272,21 @@ For `kc_redp2p_idx_options_t`:
 - `max_consumers == 0` uses the protocol safety default of 32 pending
     consumers per publisher.
 
-For `kc_redp2p_pub_options_t`, `id`, `index`, `protocol`, and
-`port` are required. `protocol` is `KC_REDP2P_TCP` or
-`KC_REDP2P_UDP`. `pass` is optional registration admission material.
-`stun` is an optional STUN URL for deployments that need external candidate
-discovery.
+For `kc_redp2p_pub_options_t`, `id`, `index`, and `protocol` are required.
+`protocol` is `KC_REDP2P_TCP` or `KC_REDP2P_UDP`. Set a nonzero `port` to
+publish an existing local service, or leave `port` zero and provide `receive`
+for direct mode. `pass` and `stun` are optional.
 
-For `kc_redp2p_con_options_t`, `id`, `index`, and local `port` are
-required. `stun` is optional. The consumer derives TCP or UDP from the
-publisher record.
+For `kc_redp2p_con_options_t`, `id` and `index` are required. Set a nonzero
+`port` for the compatible local-port adapter, or leave `port` zero for direct
+mode and use `kc_redp2p_con_send()`; `receive` is optional for a send-only
+direct consumer. The consumer derives TCP or UDP from the publisher record.
 
 ### Runtime Model
 
-The index coordinates publishers and consumers. Publishers expose local TCP or
-UDP services, and consumers connect through the matching public name.
+The index coordinates publishers and consumers but never relays application
+payloads. Native publishers use TCP or UDP, browser publishers use RTC, and
+consumers select only the public publisher ID.
 
 ### Platform scope
 
@@ -255,7 +315,9 @@ make
 make test
 ```
 
-The native test run covers the public API, CLI, and protocol behavior.
+The native test run covers the public API, CLI, protocol behavior, native
+TCP/UDP transport, and direct data capabilities. `tests/test.php` covers the
+PHP index and `tests/test.html` exercises the browser RTC implementation.
 
 To run through Wine:
 
