@@ -2120,9 +2120,24 @@ static void redp2p_index_handle_deregister(redp2p_t *ctx, redp2p_fd_t fd,
     }
     redp2p_evict_stale(ctx);
     peer_index = redp2p_find_peer(ctx, id);
-    if (peer_index == SIZE_MAX || sequence <= ctx->peers[peer_index].peer.sequence ||
-        !redp2p_control_proof(ctx->peers[peer_index].peer.key, "deregister", id,
-            sequence, 0, 0, NULL, 0, expected))
+    if (peer_index == SIZE_MAX || sequence <= ctx->peers[peer_index].peer.sequence)
+    {
+        crypto_wipe(proof, sizeof(proof));
+        crypto_wipe(expected, sizeof(expected));
+        redp2p_index_respond_error(fd, 403, "invalid_proof");
+        return;
+    }
+    if (ctx->peers[peer_index].peer.transport == REDP2P_PROTO_RTC) {
+        if (!redp2p_rtc_control_proof(ctx->peers[peer_index].peer.key,
+            "deregister", id, sequence, NULL, NULL, expected))
+        {
+            crypto_wipe(proof, sizeof(proof));
+            crypto_wipe(expected, sizeof(expected));
+            redp2p_index_respond_error(fd, 403, "invalid_proof");
+            return;
+        }
+    } else if (!redp2p_control_proof(ctx->peers[peer_index].peer.key,
+        "deregister", id, sequence, 0, 0, NULL, 0, expected))
     {
         crypto_wipe(proof, sizeof(proof));
         crypto_wipe(expected, sizeof(expected));
