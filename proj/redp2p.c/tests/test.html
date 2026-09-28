@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>REDP2P Browser Test</title>
+</head>
+<body>
+<pre id="output">REDP2P browser test
+</pre>
+
+<script src="../imp/redp2p-pub.js"></script>
+<script src="../imp/redp2p-con.js"></script>
+<script>
+"use strict";
+
+(async () => {
+    const output = document.getElementById("output");
+    const write = line => {
+        output.textContent += line + "\n";
+    };
+    const params = new URLSearchParams(location.search);
+    const index = params.get("index");
+
+    if (!index) {
+        write("SKIP: pass ?index=https://host/redp2p-idx.php");
+        return;
+    }
+
+    const id = "browser" + crypto.getRandomValues(new Uint32Array(1))[0];
+    let pub = null;
+    let con = null;
+
+    try {
+        const reply = new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("response timeout")), 30000);
+            pub = RedP2P.pub({
+                id,
+                index,
+                pollInterval: 100,
+                receive(input) {
+                    const text = typeof input.data === "string"
+                        ? input.data
+                        : new TextDecoder().decode(input.data);
+                    if (text !== "ping") {
+                        clearTimeout(timeout);
+                        reject(new Error("publisher received unexpected data"));
+                        return;
+                    }
+                    input.client.respond("pong");
+                },
+                error(error) {
+                    clearTimeout(timeout);
+                    reject(error);
+                }
+            }).then(async publisher => {
+                pub = publisher;
+                con = await RedP2P.con({
+                    id,
+                    index,
+                    pollInterval: 100,
+                    receive(data) {
+                        const text = typeof data === "string"
+                            ? data
+                            : new TextDecoder().decode(data);
+                        clearTimeout(timeout);
+                        text === "pong"
+                            ? resolve()
+                            : reject(new Error("consumer received unexpected data"));
+                    },
+                    error(error) {
+                        clearTimeout(timeout);
+                        reject(error);
+                    }
+                });
+                con.send("ping");
+            }).catch(error => {
+                clearTimeout(timeout);
+                reject(error);
+            });
+        });
+
+        await reply;
+        write("PASS: RTC publish/connect/send/respond/receive");
+    } catch (error) {
+        write("FAIL: " + (error && error.stack ? error.stack : String(error)));
+        throw error;
+    } finally {
+        if (con) {
+            con.close();
+        }
+        if (pub && typeof pub.close === "function") {
+            await pub.close();
+        }
+    }
+})();
+</script>
+</body>
+</html>
