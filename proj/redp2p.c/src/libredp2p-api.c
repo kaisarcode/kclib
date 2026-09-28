@@ -428,6 +428,53 @@ static int kc_redp2p_con_adapter_open(kc_redp2p_con_t *con)
     return KC_REDP2P_OK;
 }
 
+/** Stops and releases the direct publisher adapter. */
+static void kc_redp2p_pub_adapter_close(kc_redp2p_pub_t *pub)
+{
+    size_t i;
+
+    if (!pub) return;
+    atomic_store(&pub->adapter_stop, 1);
+    kc_redp2p_pub_adapter_join(pub);
+    if (!REDP2P_ISERR(pub->adapter_fd)) {
+        REDP2P_FD_CLOSE(pub->adapter_fd);
+        pub->adapter_fd = REDP2P_FD_INVALID;
+    }
+    for (i = 0; i < pub->client_count; i++) {
+        kc_redp2p_client_t *client = pub->clients[i];
+        if (!client) continue;
+        if (!client->udp && !REDP2P_ISERR(client->fd) &&
+            !atomic_load(&client->closed))
+            REDP2P_FD_CLOSE(client->fd);
+        crypto_wipe(client, sizeof(*client));
+        free(client);
+    }
+    free(pub->clients);
+    pub->clients = NULL;
+    pub->client_count = 0;
+    pub->client_cap = 0;
+    if (pub->adapter_platform) {
+        redp2p_platform_cleanup();
+        pub->adapter_platform = 0;
+    }
+}
+
+/** Stops and releases the direct consumer adapter. */
+static void kc_redp2p_con_adapter_close(kc_redp2p_con_t *con)
+{
+    if (!con) return;
+    atomic_store(&con->adapter_stop, 1);
+    kc_redp2p_con_adapter_join(con);
+    if (!REDP2P_ISERR(con->adapter_fd)) {
+        REDP2P_FD_CLOSE(con->adapter_fd);
+        con->adapter_fd = REDP2P_FD_INVALID;
+    }
+    if (con->adapter_platform) {
+        redp2p_platform_cleanup();
+        con->adapter_platform = 0;
+    }
+}
+
 /**
  * Sleeps briefly while waiting for a public runtime to become ready.
  * @return None.
