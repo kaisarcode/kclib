@@ -1465,6 +1465,23 @@ int redp2p_context_destroy(redp2p_t *ctx) {
         crypto_wipe(ctx->pending_calls,
             ctx->pending_calls_cap * sizeof(ctx->pending_calls[0]));
     free(ctx->pending_calls);
+    if (ctx->rtc_pending) {
+        for (i = 0; i < ctx->n_rtc_pending; i++) {
+            if (ctx->rtc_pending[i].offer_sdp) {
+                crypto_wipe(ctx->rtc_pending[i].offer_sdp,
+                    strlen(ctx->rtc_pending[i].offer_sdp));
+                free(ctx->rtc_pending[i].offer_sdp);
+            }
+            if (ctx->rtc_pending[i].answer_sdp) {
+                crypto_wipe(ctx->rtc_pending[i].answer_sdp,
+                    strlen(ctx->rtc_pending[i].answer_sdp));
+                free(ctx->rtc_pending[i].answer_sdp);
+            }
+        }
+        crypto_wipe(ctx->rtc_pending,
+            ctx->rtc_pending_cap * sizeof(ctx->rtc_pending[0]));
+    }
+    free(ctx->rtc_pending);
     free(ctx->rate_sources);
 #ifdef _WIN32
     DeleteCriticalSection(&ctx->mutex);
