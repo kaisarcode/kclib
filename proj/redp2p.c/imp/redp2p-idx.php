@@ -1137,6 +1137,8 @@ class Redp2pIndex
 
     /**
      * Counts all pending connection work for one publisher.
+     * @param string $id Publisher identifier.
+     * @return int Pending connection count.
      */
     private function pendingCountForPublisher(string $id): int
     {
@@ -1154,6 +1156,7 @@ class Redp2pIndex
 
     /**
      * Counts all pending connection work in the index.
+     * @return int Pending connection count.
      */
     private function pendingCountGlobal(): int
     {
