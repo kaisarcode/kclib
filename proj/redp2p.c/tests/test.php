@@ -357,19 +357,19 @@ check(bin2hex($vectorWireSecret) ===
     'edccec6e4b9f610612682014714771710cb5970b35db8e45e5d3a184eda862b5',
     'encrypted registration secret vector');
 
-$passwordValidation = new Redp2pIndex(new PDO('sqlite::memory:'),
+new Redp2pIndex(new PDO('sqlite::memory:'),
     ['pass' => "a!\"\\[]{}()<>|&*^$#?~`\xc3\xb1"]);
-$passwordValidation->setPass('');
+new Redp2pIndex(new PDO('sqlite::memory:'), ['pass' => '']);
 foreach (["bad pass", "bad\tpass", "bad\rpass", "bad\npass", "bad\x7fpass"] as $invalidPass) {
     try {
-        $passwordValidation->setPass($invalidPass);
+        new Redp2pIndex(new PDO('sqlite::memory:'), ['pass' => $invalidPass]);
         check(false, 'control password is rejected');
     } catch (InvalidArgumentException) {
         check(true, 'control password is rejected');
     }
 }
 try {
-    $passwordValidation->setVips('vip bad pass');
+    new Redp2pIndex(new PDO('sqlite::memory:'), ['vip' => 'vip bad pass']);
     check(false, 'VIP whitespace password is rejected');
 } catch (InvalidArgumentException) {
     check(true, 'VIP whitespace password is rejected');
