@@ -2536,6 +2536,12 @@ static int kc_wvw_show_impl(kc_wvw_t *ctx) {
     return KC_WVW_OK;
 }
 
+/**
+ * Set whether the native window appears in the platform window list.
+ * @param ctx Window context.
+ * @param listed Non-zero to list the window, zero to unlist it.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
 static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
     LONG_PTR ex_style;
     int was_visible;
@@ -2554,6 +2560,11 @@ static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
     return KC_WVW_OK;
 }
 
+/**
+ * Return whether the native window appears in the platform window list.
+ * @param ctx Window context.
+ * @return 1 when listed, otherwise 0.
+ */
 static int kc_wvw_is_listed_impl(kc_wvw_t *ctx) {
     LONG_PTR ex_style;
     if (!ctx || !ctx->hwnd) return 0;
@@ -4869,6 +4880,12 @@ static int kc_wvw_show_impl(kc_wvw_t *ctx) {
     return KC_WVW_OK;
 }
 
+/**
+ * Set whether the native window appears in the platform window list.
+ * @param ctx Window context.
+ * @param listed Non-zero to list the window, zero to unlist it.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
 static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
     if (!ctx || !ctx->ns_window) return KC_WVW_ERROR;
     @autoreleasepool {
@@ -4879,6 +4896,11 @@ static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
     return KC_WVW_OK;
 }
 
+/**
+ * Return whether the native window appears in the platform window list.
+ * @param ctx Window context.
+ * @return 1 when listed, otherwise 0.
+ */
 static int kc_wvw_is_listed_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->ns_window) return 0;
     @autoreleasepool {
@@ -5756,6 +5778,12 @@ static int kc_wvw_show_impl(kc_wvw_t *ctx) {
     return KC_WVW_OK;
 }
 
+/**
+ * Set whether the native window appears in the platform window list.
+ * @param ctx Window context.
+ * @param listed Non-zero to list the window, zero to unlist it.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
 static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
     if (!ctx || !ctx->window) return KC_WVW_ERROR;
     gtk_window_set_skip_taskbar_hint(
@@ -5764,6 +5792,11 @@ static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
     return KC_WVW_OK;
 }
 
+/**
+ * Return whether the native window appears in the platform window list.
+ * @param ctx Window context.
+ * @return 1 when listed, otherwise 0.
+ */
 static int kc_wvw_is_listed_impl(kc_wvw_t *ctx) {
     if (!ctx || !ctx->window) return 0;
     return gtk_window_get_skip_taskbar_hint(GTK_WINDOW(ctx->window)) ? 0 : 1;
