@@ -320,13 +320,10 @@ The browser RTC integration test is independent from the native build:
 ./tests/test.sh
 ```
 
-The script runs the PHP index against a temporary SQLite database, serves the
-project on `127.0.0.1:8088`, and prints the browser test URL for
-`tests/test.html`. Set `TEST_HOST` or `TEST_PORT` to override the local
-endpoint. Stop it with Ctrl+C.
-
-The PHP index contract itself can also be exercised directly with
-`php tests/test.php`.
+The script first runs the PHP index contract tests, then starts a temporary
+SQLite-backed PHP index on `127.0.0.1:8088` and serves the browser integration
+page at `http://127.0.0.1:8088/tests/test.html`. Set `TEST_HOST` or `TEST_PORT`
+to override the local endpoint. Stop it with Ctrl+C.
 
 To run through Wine:
 
