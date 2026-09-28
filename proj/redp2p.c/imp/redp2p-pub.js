@@ -703,7 +703,6 @@
     }
 })(globalThis);
 
-
 (function (global) {
     const core = global.RedP2PCore;
     if (!core) {
