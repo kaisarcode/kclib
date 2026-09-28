@@ -6386,14 +6386,14 @@ typedef struct {
     _Atomic int closed;
 } test_direct_close_state_t;
 
-#ifdef REDP2P_LIFECYCLE_TEST
+#ifdef REDP2P_TESTING
 void redp2p_test_api_io_hold(int hold);
 int redp2p_test_api_io_entered(void);
 void redp2p_test_api_port_hold(int hold);
 unsigned short redp2p_test_api_port_value(void);
 #endif
 
-#ifdef REDP2P_LIFECYCLE_TEST
+#ifdef REDP2P_TESTING
 typedef struct {
     kc_redp2p_pub_t *pub;
     kc_redp2p_con_t *con;
@@ -6620,7 +6620,7 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
     return fail == 0 ? 0 : 1;
 }
 
-#ifdef REDP2P_LIFECYCLE_TEST
+#ifdef REDP2P_TESTING
 static int test_direct_api_wait_hook(uint64_t timeout_ms)
 {
     uint64_t deadline = redp2p_now_ms() + timeout_ms;
@@ -6633,7 +6633,7 @@ static int test_direct_api_wait_hook(uint64_t timeout_ms)
 
 static int test_direct_api_con_close_race(const char *index)
 {
-#ifdef REDP2P_LIFECYCLE_TEST
+#ifdef REDP2P_TESTING
     kc_redp2p_pub_options_t pub_options;
     kc_redp2p_con_options_t con_options;
     test_direct_race_state_t send_state;
@@ -6703,7 +6703,7 @@ static int test_direct_api_con_close_race(const char *index)
 
 static int test_direct_api_pub_close_race(const char *index, int close_client)
 {
-#ifdef REDP2P_LIFECYCLE_TEST
+#ifdef REDP2P_TESTING
     kc_redp2p_pub_options_t pub_options;
     kc_redp2p_con_options_t con_options;
     test_direct_race_state_t capture;
@@ -6788,7 +6788,7 @@ static int test_direct_api_pub_close_race(const char *index, int close_client)
 
 static int test_direct_api_port_retry(const char *index)
 {
-#ifdef REDP2P_LIFECYCLE_TEST
+#ifdef REDP2P_TESTING
     kc_redp2p_pub_options_t pub_options;
     test_direct_race_state_t state;
     kc_redp2p_pub_t *pub = NULL;
