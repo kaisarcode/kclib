@@ -38,7 +38,7 @@
 #define NETL_CLI_COMMAND_SIZE 4096
 
 /**
- * Open the listener with the CLI accepted-peer callback.
+ * Open the listener with the CLI accepted-peer action.
  * @return KC_NETL_OK on success, otherwise a negative status.
  */
 int kc_netl_cli_open(
@@ -47,7 +47,7 @@ int kc_netl_cli_open(
     kc_netl_receive_fn receive,
     kc_netl_error_fn error,
     void *userdata,
-    void (*accept_handler)(kc_netl_peer_t *peer, void *userdata),
+    void (*accept)(kc_netl_peer_t *peer, void *userdata),
     void *accept_userdata
 );
 
