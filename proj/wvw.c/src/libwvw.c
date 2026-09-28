@@ -5076,7 +5076,7 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
         state->maximized = [window isZoomed] ? 1 : 0;
         state->fullscreen = ([window styleMask] & NSWindowStyleMaskFullScreen) ? 1 : 0;
         state->visible = [window isVisible] ? 1 : 0;
-        state->listed = [window isExcludedFromWindowsMenu] ? 0 : 1;
+        state->listed = kc_wvw_is_listed_impl(ctx);
     }
     return KC_WVW_OK;
 }
