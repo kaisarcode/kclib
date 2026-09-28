@@ -5988,7 +5988,6 @@ static int case_kc_redp2p_heartbeat(void) {
     return fail == 0 ? 0 : 1;
 }
 
-
 /**
  * Builds a browser-compatible RTC registration request against a live C index.
  * @param port Index port.
@@ -6374,7 +6373,6 @@ static int test_cli_run_silent(char *const argv[])
     return WIFEXITED(status) ? WEXITSTATUS(status) : 255;
 #endif
 }
-
 
 typedef struct {
     _Atomic int publisher_received;
