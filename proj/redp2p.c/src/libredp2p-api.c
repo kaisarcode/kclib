@@ -941,52 +941,96 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     int status;
 
     if (!out || !options || !options->id || !options->index ||
-        !redp2p_is_valid_id(options->id) || options->port == 0 ||
+        !redp2p_is_valid_id(options->id) ||
         (options->protocol != KC_REDP2P_TCP &&
         options->protocol != KC_REDP2P_UDP))
         return KC_REDP2P_EINVAL;
     *out = NULL;
     pub = (kc_redp2p_pub_t *)calloc(1, sizeof(*pub));
     if (!pub) return KC_REDP2P_ERROR;
+    pub->adapter_fd = REDP2P_FD_INVALID;
+    pub->direct = options->port == 0;
+    pub->receive = options->receive;
+    pub->userdata = options->userdata;
+    if (pub->direct && !pub->receive) {
+        free(pub);
+        return KC_REDP2P_EINVAL;
+    }
+    if (!pub->direct && pub->receive) {
+        free(pub);
+        return KC_REDP2P_EINVAL;
+    }
     if (!kc_redp2p_parse_index(options->index, pub->index_host,
         &pub->index_port)) {
         free(pub);
         return KC_REDP2P_EINVAL;
     }
     memcpy(pub->id, options->id, strlen(options->id) + 1);
-    pub->port = options->port;
 
     status = redp2p_context_create(&pub->runtime.ctx);
     if (status != REDP2P_OK) goto fail_no_ctx;
     kc_redp2p_public_defaults(pub->runtime.ctx);
     status = redp2p_pub_set_protocol(pub->runtime.ctx, options->protocol);
     if (status != REDP2P_OK) goto fail;
-    status = redp2p_set_local_port(pub->runtime.ctx, options->port);
-    if (status != REDP2P_OK) goto fail;
+
+    pub->port = options->port;
+    if (pub->direct) {
+        int type = options->protocol == KC_REDP2P_TCP
+            ? SOCK_STREAM : SOCK_DGRAM;
+
+        if (redp2p_platform_init() != 0) {
+            status = KC_REDP2P_ENET;
+            goto fail;
+        }
+        pub->adapter_platform = 1;
+        pub->adapter_fd = kc_redp2p_loopback_socket(type,
+            options->protocol == KC_REDP2P_TCP, 0, &pub->port);
+        if (REDP2P_ISERR(pub->adapter_fd) || pub->port == 0) {
+            status = KC_REDP2P_ENET;
+            goto fail_adapter;
+        }
+    }
+    status = redp2p_set_local_port(pub->runtime.ctx, pub->port);
+    if (status != REDP2P_OK) goto fail_adapter;
     if (options->pass) {
         status = redp2p_set_registration_pass(pub->runtime.ctx, options->pass);
-        if (status != REDP2P_OK) goto fail;
+        if (status != REDP2P_OK) goto fail_adapter;
     }
     if (options->stun) {
         status = redp2p_set_stun_server(pub->runtime.ctx, options->stun);
-        if (status != REDP2P_OK) goto fail;
+        if (status != REDP2P_OK) goto fail_adapter;
     }
 
     atomic_store(&pub->runtime.ctx->ready_state, 0);
     atomic_store(&pub->runtime.ctx->ready_status, REDP2P_ERROR);
     status = kc_redp2p_thread_start_pub(pub);
-    if (status != REDP2P_OK) goto fail;
+    if (status != REDP2P_OK) goto fail_adapter;
     status = kc_redp2p_runtime_wait_ready(&pub->runtime);
     if (status != REDP2P_OK) {
         kc_redp2p_runtime_close(&pub->runtime);
-        free(pub);
-        return status;
+        pub->runtime.ctx = NULL;
+        goto fail_adapter_no_ctx;
+    }
+    if (pub->direct) {
+        status = kc_redp2p_pub_adapter_thread_start(pub);
+        if (status != KC_REDP2P_OK) {
+            kc_redp2p_runtime_close(&pub->runtime);
+            pub->runtime.ctx = NULL;
+            goto fail_adapter_no_ctx;
+        }
     }
     *out = pub;
     return KC_REDP2P_OK;
 
+fail_adapter:
+    kc_redp2p_pub_adapter_close(pub);
 fail:
-    redp2p_context_destroy(pub->runtime.ctx);
+    if (pub->runtime.ctx) {
+        redp2p_context_destroy(pub->runtime.ctx);
+        pub->runtime.ctx = NULL;
+    }
+fail_adapter_no_ctx:
+    kc_redp2p_pub_adapter_close(pub);
 fail_no_ctx:
     free(pub);
     return status;
@@ -1005,11 +1049,19 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     int status;
 
     if (!out || !options || !options->id || !options->index ||
-        !redp2p_is_valid_id(options->id) || options->port == 0)
+        !redp2p_is_valid_id(options->id))
         return KC_REDP2P_EINVAL;
     *out = NULL;
     con = (kc_redp2p_con_t *)calloc(1, sizeof(*con));
     if (!con) return KC_REDP2P_ERROR;
+    con->adapter_fd = REDP2P_FD_INVALID;
+    con->direct = options->port == 0;
+    con->receive = options->receive;
+    con->userdata = options->userdata;
+    if (!con->direct && con->receive) {
+        free(con);
+        return KC_REDP2P_EINVAL;
+    }
     if (!kc_redp2p_parse_index(options->index, con->index_host,
         &con->index_port) || !kc_redp2p_make_self_id(con->self_id)) {
         free(con);
@@ -1018,10 +1070,20 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     memcpy(con->id, options->id, strlen(options->id) + 1);
     con->port = options->port;
 
+    if (con->direct) {
+        if (redp2p_platform_init() != 0) {
+            free(con);
+            return KC_REDP2P_ENET;
+        }
+        con->adapter_platform = 1;
+        status = kc_redp2p_ephemeral_port(&con->port);
+        if (status != KC_REDP2P_OK) goto fail_no_ctx;
+    }
+
     status = redp2p_context_create(&con->runtime.ctx);
     if (status != REDP2P_OK) goto fail_no_ctx;
     kc_redp2p_public_defaults(con->runtime.ctx);
-    status = redp2p_set_local_port(con->runtime.ctx, options->port);
+    status = redp2p_set_local_port(con->runtime.ctx, con->port);
     if (status != REDP2P_OK) goto fail;
     if (options->stun) {
         status = redp2p_set_stun_server(con->runtime.ctx, options->stun);
@@ -1035,15 +1097,36 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     status = kc_redp2p_runtime_wait_ready(&con->runtime);
     if (status != REDP2P_OK) {
         kc_redp2p_runtime_close(&con->runtime);
-        free(con);
-        return status;
+        con->runtime.ctx = NULL;
+        goto fail_no_ctx;
+    }
+    if (con->direct) {
+        status = kc_redp2p_con_adapter_open(con);
+        if (status != KC_REDP2P_OK) {
+            kc_redp2p_runtime_close(&con->runtime);
+            con->runtime.ctx = NULL;
+            goto fail_no_ctx;
+        }
+        if (con->receive) {
+            status = kc_redp2p_con_adapter_thread_start(con);
+            if (status != KC_REDP2P_OK) {
+                kc_redp2p_con_adapter_close(con);
+                kc_redp2p_runtime_close(&con->runtime);
+                con->runtime.ctx = NULL;
+                goto fail_no_ctx;
+            }
+        }
     }
     *out = con;
     return KC_REDP2P_OK;
 
 fail:
-    redp2p_context_destroy(con->runtime.ctx);
+    if (con->runtime.ctx) {
+        redp2p_context_destroy(con->runtime.ctx);
+        con->runtime.ctx = NULL;
+    }
 fail_no_ctx:
+    kc_redp2p_con_adapter_close(con);
     free(con);
     return status;
 }
