@@ -122,7 +122,8 @@ unsigned short kc_netl_port(const kc_netl_t *listener);
 
 /**
  * Stop the listener, close all TCP peers, and release it.
- * NULL is accepted. This may also be called while netl is delivering a receive, disconnect, or error.
+ * NULL is accepted. This may also be called while netl is delivering a
+ * receive, disconnect, or error.
   * @return None.
  */
 void kc_netl_close(kc_netl_t *listener);
