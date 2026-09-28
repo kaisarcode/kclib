@@ -307,34 +307,26 @@ make
 
 ### Tests
 
-The test suites are intentionally separated by runtime.
-
-Native C tests:
+Native C tests are run with:
 
 ```bash
 make
 make test
 ```
 
-PHP index tests:
+The browser RTC integration test is independent from the native build:
 
 ```bash
-make test-php
+./tests/test.sh
 ```
 
-Browser RTC integration:
+The script runs the PHP index against a temporary SQLite database, serves the
+project on `127.0.0.1:8088`, and prints the browser test URL for
+`tests/test.html`. Set `TEST_HOST` or `TEST_PORT` to override the local
+endpoint. Stop it with Ctrl+C.
 
-```bash
-make test-browser
-```
-
-The browser runner starts a temporary SQLite-backed PHP index on
-`127.0.0.1:8088`, serves the project, and prints the ready-to-open
-`tests/test.html` URL. Set `TEST_HOST` or `TEST_PORT` to override the
-local endpoint. Stop it with Ctrl+C.
-
-`make test` remains exclusively the native C suite; it does not invoke PHP or
-browser tests.
+The PHP index contract itself can also be exercised directly with
+`php tests/test.php`.
 
 To run through Wine:
 
