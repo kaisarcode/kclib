@@ -166,7 +166,15 @@ static int kc_redp2p_ephemeral_port(uint16_t *port_out)
     return KC_REDP2P_ENET;
 }
 
-/** Adds one stable publisher client object to the adapter-owned list. */
+/**
+ * Adds one stable publisher client object to the adapter-owned list.
+ * @param pub Publisher capability.
+ * @param fd Client socket.
+ * @param udp Whether the client uses UDP.
+ * @param address Client address.
+ * @param address_len Client address size.
+ * @return Stable client capability, or NULL on failure.
+ */
 static kc_redp2p_client_t *kc_redp2p_pub_add_client(kc_redp2p_pub_t *pub,
     redp2p_fd_t fd, int udp, const struct sockaddr_storage *address,
     socklen_t address_len)
@@ -198,7 +206,13 @@ static kc_redp2p_client_t *kc_redp2p_pub_add_client(kc_redp2p_pub_t *pub,
     return client;
 }
 
-/** Finds or creates the stable client identity for one UDP backend endpoint. */
+/**
+ * Finds or creates the stable client identity for one UDP backend endpoint.
+ * @param pub Publisher capability.
+ * @param address Client address.
+ * @param address_len Client address size.
+ * @return Stable client capability, or NULL on failure.
+ */
 static kc_redp2p_client_t *kc_redp2p_pub_udp_client(kc_redp2p_pub_t *pub,
     const struct sockaddr_storage *address, socklen_t address_len)
 {
@@ -214,7 +228,14 @@ static kc_redp2p_client_t *kc_redp2p_pub_udp_client(kc_redp2p_pub_t *pub,
         address_len);
 }
 
-/** Emits one publisher receive event. */
+/**
+ * Emits one publisher receive event.
+ * @param pub Publisher capability.
+ * @param client Stable client capability.
+ * @param data Received bytes.
+ * @param size Byte count.
+ * @return None.
+ */
 static void kc_redp2p_pub_emit(kc_redp2p_pub_t *pub,
     kc_redp2p_client_t *client, const void *data, size_t size)
 {
@@ -357,7 +378,11 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
 #endif
 }
 
-/** Starts a platform thread for the publisher data adapter. */
+/**
+ * Starts a platform thread for the publisher data adapter.
+ * @param pub Publisher capability.
+ * @return KC_REDP2P_OK on success or KC_REDP2P_ERROR.
+ */
 static int kc_redp2p_pub_adapter_thread_start(kc_redp2p_pub_t *pub)
 {
 #ifdef _WIN32
@@ -373,7 +398,11 @@ static int kc_redp2p_pub_adapter_thread_start(kc_redp2p_pub_t *pub)
     return KC_REDP2P_OK;
 }
 
-/** Starts a platform thread for the consumer data adapter. */
+/**
+ * Starts a platform thread for the consumer data adapter.
+ * @param con Consumer capability.
+ * @return KC_REDP2P_OK on success or KC_REDP2P_ERROR.
+ */
 static int kc_redp2p_con_adapter_thread_start(kc_redp2p_con_t *con)
 {
 #ifdef _WIN32
@@ -389,7 +418,11 @@ static int kc_redp2p_con_adapter_thread_start(kc_redp2p_con_t *con)
     return KC_REDP2P_OK;
 }
 
-/** Joins a publisher adapter thread if one was started. */
+/**
+ * Joins a publisher adapter thread if one was started.
+ * @param pub Publisher capability.
+ * @return None.
+ */
 static void kc_redp2p_pub_adapter_join(kc_redp2p_pub_t *pub)
 {
     if (!pub || !pub->adapter_thread_started) return;
@@ -403,7 +436,11 @@ static void kc_redp2p_pub_adapter_join(kc_redp2p_pub_t *pub)
     pub->adapter_thread_started = 0;
 }
 
-/** Joins a consumer adapter thread if one was started. */
+/**
+ * Joins a consumer adapter thread if one was started.
+ * @param con Consumer capability.
+ * @return None.
+ */
 static void kc_redp2p_con_adapter_join(kc_redp2p_con_t *con)
 {
     if (!con || !con->adapter_thread_started) return;
@@ -417,7 +454,11 @@ static void kc_redp2p_con_adapter_join(kc_redp2p_con_t *con)
     con->adapter_thread_started = 0;
 }
 
-/** Opens the direct consumer's connection to its private local adapter. */
+/**
+ * Opens the direct consumer's connection to its private local adapter.
+ * @param con Consumer capability.
+ * @return KC_REDP2P_OK on success or an error code.
+ */
 static int kc_redp2p_con_adapter_open(kc_redp2p_con_t *con)
 {
     struct sockaddr_in address;
@@ -442,7 +483,11 @@ static int kc_redp2p_con_adapter_open(kc_redp2p_con_t *con)
     return KC_REDP2P_OK;
 }
 
-/** Stops and releases the direct publisher adapter. */
+/**
+ * Stops and releases the direct publisher adapter.
+ * @param pub Publisher capability.
+ * @return None.
+ */
 static void kc_redp2p_pub_adapter_close(kc_redp2p_pub_t *pub)
 {
     size_t i;
@@ -473,7 +518,11 @@ static void kc_redp2p_pub_adapter_close(kc_redp2p_pub_t *pub)
     }
 }
 
-/** Stops and releases the direct consumer adapter. */
+/**
+ * Stops and releases the direct consumer adapter.
+ * @param con Consumer capability.
+ * @return None.
+ */
 static void kc_redp2p_con_adapter_close(kc_redp2p_con_t *con)
 {
     if (!con) return;
