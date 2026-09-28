@@ -6081,6 +6081,152 @@ static int test_cli_run_silent(char *const argv[])
 #endif
 }
 
+
+typedef struct {
+    _Atomic int publisher_received;
+    _Atomic int consumer_received;
+    _Atomic int respond_status;
+} test_direct_api_state_t;
+
+/**
+ * Receives direct publisher data and responds through the stable client.
+ * @param input Publisher input.
+ * @param userdata Direct test state.
+ * @return None.
+ */
+static void test_direct_pub_receive(const kc_redp2p_pub_input_t *input,
+    void *userdata)
+{
+    test_direct_api_state_t *state = (test_direct_api_state_t *)userdata;
+
+    if (!input || !state || input->size != 4 ||
+        memcmp(input->data, "ping", 4) != 0)
+    {
+        if (state) atomic_store(&state->publisher_received, -1);
+        return;
+    }
+    atomic_store(&state->publisher_received, 1);
+    atomic_store(&state->respond_status,
+        kc_redp2p_client_respond(input->client, "pong", 4));
+}
+
+/**
+ * Receives direct consumer response data.
+ * @param data Response bytes.
+ * @param size Response size.
+ * @param userdata Direct test state.
+ * @return None.
+ */
+static void test_direct_con_receive(const void *data, size_t size,
+    void *userdata)
+{
+    test_direct_api_state_t *state = (test_direct_api_state_t *)userdata;
+
+    if (!state) return;
+    atomic_store(&state->consumer_received,
+        data && size == 4 && memcmp(data, "pong", 4) == 0 ? 1 : -1);
+}
+
+/**
+ * Exercises one native protocol through the capability-level direct data API.
+ * @param protocol KC_REDP2P_TCP or KC_REDP2P_UDP.
+ * @param id Publisher identifier.
+ * @param index Index endpoint.
+ * @return 0 on success, 1 on failure.
+ */
+static int test_direct_api_roundtrip(int protocol, const char *id,
+    const char *index)
+{
+    kc_redp2p_pub_t *pub = NULL;
+    kc_redp2p_con_t *con = NULL;
+    kc_redp2p_pub_options_t pub_options;
+    kc_redp2p_con_options_t con_options;
+    test_direct_api_state_t state;
+    uint64_t deadline;
+    int fail = 0;
+    int status;
+
+    memset(&state, 0, sizeof(state));
+    atomic_store(&state.respond_status, KC_REDP2P_ERROR);
+    memset(&pub_options, 0, sizeof(pub_options));
+    pub_options.id = id;
+    pub_options.index = index;
+    pub_options.protocol = protocol;
+    pub_options.receive = test_direct_pub_receive;
+    pub_options.userdata = &state;
+
+    status = kc_redp2p_pub(&pub, &pub_options);
+    fail += expect_int("direct pub create", KC_REDP2P_OK, status);
+    fail += expect_true("direct pub handle", pub != NULL);
+
+    memset(&con_options, 0, sizeof(con_options));
+    con_options.id = id;
+    con_options.index = index;
+    con_options.receive = test_direct_con_receive;
+    con_options.userdata = &state;
+    if (fail == 0) {
+        status = kc_redp2p_con(&con, &con_options);
+        fail += expect_int("direct con create", KC_REDP2P_OK, status);
+        fail += expect_true("direct con handle", con != NULL);
+    }
+    if (fail == 0) {
+        status = kc_redp2p_con_send(con, "ping", 4);
+        fail += expect_int("direct send", KC_REDP2P_OK, status);
+    }
+
+    deadline = redp2p_now_ms() + 10000U;
+    while (fail == 0 && atomic_load(&state.consumer_received) == 0 &&
+        redp2p_now_ms() < deadline)
+        test_sleep_ms(10U);
+
+    fail += expect_int("direct publisher receive", 1,
+        atomic_load(&state.publisher_received));
+    fail += expect_int("direct respond", KC_REDP2P_OK,
+        atomic_load(&state.respond_status));
+    fail += expect_int("direct consumer receive", 1,
+        atomic_load(&state.consumer_received));
+
+    kc_redp2p_con_close(con);
+    kc_redp2p_pub_close(pub);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Exercises direct receive/respond/send for TCP and UDP without public ports.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_redp2p_direct_api(void)
+{
+    kc_redp2p_idx_t *idx = NULL;
+    kc_redp2p_idx_options_t idx_options;
+    char index[320];
+    char local_ip[INET_ADDRSTRLEN];
+    unsigned short port;
+    int fail = 0;
+
+    port = (unsigned short)(test_port_base() + 413U);
+    fail += expect_int("resolve direct API unicast", 0,
+        test_local_unicast_ipv4(local_ip));
+    memset(&idx_options, 0, sizeof(idx_options));
+    idx_options.host = local_ip;
+    idx_options.port = port;
+    idx_options.max_consumers = 32;
+    if (fail == 0)
+        fail += expect_int("direct API index", KC_REDP2P_OK,
+            kc_redp2p_idx(&idx, &idx_options));
+
+    snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)port);
+    if (fail == 0)
+        fail += test_direct_api_roundtrip(KC_REDP2P_TCP, "directtcp", index);
+    if (fail == 0)
+        fail += test_direct_api_roundtrip(KC_REDP2P_UDP, "directudp", index);
+
+    kc_redp2p_idx_close(idx);
+    case_result(fail, "kc_redp2p_direct_api",
+        "native TCP and UDP support direct receive/respond/send");
+    return fail == 0 ? 0 : 1;
+}
+
 /**
  * Exercises the normalized public idx/pub/con capability API end to end.
  * @return 0 on success, 1 on failure.
@@ -6234,7 +6380,7 @@ static int case_kc_redp2p_cli(void)
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 16;
+    test_case_total = 17;
     test_case_current = 0;
     run_case(&rc, case_kc_redp2p_validation);
     run_case(&rc, case_kc_redp2p_register);
@@ -6251,6 +6397,7 @@ static int case_all(void) {
     run_case(&rc, case_redp2p_persisted_deregister);
     run_case(&rc, case_kc_redp2p_list_publishers);
     run_case(&rc, case_kc_redp2p_api);
+    run_case(&rc, case_kc_redp2p_direct_api);
     run_case(&rc, case_kc_redp2p_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -6278,6 +6425,7 @@ static int dispatch_case(const char *name) {
     if (strcmp(name, "redp2p_persisted_deregister") == 0) return case_redp2p_persisted_deregister();
     if (strcmp(name, "kc_redp2p_list_publishers") == 0) return case_kc_redp2p_list_publishers();
     if (strcmp(name, "kc_redp2p_api") == 0) return case_kc_redp2p_api();
+    if (strcmp(name, "kc_redp2p_direct_api") == 0) return case_kc_redp2p_direct_api();
     if (strcmp(name, "kc_redp2p_cli") == 0) return case_kc_redp2p_cli();
     fprintf(stderr, "unknown test case: %s\n", name);
     return 2;
