@@ -30,7 +30,8 @@ typedef struct kc_nets kc_nets_t;
 
 /**
  * Receives the terminal result of one network transfer.
- * Response bytes are borrowed and remain valid only for the completion duration.
+ * Response bytes are borrowed and remain valid only for the completion
+ * duration.
  * @param status   KC_NETS_OK or a negative status code.
  * @param data     Borrowed response bytes, or NULL when no response is present.
  * @param size     Response size in bytes.
