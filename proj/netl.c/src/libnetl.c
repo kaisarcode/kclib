@@ -95,9 +95,9 @@ struct kc_netl {
     int max_pending_connections;
     unsigned short port;
 
-    kc_netl_handler_t handler;
-    kc_netl_close_handler_t close_handler;
-    kc_netl_error_handler_t error_handler;
+    kc_netl_receive_fn receive;
+    kc_netl_disconnect_fn disconnect;
+    kc_netl_error_fn error;
     void *userdata;
 
     kc_netl_peer_t *peers;
@@ -492,7 +492,7 @@ static void kc_netl_peer_finish(
     kc_netl_peer_t *peer,
     int notify
 ) {
-    kc_netl_close_handler_t handler = NULL;
+    kc_netl_disconnect_fn handler = NULL;
     void *userdata = NULL;
 
     kc_netl_lock(listener);
@@ -503,7 +503,7 @@ static void kc_netl_peer_finish(
             peer->fd = KC_NETL_FD_INVALID;
         }
         kc_netl_peer_detach(listener, peer);
-        handler = notify ? listener->close_handler : NULL;
+        handler = notify ? listener->disconnect : NULL;
         userdata = listener->userdata;
     }
     kc_netl_unlock(listener);
@@ -518,14 +518,14 @@ static void kc_netl_peer_finish(
  * @return None.
  */
 static void kc_netl_fail(kc_netl_t *listener, int status) {
-    kc_netl_error_handler_t handler = NULL;
+    kc_netl_error_fn handler = NULL;
     void *userdata = NULL;
 
     kc_netl_lock(listener);
     if (!listener->failed) {
         listener->failed = 1;
         listener->stop = 1;
-        handler = listener->error_handler;
+        handler = listener->error;
         userdata = listener->userdata;
     }
     kc_netl_unlock(listener);
@@ -620,7 +620,7 @@ static void kc_netl_receive_tcp(
         input.port = peer->port;
         input.data = buffer;
         input.data_size = (size_t)received;
-        listener->handler(&input, listener->userdata);
+        listener->receive(&input, listener->userdata);
         return;
     }
 
@@ -679,7 +679,7 @@ static void kc_netl_receive_udp(kc_netl_t *listener) {
     input.port = peer.port;
     input.data = buffer;
     input.data_size = (size_t)received;
-    listener->handler(&input, listener->userdata);
+    listener->receive(&input, listener->userdata);
     peer.closed = 1;
 }
 
@@ -1065,9 +1065,9 @@ static void kc_netl_destroy(kc_netl_t *listener) {
 static int kc_netl_open_internal(
     kc_netl_t **out,
     const kc_netl_options_t *options,
-    kc_netl_handler_t handler,
-    kc_netl_close_handler_t close_handler,
-    kc_netl_error_handler_t error_handler,
+    kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,
+    kc_netl_error_fn error,
     void *userdata
 #ifdef KC_NETL_CLI
     ,
@@ -1082,7 +1082,7 @@ static int kc_netl_open_internal(
     *out = NULL;
     if (
         options == NULL ||
-        handler == NULL ||
+        receive == NULL ||
         (
             options->protocol != KC_NETL_TCP &&
             options->protocol != KC_NETL_UDP
@@ -1103,9 +1103,9 @@ static int kc_netl_open_internal(
         options->max_pending_connections != NULL
             ? *options->max_pending_connections
             : KC_NETL_DEFAULT_MAX_PENDING_CONNECTIONS;
-    listener->handler = handler;
-    listener->close_handler = close_handler;
-    listener->error_handler = error_handler;
+    listener->receive = receive;
+    listener->disconnect = disconnect;
+    listener->error = error;
     listener->userdata = userdata;
 #ifdef KC_NETL_CLI
     listener->cli_accept_handler = cli_accept_handler;
@@ -1148,17 +1148,17 @@ static int kc_netl_open_internal(
 int kc_netl_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
-    kc_netl_handler_t handler,
-    kc_netl_close_handler_t close_handler,
-    kc_netl_error_handler_t error_handler,
+    kc_netl_receive_fn handler,
+    kc_netl_disconnect_fn close_handler,
+    kc_netl_error_fn error_handler,
     void *userdata
 ) {
     return kc_netl_open_internal(
         out,
         options,
-        handler,
-        close_handler,
-        error_handler,
+        receive,
+        disconnect,
+        error,
         userdata
 #ifdef KC_NETL_CLI
         ,
@@ -1284,8 +1284,8 @@ void kc_netl_close(kc_netl_t *listener) {
 int kc_netl_cli_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
-    kc_netl_handler_t handler,
-    kc_netl_error_handler_t error_handler,
+    kc_netl_receive_fn receive,
+    kc_netl_error_fn error,
     void *userdata,
     void (*accept_handler)(kc_netl_peer_t *peer, void *userdata),
     void *accept_userdata
@@ -1293,9 +1293,9 @@ int kc_netl_cli_open(
     return kc_netl_open_internal(
         out,
         options,
-        handler,
+        receive,
         NULL,
-        error_handler,
+        error,
         userdata,
         accept_handler,
         accept_userdata
