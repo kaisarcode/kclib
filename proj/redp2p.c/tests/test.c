@@ -6456,7 +6456,8 @@ TEST_API_THREAD(test_direct_respond_thread)
 
 /**
  * Closes a publisher client on a worker thread.
- * Summary: Holds client teardown open while publisher close starts concurrently.
+ * Summary: Holds client teardown open while publisher close starts
+ *          concurrently.
  * @param arg Direct race state.
  * @return Platform thread result.
  */
