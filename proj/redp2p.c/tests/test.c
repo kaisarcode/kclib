@@ -6410,6 +6410,44 @@ static int case_kc_redp2p_api(void)
     }
 
     kc_redp2p_con_close(con);
+    con = NULL;
+    kc_redp2p_pub_close(pub);
+    pub = NULL;
+
+    memset(&test_direct_receive, 0, sizeof(test_direct_receive));
+    memset(&pub_options, 0, sizeof(pub_options));
+    pub_options.id = "directudp";
+    pub_options.index = index;
+    pub_options.protocol = KC_REDP2P_UDP;
+    pub_options.receive = test_direct_pub_receive;
+    if (fail == 0) {
+        status = kc_redp2p_pub(&pub, &pub_options);
+        fail += expect_int("direct UDP pub create", KC_REDP2P_OK, status);
+    }
+    memset(&con_options, 0, sizeof(con_options));
+    con_options.id = "directudp";
+    con_options.index = index;
+    con_options.receive = test_direct_con_receive;
+    if (fail == 0) {
+        status = kc_redp2p_con(&con, &con_options);
+        fail += expect_int("direct UDP con create", KC_REDP2P_OK, status);
+    }
+    if (fail == 0) {
+        status = kc_redp2p_con_send(con, payload, sizeof(payload));
+        fail += expect_int("direct UDP send", KC_REDP2P_OK, status);
+    }
+    if (fail == 0) {
+        uint64_t deadline = test_now_ms() + 10000U;
+        while (!atomic_load(&test_direct_receive.received) &&
+            test_now_ms() < deadline)
+            test_sleep_ms(10);
+        fail += expect_true("direct UDP datagram received",
+            atomic_load(&test_direct_receive.received) &&
+            test_direct_receive.size == sizeof(payload) &&
+            memcmp(test_direct_receive.data, payload, sizeof(payload)) == 0);
+    }
+
+    kc_redp2p_con_close(con);
     kc_redp2p_pub_close(pub);
     kc_redp2p_idx_close(idx);
     if (echo_started) test_tcp_echo_stop(&echo);
