@@ -49,7 +49,7 @@ struct kc_nets {
     int protocol;
     unsigned char *data;
     size_t data_size;
-    kc_nets_handler_t handler;
+    kc_nets_complete_fn complete;
     void *userdata;
     int stopped;
     kc_nets_socket_t socket;
@@ -500,7 +500,7 @@ static int kc_nets_transfer_address(
 /**
  * Execute one transfer on the worker thread.
  * @param nets Transfer.
- * @param out_data Receives owned callback response bytes.
+ * @param out_data Receives owned completion response bytes.
  * @param out_size Receives response size.
  * @return Public terminal status.
  */
@@ -567,7 +567,7 @@ static void kc_nets_destroy(kc_nets_t *nets) {
 }
 
 /**
- * Run one asynchronous transfer and deliver its terminal callback.
+ * Run one asynchronous transfer and deliver its terminal completion.
  * @param userdata Transfer pointer.
  * @return Platform thread return value.
  */
@@ -586,7 +586,7 @@ static void *kc_nets_worker(void *userdata)
     response_size = 0U;
     status = kc_nets_run(nets, &response, &response_size);
 
-    nets->handler(status, response, response_size, nets->userdata);
+    nets->complete(status, response, response_size, nets->userdata);
     free(response);
 
 #ifdef _WIN32
@@ -604,8 +604,8 @@ static void *kc_nets_worker(void *userdata)
  * @param protocol Transport selector.
  * @param data Input bytes copied by the library.
  * @param data_size Input size in bytes.
- * @param handler Terminal result callback.
- * @param userdata Caller data passed to the callback.
+ * @param complete Terminal completion.
+ * @param userdata Caller data passed to the completion.
  * @return KC_NETS_OK when launched, or a negative status code.
  */
 int kc_nets_send(
@@ -615,14 +615,14 @@ int kc_nets_send(
     int protocol,
     const void *data,
     size_t data_size,
-    kc_nets_handler_t handler,
+    kc_nets_complete_fn complete,
     void *userdata
 ) {
     kc_nets_t *nets;
 
     if (out == NULL) return KC_NETS_EINVAL;
     *out = NULL;
-    if (host == NULL || host[0] == '\0' || data == NULL || handler == NULL) {
+    if (host == NULL || host[0] == '\0' || data == NULL || complete == NULL) {
         return KC_NETS_EINVAL;
     }
     if (protocol != KC_NETS_TCP &&
@@ -653,7 +653,7 @@ int kc_nets_send(
     nets->port = port;
     nets->protocol = protocol;
     nets->data_size = data_size;
-    nets->handler = handler;
+    nets->complete = complete;
     nets->userdata = userdata;
     nets->socket = KC_NETS_BAD_SOCKET;
 
