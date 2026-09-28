@@ -1,6 +1,6 @@
 /**
  * redp2p.c - libredp2p public API contract tests.
- * Summary: Exercises the libredp2p contract through 16 grouped functional
+ * Summary: Exercises the libredp2p contract through 18 grouped functional
  * and integration cases covering the public capability API, CLI, protocol,
  * index lifecycle, registration, and peer transport.
  *
@@ -7227,7 +7227,7 @@ static int case_kc_redp2p_cli(void)
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 17;
+    test_case_total = 18;
     test_case_current = 0;
     run_case(&rc, case_kc_redp2p_validation);
     run_case(&rc, case_kc_redp2p_register);
@@ -7294,6 +7294,10 @@ int main(int argc, char **argv) {
         return 2;
     }
     test_case_name = argv[1];
+    if (strcmp(argv[1], "all") != 0) {
+        test_case_total = 1;
+        test_case_current = 1;
+    }
     test_setenv("REDP2P_PUNCH_POLL_MS", "50");
     if (test_home() != 0) return 1;
     if (test_socket_start() != 0) {
