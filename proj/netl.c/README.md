@@ -3,9 +3,9 @@
 `netl.c` is a small C library and CLI for listening for inbound TCP or UDP
 traffic.
 
-The library delivers incoming bytes through a callback together with the remote
-peer that sent them. The application may process the input directly or pass it
-to another protocol library, and may optionally respond to the same peer.
+The library receives incoming bytes together with the remote peer that sent
+them. The application may process the input directly or pass it to another
+protocol library, and may optionally respond to the same peer.
 
 ---
 
@@ -40,7 +40,7 @@ Common options are `-h` / `--help` and `-v` / `--version`.
 ```c
 #include "libnetl.h"
 
-static void on_input(
+static void receive(
     const kc_netl_input_t *input,
     void *userdata
 ) {
@@ -69,7 +69,7 @@ int main(void) {
         kc_netl_open(
             &listener,
             &options,
-            on_input,
+            receive,
             NULL,
             NULL,
             NULL
@@ -92,7 +92,7 @@ Each input contains:
 - the remote host and port;
 - the bytes that arrived.
 
-A TCP peer keeps the same identity across successive input callbacks, so an
+A TCP peer keeps the same identity across successive receives, so an
 application can associate incremental protocol state with that peer. A UDP input
 represents one datagram and its origin.
 
