@@ -58,8 +58,8 @@ static int test_case_total = 0;
 static int test_case_current = 0;
 
 typedef struct {
-    atomic_int input_count;
-    atomic_int close_count;
+    atomic_int receive_count;
+    atomic_int disconnect_count;
     atomic_int error_count;
     atomic_int udp_reply;
     kc_netl_peer_t *peers[8];
@@ -281,9 +281,9 @@ static int test_socket_expect(
  * On input.
  * @return None.
  */
-static void on_input(const kc_netl_input_t *input, void *userdata) {
+static void receive(const kc_netl_input_t *input, void *userdata) {
     callback_state_t *state = (callback_state_t *)userdata;
-    int index = atomic_load(&state->input_count);
+    int index = atomic_load(&state->receive_count);
 
     if (index < 8) {
         size_t copy_size = input->data_size < sizeof(state->data[index])
@@ -307,24 +307,24 @@ static void on_input(const kc_netl_input_t *input, void *userdata) {
         (void)kc_netl_respond(input->peer, "pong", 4U);
     }
 
-    atomic_fetch_add(&state->input_count, 1);
+    atomic_fetch_add(&state->receive_count, 1);
 }
 
 /**
  * On close.
  * @return None.
  */
-static void on_close(kc_netl_peer_t *peer, void *userdata) {
+static void disconnect(kc_netl_peer_t *peer, void *userdata) {
     callback_state_t *state = (callback_state_t *)userdata;
     (void)peer;
-    atomic_fetch_add(&state->close_count, 1);
+    atomic_fetch_add(&state->disconnect_count, 1);
 }
 
 /**
  * On error.
  * @return None.
  */
-static void on_error(int status, void *userdata) {
+static void error(int status, void *userdata) {
     callback_state_t *state = (callback_state_t *)userdata;
     (void)status;
     atomic_fetch_add(&state->error_count, 1);
@@ -336,8 +336,8 @@ static void on_error(int status, void *userdata) {
  */
 static void state_init(callback_state_t *state) {
     memset(state, 0, sizeof(*state));
-    atomic_init(&state->input_count, 0);
-    atomic_init(&state->close_count, 0);
+    atomic_init(&state->receive_count, 0);
+    atomic_init(&state->disconnect_count, 0);
     atomic_init(&state->error_count, 0);
     atomic_init(&state->udp_reply, 0);
 }
@@ -360,32 +360,32 @@ static int case_kc_netl_open(void) {
     fail += expect_int(
         "NULL out",
         KC_NETL_EINVAL,
-        kc_netl_open(NULL, &options, on_input, on_close, on_error, &state)
+        kc_netl_open(NULL, &options, receive, disconnect, error, &state)
     );
     fail += expect_int(
         "NULL options",
         KC_NETL_EINVAL,
-        kc_netl_open(&listener, NULL, on_input, on_close, on_error, &state)
+        kc_netl_open(&listener, NULL, receive, disconnect, error, &state)
     );
     fail += expect_true("failed open clears output", listener == NULL);
     fail += expect_int(
-        "NULL handler",
+        "NULL receive",
         KC_NETL_EINVAL,
-        kc_netl_open(&listener, &options, NULL, on_close, on_error, &state)
+        kc_netl_open(&listener, &options, NULL, disconnect, error, &state)
     );
 
     options.protocol = 99;
     fail += expect_int(
         "invalid protocol",
         KC_NETL_EINVAL,
-        kc_netl_open(&listener, &options, on_input, on_close, on_error, &state)
+        kc_netl_open(&listener, &options, receive, disconnect, error, &state)
     );
 
     options.protocol = KC_NETL_TCP;
     fail += expect_int(
         "TCP open",
         KC_NETL_OK,
-        kc_netl_open(&listener, &options, on_input, on_close, on_error, &state)
+        kc_netl_open(&listener, &options, receive, disconnect, error, &state)
     );
     fail += expect_true("listener allocated", listener != NULL);
     fail += expect_true(
@@ -395,7 +395,7 @@ static int case_kc_netl_open(void) {
     kc_netl_close(listener);
     kc_netl_close(NULL);
 
-    case_result(fail, "kc_netl_open", "opens an operational callback listener");
+    case_result(fail, "kc_netl_open", "opens an operational receiving listener");
     return fail != 0;
 }
 
@@ -423,9 +423,9 @@ static int case_kc_netl_tcp(void) {
         kc_netl_open(
             &listener,
             &options,
-            on_input,
-            on_close,
-            on_error,
+            receive,
+            disconnect,
+            error,
             &state
         ) != KC_NETL_OK
     ) {
@@ -446,7 +446,7 @@ static int case_kc_netl_tcp(void) {
     fail += expect_int(
         "two TCP inputs",
         0,
-        wait_atomic_at_least(&state.input_count, 2)
+        wait_atomic_at_least(&state.receive_count, 2)
     );
 
     for (i = 0; i < 2; i++) {
@@ -479,9 +479,9 @@ static int case_kc_netl_tcp(void) {
     fail += expect_int(
         "third TCP input",
         0,
-        wait_atomic_at_least(&state.input_count, 3)
+        wait_atomic_at_least(&state.receive_count, 3)
     );
-    if (atomic_load(&state.input_count) >= 3) {
+    if (atomic_load(&state.receive_count) >= 3) {
         fail += expect_true("B peer retained", state.peers[2] == peer_b);
         fail += expect_bytes(
             "B next bytes",
@@ -501,9 +501,9 @@ static int case_kc_netl_tcp(void) {
         kc_netl_peer_close(peer_a);
         fail += test_socket_expect(client_a, "bye", 3U);
         fail += expect_int(
-            "A close callback",
+            "A disconnect",
             0,
-            wait_atomic_at_least(&state.close_count, 1)
+            wait_atomic_at_least(&state.disconnect_count, 1)
         );
     }
 
@@ -511,9 +511,9 @@ static int case_kc_netl_tcp(void) {
     fail += expect_int(
         "B stays active",
         0,
-        wait_atomic_at_least(&state.input_count, 4)
+        wait_atomic_at_least(&state.receive_count, 4)
     );
-    if (atomic_load(&state.input_count) >= 4) {
+    if (atomic_load(&state.receive_count) >= 4) {
         fail += expect_true(
             "B identity still retained",
             state.peers[3] == peer_b
@@ -522,7 +522,7 @@ static int case_kc_netl_tcp(void) {
 
     TEST_CLOSE(client_a);
     TEST_CLOSE(client_b);
-    (void)wait_atomic_at_least(&state.close_count, 2);
+    (void)wait_atomic_at_least(&state.disconnect_count, 2);
     fail += expect_int("no listener error", 0, atomic_load(&state.error_count));
 
     kc_netl_close(listener);
@@ -559,9 +559,9 @@ static int case_kc_netl_udp(void) {
         kc_netl_open(
             &listener,
             &options,
-            on_input,
-            on_close,
-            on_error,
+            receive,
+            disconnect,
+            error,
             &state
         ) != KC_NETL_OK
     ) {
@@ -594,9 +594,9 @@ static int case_kc_netl_udp(void) {
     );
 
     fail += expect_int(
-        "UDP callback",
+        "UDP receive",
         0,
-        wait_atomic_at_least(&state.input_count, 1)
+        wait_atomic_at_least(&state.receive_count, 1)
     );
     fail += expect_int("UDP protocol", KC_NETL_UDP, state.protocols[0]);
     fail += expect_true("UDP peer present", state.peers[0] != NULL);
@@ -617,9 +617,9 @@ static int case_kc_netl_udp(void) {
     }
 
     fail += expect_int(
-        "UDP has no close callback",
+        "UDP has no disconnect",
         0,
-        atomic_load(&state.close_count)
+        atomic_load(&state.disconnect_count)
     );
     fail += expect_int("no listener error", 0, atomic_load(&state.error_count));
 
