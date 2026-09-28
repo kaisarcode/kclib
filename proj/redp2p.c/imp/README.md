@@ -1,9 +1,15 @@
-# REDP2P index protocol implementations
+# REDP2P alternate implementations
 
-Alternate implementations of the REDP2P index protocol server.
+This directory contains non-C implementations of REDP2P roles.
 
-The wire contract is defined in [INDEX-PROTOCOL-SPECIFICATION.md](../INDEX-PROTOCOL-SPECIFICATION.md). The C reference implementation is `redp2p idx <port>`. These directories provide drop-in index servers for deployments that cannot run the C binary.
+```text
+redp2p-idx.php
+redp2p-pub.js
+redp2p-con.js
+```
 
-Contents:
+`redp2p-idx.php` implements the REDP2P index protocol in PHP.
+`redp2p-pub.js` and `redp2p-con.js` are standalone browser implementations
+of the publisher and consumer roles over WebRTC.
 
-* `php/` - PHP 8 index server backed by PDO (SQLite or MySQL).
+The common wire contract is documented in [doc/protocol.md](../doc/protocol.md).
