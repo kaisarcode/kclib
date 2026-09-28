@@ -2000,11 +2000,18 @@ static void redp2p_index_handle_lookup(redp2p_t *ctx, redp2p_fd_t fd,
 {
     char id[REDP2P_ID_MAX + 1];
     size_t peer_index;
+    const char *transport;
 
     if (!redp2p_index_require_id_response(req, fd, id, sizeof(id))) return;
     peer_index = redp2p_find_peer(ctx, id);
     if (peer_index == SIZE_MAX || redp2p_peer_is_stale(ctx, peer_index)) {
         redp2p_index_respond_error(fd, 404, "not_found");
+        return;
+    }
+    transport = redp2p_index_transport_name(
+        ctx->peers[peer_index].peer.transport);
+    if (!transport) {
+        redp2p_index_respond_error(fd, 500, "internal");
         return;
     }
     {
@@ -2019,13 +2026,16 @@ static void redp2p_index_handle_lookup(redp2p_t *ctx, redp2p_fd_t fd,
         out = json_value_get_object(reply);
         json_object_set_boolean(out, "ok", 1);
         json_object_set_string(out, "id", ctx->peers[peer_index].peer.id);
-        json_object_set_number(out, "proto",
-            (double)ctx->peers[peer_index].peer.proto);
-        json_object_set_number(out, "udp_port",
-            (double)ctx->peers[peer_index].peer.udp_port);
-        redp2p_append_candidates(out, "candidates",
-            ctx->peers[peer_index].peer.candidates,
-            ctx->peers[peer_index].peer.n_candidates);
+        json_object_set_string(out, "transport", transport);
+        if (ctx->peers[peer_index].peer.transport != REDP2P_PROTO_RTC) {
+            json_object_set_number(out, "proto",
+                (double)ctx->peers[peer_index].peer.proto);
+            json_object_set_number(out, "udp_port",
+                (double)ctx->peers[peer_index].peer.udp_port);
+            redp2p_append_candidates(out, "candidates",
+                ctx->peers[peer_index].peer.candidates,
+                ctx->peers[peer_index].peer.n_candidates);
+        }
         json_object_set_number(out, "last_seen",
             (double)ctx->peers[peer_index].peer.last_seen);
         redp2p_index_respond(fd, 200, "OK", reply);
@@ -2361,6 +2371,10 @@ static void redp2p_index_handle_punch_req(redp2p_t *ctx, redp2p_fd_t fd,
         redp2p_index_respond_error(fd, 404, "not_found");
         return;
     }
+    if (ctx->peers[peer_index].peer.transport == REDP2P_PROTO_RTC) {
+        redp2p_index_respond_error(fd, 409, "unsupported_transport");
+        return;
+    }
     if (!json_object_has_value_of_type(req, "session", JSONString)) {
         redp2p_index_respond_error(fd, 400, "bad_request");
         return;
@@ -2397,7 +2411,10 @@ static void redp2p_index_handle_punch_req(redp2p_t *ctx, redp2p_fd_t fd,
         redp2p_index_respond_error(fd, 429, "pending_limit_publisher");
         return;
     }
-    if (ctx->n_pending_calls >= REDP2P_MAX_PENDING_CALLS_GLOBAL) {
+    redp2p_rtc_pending_evict_stale(ctx);
+    if (ctx->n_pending_calls + ctx->n_rtc_pending >=
+        REDP2P_MAX_PENDING_CALLS_GLOBAL)
+    {
         redp2p_index_respond_error(fd, 429, "pending_limit_global");
         return;
     }
@@ -2469,6 +2486,12 @@ static void redp2p_index_handle_punch_poll(redp2p_t *ctx, redp2p_fd_t fd,
         crypto_wipe(proof, sizeof(proof));
         crypto_wipe(expected, sizeof(expected));
         redp2p_index_respond_error(fd, 404, "not_found");
+        return;
+    }
+    if (ctx->peers[peer_index].peer.transport == REDP2P_PROTO_RTC) {
+        crypto_wipe(proof, sizeof(proof));
+        crypto_wipe(expected, sizeof(expected));
+        redp2p_index_respond_error(fd, 409, "unsupported_transport");
         return;
     }
     if (sequence <= ctx->peers[peer_index].peer.sequence ||
