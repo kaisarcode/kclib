@@ -6388,7 +6388,7 @@ typedef struct {
  * @param userdata Direct test state.
  * @return None.
  */
-static void test_direct_pub_receive(const kc_redp2p_pub_input_t *input,
+static void test_direct_api_pub_receive(const kc_redp2p_pub_input_t *input,
     void *userdata)
 {
     test_direct_api_state_t *state = (test_direct_api_state_t *)userdata;
@@ -6411,7 +6411,7 @@ static void test_direct_pub_receive(const kc_redp2p_pub_input_t *input,
  * @param userdata Direct test state.
  * @return None.
  */
-static void test_direct_con_receive(const void *data, size_t size,
+static void test_direct_api_con_receive(const void *data, size_t size,
     void *userdata)
 {
     test_direct_api_state_t *state = (test_direct_api_state_t *)userdata;
@@ -6446,7 +6446,7 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
     pub_options.id = id;
     pub_options.index = index;
     pub_options.protocol = protocol;
-    pub_options.receive = test_direct_pub_receive;
+    pub_options.receive = test_direct_api_pub_receive;
     pub_options.userdata = &state;
 
     status = kc_redp2p_pub(&pub, &pub_options);
@@ -6456,7 +6456,7 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = id;
     con_options.index = index;
-    con_options.receive = test_direct_con_receive;
+    con_options.receive = test_direct_api_con_receive;
     con_options.userdata = &state;
     if (fail == 0) {
         status = kc_redp2p_con(&con, &con_options);
