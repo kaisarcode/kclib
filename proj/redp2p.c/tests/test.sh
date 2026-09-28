@@ -1,10 +1,10 @@
 #!/bin/bash
-# REDP2P browser integration test.
-# Summary: Runs the local PHP index and serves the browser RTC test page.
+# REDP2P browser integration test
+# Summary: Runs the local PHP index and browser-to-browser transport test.
 #
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
-# License: https://www.gnu.org/licenses/gpl-3.0.html
+# License: GNU General Public License v3.0
 
 set -e
 
@@ -15,16 +15,21 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMP_DIR=""
 SERVER_PID=""
 
+# Removes generated test resources.
+# @return 0 on success.
 cleanup() {
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
     fi
+
     if [ -n "$TEMP_DIR" ]; then
         rm -rf "$TEMP_DIR"
     fi
 }
 
+# Stops the test when a required dependency is unavailable.
+# @return 0 on success.
 check_dependencies() {
     command -v php >/dev/null 2>&1 || {
         echo "PHP is required." >&2
@@ -42,22 +47,14 @@ check_dependencies() {
     }
 }
 
-wait_server() {
-    local i
-    for i in $(seq 1 100); do
-        if php -r '$u=$argv[1]; $c=@file_get_contents($u); exit($c === false ? 1 : 0);' \
-            "http://$HOST:$PORT/tests/test.html" >/dev/null 2>&1; then
-            return 0
-        fi
-        sleep 0.05
-    done
-    echo "Browser test server did not start." >&2
-    if [ -f "$TEMP_DIR/php.log" ]; then
-        cat "$TEMP_DIR/php.log" >&2
-    fi
-    return 1
+# Runs the PHP index contract tests.
+# @return 0 on success.
+run_index_test() {
+    php "$SCRIPT_DIR/test.php"
 }
 
+# Creates the temporary front controller used by PHP's development server.
+# @return 0 on success.
 create_router() {
     cat > "$TEMP_DIR/router.php" <<'PHP'
 <?php
@@ -65,9 +62,11 @@ declare(strict_types=1);
 
 $root = getenv('REDP2P_TEST_ROOT');
 $dbPath = getenv('REDP2P_TEST_DB');
-if (!is_string($root) || $root === '' || !is_string($dbPath) || $dbPath === '') {
+
+if (!is_string($root) || $root === '' ||
+    !is_string($dbPath) || $dbPath === '') {
     http_response_code(500);
-    echo "test configuration missing";
+    echo 'test configuration missing';
     return true;
 }
 
@@ -77,18 +76,49 @@ if ($path !== '/index') {
 }
 
 require $root . '/imp/redp2p-idx.php';
+
 \KaisarCode\Redp2pIndex::serve([
     'dsn' => 'sqlite:' . $dbPath,
 ]);
+
 return true;
 PHP
 }
 
+# Waits until the local PHP server accepts connections.
+# @return 0 when the server is ready.
+wait_server() {
+    local attempt
+
+    attempt=0
+    while [ "$attempt" -lt 50 ]; do
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            cat "$TEMP_DIR/php.log" >&2
+            return 1
+        fi
+
+        # shellcheck disable=SC2016
+        if TEST_HOST_INTERNAL="$HOST" TEST_PORT_INTERNAL="$PORT" php -r '$socket = @fsockopen(getenv("TEST_HOST_INTERNAL"), (int)getenv("TEST_PORT_INTERNAL"), $errno, $errstr, 0.1); if (!$socket) { exit(1); } fclose($socket);' 2>/dev/null; then
+            return 0
+        fi
+
+        attempt=$((attempt + 1))
+        sleep 0.1
+    done
+
+    echo "Timed out waiting for PHP server." >&2
+    return 1
+}
+
+# Runs the local REDP2P browser integration environment.
+# @return 0 on success.
 main() {
     check_dependencies
 
     TEMP_DIR="$(mktemp -d)"
     trap cleanup EXIT INT TERM
+
+    run_index_test
     create_router
 
     REDP2P_TEST_ROOT="$ROOT_DIR" \
@@ -107,7 +137,7 @@ main() {
     echo "REDP2P browser test server running."
     echo
     echo "Open:"
-    echo "http://$HOST:$PORT/tests/test.html?index=http://$HOST:$PORT/index"
+    echo "http://$HOST:$PORT/tests/test.html"
     echo
     echo "Press Ctrl+C to stop."
 
