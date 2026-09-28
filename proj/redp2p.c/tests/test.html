@@ -20,12 +20,7 @@
         output.textContent += line + "\n";
     };
     const params = new URLSearchParams(location.search);
-    const index = params.get("index");
-
-    if (!index) {
-        write("SKIP: pass ?index=https://host/redp2p-idx.php");
-        return;
-    }
+    const index = params.get("index") || new URL("/index", location.href).href;
 
     const id = "browser" + crypto.getRandomValues(new Uint32Array(1))[0];
     let pub = null;
