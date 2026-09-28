@@ -531,6 +531,21 @@ static int redp2p_consumer_initial_lookup(redp2p_consumer_runtime_t *runtime)
     }
     out = json_value_get_object(response);
     runtime->n_peer_candidates = 0;
+    if (out && json_object_has_value_of_type(out, "transport", JSONString)) {
+        const char *transport = json_object_get_string(out, "transport");
+        if (transport && strcmp(transport, "rtc") == 0) {
+            json_value_free(response);
+            redp2p_set_error(ctx, "connect: publisher transport is unsupported");
+            return REDP2P_EUNSUPPORTED;
+        }
+        if (!transport || (strcmp(transport, "tcp") != 0 &&
+            strcmp(transport, "udp") != 0))
+        {
+            json_value_free(response);
+            redp2p_set_error(ctx, "connect: invalid publisher transport");
+            return REDP2P_EPROTO;
+        }
+    }
     if (!out || !json_object_has_value_of_type(out, "proto", JSONNumber) ||
         !redp2p_parse_candidates(out, "candidates",
             runtime->peer_candidates, &runtime->n_peer_candidates))
