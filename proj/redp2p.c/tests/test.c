@@ -6393,6 +6393,7 @@ void redp2p_test_api_port_hold(int hold);
 unsigned short redp2p_test_api_port_value(void);
 #endif
 
+#ifdef REDP2P_LIFECYCLE_TEST
 typedef struct {
     kc_redp2p_pub_t *pub;
     kc_redp2p_con_t *con;
@@ -6480,6 +6481,7 @@ static void test_direct_capture_client(const kc_redp2p_pub_input_t *input,
     state->client = input->client;
     atomic_store(&state->done, 1);
 }
+#endif
 
 static void test_direct_pub_self_close(const kc_redp2p_pub_input_t *input,
     void *userdata)
