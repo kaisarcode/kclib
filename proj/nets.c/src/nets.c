@@ -220,7 +220,7 @@ static int nets_read_fd(int fd, char **out_data, size_t *out_size) {
 }
 
 /**
- * Initialize callback completion state.
+ * Initialize completion state.
  * @param result Completion state.
  * @return 0 on success, 1 on failure.
  */
@@ -241,7 +241,7 @@ static int nets_result_init(nets_cli_result_t *result) {
 }
 
 /**
- * Destroy callback completion state.
+ * Destroy completion state.
  * @param result Completion state.
  * @return None.
  */
@@ -262,7 +262,7 @@ static void nets_result_destroy(nets_cli_result_t *result) {
  * @param userdata Completion state.
  * @return None.
  */
-static void nets_result_handler(
+static void nets_complete(
     int status,
     const void *data,
     size_t size,
@@ -447,7 +447,7 @@ int main(int argc, char **argv) {
         protocol,
         input,
         input_size,
-        nets_result_handler,
+        nets_complete,
         &result
     );
     free(input);
