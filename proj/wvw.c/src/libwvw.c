@@ -53,6 +53,7 @@ typedef struct {
     int click_through;
     int no_focus;
     int hidden;
+    int unlist;
 } kc_wvw_config_t;
 
 typedef struct {
@@ -62,6 +63,7 @@ typedef struct {
     int maximized;
     int fullscreen;
     int visible;
+    int listed;
 } kc_wvw_window_state_t;
 
 typedef enum {
@@ -71,6 +73,8 @@ typedef enum {
     KC_WVW_OP_POST_BRIDGE_EVENT,
     KC_WVW_OP_HIDE,
     KC_WVW_OP_SHOW,
+    KC_WVW_OP_LIST,
+    KC_WVW_OP_UNLIST,
     KC_WVW_OP_MINIMIZE,
     KC_WVW_OP_MAXIMIZE,
     KC_WVW_OP_RESTORE,
@@ -81,6 +85,7 @@ typedef enum {
     KC_WVW_OP_SET_POSITION,
     KC_WVW_OP_GET_POSITION,
     KC_WVW_OP_IS_VISIBLE,
+    KC_WVW_OP_IS_LISTED,
     KC_WVW_OP_IS_MINIMIZED,
     KC_WVW_OP_IS_MAXIMIZED,
     KC_WVW_OP_IS_FULLSCREEN,
@@ -734,6 +739,7 @@ static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *o
     config->click_through = options->click_through ? !!*options->click_through : 0;
     config->no_focus = options->no_focus ? !!*options->no_focus : 0;
     config->hidden = options->hidden ? !!*options->hidden : 0;
+    config->unlist = options->unlist ? !!*options->unlist : 0;
     if (config->width <= 0 || config->height <= 0 ||
         config->width > KC_WVW_SIZE_MAX || config->height > KC_WVW_SIZE_MAX ||
         strlen(config->title) > KC_WVW_TITLE_MAX) {
@@ -2003,6 +2009,9 @@ static int kc_wvw_create_window(kc_wvw_t *ctx) {
     if (ctx->opts.no_focus) {
         ex_style |= WS_EX_NOACTIVATE;
     }
+    if (ctx->opts.unlist) {
+        ex_style |= WS_EX_TOOLWINDOW;
+    }
 
     rect.left = (ctx->opts.has_posx) ? ctx->opts.posx : CW_USEDEFAULT;
     rect.top = (ctx->opts.has_posy) ? ctx->opts.posy : CW_USEDEFAULT;
@@ -2527,6 +2536,31 @@ static int kc_wvw_show_impl(kc_wvw_t *ctx) {
     return KC_WVW_OK;
 }
 
+static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
+    LONG_PTR ex_style;
+    int was_visible;
+    if (!ctx || !ctx->hwnd) return KC_WVW_ERROR;
+    was_visible = IsWindowVisible(ctx->hwnd) ? 1 : 0;
+    if (was_visible) ShowWindow(ctx->hwnd, SW_HIDE);
+    ex_style = GetWindowLongPtrW(ctx->hwnd, GWL_EXSTYLE);
+    if (listed) ex_style &= ~WS_EX_TOOLWINDOW;
+    else ex_style |= WS_EX_TOOLWINDOW;
+    SetWindowLongPtrW(ctx->hwnd, GWL_EXSTYLE, ex_style);
+    SetWindowPos(ctx->hwnd, NULL, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+        SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    ctx->opts.unlist = listed ? 0 : 1;
+    if (was_visible) ShowWindow(ctx->hwnd, SW_SHOW);
+    return KC_WVW_OK;
+}
+
+static int kc_wvw_is_listed_impl(kc_wvw_t *ctx) {
+    LONG_PTR ex_style;
+    if (!ctx || !ctx->hwnd) return 0;
+    ex_style = GetWindowLongPtrW(ctx->hwnd, GWL_EXSTYLE);
+    return (ex_style & WS_EX_TOOLWINDOW) ? 0 : 1;
+}
+
 /**
  * Minimize (iconify) the window.
  * @param ctx Window context.
@@ -2686,6 +2720,7 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
     state->minimized = !!(style & WS_MINIMIZE);
     state->fullscreen = ctx->opts.fullscreen;
     state->visible = IsWindowVisible(ctx->hwnd);
+    state->listed = kc_wvw_is_listed_impl(ctx);
     state->width = ctx->opts.width;
     state->height = ctx->opts.height;
     return KC_WVW_OK;
@@ -3103,7 +3138,7 @@ typedef struct {
     char *background;
     int width, height, posx, posy;
     int has_posx, has_posy;
-    int fullscreen, borderless, always_on_top, click_through, no_focus, hidden;
+    int fullscreen, borderless, always_on_top, click_through, no_focus, hidden, unlist;
 } kc_wvw_config_t;
 typedef struct {
     int width;
@@ -3112,6 +3147,7 @@ typedef struct {
     int maximized;
     int fullscreen;
     int visible;
+    int listed;
 } kc_wvw_window_state_t;
 
 typedef enum {
@@ -3121,6 +3157,8 @@ typedef enum {
     KC_WVW_OP_POST_BRIDGE_EVENT,
     KC_WVW_OP_HIDE,
     KC_WVW_OP_SHOW,
+    KC_WVW_OP_LIST,
+    KC_WVW_OP_UNLIST,
     KC_WVW_OP_MINIMIZE,
     KC_WVW_OP_MAXIMIZE,
     KC_WVW_OP_RESTORE,
@@ -3131,6 +3169,7 @@ typedef enum {
     KC_WVW_OP_SET_POSITION,
     KC_WVW_OP_GET_POSITION,
     KC_WVW_OP_IS_VISIBLE,
+    KC_WVW_OP_IS_LISTED,
     KC_WVW_OP_IS_MINIMIZED,
     KC_WVW_OP_IS_MAXIMIZED,
     KC_WVW_OP_IS_FULLSCREEN,
@@ -3294,6 +3333,7 @@ static int kc_wvw_config_copy(kc_wvw_config_t *config, const kc_wvw_options_t *o
     config->click_through = options->click_through ? !!*options->click_through : 0;
     config->no_focus = options->no_focus ? !!*options->no_focus : 0;
     config->hidden = options->hidden ? !!*options->hidden : 0;
+    config->unlist = options->unlist ? !!*options->unlist : 0;
     if (config->width <= 0 || config->height <= 0 ||
         config->width > KC_WVW_SIZE_MAX || config->height > KC_WVW_SIZE_MAX ||
         strlen(config->title) > KC_WVW_TITLE_MAX) {
@@ -4790,6 +4830,7 @@ static int kc_wvw_macos_create_window(kc_wvw_t *ctx) {
         if (ctx->opts.click_through) {
             [window setIgnoresMouseEvents:YES];
         }
+        [window setExcludedFromWindowsMenu:ctx->opts.unlist ? YES : NO];
 
         KCWvwWindowDelegate *windowDelegate = [[KCWvwWindowDelegate alloc] init];
         windowDelegate.ctx = ctx;
@@ -4826,6 +4867,24 @@ static int kc_wvw_show_impl(kc_wvw_t *ctx) {
         [window orderFront:nil];
     }
     return KC_WVW_OK;
+}
+
+static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
+    if (!ctx || !ctx->ns_window) return KC_WVW_ERROR;
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        [window setExcludedFromWindowsMenu:listed ? NO : YES];
+    }
+    ctx->opts.unlist = listed ? 0 : 1;
+    return KC_WVW_OK;
+}
+
+static int kc_wvw_is_listed_impl(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->ns_window) return 0;
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        return [window isExcludedFromWindowsMenu] ? 0 : 1;
+    }
 }
 
 /**
@@ -5017,6 +5076,7 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
         state->maximized = [window isZoomed] ? 1 : 0;
         state->fullscreen = ([window styleMask] & NSWindowStyleMaskFullScreen) ? 1 : 0;
         state->visible = [window isVisible] ? 1 : 0;
+        state->listed = [window isExcludedFromWindowsMenu] ? 0 : 1;
     }
     return KC_WVW_OK;
 }
@@ -5399,6 +5459,8 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
 
     gtk_window_set_default_size(GTK_WINDOW(ctx->window), ctx->opts.width, ctx->opts.height);
     gtk_window_set_title(GTK_WINDOW(ctx->window), ctx->opts.title ? ctx->opts.title : "wvw");
+    gtk_window_set_skip_taskbar_hint(
+        GTK_WINDOW(ctx->window), ctx->opts.unlist ? TRUE : FALSE);
     if (ctx->opts.has_posx || ctx->opts.has_posy) {
         GdkDisplay *display = gdk_display_get_default();
         GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
@@ -5694,6 +5756,19 @@ static int kc_wvw_show_impl(kc_wvw_t *ctx) {
     return KC_WVW_OK;
 }
 
+static int kc_wvw_set_listed_impl(kc_wvw_t *ctx, int listed) {
+    if (!ctx || !ctx->window) return KC_WVW_ERROR;
+    gtk_window_set_skip_taskbar_hint(
+        GTK_WINDOW(ctx->window), listed ? FALSE : TRUE);
+    ctx->opts.unlist = listed ? 0 : 1;
+    return KC_WVW_OK;
+}
+
+static int kc_wvw_is_listed_impl(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->window) return 0;
+    return gtk_window_get_skip_taskbar_hint(GTK_WINDOW(ctx->window)) ? 0 : 1;
+}
+
 /**
  * Minimize (iconify) the window.
  * @param ctx Window context.
@@ -5838,6 +5913,7 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
         state->fullscreen = !!(ws & GDK_WINDOW_STATE_FULLSCREEN);
     }
     state->visible = gtk_widget_get_visible(ctx->window);
+    state->listed = kc_wvw_is_listed_impl(ctx);
     return KC_WVW_OK;
 }
 
@@ -5861,15 +5937,16 @@ static int kc_wvw_execute_op(kc_wvw_t *ctx,kc_wvw_op_t *op){
     case KC_WVW_OP_ENABLE_BRIDGE:return kc_wvw_enable_bridge_impl(ctx,op->bridge);
     case KC_WVW_OP_POST_BRIDGE_EVENT:return kc_wvw_post_bridge_event_impl(ctx,op->text);
     case KC_WVW_OP_HIDE:return kc_wvw_hide_impl(ctx);case KC_WVW_OP_SHOW:return kc_wvw_show_impl(ctx);
+    case KC_WVW_OP_LIST:return kc_wvw_set_listed_impl(ctx,1);case KC_WVW_OP_UNLIST:return kc_wvw_set_listed_impl(ctx,0);
     case KC_WVW_OP_MINIMIZE:return kc_wvw_minimize_impl(ctx);case KC_WVW_OP_MAXIMIZE:return kc_wvw_maximize_impl(ctx);case KC_WVW_OP_RESTORE:return kc_wvw_restore_impl(ctx);
     case KC_WVW_OP_SET_TITLE:return kc_wvw_set_title_impl(ctx,op->text);case KC_WVW_OP_GET_TITLE:op->out_text=ctx->opts.title;return op->out_text?KC_WVW_OK:KC_WVW_ERROR;
     case KC_WVW_OP_SET_SIZE:return kc_wvw_set_size_impl(ctx,op->a,op->b);
     case KC_WVW_OP_GET_SIZE:if(!op->out_a||!op->out_b||kc_wvw_get_state_impl(ctx,&state)!=KC_WVW_OK)return KC_WVW_ERROR;*op->out_a=state.width;*op->out_b=state.height;return KC_WVW_OK;
     case KC_WVW_OP_SET_POSITION:return kc_wvw_set_position_impl(ctx,op->a,op->b);
     case KC_WVW_OP_GET_POSITION:return kc_wvw_get_position_impl(ctx,op->out_a,op->out_b);
-    case KC_WVW_OP_IS_VISIBLE:case KC_WVW_OP_IS_MINIMIZED:case KC_WVW_OP_IS_MAXIMIZED:case KC_WVW_OP_IS_FULLSCREEN:
+    case KC_WVW_OP_IS_VISIBLE:case KC_WVW_OP_IS_LISTED:case KC_WVW_OP_IS_MINIMIZED:case KC_WVW_OP_IS_MAXIMIZED:case KC_WVW_OP_IS_FULLSCREEN:
         if(kc_wvw_get_state_impl(ctx,&state)!=KC_WVW_OK)return KC_WVW_ERROR;
-        op->a=op->kind==KC_WVW_OP_IS_VISIBLE?state.visible:op->kind==KC_WVW_OP_IS_MINIMIZED?state.minimized:op->kind==KC_WVW_OP_IS_MAXIMIZED?state.maximized:state.fullscreen;return KC_WVW_OK;
+        op->a=op->kind==KC_WVW_OP_IS_VISIBLE?state.visible:op->kind==KC_WVW_OP_IS_LISTED?state.listed:op->kind==KC_WVW_OP_IS_MINIMIZED?state.minimized:op->kind==KC_WVW_OP_IS_MAXIMIZED?state.maximized:state.fullscreen;return KC_WVW_OK;
     case KC_WVW_OP_CLOSE:
         kc_wvw_request_close(ctx);
         return KC_WVW_OK;
@@ -5880,6 +5957,7 @@ int kc_wvw_add_init_script(kc_wvw_t *ctx,const char *js){kc_wvw_op_t op={0};op.k
 int kc_wvw_enable_bridge(kc_wvw_t *ctx,const kc_wvw_bridge_options_t *o){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_ENABLE_BRIDGE;op.bridge=o;return kc_wvw_dispatch_op(ctx,&op);}
 int kc_wvw_post_bridge_event(kc_wvw_t *ctx,const char *json){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_POST_BRIDGE_EVENT;op.text=json;return kc_wvw_dispatch_op(ctx,&op);}
 int kc_wvw_hide(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_HIDE;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_show(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SHOW;return kc_wvw_dispatch_op(ctx,&op);}
+int kc_wvw_list(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_LIST;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_unlist(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_UNLIST;return kc_wvw_dispatch_op(ctx,&op);}
 int kc_wvw_minimize(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_MINIMIZE;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_maximize(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_MAXIMIZE;return kc_wvw_dispatch_op(ctx,&op);}int kc_wvw_restore(kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_RESTORE;return kc_wvw_dispatch_op(ctx,&op);}
 int kc_wvw_set_title(kc_wvw_t *ctx,const char *title){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_TITLE;op.text=title;return kc_wvw_dispatch_op(ctx,&op);}
 const char *kc_wvw_get_title(const kc_wvw_t *ctx){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_TITLE;if(kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op)!=KC_WVW_OK)return NULL;return op.out_text;}
@@ -5888,4 +5966,4 @@ int kc_wvw_get_size(const kc_wvw_t *ctx,int *w,int *h){kc_wvw_op_t op={0};op.kin
 int kc_wvw_set_position(kc_wvw_t *ctx,int x,int y){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_SET_POSITION;op.a=x;op.b=y;return kc_wvw_dispatch_op(ctx,&op);}
 int kc_wvw_get_position(const kc_wvw_t *ctx,int *x,int *y){kc_wvw_op_t op={0};op.kind=KC_WVW_OP_GET_POSITION;op.out_a=x;op.out_b=y;return kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op);}
 static int kc_wvw_bool_query(const kc_wvw_t *ctx,kc_wvw_op_kind_t k){kc_wvw_op_t op={0};op.kind=k;if(kc_wvw_dispatch_op((kc_wvw_t *)ctx,&op)!=KC_WVW_OK)return 0;return !!op.a;}
-int kc_wvw_is_visible(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_VISIBLE);}int kc_wvw_is_minimized(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_MINIMIZED);}int kc_wvw_is_maximized(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_MAXIMIZED);}int kc_wvw_is_fullscreen(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_FULLSCREEN);}
+int kc_wvw_is_visible(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_VISIBLE);}int kc_wvw_is_listed(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_LISTED);}int kc_wvw_is_minimized(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_MINIMIZED);}int kc_wvw_is_maximized(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_MAXIMIZED);}int kc_wvw_is_fullscreen(const kc_wvw_t *ctx){return kc_wvw_bool_query(ctx,KC_WVW_OP_IS_FULLSCREEN);}

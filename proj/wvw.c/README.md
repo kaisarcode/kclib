@@ -44,7 +44,8 @@ wvw \
 | `--always-on-top` | Keep the window above normal windows |
 | `--click-through` | Ignore mouse input on the host window |
 | `--no-focus` | Do not activate the window for keyboard focus |
-| `--hidden` | Start with the window hidden |
+| `--hide` | Start with the window hidden |
+| `--unlist` | Exclude the window from the window list |
 | `-h`, `--help` | Show help and usage |
 | `-v`, `--version` | Show version |
 
@@ -64,6 +65,7 @@ KC_WVW_ALWAYS_ON_TOP
 KC_WVW_CLICK_THROUGH
 KC_WVW_NO_FOCUS
 KC_WVW_HIDDEN
+KC_WVW_UNLIST
 ```
 
 Command-line arguments override environment defaults.
@@ -125,6 +127,8 @@ int kc_wvw_post_bridge_event(kc_wvw_t *wvw, const char *json);
 
 int kc_wvw_hide(kc_wvw_t *wvw);
 int kc_wvw_show(kc_wvw_t *wvw);
+int kc_wvw_list(kc_wvw_t *wvw);
+int kc_wvw_unlist(kc_wvw_t *wvw);
 int kc_wvw_minimize(kc_wvw_t *wvw);
 int kc_wvw_maximize(kc_wvw_t *wvw);
 int kc_wvw_restore(kc_wvw_t *wvw);
@@ -147,6 +151,7 @@ int kc_wvw_get_position(
 );
 
 int kc_wvw_is_visible(const kc_wvw_t *wvw);
+int kc_wvw_is_listed(const kc_wvw_t *wvw);
 int kc_wvw_is_minimized(const kc_wvw_t *wvw);
 int kc_wvw_is_maximized(const kc_wvw_t *wvw);
 int kc_wvw_is_fullscreen(const kc_wvw_t *wvw);
@@ -214,6 +219,10 @@ window at startup.
 `hidden` creates the WebView without initially presenting its native window.
 The same window can later be shown with `kc_wvw_show()` and hidden again with
 `kc_wvw_hide()`; hiding does not close the WebView.
+
+`unlist` excludes the window from the platform window list. The default is
+listed. `kc_wvw_list()` and `kc_wvw_unlist()` change that state without
+changing window visibility.
 
 `KC_WVW_TITLE_MAX` is 4096 bytes and `KC_WVW_SIZE_MAX` is 16384 pixels.
 

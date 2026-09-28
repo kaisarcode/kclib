@@ -39,7 +39,8 @@ static void kc_wvw_help(const char *name) {
     printf("  --always-on-top     Keep the window above normal windows\n");
     printf("  --click-through     Ignore mouse input on the host window\n");
     printf("  --no-focus          Do not activate the window for keyboard focus\n");
-    printf("  --hidden            Start with the window hidden\n");
+    printf("  --hide              Start with the window hidden\n");
+    printf("  --unlist            Exclude the window from the window list\n");
     printf("  -h, --help          Show this help\n");
     printf("  -v, --version       Show version\n");
 }
@@ -97,6 +98,7 @@ int main(int argc, char **argv) {
     int click_through = 0;
     int no_focus = 0;
     int hidden = 0;
+    int unlist = 0;
     int status = 0;
     int i;
 
@@ -110,6 +112,7 @@ int main(int argc, char **argv) {
     kc_wvw_env_int("KC_WVW_CLICK_THROUGH", &click_through);
     kc_wvw_env_int("KC_WVW_NO_FOCUS", &no_focus);
     kc_wvw_env_int("KC_WVW_HIDDEN", &hidden);
+    kc_wvw_env_int("KC_WVW_UNLIST", &unlist);
 
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
@@ -155,7 +158,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--always-on-top")) always_on_top = 1;
         else if (!strcmp(argv[i], "--click-through")) click_through = 1;
         else if (!strcmp(argv[i], "--no-focus")) no_focus = 1;
-        else if (!strcmp(argv[i], "--hidden")) hidden = 1;
+        else if (!strcmp(argv[i], "--hide")) hidden = 1;
+        else if (!strcmp(argv[i], "--unlist")) unlist = 1;
         else {
             fprintf(stderr, "wvw: unknown option '%s'\n", argv[i]);
             return 1;
@@ -180,6 +184,7 @@ int main(int argc, char **argv) {
     options.click_through = &click_through;
     options.no_focus = &no_focus;
     options.hidden = &hidden;
+    options.unlist = &unlist;
 
     if (kc_wvw_open(&wvw, &options) != KC_WVW_OK) {
         const char *error = kc_wvw_get_error(wvw);

@@ -80,7 +80,12 @@ static char *test_url(void) {
  * @param url_out Destination owned URL string.
  * @return 1 on success, 0 on failure.
  */
-static int open_test(kc_wvw_t **out, char **url_out, const int *hidden) {
+static int open_test(
+    kc_wvw_t **out,
+    char **url_out,
+    const int *hidden,
+    const int *unlist
+) {
     kc_wvw_options_t options = {0};
     int width = 640;
     int height = 480;
@@ -92,6 +97,7 @@ static int open_test(kc_wvw_t **out, char **url_out, const int *hidden) {
     options.width = &width;
     options.height = &height;
     options.hidden = hidden;
+    options.unlist = unlist;
     if (kc_wvw_open(out, &options) != KC_WVW_OK) {
         kc_wvw_close(*out);
         *out = NULL;
@@ -166,7 +172,7 @@ static void case_kc_wvw_navigation(void) {
     int cycle;
 
     for (cycle = 0; cycle < 4 && ok; cycle++) {
-        ok = open_test(&wvw, &url, NULL);
+        ok = open_test(&wvw, &url, NULL, NULL);
         if (ok) ok = kc_wvw_navigate(wvw, url) == KC_WVW_OK;
         kc_wvw_close(wvw);
         free(url);
@@ -186,7 +192,7 @@ static void case_kc_wvw_bridge(void) {
     char *url = NULL;
     const char *methods[] = { "ping" };
     kc_wvw_bridge_options_t bridge = {0};
-    int ok = open_test(&wvw, &url, NULL);
+    int ok = open_test(&wvw, &url, NULL, NULL);
 
     if (ok) {
         bridge.methods = methods;
@@ -215,13 +221,19 @@ static void case_kc_wvw_visibility(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
     int hidden = 1;
-    int ok = open_test(&wvw, &url, &hidden);
+    int unlist = 1;
+    int ok = open_test(&wvw, &url, &hidden, &unlist);
 
     if (ok) {
         ok =
             kc_wvw_is_visible(wvw) == 0 &&
+            kc_wvw_is_listed(wvw) == 0 &&
             kc_wvw_show(wvw) == KC_WVW_OK &&
             kc_wvw_is_visible(wvw) == 1 &&
+            kc_wvw_list(wvw) == KC_WVW_OK &&
+            kc_wvw_is_listed(wvw) == 1 &&
+            kc_wvw_unlist(wvw) == KC_WVW_OK &&
+            kc_wvw_is_listed(wvw) == 0 &&
             kc_wvw_hide(wvw) == KC_WVW_OK &&
             kc_wvw_is_visible(wvw) == 0 &&
             kc_wvw_show(wvw) == KC_WVW_OK;
@@ -229,7 +241,7 @@ static void case_kc_wvw_visibility(void) {
     kc_wvw_close(wvw);
     free(url);
     result("kc_wvw_visibility",
-        "hidden startup and show/hide preserve one live window", ok);
+        "hide/show and list/unlist preserve one live window", ok);
 }
 
 /**
@@ -239,7 +251,7 @@ static void case_kc_wvw_visibility(void) {
 static void case_kc_wvw_actions(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int ok = open_test(&wvw, &url, NULL);
+    int ok = open_test(&wvw, &url, NULL, NULL);
 
     if (ok) {
         ok =
@@ -262,7 +274,7 @@ static void case_kc_wvw_title(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
     const char *title;
-    int ok = open_test(&wvw, &url, NULL);
+    int ok = open_test(&wvw, &url, NULL, NULL);
 
     if (ok) {
         ok = kc_wvw_set_title(wvw, "changed") == KC_WVW_OK;
@@ -284,7 +296,7 @@ static void case_kc_wvw_size(void) {
     char *url = NULL;
     int width = 0;
     int height = 0;
-    int ok = open_test(&wvw, &url, NULL);
+    int ok = open_test(&wvw, &url, NULL, NULL);
 
     if (ok) {
         ok =
@@ -308,7 +320,7 @@ static void case_kc_wvw_position(void) {
     char *url = NULL;
     int x = 0;
     int y = 0;
-    int ok = open_test(&wvw, &url, NULL);
+    int ok = open_test(&wvw, &url, NULL, NULL);
 
     if (ok) {
         ok =
@@ -330,16 +342,18 @@ static void case_kc_wvw_position(void) {
 static void case_kc_wvw_booleans(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int ok = open_test(&wvw, &url, NULL);
+    int ok = open_test(&wvw, &url, NULL, NULL);
 
     if (ok) {
         int visible = kc_wvw_is_visible(wvw);
+        int listed = kc_wvw_is_listed(wvw);
         int minimized = kc_wvw_is_minimized(wvw);
         int maximized = kc_wvw_is_maximized(wvw);
         int fullscreen = kc_wvw_is_fullscreen(wvw);
 
         ok =
             (visible == 0 || visible == 1) &&
+            (listed == 0 || listed == 1) &&
             (minimized == 0 || minimized == 1) &&
             (maximized == 0 || maximized == 1) &&
             (fullscreen == 0 || fullscreen == 1);
@@ -383,7 +397,9 @@ static void case_kc_wvw_cli(void) {
     ok &= run_cli("-h", 1);
     ok &= run_cli("--version", 1);
     ok &= run_cli("-v", 1);
-    ok &= run_cli("--hidden --help", 1);
+    ok &= run_cli("--hide --help", 1);
+    ok &= run_cli("--unlist --help", 1);
+    ok &= run_cli("--hidden --help", 0);
     ok &= run_cli("", 0);
     ok &= run_cli("--invalid", 0);
     ok &= run_cli("--url", 0);

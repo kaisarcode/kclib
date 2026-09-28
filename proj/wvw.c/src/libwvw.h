@@ -48,6 +48,7 @@ typedef struct {
     const int *click_through;
     const int *no_focus;
     const int *hidden;
+    const int *unlist;
 } kc_wvw_options_t;
 
 typedef struct {
@@ -127,6 +128,20 @@ int kc_wvw_hide(kc_wvw_t *wvw);
 int kc_wvw_show(kc_wvw_t *wvw);
 
 /**
+ * Include the native window in the platform window list.
+ * @param wvw WebView handle.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_list(kc_wvw_t *wvw);
+
+/**
+ * Exclude the native window from the platform window list.
+ * @param wvw WebView handle.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_unlist(kc_wvw_t *wvw);
+
+/**
  * Minimize the native window.
  * @param wvw WebView handle.
  * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
@@ -204,6 +219,13 @@ int kc_wvw_get_position(const kc_wvw_t *wvw, int *out_x, int *out_y);
  * @return 1 when visible, 0 when hidden, or KC_WVW_ERROR on failure.
  */
 int kc_wvw_is_visible(const kc_wvw_t *wvw);
+
+/**
+ * Return whether the native window is included in the platform window list.
+ * @param wvw WebView handle.
+ * @return 1 when listed, 0 when unlisted, or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_is_listed(const kc_wvw_t *wvw);
 
 /**
  * Return whether the native window is minimized.
