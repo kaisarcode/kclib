@@ -121,14 +121,15 @@ main() {
     run_index_test
     create_router
 
-    REDP2P_TEST_ROOT="$ROOT_DIR" \
-    REDP2P_TEST_DB="$TEMP_DIR/redp2p.sqlite" \
-    REDP2P_POW=0 \
-    REDP2P_SEATS="" \
-    REDP2P_PASS="" \
-    REDP2P_VIP="" \
-    REDP2P_MAX_CONSUMERS_PER_PUBLISHER=32 \
-    php -S "$HOST:$PORT" -t "$ROOT_DIR" "$TEMP_DIR/router.php" \
+    env \
+        -u REDP2P_SEATS \
+        -u REDP2P_PASS \
+        -u REDP2P_VIP \
+        REDP2P_TEST_ROOT="$ROOT_DIR" \
+        REDP2P_TEST_DB="$TEMP_DIR/redp2p.sqlite" \
+        REDP2P_POW=0 \
+        REDP2P_MAX_CONSUMERS_PER_PUBLISHER=32 \
+        php -S "$HOST:$PORT" -t "$ROOT_DIR" "$TEMP_DIR/router.php" \
         >"$TEMP_DIR/php.log" 2>&1 &
     SERVER_PID=$!
 
