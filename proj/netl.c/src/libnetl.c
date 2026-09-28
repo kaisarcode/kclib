@@ -1148,9 +1148,9 @@ static int kc_netl_open_internal(
 int kc_netl_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
-    kc_netl_receive_fn handler,
-    kc_netl_disconnect_fn close_handler,
-    kc_netl_error_fn error_handler,
+    kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,
+    kc_netl_error_fn error,
     void *userdata
 ) {
     return kc_netl_open_internal(
