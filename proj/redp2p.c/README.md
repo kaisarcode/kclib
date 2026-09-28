@@ -307,17 +307,34 @@ make
 
 ### Tests
 
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+The test suites are intentionally separated by runtime.
+
+Native C tests:
 
 ```bash
 make
 make test
 ```
 
-The native test run covers the public API, CLI, protocol behavior, native
-TCP/UDP transport, and direct data capabilities. `tests/test.php` covers the
-PHP index and `tests/test.html` exercises the browser RTC implementation.
+PHP index tests:
+
+```bash
+make test-php
+```
+
+Browser RTC integration:
+
+```bash
+make test-browser
+```
+
+The browser runner starts a temporary SQLite-backed PHP index on
+`127.0.0.1:8088`, serves the project, and prints the ready-to-open
+`tests/test.html` URL. Set `TEST_HOST` or `TEST_PORT` to override the
+local endpoint. Stop it with Ctrl+C.
+
+`make test` remains exclusively the native C suite; it does not invoke PHP or
+browser tests.
 
 To run through Wine:
 
