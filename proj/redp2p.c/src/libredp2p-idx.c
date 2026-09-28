@@ -2980,6 +2980,12 @@ static void redp2p_index_dispatch(redp2p_t *ctx, redp2p_fd_t fd,
         redp2p_index_handle_punch_req(ctx, fd, req, peer);
     else if (strcmp(op, "punch_poll") == 0)
         redp2p_index_handle_punch_poll(ctx, fd, req);
+    else if (strcmp(op, "connect") == 0)
+        redp2p_index_handle_rtc_connect(ctx, fd, req, peer);
+    else if (strcmp(op, "poll") == 0)
+        redp2p_index_handle_rtc_poll(ctx, fd, req);
+    else if (strcmp(op, "answer") == 0)
+        redp2p_index_handle_rtc_answer(ctx, fd, req);
     else
         redp2p_index_respond_error(fd, 400, "bad_request");
     json_value_free(value);
