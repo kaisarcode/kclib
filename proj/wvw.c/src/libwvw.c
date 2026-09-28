@@ -124,6 +124,7 @@ struct kc_wvw {
     ICoreWebView2Controller *controller;
     ICoreWebView2 *webview;
     kc_wvw_init_state_t init_state;
+    HRESULT init_error;
     char *pending_url;
     kc_wvw_bridge_state_t bridge;
     char error[256];
@@ -2087,6 +2088,7 @@ static int kc_wvw_start_webview(kc_wvw_t *ctx) {
 
     hr = get_version(NULL, &version);
     if (FAILED(hr) || !version) {
+        kc_wvw_set_error(ctx, "WebView2 version lookup failed: 0x%08lx", (unsigned long)hr);
         return KC_WVW_ERROR;
     }
     CoTaskMemFree(version);
@@ -2120,6 +2122,8 @@ static int kc_wvw_start_webview(kc_wvw_t *ctx) {
     ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler_Release((ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *)handler);
     free(user_data_dir);
     if (FAILED(hr)) {
+        kc_wvw_set_error(ctx, "WebView2 environment creation failed: 0x%08lx", (unsigned long)hr);
+        ctx->init_error = hr;
         return KC_WVW_ERROR;
     }
 
@@ -2140,6 +2144,8 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_environment_invoke(ICoreWebView2CreateCo
 
     if (!ctx || ctx->closing || FAILED(error_code) || !result) {
         if (ctx) {
+            kc_wvw_set_error(ctx, "WebView2 environment completion failed: 0x%08lx", (unsigned long)error_code);
+            ctx->init_error = error_code;
             ctx->init_state = KC_WVW_INIT_FAILED;
         }
         return S_OK;
@@ -2155,6 +2161,8 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_environment_invoke(ICoreWebView2CreateCo
     hr = ICoreWebView2Environment_CreateCoreWebView2Controller(ctx->environment, ctx->hwnd, (ICoreWebView2CreateCoreWebView2ControllerCompletedHandler *)handler);
     ICoreWebView2CreateCoreWebView2ControllerCompletedHandler_Release((ICoreWebView2CreateCoreWebView2ControllerCompletedHandler *)handler);
     if (FAILED(hr)) {
+        kc_wvw_set_error(ctx, "WebView2 controller creation failed: 0x%08lx", (unsigned long)hr);
+        ctx->init_error = hr;
         ctx->init_state = KC_WVW_INIT_FAILED;
     }
     return S_OK;
@@ -2172,6 +2180,8 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_controller_invoke(ICoreWebView2CreateCor
 
     if (!ctx || ctx->closing || FAILED(error_code) || !result) {
         if (ctx) {
+            kc_wvw_set_error(ctx, "WebView2 controller completion failed: 0x%08lx", (unsigned long)error_code);
+            ctx->init_error = error_code;
             ctx->init_state = KC_WVW_INIT_FAILED;
         }
         return S_OK;
@@ -2209,29 +2219,117 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_controller_invoke(ICoreWebView2CreateCor
  * @return Thread status code.
  */
 static DWORD WINAPI kc_wvw_windows_worker(LPVOID data) {
-    kc_wvw_t *ctx=(kc_wvw_t *)data; HRESULT hr; MSG message;
-    ctx->worker_id=GetCurrentThreadId(); ctx->init_state=KC_WVW_INIT_PENDING;
-    hr=CoInitializeEx(NULL,COINIT_APARTMENTTHREADED);
-    if(FAILED(hr)&&hr!=RPC_E_CHANGED_MODE){kc_wvw_set_error(ctx,"COM initialization failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
-    ctx->com_initialized=SUCCEEDED(hr);ctx->hinstance=GetModuleHandleW(NULL);ctx->background_brush=kc_wvw_background_brush(ctx->opts.background);
-    ctx->pending_url=kc_wvw_strdup(ctx->opts.url);
-    if(!ctx->pending_url){kc_wvw_set_error(ctx,"memory allocation failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
-    if(kc_wvw_load_loader(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2Loader.dll not found");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
-    if(kc_wvw_create_window(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
-    if(kc_wvw_start_webview(ctx)!=KC_WVW_OK||kc_wvw_wait_for_ready(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"WebView2 initialization failed");SetEvent(ctx->ready);SetEvent(ctx->closed_event);return 1;}
-    ctx->started=1;ctx->running=1;SetEvent(ctx->ready);
-    while(ctx->running&&GetMessageW(&message,NULL,0,0)>0){TranslateMessage(&message);DispatchMessageW(&message);}
-    ctx->running=0;
-    if(ctx->controller){ICoreWebView2Controller_Close(ctx->controller);ICoreWebView2Controller_Release(ctx->controller);ctx->controller=NULL;}
-    if(ctx->webview){ICoreWebView2_Release(ctx->webview);ctx->webview=NULL;}
-    if(ctx->environment){ICoreWebView2Environment_Release(ctx->environment);ctx->environment=NULL;}
+    kc_wvw_t *ctx = (kc_wvw_t *)data;
+    HRESULT hr;
+    MSG message;
+    int attempt;
+    ULONGLONG retry_at;
+    DWORD status = 1;
+
+    ctx->worker_id = GetCurrentThreadId();
+    hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr)) {
+        kc_wvw_set_error(ctx, "COM initialization failed: 0x%08lx", (unsigned long)hr);
+        goto cleanup;
+    }
+    ctx->com_initialized = 1;
+    ctx->hinstance = GetModuleHandleW(NULL);
+    ctx->background_brush = kc_wvw_background_brush(ctx->opts.background);
+    ctx->pending_url = kc_wvw_strdup(ctx->opts.url);
+    if (!ctx->pending_url) {
+        kc_wvw_set_error(ctx, "memory allocation failed");
+        goto cleanup;
+    }
+    if (kc_wvw_load_loader(ctx) != KC_WVW_OK) {
+        kc_wvw_set_error(ctx, "WebView2Loader.dll not found");
+        goto cleanup;
+    }
+    if (kc_wvw_create_window(ctx) != KC_WVW_OK) {
+        kc_wvw_set_error(ctx, "window creation failed");
+        goto cleanup;
+    }
+    for (attempt = 0; attempt < 3; attempt++) {
+        ctx->init_state = KC_WVW_INIT_PENDING;
+        ctx->init_error = S_OK;
+        ctx->error[0] = '\0';
+        if (kc_wvw_start_webview(ctx) == KC_WVW_OK &&
+            kc_wvw_wait_for_ready(ctx) == KC_WVW_OK) {
+            break;
+        }
+        if (ctx->closing || ctx->init_error != CO_E_SERVER_EXEC_FAILURE || attempt == 2) {
+            if (!ctx->error[0]) kc_wvw_set_error(ctx, "WebView2 initialization failed");
+            goto cleanup;
+        }
+        if (ctx->environment) {
+            ICoreWebView2Environment_Release(ctx->environment);
+            ctx->environment = NULL;
+        }
+        retry_at = GetTickCount64() + 250;
+        while (!ctx->closing) {
+            ULONGLONG now = GetTickCount64();
+            DWORD wait_result;
+
+            if (now >= retry_at) break;
+            wait_result = MsgWaitForMultipleObjectsEx(0, NULL,
+                (DWORD)(retry_at - now), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            if (wait_result == WAIT_FAILED) goto cleanup;
+            if (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) {
+                if (message.message == WM_QUIT) goto cleanup;
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        if (ctx->closing) goto cleanup;
+    }
+    ctx->started = 1;
+    ctx->running = 1;
+    status = 0;
+    SetEvent(ctx->ready);
+    while (ctx->running && GetMessageW(&message, NULL, 0, 0) > 0) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+
+cleanup:
+    ctx->closing = 1;
+    ctx->running = 0;
+    if (ctx->controller) {
+        ICoreWebView2Controller_Close(ctx->controller);
+        ICoreWebView2Controller_Release(ctx->controller);
+        ctx->controller = NULL;
+    }
+    if (ctx->webview) {
+        ICoreWebView2_Release(ctx->webview);
+        ctx->webview = NULL;
+    }
+    if (ctx->environment) {
+        ICoreWebView2Environment_Release(ctx->environment);
+        ctx->environment = NULL;
+    }
     if (ctx->hwnd && IsWindow(ctx->hwnd)) {
         DestroyWindow(ctx->hwnd);
     }
     ctx->hwnd = NULL;
-    if(ctx->loader){FreeLibrary(ctx->loader);ctx->loader=NULL;}if(ctx->background_brush){DeleteObject(ctx->background_brush);ctx->background_brush=NULL;}
-    if(ctx->com_initialized){CoUninitialize();ctx->com_initialized=0;}SetEvent(ctx->closed_event);
-    if(ctx->free_on_exit){if(ctx->thread)CloseHandle(ctx->thread);ctx->thread=NULL;kc_wvw_context_release(ctx);}return 0;
+    if (ctx->loader) {
+        FreeLibrary(ctx->loader);
+        ctx->loader = NULL;
+    }
+    if (ctx->background_brush) {
+        DeleteObject(ctx->background_brush);
+        ctx->background_brush = NULL;
+    }
+    if (ctx->com_initialized) {
+        CoUninitialize();
+        ctx->com_initialized = 0;
+    }
+    if (!ctx->started) SetEvent(ctx->ready);
+    SetEvent(ctx->closed_event);
+    if (ctx->free_on_exit) {
+        if (ctx->thread) CloseHandle(ctx->thread);
+        ctx->thread = NULL;
+        kc_wvw_context_release(ctx);
+    }
+    return status;
 }
 
 /**

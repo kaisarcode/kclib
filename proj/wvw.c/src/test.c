@@ -145,22 +145,34 @@ static void case_kc_wvw_open(void) {
     int ok = kc_wvw_open(NULL, &invalid) == KC_WVW_ERROR;
 
     ok &= kc_wvw_open(&wvw, &invalid) == KC_WVW_ERROR && wvw == NULL;
+#ifdef _WIN32
+    invalid.url = "about:blank";
+    invalid.background = "80ffffff";
+    ok &= kc_wvw_open(&wvw, &invalid) == KC_WVW_ERROR;
+    kc_wvw_close(wvw);
+#endif
     kc_wvw_close(NULL);
     result("kc_wvw_open", "rejects missing URL and close accepts NULL", ok);
 }
 
 /**
- * Test immediate navigation after open.
+ * Test immediate navigation across repeated open and close cycles.
  * @return None.
  */
 static void case_kc_wvw_navigation(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    int ok = open_test(&wvw, &url, NULL);
+    int ok = 1;
+    int cycle;
 
-    if (ok) ok = kc_wvw_navigate(wvw, url) == KC_WVW_OK;
-    kc_wvw_close(wvw);
-    free(url);
+    for (cycle = 0; cycle < 4 && ok; cycle++) {
+        ok = open_test(&wvw, &url, NULL);
+        if (ok) ok = kc_wvw_navigate(wvw, url) == KC_WVW_OK;
+        kc_wvw_close(wvw);
+        free(url);
+        wvw = NULL;
+        url = NULL;
+    }
     result("kc_wvw_navigation",
         "open returns an operational WebView that can navigate", ok);
 }
