@@ -1148,7 +1148,6 @@ static const char *redp2p_index_password(redp2p_t *ctx, const char *id) {
     return vip == SIZE_MAX ? ctx->pass : ctx->vips[vip].pass;
 }
 
-
 /**
  * Returns the public transport name stored for one publisher.
  * @param transport Internal transport value.
@@ -1301,7 +1300,11 @@ static void redp2p_rtc_pending_remove(redp2p_t *ctx, int index)
     crypto_wipe(&removed, sizeof(removed));
 }
 
-/** Evicts expired RTC signaling records. */
+/**
+ * Evicts expired RTC signaling records.
+ * @param ctx Index context.
+ * @return None.
+ */
 static void redp2p_rtc_pending_evict_stale(redp2p_t *ctx)
 {
     uint64_t now;
@@ -1316,7 +1319,12 @@ static void redp2p_rtc_pending_evict_stale(redp2p_t *ctx)
     }
 }
 
-/** Removes RTC signaling state addressed to one publisher. */
+/**
+ * Removes RTC signaling state addressed to one publisher.
+ * @param ctx Index context.
+ * @param publisher_id Publisher identifier.
+ * @return None.
+ */
 static void redp2p_rtc_pending_remove_publisher(redp2p_t *ctx,
     const char *publisher_id)
 {
@@ -1331,7 +1339,12 @@ static void redp2p_rtc_pending_remove_publisher(redp2p_t *ctx,
     }
 }
 
-/** Counts fresh RTC signaling records for one publisher. */
+/**
+ * Counts fresh RTC signaling records for one publisher.
+ * @param ctx Index context.
+ * @param publisher_id Publisher identifier.
+ * @return Number of fresh signaling records.
+ */
 static int redp2p_rtc_pending_count_for_publisher(redp2p_t *ctx,
     const char *publisher_id)
 {
@@ -1346,7 +1359,12 @@ static int redp2p_rtc_pending_count_for_publisher(redp2p_t *ctx,
     return count;
 }
 
-/** Finds one fresh RTC signaling record by connection id. */
+/**
+ * Finds one fresh RTC signaling record by connection id.
+ * @param ctx Index context.
+ * @param connection Connection identifier.
+ * @return Pending record index, or -1 when absent.
+ */
 static int redp2p_rtc_pending_find(redp2p_t *ctx, const char *connection)
 {
     int i;
