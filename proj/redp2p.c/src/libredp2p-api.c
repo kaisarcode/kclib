@@ -1611,12 +1611,8 @@ void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
 
 /**
  * Stops and releases one consumer runtime.
- * @param con Consumer handle.
- * @return None.
- */
-/**
- * Stops and releases one consumer runtime.
- * Summary: Defers final destruction when invoked by the adapter callback.
+ * Summary: Defers final destruction when invoked by the adapter
+ *          callback.
  * @param con Consumer handle.
  * @return None.
  */
