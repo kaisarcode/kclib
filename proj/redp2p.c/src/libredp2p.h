@@ -20,6 +20,18 @@ extern "C" {
 typedef struct kc_redp2p_idx kc_redp2p_idx_t;
 typedef struct kc_redp2p_pub kc_redp2p_pub_t;
 typedef struct kc_redp2p_con kc_redp2p_con_t;
+typedef struct kc_redp2p_client kc_redp2p_client_t;
+
+typedef struct {
+    kc_redp2p_client_t *client;
+    const void *data;
+    size_t size;
+} kc_redp2p_pub_input_t;
+
+typedef void (*kc_redp2p_pub_receive_fn)(
+    const kc_redp2p_pub_input_t *input, void *userdata);
+typedef void (*kc_redp2p_con_receive_fn)(
+    const void *data, size_t size, void *userdata);
 
 #define KC_REDP2P_OK          0
 #define KC_REDP2P_ERROR      -1
@@ -64,6 +76,8 @@ typedef struct {
     uint16_t port;
     const char *pass;
     const char *stun;
+    kc_redp2p_pub_receive_fn receive;
+    void *userdata;
 } kc_redp2p_pub_options_t;
 
 typedef struct {
@@ -71,6 +85,8 @@ typedef struct {
     const char *index;
     uint16_t port;
     const char *stun;
+    kc_redp2p_con_receive_fn receive;
+    void *userdata;
 } kc_redp2p_con_options_t;
 
 typedef struct {
@@ -152,6 +168,41 @@ void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
  * @return None.
  */
 void kc_redp2p_con_close(kc_redp2p_con_t *con);
+
+/**
+ * Sends application data through a direct consumer capability.
+ *
+ * TCP preserves stream semantics. UDP sends one datagram per call.
+ * This operation is available when the consumer was opened without a local
+ * port. A port-backed consumer returns KC_REDP2P_EINVAL.
+ *
+ * @param con Consumer capability.
+ * @param data Bytes to send.
+ * @param size Byte count.
+ * @return KC_REDP2P_OK on success, otherwise a negative status.
+ */
+int kc_redp2p_con_send(kc_redp2p_con_t *con,
+    const void *data, size_t size);
+
+/**
+ * Responds to one publisher client.
+ *
+ * TCP writes bytes to the client stream. UDP sends one datagram per call.
+ *
+ * @param client Publisher client received with kc_redp2p_pub_input_t.
+ * @param data Bytes to send.
+ * @param size Byte count.
+ * @return KC_REDP2P_OK on success, otherwise a negative status.
+ */
+int kc_redp2p_client_respond(kc_redp2p_client_t *client,
+    const void *data, size_t size);
+
+/**
+ * Closes one publisher client. NULL is a safe no-op.
+ * @param client Publisher client.
+ * @return None.
+ */
+void kc_redp2p_client_close(kc_redp2p_client_t *client);
 
 /**
  * Releases memory returned by REDP2P. NULL is a safe no-op.
