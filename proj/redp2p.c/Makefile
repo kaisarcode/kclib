@@ -402,13 +402,18 @@ test:
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
+		test_ver=$(sed -n 's/^REDP2P_BUILD_VERSION:UNINITIALIZED=//p; s/^REDP2P_BUILD_VERSION:STRING=//p' $(BUILD_DIR)/x86_64-windows/CMakeCache.txt | tail -n 1); \
+		if [ -z "$test_ver" ]; then \
+			echo "Missing Windows build version. Rebuild x86_64/windows first." >&2; \
+			exit 1; \
+		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wine/build.ninja ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
 				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
 				-DREDP2P_BUILD_TESTS=ON \
-				-DREDP2P_BUILD_VERSION=$(BUILD_VERSION) \
+				-DREDP2P_BUILD_VERSION=$test_ver \
 				-DREDP2P_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libredp2p.dll \
 				-DREDP2P_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libredp2p.dll.a \
 				-DREDP2P_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/redp2p.exe \
@@ -426,11 +431,16 @@ test:
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
+		test_ver=$(sed -n 's/^REDP2P_BUILD_VERSION:UNINITIALIZED=//p; s/^REDP2P_BUILD_VERSION:STRING=//p' $(BUILD_DIR)/$(subst /,-,$(NATIVE_TARGET))/CMakeCache.txt | tail -n 1); \
+		if [ -z "$test_ver" ]; then \
+			echo "Missing native build version. Run 'make' first." >&2; \
+			exit 1; \
+		fi; \
 		if [ ! -f $(BUILD_DIR)/test/build.ninja ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DREDP2P_BUILD_TESTS=ON \
-				-DREDP2P_BUILD_VERSION=$(BUILD_VERSION) \
+				-DREDP2P_BUILD_VERSION=$test_ver \
 				-DREDP2P_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
 				-DREDP2P_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/redp2p$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
