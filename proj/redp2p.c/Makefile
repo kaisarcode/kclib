@@ -402,8 +402,8 @@ test:
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		test_ver=$(sed -n 's/^REDP2P_BUILD_VERSION:UNINITIALIZED=//p; s/^REDP2P_BUILD_VERSION:STRING=//p' $(BUILD_DIR)/x86_64-windows/CMakeCache.txt | tail -n 1); \
-		if [ -z "$test_ver" ]; then \
+		test_ver=$$(sed -n 's/^REDP2P_BUILD_VERSION:UNINITIALIZED=//p; s/^REDP2P_BUILD_VERSION:STRING=//p' $(BUILD_DIR)/x86_64-windows/CMakeCache.txt | tail -n 1); \
+		if [ -z "$$test_ver" ]; then \
 			echo "Missing Windows build version. Rebuild x86_64/windows first." >&2; \
 			exit 1; \
 		fi; \
@@ -429,8 +429,8 @@ test:
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		test_ver=$(sed -n 's/^REDP2P_BUILD_VERSION:UNINITIALIZED=//p; s/^REDP2P_BUILD_VERSION:STRING=//p' $(BUILD_DIR)/$(subst /,-,$(NATIVE_TARGET))/CMakeCache.txt | tail -n 1); \
-		if [ -z "$test_ver" ]; then \
+		test_ver=$$(sed -n 's/^REDP2P_BUILD_VERSION:UNINITIALIZED=//p; s/^REDP2P_BUILD_VERSION:STRING=//p' $(BUILD_DIR)/$(subst /,-,$(NATIVE_TARGET))/CMakeCache.txt | tail -n 1); \
+		if [ -z "$$test_ver" ]; then \
 			echo "Missing native build version. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
