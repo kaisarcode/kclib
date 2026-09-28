@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #ifndef _WIN32
 #include <time.h>
@@ -446,7 +447,7 @@ static void kc_redp2p_pub_adapter_close(kc_redp2p_pub_t *pub)
         if (!client->udp && !REDP2P_ISERR(client->fd) &&
             !atomic_load(&client->closed))
             REDP2P_FD_CLOSE(client->fd);
-        crypto_wipe(client, sizeof(*client));
+        memset(client, 0, sizeof(*client));
         free(client);
     }
     free(pub->clients);
@@ -1210,6 +1211,7 @@ void kc_redp2p_idx_close(kc_redp2p_idx_t *idx)
 void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
 {
     if (!pub) return;
+    kc_redp2p_pub_adapter_close(pub);
     kc_redp2p_runtime_close(&pub->runtime);
     free(pub);
 }
@@ -1222,8 +1224,89 @@ void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
 void kc_redp2p_con_close(kc_redp2p_con_t *con)
 {
     if (!con) return;
+    kc_redp2p_con_adapter_close(con);
     kc_redp2p_runtime_close(&con->runtime);
     free(con);
+}
+
+/**
+ * Writes an arbitrary TCP byte sequence in bounded native chunks.
+ * @return KC_REDP2P_OK on success or KC_REDP2P_ENET.
+ */
+static int kc_redp2p_send_stream(redp2p_fd_t fd, const void *data, size_t size)
+{
+    const unsigned char *cursor = (const unsigned char *)data;
+
+    while (size > 0) {
+        int chunk = size > (size_t)INT_MAX ? INT_MAX : (int)size;
+        if (redp2p_write_all(fd, (const char *)cursor, chunk) != 0)
+            return KC_REDP2P_ENET;
+        cursor += (size_t)chunk;
+        size -= (size_t)chunk;
+    }
+    return KC_REDP2P_OK;
+}
+
+/**
+ * Sends data through a direct consumer capability.
+ * @param con Direct consumer capability.
+ * @param data Application bytes.
+ * @param size Byte count.
+ * @return KC_REDP2P_OK on success or a negative status.
+ */
+int kc_redp2p_con_send(kc_redp2p_con_t *con, const void *data, size_t size)
+{
+    int sent;
+
+    if (!con || !con->direct || REDP2P_ISERR(con->adapter_fd) ||
+        (!data && size > 0))
+        return KC_REDP2P_EINVAL;
+    if (size == 0) return KC_REDP2P_OK;
+    if (con->runtime.ctx &&
+        con->runtime.ctx->proto == REDP2P_PROTO_TCP)
+        return kc_redp2p_send_stream(con->adapter_fd, data, size);
+    if (size > REDP2P_UDP_PAYLOAD_MAX) return KC_REDP2P_EINVAL;
+    sent = (int)send(con->adapter_fd, (const char *)data, (int)size, 0);
+    return sent == (int)size ? KC_REDP2P_OK : KC_REDP2P_ENET;
+}
+
+/**
+ * Responds to one publisher client.
+ * @param client Stable publisher-side client identity.
+ * @param data Application bytes.
+ * @param size Byte count.
+ * @return KC_REDP2P_OK on success or a negative status.
+ */
+int kc_redp2p_client_respond(kc_redp2p_client_t *client,
+    const void *data, size_t size)
+{
+    int sent;
+
+    if (!client || !client->pub || atomic_load(&client->closed) ||
+        (!data && size > 0))
+        return KC_REDP2P_EINVAL;
+    if (size == 0) return KC_REDP2P_OK;
+    if (!client->udp)
+        return kc_redp2p_send_stream(client->fd, data, size);
+    if (size > REDP2P_UDP_PAYLOAD_MAX) return KC_REDP2P_EINVAL;
+    sent = (int)sendto(client->pub->adapter_fd, (const char *)data,
+        (int)size, 0, (const struct sockaddr *)&client->address,
+        client->address_len);
+    return sent == (int)size ? KC_REDP2P_OK : KC_REDP2P_ENET;
+}
+
+/**
+ * Closes one publisher-side client identity.
+ * @param client Client to close.
+ * @return None.
+ */
+void kc_redp2p_client_close(kc_redp2p_client_t *client)
+{
+    if (!client || atomic_exchange(&client->closed, 1)) return;
+    if (!client->udp && !REDP2P_ISERR(client->fd)) {
+        REDP2P_FD_CLOSE(client->fd);
+        client->fd = REDP2P_FD_INVALID;
+    }
 }
 
 /**
