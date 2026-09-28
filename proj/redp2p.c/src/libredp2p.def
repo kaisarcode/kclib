@@ -6,6 +6,9 @@ EXPORTS
     kc_redp2p_idx_close
     kc_redp2p_pub_close
     kc_redp2p_con_close
+    kc_redp2p_con_send
+    kc_redp2p_client_respond
+    kc_redp2p_client_close
     kc_redp2p_free
     kc_redp2p_strerror
     kc_redp2p_version
