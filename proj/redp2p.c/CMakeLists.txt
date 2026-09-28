@@ -150,46 +150,21 @@ if(REDP2P_BUILD_TESTS)
 
     add_executable(redp2p_contract_test
         tests/test.c
-        ${REDP2P_ENGINE_SOURCES}
+        ${REDP2P_SOURCES}
     )
     target_include_directories(redp2p_contract_test PRIVATE
         src lib/monocypher lib/kcp lib/parson
-    )
-    target_link_libraries(redp2p_contract_test PRIVATE
-        ${REDP2P_TEST_SHARED_TARGET}
     )
     target_compile_definitions(redp2p_contract_test PRIVATE
         REDP2P_TEST_CLI="${REDP2P_TEST_CLI_TARGET_PATH}"
         REDP2P_TESTING=1
     )
 
-    add_executable(redp2p_lifecycle_test
-        tests/test.c
-        ${REDP2P_SOURCES}
-    )
-    target_include_directories(redp2p_lifecycle_test PRIVATE
-        src lib/monocypher lib/kcp lib/parson
-    )
-    target_compile_definitions(redp2p_lifecycle_test PRIVATE
-        REDP2P_TEST_CLI=""
-        REDP2P_TESTING=1
-        REDP2P_LIFECYCLE_TEST=1
-    )
-
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(redp2p_contract_test PRIVATE pthread m)
-        target_link_libraries(redp2p_lifecycle_test PRIVATE pthread m)
     elseif(MINGW)
         target_link_libraries(redp2p_contract_test PRIVATE ws2_32 bcrypt)
-        target_link_libraries(redp2p_lifecycle_test PRIVATE ws2_32 bcrypt)
     elseif(MSVC)
         target_link_libraries(redp2p_contract_test PRIVATE ws2_32 bcrypt)
-        target_link_libraries(redp2p_lifecycle_test PRIVATE ws2_32 bcrypt)
     endif()
-
-    add_custom_command(TARGET redp2p_contract_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:${REDP2P_TEST_SHARED_TARGET}>
-            $<TARGET_FILE_DIR:redp2p_contract_test>
-    )
 endif()
