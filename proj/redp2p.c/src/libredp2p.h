@@ -1,6 +1,6 @@
 /**
  * libredp2p.h - REDP2P.
- * Summary: Public API for publishing and consuming direct peer-to-peer port tunnels.
+ * Summary: Public API for publishing and consuming direct peer-to-peer transport.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -107,26 +107,29 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
     const kc_redp2p_idx_options_t *options);
 
 /**
- * Publishes one local port through an index.
+ * Publishes one native TCP or UDP capability through an index.
  *
+ * A nonzero options port adapts an existing local service. A zero port selects
+ * direct mode and requires a receive function; REDP2P owns the private adapter.
  * Success means the publisher is registered and its runtime is active.
  *
  * @param out Destination publisher handle.
- * @param options Publisher identity, index, protocol, and local port.
+ * @param options Publisher identity, index, protocol, and data mode.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
 int kc_redp2p_pub(kc_redp2p_pub_t **out,
     const kc_redp2p_pub_options_t *options);
 
 /**
- * Exposes one announced publisher through a local port.
+ * Connects to one announced publisher.
  *
- * The publisher protocol is learned from the index. REDP2P only establishes
- * and maintains the tunnel; applications use the local port with any socket
- * library or process they choose.
+ * The publisher protocol is learned from the index. A nonzero options port
+ * exposes the compatible local tunnel. A zero port selects direct mode, where
+ * kc_redp2p_con_send() and the optional receive function carry application
+ * data without a public local port.
  *
  * @param out Destination consumer handle.
- * @param options Target publisher, index, and local tunnel port.
+ * @param options Target publisher, index, and data mode.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
 int kc_redp2p_con(kc_redp2p_con_t **out,
