@@ -1,35 +1,25 @@
 # redp2p.c - Peer-to-Peer Connectivity
 
-`redp2p.c` connects two peers directly.
+`redp2p.c` provides peer-to-peer connectivity through three roles: an index, a
+publisher, and a consumer.
 
-The idea is simple: one peer publishes something under a name, another peer asks
-for that name, and an index helps them find each other. Once the connection is
-established, the index is no longer in the data path.
-
-REDP2P is built around three roles:
+The publisher registers an identifier in an index and exposes a service or data
+endpoint under that identifier. The consumer resolves that identifier through
+the same index and requests a connection. The index coordinates discovery and
+connection establishment; once the peers are connected, application traffic
+flows directly between publisher and consumer.
 
 ```text
            index
           /     \
-   publisher   consumer
-          \     /
-       direct link
+   publisher - consumer
 ```
 
-The **publisher** says: “I am `chat`, `device01`, `game`, etc.”
-
-The **consumer** says: “Connect me to `chat`.”
-
-The **index** knows which publishers are available and coordinates the meeting.
-It does not proxy the application traffic between them.
-
-That same model is used in two environments:
-
-- native programs, where REDP2P connects TCP or UDP services;
-- browsers, where REDP2P connects peers with WebRTC data channels.
-
-The project includes both a native C index and a PHP index. Both speak the same
-REDP2P index protocol and both can coordinate WebRTC signaling.
+The same model is used by the native and browser implementations. Native peers
+publish and consume TCP or UDP services, while browser peers use WebRTC data
+channels. The project provides two compatible index implementations: the native
+C index and the PHP index. Both implement the REDP2P index protocol, including
+the signaling required by WebRTC peers.
 
 ---
 
@@ -73,8 +63,8 @@ Machine B can now use:
 
 as if the service were local.
 
-The index helped the two peers establish the connection, but the service traffic
-travels directly between them.
+The index coordinates the connection, but service traffic travels directly
+between the peers.
 
 The same works for UDP:
 
@@ -96,8 +86,8 @@ Start an index:
 redp2p idx 9876
 ```
 
-An index can serve native peers and can also handle the WebRTC signaling used by
-browser peers.
+The native index coordinates TCP/UDP peers and also implements the WebRTC
+signaling used by browser peers.
 
 List the publishers currently known by a local index:
 
@@ -173,24 +163,13 @@ SIGTERM.
 
 ## Browser / WebRTC
 
-The browser version keeps exactly the same idea:
+The browser implementation uses the same index/publisher/consumer model, with
+WebRTC as the peer transport.
 
-```text
-browser publisher
-       |
-       | registers "chat"
-       v
-     index
-       ^
-       | asks for "chat"
-       |
-browser consumer
-
-publisher <========== WebRTC ==========> consumer
-```
-
-The browser peers use the index only for discovery and WebRTC signaling. Once
-the WebRTC data channel is open, application data goes directly between the
+A browser publisher registers an ID in the index. A browser consumer resolves
+that ID and submits a WebRTC offer through the index. The publisher receives the
+offer through the same index and returns an answer. After negotiation completes,
+the resulting data channel carries application traffic directly between the two
 browsers.
 
 The browser implementation is under:
@@ -218,10 +197,10 @@ const pub = await RedP2P.pub({
 });
 ```
 
-The publisher registers `chat` in the index and waits for consumers.
+The publisher remains registered while the returned publisher object is open.
 
-When a consumer sends data, `receive()` gets both the data and the connected
-client. The publisher can answer that client with:
+When a consumer sends data, `receive()` receives the data together with the
+connected client. The publisher can answer that client with:
 
 ```js
 input.client.respond(data);
@@ -277,27 +256,24 @@ localhost development.
 
 ---
 
-## The index
+## Index implementations
 
-The index is the meeting point.
+The index maintains publisher registrations and coordinates connection setup. It
+supports both native peer discovery and WebRTC signaling, but it is not a relay
+for application data.
 
-It keeps track of published IDs and coordinates connection attempts. For native
-peers it exchanges the information needed to establish the peer-to-peer path.
-For browser peers it also carries the WebRTC offer/answer signaling.
-
-It does **not** relay the application data after the peers connect.
-
-There are two index implementations in this project.
+The project includes two compatible implementations.
 
 ### Native C index
 
-The CLI starts it with:
+The native index is part of the C library and can be started through the CLI:
 
 ```bash
 redp2p idx 9876
 ```
 
-The same index handles native TCP/UDP coordination and browser WebRTC signaling.
+It handles native TCP/UDP coordination and the WebRTC signaling operations used
+by browser publishers and consumers.
 
 ### PHP index
 
@@ -331,7 +307,7 @@ The same index limits and registration settings are available through
 
 ## Public C API
 
-The library exposes the same three concepts directly:
+The library exposes the same three roles directly:
 
 ```c
 kc_redp2p_idx(...)
