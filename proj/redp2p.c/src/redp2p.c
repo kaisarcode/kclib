@@ -137,7 +137,6 @@ static int redp2p_cli_spec(const char *text, char id[KC_REDP2P_ID_MAX + 1],
     return redp2p_is_valid_id(id);
 }
 
-
 #ifdef _WIN32
 typedef HANDLE redp2p_cli_thread_t;
 typedef CRITICAL_SECTION redp2p_cli_mutex_t;
@@ -206,6 +205,11 @@ struct redp2p_cli_con_udp_session {
     redp2p_cli_con_udp_session_t *next;
 };
 
+/**
+ * Initializes one CLI synchronization mutex.
+ * @param mutex Mutex to initialize.
+ * @return 0 on success, nonzero on failure.
+ */
 static int redp2p_cli_mutex_init(redp2p_cli_mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -216,6 +220,11 @@ static int redp2p_cli_mutex_init(redp2p_cli_mutex_t *mutex)
 #endif
 }
 
+/**
+ * Locks one CLI synchronization mutex.
+ * @param mutex Mutex to lock.
+ * @return None.
+ */
 static void redp2p_cli_mutex_lock(redp2p_cli_mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -225,6 +234,11 @@ static void redp2p_cli_mutex_lock(redp2p_cli_mutex_t *mutex)
 #endif
 }
 
+/**
+ * Unlocks one CLI synchronization mutex.
+ * @param mutex Mutex to unlock.
+ * @return None.
+ */
 static void redp2p_cli_mutex_unlock(redp2p_cli_mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -234,6 +248,11 @@ static void redp2p_cli_mutex_unlock(redp2p_cli_mutex_t *mutex)
 #endif
 }
 
+/**
+ * Destroys one CLI synchronization mutex.
+ * @param mutex Mutex to destroy.
+ * @return None.
+ */
 static void redp2p_cli_mutex_destroy(redp2p_cli_mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -244,6 +263,13 @@ static void redp2p_cli_mutex_destroy(redp2p_cli_mutex_t *mutex)
 }
 
 #ifdef _WIN32
+/**
+ * Starts one Windows CLI worker thread.
+ * @param thread Destination thread handle.
+ * @param fn Worker entry point.
+ * @param arg Worker argument.
+ * @return 0 on success, -1 on failure.
+ */
 static int redp2p_cli_thread_start(redp2p_cli_thread_t *thread,
     LPTHREAD_START_ROUTINE fn, void *arg)
 {
@@ -251,6 +277,13 @@ static int redp2p_cli_thread_start(redp2p_cli_thread_t *thread,
     return *thread ? 0 : -1;
 }
 #else
+/**
+ * Starts one POSIX CLI worker thread.
+ * @param thread Destination thread handle.
+ * @param fn Worker entry point.
+ * @param arg Worker argument.
+ * @return 0 on success, nonzero on failure.
+ */
 static int redp2p_cli_thread_start(redp2p_cli_thread_t *thread,
     void *(*fn)(void *), void *arg)
 {
@@ -258,6 +291,11 @@ static int redp2p_cli_thread_start(redp2p_cli_thread_t *thread,
 }
 #endif
 
+/**
+ * Joins one CLI worker thread.
+ * @param thread Thread to join.
+ * @return None.
+ */
 static void redp2p_cli_thread_join(redp2p_cli_thread_t thread)
 {
 #ifdef _WIN32
@@ -268,6 +306,11 @@ static void redp2p_cli_thread_join(redp2p_cli_thread_t thread)
 #endif
 }
 
+/**
+ * Shuts down both directions of one CLI socket.
+ * @param fd Socket descriptor.
+ * @return None.
+ */
 static void redp2p_cli_socket_shutdown(redp2p_fd_t fd)
 {
     if (REDP2P_ISERR(fd)) return;
@@ -278,6 +321,12 @@ static void redp2p_cli_socket_shutdown(redp2p_fd_t fd)
 #endif
 }
 
+/**
+ * Opens one CLI socket connected to a loopback service.
+ * @param protocol REDP2P TCP or UDP protocol.
+ * @param port Loopback service port.
+ * @return Connected descriptor, or REDP2P_FD_INVALID on failure.
+ */
 static redp2p_fd_t redp2p_cli_connect_local(int protocol, uint16_t port)
 {
     struct sockaddr_in address;
@@ -298,6 +347,12 @@ static redp2p_fd_t redp2p_cli_connect_local(int protocol, uint16_t port)
     return fd;
 }
 
+/**
+ * Opens one CLI loopback listener or datagram socket.
+ * @param protocol REDP2P TCP or UDP protocol.
+ * @param port Local loopback port.
+ * @return Bound descriptor, or REDP2P_FD_INVALID on failure.
+ */
 static redp2p_fd_t redp2p_cli_bind_local(int protocol, uint16_t port)
 {
     struct sockaddr_in address;
@@ -324,6 +379,14 @@ static redp2p_fd_t redp2p_cli_bind_local(int protocol, uint16_t port)
     return fd;
 }
 
+/**
+ * Writes one application payload to a CLI forwarding socket.
+ * @param fd Destination socket.
+ * @param protocol REDP2P TCP or UDP protocol.
+ * @param data Application bytes.
+ * @param size Byte count.
+ * @return 0 on success, -1 on failure.
+ */
 static int redp2p_cli_socket_send(redp2p_fd_t fd, int protocol,
     const void *data, size_t size)
 {
@@ -345,6 +408,13 @@ static int redp2p_cli_socket_send(redp2p_fd_t fd, int protocol,
     return 0;
 }
 
+/**
+ * Parses one CLI index endpoint into host and port components.
+ * @param text Index endpoint text.
+ * @param host Destination host buffer.
+ * @param port Destination index port.
+ * @return 1 on success, 0 on invalid input.
+ */
 static int redp2p_cli_parse_index(const char *text, char host[256],
     uint16_t *port)
 {
@@ -379,6 +449,13 @@ static int redp2p_cli_parse_index(const char *text, char host[256],
     return 1;
 }
 
+/**
+ * Resolves the native transport announced by one publisher.
+ * @param index Index endpoint.
+ * @param id Publisher identifier.
+ * @param protocol Destination REDP2P protocol.
+ * @return KC_REDP2P_OK on success or a public error code.
+ */
 static int redp2p_cli_lookup_protocol(const char *index, const char *id,
     int *protocol)
 {
@@ -443,6 +520,11 @@ cleanup:
     return result;
 }
 
+/**
+ * Pumps one local publisher backend socket back into its peer channel.
+ * @param arg Publisher client forwarding state.
+ * @return Platform thread result.
+ */
 REDP2P_CLI_THREAD(redp2p_cli_pub_backend_worker)
 {
     redp2p_cli_pub_client_t *state = (redp2p_cli_pub_client_t *)arg;
@@ -467,6 +549,12 @@ REDP2P_CLI_THREAD(redp2p_cli_pub_backend_worker)
     REDP2P_CLI_THREAD_RETURN();
 }
 
+/**
+ * Attaches one established peer channel to the CLI publisher backend.
+ * @param client Established publisher client.
+ * @param userdata Publisher CLI state.
+ * @return None.
+ */
 static void redp2p_cli_pub_connect(kc_redp2p_client_t *client, void *userdata)
 {
     redp2p_cli_pub_state_t *owner = (redp2p_cli_pub_state_t *)userdata;
@@ -519,6 +607,12 @@ static void redp2p_cli_pub_connect(kc_redp2p_client_t *client, void *userdata)
     state->thread_started = 1;
 }
 
+/**
+ * Forwards peer bytes from the publisher channel to its local backend socket.
+ * @param input Publisher receive event.
+ * @param userdata Publisher CLI state.
+ * @return None.
+ */
 static void redp2p_cli_pub_receive(const kc_redp2p_pub_input_t *input,
     void *userdata)
 {
@@ -542,6 +636,11 @@ static void redp2p_cli_pub_receive(const kc_redp2p_pub_input_t *input,
     if (failed) kc_redp2p_client_close(input->client);
 }
 
+/**
+ * Stops all active CLI publisher forwarding workers.
+ * @param state Publisher CLI state.
+ * @return None.
+ */
 static void redp2p_cli_pub_state_stop(redp2p_cli_pub_state_t *state)
 {
     redp2p_cli_pub_client_t *client;
@@ -557,6 +656,11 @@ static void redp2p_cli_pub_state_stop(redp2p_cli_pub_state_t *state)
     }
 }
 
+/**
+ * Releases all CLI publisher forwarding resources.
+ * @param state Publisher CLI state.
+ * @return None.
+ */
 static void redp2p_cli_pub_state_destroy(redp2p_cli_pub_state_t *state)
 {
     redp2p_cli_pub_client_t *client = state->clients;
@@ -570,6 +674,13 @@ static void redp2p_cli_pub_state_destroy(redp2p_cli_pub_state_t *state)
     redp2p_cli_mutex_destroy(&state->mutex);
 }
 
+/**
+ * Forwards peer TCP bytes to one local CLI client socket.
+ * @param data Peer bytes.
+ * @param size Byte count.
+ * @param userdata TCP forwarding session.
+ * @return None.
+ */
 static void redp2p_cli_con_tcp_receive(const void *data, size_t size,
     void *userdata)
 {
@@ -580,6 +691,11 @@ static void redp2p_cli_con_tcp_receive(const void *data, size_t size,
     (void)redp2p_cli_socket_send(session->fd, KC_REDP2P_TCP, data, size);
 }
 
+/**
+ * Runs one local TCP client over one REDP2P peer channel.
+ * @param arg TCP forwarding session.
+ * @return Platform thread result.
+ */
 REDP2P_CLI_THREAD(redp2p_cli_con_tcp_worker)
 {
     redp2p_cli_con_tcp_session_t *session =
@@ -616,6 +732,14 @@ REDP2P_CLI_THREAD(redp2p_cli_con_tcp_worker)
     REDP2P_CLI_THREAD_RETURN();
 }
 
+/**
+ * Runs the CLI TCP loopback forwarding application.
+ * @param id Target publisher identifier.
+ * @param index Index endpoint.
+ * @param port Local loopback port.
+ * @param stun Optional STUN URL.
+ * @return 0 on clean shutdown, 1 on startup failure.
+ */
 static int redp2p_cli_con_tcp_run(const char *id, const char *index,
     uint16_t port, const char *stun)
 {
@@ -697,6 +821,13 @@ static int redp2p_cli_con_tcp_run(const char *id, const char *index,
     return result;
 }
 
+/**
+ * Forwards one peer UDP datagram to its local CLI endpoint.
+ * @param data Peer datagram bytes.
+ * @param size Byte count.
+ * @param userdata UDP forwarding session.
+ * @return None.
+ */
 static void redp2p_cli_con_udp_receive(const void *data, size_t size,
     void *userdata)
 {
@@ -708,6 +839,12 @@ static void redp2p_cli_con_udp_receive(const void *data, size_t size,
         (const struct sockaddr *)&session->address, session->address_len);
 }
 
+/**
+ * Finds the peer channel associated with one local UDP endpoint.
+ * @param state UDP forwarding state.
+ * @param address Local endpoint address.
+ * @return Matching session, or NULL when absent.
+ */
 static redp2p_cli_con_udp_session_t *redp2p_cli_con_udp_find(
     redp2p_cli_con_udp_state_t *state,
     const struct sockaddr_storage *address)
@@ -721,6 +858,12 @@ static redp2p_cli_con_udp_session_t *redp2p_cli_con_udp_find(
     return NULL;
 }
 
+/**
+ * Opens one REDP2P channel for a local UDP endpoint.
+ * @param state UDP forwarding state.
+ * @param session Session receiving the channel.
+ * @return KC_REDP2P_OK on success or a public error code.
+ */
 static int redp2p_cli_con_udp_open(redp2p_cli_con_udp_state_t *state,
     redp2p_cli_con_udp_session_t *session)
 {
@@ -735,6 +878,14 @@ static int redp2p_cli_con_udp_open(redp2p_cli_con_udp_state_t *state,
     return kc_redp2p_con(&session->con, &options);
 }
 
+/**
+ * Runs the CLI UDP loopback forwarding application.
+ * @param id Target publisher identifier.
+ * @param index Index endpoint.
+ * @param port Local loopback port.
+ * @param stun Optional STUN URL.
+ * @return 0 on clean shutdown, 1 on startup failure.
+ */
 static int redp2p_cli_con_udp_run(const char *id, const char *index,
     uint16_t port, const char *stun)
 {
@@ -805,7 +956,6 @@ static int redp2p_cli_con_udp_run(const char *id, const char *index,
     REDP2P_FD_CLOSE(state.fd);
     return 0;
 }
-
 
 /**
  * Prints command usage information.
