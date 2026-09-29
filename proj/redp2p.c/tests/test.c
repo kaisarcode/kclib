@@ -160,7 +160,9 @@ static _Atomic int test_direct_connected;
 static void test_direct_pub_connect(kc_redp2p_client_t *client, void *userdata)
 {
     (void)userdata;
-    if (client) atomic_store(&test_direct_connected, 1);
+    if (!client) return;
+    atomic_store(&test_direct_connected, 1);
+    (void)kc_redp2p_client_respond(client, "ready", 5);
 }
 
 /**
@@ -7196,6 +7198,17 @@ static int case_kc_redp2p_api(void)
             atomic_load(&test_direct_connected));
     }
     if (fail == 0) {
+        uint64_t deadline = test_now_ms() + 5000U;
+        while (!atomic_load(&test_direct_receive.received) &&
+            test_now_ms() < deadline)
+            test_sleep_ms(10);
+        fail += expect_true("public TCP channel may send immediately",
+            atomic_load(&test_direct_receive.received) &&
+            test_direct_receive.size == 5 &&
+            memcmp(test_direct_receive.data, "ready", 5) == 0);
+        memset(&test_direct_receive, 0, sizeof(test_direct_receive));
+    }
+    if (fail == 0) {
         status = kc_redp2p_con_send(con, payload, sizeof(payload));
         fail += expect_int("public TCP send", KC_REDP2P_OK, status);
     }
@@ -7243,6 +7256,17 @@ static int case_kc_redp2p_api(void)
             test_sleep_ms(10);
         fail += expect_true("public UDP publisher channel",
             atomic_load(&test_direct_connected));
+    }
+    if (fail == 0) {
+        uint64_t deadline = test_now_ms() + 5000U;
+        while (!atomic_load(&test_direct_receive.received) &&
+            test_now_ms() < deadline)
+            test_sleep_ms(10);
+        fail += expect_true("public UDP channel may send immediately",
+            atomic_load(&test_direct_receive.received) &&
+            test_direct_receive.size == 5 &&
+            memcmp(test_direct_receive.data, "ready", 5) == 0);
+        memset(&test_direct_receive, 0, sizeof(test_direct_receive));
     }
     if (fail == 0) {
         status = kc_redp2p_con_send(con, payload, sizeof(payload));
