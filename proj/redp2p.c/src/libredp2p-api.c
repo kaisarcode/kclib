@@ -23,6 +23,7 @@
 #endif
 
 #define KC_REDP2P_READY_TIMEOUT_MS 10000U
+#define KC_REDP2P_CHANNEL_TIMEOUT_MS 30000U
 #define KC_REDP2P_DIRECT_PORT_ATTEMPTS 8
 
 #ifdef _WIN32
@@ -64,7 +65,6 @@ struct kc_redp2p_pub {
     uint16_t index_port;
     char id[KC_REDP2P_ID_MAX + 1];
     uint16_t port;
-    int direct;
     int adapter_platform;
     redp2p_fd_t adapter_fd;
 #ifdef _WIN32
@@ -79,6 +79,7 @@ struct kc_redp2p_pub {
     _Atomic int deferred_close;
     kc_redp2p_io_mutex_t io_mutex;
     int io_mutex_initialized;
+    kc_redp2p_pub_connect_fn connect;
     kc_redp2p_pub_receive_fn receive;
     void *userdata;
     kc_redp2p_client_t **clients;
@@ -93,7 +94,6 @@ struct kc_redp2p_con {
     char id[KC_REDP2P_ID_MAX + 1];
     char self_id[KC_REDP2P_ID_MAX + 1];
     uint16_t port;
-    int direct;
     int adapter_platform;
     redp2p_fd_t adapter_fd;
 #ifdef _WIN32
@@ -395,6 +395,8 @@ static kc_redp2p_client_t *kc_redp2p_pub_add_client(kc_redp2p_pub_t *pub,
     if (address) client->address = *address;
     client->address_len = address_len;
     pub->clients[pub->client_count++] = client;
+    if (pub->connect && !atomic_load(&pub->closing))
+        pub->connect(client, pub->userdata);
     return client;
 }
 
@@ -406,16 +408,18 @@ static kc_redp2p_client_t *kc_redp2p_pub_add_client(kc_redp2p_pub_t *pub,
  * @return Stable client capability, or NULL on failure.
  */
 static kc_redp2p_client_t *kc_redp2p_pub_udp_client(kc_redp2p_pub_t *pub,
-    const struct sockaddr_storage *address, socklen_t address_len)
+    const struct sockaddr_storage *address, socklen_t address_len, int *created)
 {
     size_t i;
 
+    if (created) *created = 0;
     for (i = 0; i < pub->client_count; i++) {
         kc_redp2p_client_t *client = pub->clients[i];
         if (client && client->udp && !atomic_load(&client->closed) &&
             redp2p_sockaddr_equal(&client->address, address))
             return client;
     }
+    if (created) *created = 1;
     return kc_redp2p_pub_add_client(pub, pub->adapter_fd, 1, address,
         address_len);
 }
@@ -458,7 +462,7 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
         size_t i;
         int ready;
 
-        if (!pub->direct || REDP2P_ISERR(pub->adapter_fd)) break;
+        if (REDP2P_ISERR(pub->adapter_fd)) break;
         if (pub->runtime.ctx->proto == REDP2P_PROTO_TCP) {
             for (i = 0; i < pub->client_count; i++) {
                 kc_redp2p_client_t *client = pub->clients[i];
@@ -502,9 +506,11 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
                 int n = (int)recvfrom(pub->adapter_fd, (char *)buffer,
                     sizeof(buffer), 0, (struct sockaddr *)&address, &length);
                 if (n >= 0) {
+                    int created = 0;
                     kc_redp2p_client_t *client =
-                        kc_redp2p_pub_udp_client(pub, &address, length);
-                    if (client)
+                        kc_redp2p_pub_udp_client(pub, &address, length,
+                            &created);
+                    if (client && !(created && n == 0))
                         kc_redp2p_pub_emit(pub, client, buffer, (size_t)n);
                 }
             }
@@ -564,7 +570,10 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
         if (ready <= 0 || !redp2p_poll_readable(&fd)) continue;
         n = redp2p_sock_read(con->adapter_fd, (char *)buffer,
             (int)sizeof(buffer));
-        if (n <= 0) break;
+        if (n < 0) break;
+        if (n == 0 && con->runtime.ctx &&
+            con->runtime.ctx->proto == REDP2P_PROTO_TCP)
+            break;
         if (con->receive && !atomic_load(&con->closing))
             con->receive(buffer, (size_t)n, con->userdata);
     }
@@ -983,6 +992,48 @@ static int kc_redp2p_runtime_wait_ready(kc_redp2p_runtime_t *runtime)
 }
 
 /**
+ * Waits until a consumer owns one established peer session.
+ * @param con Consumer capability.
+ * @return KC_REDP2P_OK on success or a connection status.
+ */
+static int kc_redp2p_con_wait_channel(kc_redp2p_con_t *con)
+{
+    uint64_t deadline;
+    int state;
+
+    if (!con || !con->runtime.ctx) return KC_REDP2P_EINVAL;
+    deadline = kc_redp2p_now_ms() + KC_REDP2P_CHANNEL_TIMEOUT_MS;
+    for (;;) {
+        state = atomic_load(&con->runtime.ctx->channel_state);
+        if (state != 0) break;
+        if (atomic_load(&con->runtime.done)) break;
+        if (kc_redp2p_now_ms() >= deadline) return KC_REDP2P_ETIMEOUT;
+        kc_redp2p_sleep_tick();
+    }
+    if (state > 0) return KC_REDP2P_OK;
+    if (state < 0) return atomic_load(&con->runtime.ctx->channel_status);
+    return con->runtime.result == REDP2P_OK ?
+        KC_REDP2P_ERROR : con->runtime.result;
+}
+
+/**
+ * Starts peer establishment through the private native adapter.
+ * @param con Consumer capability.
+ * @return KC_REDP2P_OK on success or KC_REDP2P_ENET.
+ */
+static int kc_redp2p_con_start_channel(kc_redp2p_con_t *con)
+{
+    int sent;
+
+    if (!con || !con->runtime.ctx || REDP2P_ISERR(con->adapter_fd))
+        return KC_REDP2P_EINVAL;
+    if (con->runtime.ctx->proto != REDP2P_PROTO_UDP)
+        return KC_REDP2P_OK;
+    sent = (int)send(con->adapter_fd, "", 0, 0);
+    return sent == 0 ? KC_REDP2P_OK : KC_REDP2P_ENET;
+}
+
+/**
  * Joins one started public runtime worker.
  * @param runtime Public runtime wrapper.
  * @return None.
@@ -1248,17 +1299,9 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     pub = (kc_redp2p_pub_t *)calloc(1, sizeof(*pub));
     if (!pub) return KC_REDP2P_ERROR;
     pub->adapter_fd = REDP2P_FD_INVALID;
-    pub->direct = options->port == 0;
+    pub->connect = options->connect;
     pub->receive = options->receive;
     pub->userdata = options->userdata;
-    if (pub->direct && !pub->receive) {
-        free(pub);
-        return KC_REDP2P_EINVAL;
-    }
-    if (!pub->direct && pub->receive) {
-        free(pub);
-        return KC_REDP2P_EINVAL;
-    }
     if (!kc_redp2p_parse_index(options->index, pub->index_host,
         &pub->index_port)) {
         free(pub);
@@ -1278,8 +1321,8 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     status = redp2p_pub_set_protocol(pub->runtime.ctx, options->protocol);
     if (status != REDP2P_OK) goto fail;
 
-    pub->port = options->port;
-    if (pub->direct) {
+    pub->port = 0;
+    {
         int type = options->protocol == KC_REDP2P_TCP
             ? SOCK_STREAM : SOCK_DGRAM;
 
@@ -1295,6 +1338,7 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
             goto fail_adapter;
         }
     }
+    pub->runtime.ctx->direct_mode = 1;
     status = redp2p_set_local_port(pub->runtime.ctx, pub->port);
     if (status != REDP2P_OK) goto fail_adapter;
     if (options->pass) {
@@ -1316,13 +1360,11 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
         pub->runtime.ctx = NULL;
         goto fail_adapter_no_ctx;
     }
-    if (pub->direct) {
-        status = kc_redp2p_pub_adapter_thread_start(pub);
-        if (status != KC_REDP2P_OK) {
-            kc_redp2p_runtime_close(&pub->runtime);
-            pub->runtime.ctx = NULL;
-            goto fail_adapter_no_ctx;
-        }
+    status = kc_redp2p_pub_adapter_thread_start(pub);
+    if (status != KC_REDP2P_OK) {
+        kc_redp2p_runtime_close(&pub->runtime);
+        pub->runtime.ctx = NULL;
+        goto fail_adapter_no_ctx;
     }
     *out = pub;
     return KC_REDP2P_OK;
@@ -1362,20 +1404,15 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     con = (kc_redp2p_con_t *)calloc(1, sizeof(*con));
     if (!con) return KC_REDP2P_ERROR;
     con->adapter_fd = REDP2P_FD_INVALID;
-    con->direct = options->port == 0;
     con->receive = options->receive;
     con->userdata = options->userdata;
-    if (!con->direct && con->receive) {
-        free(con);
-        return KC_REDP2P_EINVAL;
-    }
     if (!kc_redp2p_parse_index(options->index, con->index_host,
         &con->index_port) || !kc_redp2p_make_self_id(con->self_id)) {
         free(con);
         return KC_REDP2P_EINVAL;
     }
     memcpy(con->id, options->id, strlen(options->id) + 1);
-    con->port = options->port;
+    con->port = 0;
     status = kc_redp2p_io_mutex_init(&con->io_mutex,
         &con->io_mutex_initialized);
     if (status != KC_REDP2P_OK) {
@@ -1383,28 +1420,27 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
         return status;
     }
 
-    if (con->direct) {
-        if (redp2p_platform_init() != 0) {
-            status = KC_REDP2P_ENET;
-            goto fail_no_ctx;
-        }
-        con->adapter_platform = 1;
+    if (redp2p_platform_init() != 0) {
+        status = KC_REDP2P_ENET;
+        goto fail_no_ctx;
     }
+    con->adapter_platform = 1;
 
     {
         int attempt;
         for (attempt = 0; ; attempt++) {
             int retry_bind;
 
-            if (con->direct) {
-                status = kc_redp2p_ephemeral_port(&con->port);
-                if (status != KC_REDP2P_OK) goto fail_no_ctx;
-                kc_redp2p_test_port_point(con->port);
-            }
+            status = kc_redp2p_ephemeral_port(&con->port);
+            if (status != KC_REDP2P_OK) goto fail_no_ctx;
+            kc_redp2p_test_port_point(con->port);
 
             status = redp2p_context_create(&con->runtime.ctx);
             if (status != REDP2P_OK) goto fail_no_ctx;
             kc_redp2p_public_defaults(con->runtime.ctx);
+            con->runtime.ctx->direct_mode = 1;
+            atomic_store(&con->runtime.ctx->channel_state, 0);
+            atomic_store(&con->runtime.ctx->channel_status, REDP2P_ERROR);
             status = redp2p_set_local_port(con->runtime.ctx, con->port);
             if (status != REDP2P_OK) goto fail;
             if (options->stun) {
@@ -1422,7 +1458,7 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
             status = kc_redp2p_runtime_wait_ready(&con->runtime);
             if (status == REDP2P_OK) break;
 
-            retry_bind = con->direct && status == REDP2P_ENET &&
+            retry_bind = status == REDP2P_ENET &&
                 attempt + 1 < KC_REDP2P_DIRECT_PORT_ATTEMPTS &&
                 (strcmp(con->runtime.ctx->err_buf,
                     "connect: local UDP bind failed") == 0 ||
@@ -1434,21 +1470,28 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
             goto fail_no_ctx;
         }
     }
-    if (con->direct) {
-        status = kc_redp2p_con_adapter_open(con);
+    status = kc_redp2p_con_adapter_open(con);
+    if (status != KC_REDP2P_OK) {
+        kc_redp2p_runtime_close(&con->runtime);
+        con->runtime.ctx = NULL;
+        goto fail_no_ctx;
+    }
+    status = kc_redp2p_con_start_channel(con);
+    if (status == KC_REDP2P_OK)
+        status = kc_redp2p_con_wait_channel(con);
+    if (status != KC_REDP2P_OK) {
+        kc_redp2p_con_adapter_close(con);
+        kc_redp2p_runtime_close(&con->runtime);
+        con->runtime.ctx = NULL;
+        goto fail_no_ctx;
+    }
+    if (con->receive) {
+        status = kc_redp2p_con_adapter_thread_start(con);
         if (status != KC_REDP2P_OK) {
+            kc_redp2p_con_adapter_close(con);
             kc_redp2p_runtime_close(&con->runtime);
             con->runtime.ctx = NULL;
             goto fail_no_ctx;
-        }
-        if (con->receive) {
-            status = kc_redp2p_con_adapter_thread_start(con);
-            if (status != KC_REDP2P_OK) {
-                kc_redp2p_con_adapter_close(con);
-                kc_redp2p_runtime_close(&con->runtime);
-                con->runtime.ctx = NULL;
-                goto fail_no_ctx;
-            }
         }
     }
     *out = con;
@@ -1651,8 +1694,8 @@ static int kc_redp2p_send_stream(redp2p_fd_t fd, const void *data, size_t size)
 }
 
 /**
- * Sends data through a direct consumer capability.
- * @param con Direct consumer capability.
+ * Sends data through an established consumer capability.
+ * @param con Consumer capability.
  * @param data Application bytes.
  * @param size Byte count.
  * @return KC_REDP2P_OK on success or a negative status.
@@ -1666,8 +1709,7 @@ int kc_redp2p_con_send(kc_redp2p_con_t *con, const void *data, size_t size)
         return KC_REDP2P_EINVAL;
     kc_redp2p_io_mutex_lock(&con->io_mutex, con->io_mutex_initialized);
     kc_redp2p_test_io_point();
-    if (atomic_load(&con->closing) || !con->direct ||
-        REDP2P_ISERR(con->adapter_fd))
+    if (atomic_load(&con->closing) || REDP2P_ISERR(con->adapter_fd))
     {
         kc_redp2p_io_mutex_unlock(&con->io_mutex,
             con->io_mutex_initialized);
