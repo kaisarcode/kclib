@@ -1,6 +1,6 @@
 /**
  * test.c - libtray public API tests.
- * Summary: Exercises tray ownership, native updates, callbacks, and CLI.
+ * Summary: Exercises tray ownership, native updates, and callbacks.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -14,9 +14,6 @@
 #include <stdint.h>
 #include <time.h>
 #include <stdatomic.h>
-#ifndef KC_TRAY_TEST_CLI
-#define KC_TRAY_TEST_CLI ""
-#endif
 #if defined(_WIN32)
 #include <windows.h>
 #elif defined(__APPLE__)
@@ -257,36 +254,6 @@ static void case_error(void) {
 }
 
 /**
- * Check the grouped command-line behavior.
- * @return None.
- */
-static void case_cli(void) {
-    int ok = 1;
-    char command[1024];
-    if (KC_TRAY_TEST_CLI[0]) {
-#if defined(_WIN32)
-        snprintf(command, sizeof(command), "\"%s\" --help > NUL", KC_TRAY_TEST_CLI);
-#else
-        snprintf(command, sizeof(command), "\"%s\" --help > /dev/null", KC_TRAY_TEST_CLI);
-#endif
-        ok = system(command) == 0;
-#if defined(_WIN32)
-        snprintf(command, sizeof(command), "\"%s\" --version > NUL", KC_TRAY_TEST_CLI);
-#else
-        snprintf(command, sizeof(command), "\"%s\" --version > /dev/null", KC_TRAY_TEST_CLI);
-#endif
-        ok &= system(command) == 0;
-#if defined(_WIN32)
-        snprintf(command, sizeof(command), "\"%s\" --invalid > NUL 2>&1", KC_TRAY_TEST_CLI);
-#else
-        snprintf(command, sizeof(command), "\"%s\" --invalid > /dev/null 2>&1", KC_TRAY_TEST_CLI);
-#endif
-        ok &= system(command) != 0;
-    }
-    result("cli", "help, version and invalid argument diagnostics", ok);
-}
-
-/**
  * Check actual native menu callbacks interactively.
  * @return None.
  */
@@ -329,7 +296,7 @@ static void case_callbacks(void) {
 }
 
 /**
- * Run the tray command or its contract tests.
+ * Run the tray contract tests.
  * @param argc Argument count.
  * @param argv Argument vector.
  * @return Process status or test result.
@@ -339,9 +306,9 @@ int main(int argc, char **argv) {
         total = 1; case_callbacks(); return failures ? 1 : 0;
     }
     if (argc != 2 || strcmp(argv[1], "all") != 0) return 2;
-    total = 9;
+    total = 8;
     case_version(); case_open_close(); case_options(); case_icon();
-    case_tooltip(); case_items(); case_lifecycle(); case_error(); case_cli();
+    case_tooltip(); case_items(); case_lifecycle(); case_error();
     printf("\n%d passed, %d failed\n", total - failures, failures);
     return failures ? 1 : 0;
 }

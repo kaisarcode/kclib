@@ -42,10 +42,6 @@ if(NOT TRAY_TEST_EXTERNAL_ARTIFACTS)
             COMPILE_DEFINITIONS KC_TRAY_BUILD_VERSION=${TRAY_BUILD_VERSION}
         )
 
-        add_executable(tray src/tray.c ${TRAY_SOURCES})
-        target_include_directories(tray PRIVATE src)
-        target_link_libraries(tray user32 shell32)
-
         add_library(tray_static STATIC ${TRAY_SOURCES})
         set_target_properties(tray_static PROPERTIES OUTPUT_NAME "tray")
         target_include_directories(tray_static PRIVATE src)
@@ -71,11 +67,6 @@ if(NOT TRAY_TEST_EXTERNAL_ARTIFACTS)
             set_source_files_properties(src/libtray.c PROPERTIES
                 LANGUAGE OBJC
             )
-            set_source_files_properties(src/tray.c PROPERTIES LANGUAGE OBJC)
-            add_executable(tray src/tray.c ${TRAY_SOURCES})
-            target_include_directories(tray PRIVATE src)
-            target_link_libraries(tray "-framework Cocoa" "-framework Foundation" pthread m)
-
             add_library(tray_static STATIC ${TRAY_SOURCES})
             set_target_properties(tray_static PROPERTIES OUTPUT_NAME "tray")
             target_include_directories(tray_static PRIVATE src)
@@ -89,12 +80,6 @@ if(NOT TRAY_TEST_EXTERNAL_ARTIFACTS)
         else()
             find_package(PkgConfig REQUIRED)
             pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-
-            add_executable(tray src/tray.c ${TRAY_SOURCES})
-            target_include_directories(tray PRIVATE src ${GTK3_INCLUDE_DIRS})
-            target_compile_options(tray PRIVATE ${GTK3_CFLAGS_OTHER})
-            target_link_directories(tray PRIVATE ${GTK3_LIBRARY_DIRS})
-            target_link_libraries(tray ${GTK3_LIBRARIES} pthread m dl)
 
             add_library(tray_static STATIC ${TRAY_SOURCES})
             set_target_properties(tray_static PROPERTIES OUTPUT_NAME "tray")
@@ -129,14 +114,6 @@ if(TRAY_BUILD_TESTS)
         set(TRAY_TEST_SHARED_TARGET tray_shared)
     endif()
 
-    if(TRAY_TEST_CLI)
-        set(TRAY_TEST_CLI_TARGET_PATH "${TRAY_TEST_CLI}")
-    elseif(TARGET tray)
-        set(TRAY_TEST_CLI_TARGET_PATH "$<TARGET_FILE:tray>")
-    else()
-        set(TRAY_TEST_CLI_TARGET_PATH "")
-    endif()
-
     add_executable(tray_contract_test src/test.c)
     if(APPLE)
         set_source_files_properties(src/test.c PROPERTIES LANGUAGE OBJC)
@@ -144,9 +121,6 @@ if(TRAY_BUILD_TESTS)
     endif()
     target_include_directories(tray_contract_test PRIVATE src)
     target_link_libraries(tray_contract_test PRIVATE ${TRAY_TEST_SHARED_TARGET})
-    target_compile_definitions(tray_contract_test PRIVATE
-        KC_TRAY_TEST_CLI="${TRAY_TEST_CLI_TARGET_PATH}"
-    )
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         find_package(PkgConfig REQUIRED)
@@ -167,11 +141,4 @@ if(TRAY_BUILD_TESTS)
             $<TARGET_FILE_DIR:tray_contract_test>
     )
 
-    if(WIN32 AND TRAY_TEST_CLI)
-        add_custom_command(TARGET tray_contract_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${TRAY_TEST_CLI}"
-                $<TARGET_FILE_DIR:tray_contract_test>/tray.exe
-        )
-    endif()
 endif()

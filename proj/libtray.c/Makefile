@@ -106,7 +106,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DTRAY_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/tray $(BIN_DIR)/$(1)/linux/tray
 	@echo "OK $(1)/linux"
 endef
 
@@ -129,7 +128,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DTRAY_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/tray.exe $(BIN_DIR)/$(1)/windows/tray.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libtray.dll $(BIN_DIR)/$(1)/windows/libtray.dll
 	@echo "OK $(1)/windows"
 endef
@@ -173,7 +171,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/tray $(BIN_DIR)/$(1)/macos/tray && \
 	echo "OK $(1)/macos"
 endef
 
@@ -203,7 +200,6 @@ test:
 				-DTRAY_BUILD_TESTS=ON \
 				-DTRAY_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtray.dll \
 				-DTRAY_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtray.dll.a \
-				-DTRAY_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/tray.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=wine \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -215,7 +211,6 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DTRAY_BUILD_TESTS=ON \
 				-DTRAY_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/$(NATIVE_SHARED_LIBRARY) \
-				-DTRAY_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/tray \
 				$(NATIVE_IMPORT_ARGUMENT) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \

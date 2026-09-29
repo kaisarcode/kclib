@@ -1,43 +1,6 @@
-# tray.c - Native System Tray
+# libtray.c - Native System Tray
 
-`tray.c` creates native system tray icons and menu items on Windows, Linux, and macOS.
-
----
-
-## CLI
-
-Create a tray with a greeting item and a quit item:
-
-```bash
-tray --icon /path/to/icon.png --tooltip "My app" \
-  --item "Greet" --sep --quit "Quit"
-```
-
-`--item TEXT` prints `TEXT` on selection; `--quit TEXT` ends the process.
-Repeated `--item` and `--sep` flags build the menu in order. The CLI does not
-run external commands.
-
-### Parameters
-
-| Command/Flag | Description |
-| :--- | :--- |
-| `--icon PATH` | Set the tray icon. |
-| `--tooltip TEXT` | Set the tray tooltip. |
-| `--item TEXT` | Add an item that prints `TEXT` when selected. |
-| `--sep` | Add a separator. |
-| `--quit TEXT` | Add an item that ends the process when selected. |
-| `-h`, `--help` | Show help and usage. |
-| `-v`, `--version` | Show the build version. |
-
-Unknown flags and missing values fail with a diagnostic and status 1. At least
-one menu item or separator is required.
-
-### Environment
-
-| Variable | Description |
-| :--- | :--- |
-| `KC_TRAY_ICON` | Default icon, overridden by `--icon`. |
-| `KC_TRAY_TOOLTIP` | Default tooltip, overridden by `--tooltip`. |
+`libtray.c` creates native system tray icons and menu items on Windows, Linux, and macOS.
 
 ---
 
@@ -100,8 +63,8 @@ make
 make test
 ```
 
-`make test` runs the native API tests and one grouped CLI case; a desktop
-session is needed for native cases. To run through Wine:
+`make test` runs the native API tests; a desktop session is needed for native
+cases. To run through Wine:
 
 ```bash
 make x86_64/windows
