@@ -123,7 +123,7 @@ struct kc_wvw {
     volatile LONG ref_count;
     int running, closing, com_initialized, started, free_on_exit;
     DWORD worker_id;
-    HANDLE thread, ready, closed_event;
+    HANDLE thread, ready;
     HWND hwnd;
     HBRUSH background_brush;
     HICON window_icon;
@@ -173,7 +173,6 @@ static void kc_wvw_context_destroy(kc_wvw_t *ctx) {
     free(ctx->pending_url);
     kc_wvw_bridge_state_free(&ctx->bridge);
     kc_wvw_config_free(&ctx->opts);
-    if (ctx->closed_event) CloseHandle(ctx->closed_event);
     free(ctx);
 }
 
@@ -2347,7 +2346,6 @@ cleanup:
         ctx->com_initialized = 0;
     }
     if (!ctx->started) SetEvent(ctx->ready);
-    SetEvent(ctx->closed_event);
     if (ctx->free_on_exit) {
         if (ctx->thread) CloseHandle(ctx->thread);
         ctx->thread = NULL;
@@ -2379,10 +2377,10 @@ int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){
     kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options)return KC_WVW_ERROR;
     ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;ctx->ref_count=1;
     if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);return KC_WVW_ERROR;}
-    ctx->ready=CreateEventW(NULL,TRUE,FALSE,NULL);ctx->closed_event=CreateEventW(NULL,TRUE,FALSE,NULL);
-    if(!ctx->ready||!ctx->closed_event){if(ctx->ready)CloseHandle(ctx->ready);if(ctx->closed_event)CloseHandle(ctx->closed_event);kc_wvw_config_free(&ctx->opts);free(ctx);return KC_WVW_ERROR;}
+    ctx->ready=CreateEventW(NULL,TRUE,FALSE,NULL);
+    if(!ctx->ready){kc_wvw_config_free(&ctx->opts);free(ctx);return KC_WVW_ERROR;}
     ctx->thread=CreateThread(NULL,0,kc_wvw_windows_worker,ctx,0,NULL);
-    if(!ctx->thread){CloseHandle(ctx->ready);CloseHandle(ctx->closed_event);kc_wvw_config_free(&ctx->opts);free(ctx);return KC_WVW_ERROR;}
+    if(!ctx->thread){CloseHandle(ctx->ready);kc_wvw_config_free(&ctx->opts);free(ctx);return KC_WVW_ERROR;}
     *out=ctx;WaitForSingleObject(ctx->ready,INFINITE);CloseHandle(ctx->ready);ctx->ready=NULL;return ctx->started?KC_WVW_OK:KC_WVW_ERROR;
 }
 
@@ -2397,13 +2395,6 @@ const char *kc_wvw_get_error(const kc_wvw_t *ctx) {
     }
     return ctx->error;
 }
-
-/**
- * Wait for the CLI-owned window to close.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx||!ctx->closed_event)return KC_WVW_ERROR;WaitForSingleObject(ctx->closed_event,INFINITE);return KC_WVW_OK;}
 
 /**
  * Close the WebView and release its public lifetime.
@@ -3269,7 +3260,7 @@ typedef struct {
 
 struct kc_wvw {
     kc_wvw_config_t opts;
-    int running, closing, closed, cli_waiting;
+    int running, closing, closed;
     void *ns_window;
     void *ns_webview;
     void *ns_script_handler;
@@ -4623,7 +4614,7 @@ static int kc_wvw_background_transparent(const char *text) {
     if (!self.ctx) {
         return;
     }
-    self.ctx->running=0;self.ctx->closed=1;if(self.ctx->cli_waiting)[NSApp stop:nil];
+    self.ctx->running=0;self.ctx->closed=1;
 }
 @end
 
@@ -5202,13 +5193,6 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
 }
 
 /**
- * Wait for the CLI-owned window to close.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx||![NSThread isMainThread])return KC_WVW_ERROR;if(ctx->closed)return KC_WVW_OK;ctx->cli_waiting=1;@autoreleasepool{[NSApp run];}ctx->cli_waiting=0;return KC_WVW_OK;}
-
-/**
  * Close the WebView and release its public lifetime.
  * @param ctx Window context, or NULL.
  * @return None.
@@ -5739,13 +5723,6 @@ static int kc_wvw_linux_open_dispatch(kc_wvw_t *ctx){kc_wvw_linux_init_t call;GS
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options)return KC_WVW_ERROR;ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);return KC_WVW_ERROR;}g_mutex_init(&ctx->mutex);g_cond_init(&ctx->cond);if(kc_wvw_linux_service()!=KC_WVW_OK){kc_wvw_set_error(ctx,"GTK initialization failed");*out=ctx;return KC_WVW_ERROR;}ctx->context=kc_wvw_gtk_context;ctx->thread=kc_wvw_gtk_thread;*out=ctx;if(kc_wvw_linux_open_dispatch(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");return KC_WVW_ERROR;}ctx->running=1;return KC_WVW_OK;}
-
-/**
- * Wait for the CLI-owned window to close.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_cli_wait(kc_wvw_t *ctx){if(!ctx)return KC_WVW_ERROR;g_mutex_lock(&ctx->mutex);while(!ctx->closed)g_cond_wait(&ctx->cond,&ctx->mutex);g_mutex_unlock(&ctx->mutex);return KC_WVW_OK;}
 
 /**
  * Close the WebView and release its public lifetime.
