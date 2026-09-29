@@ -28,6 +28,8 @@ typedef struct {
     size_t size;
 } kc_redp2p_pub_input_t;
 
+typedef void (*kc_redp2p_pub_connect_fn)(
+    kc_redp2p_client_t *client, void *userdata);
 typedef void (*kc_redp2p_pub_receive_fn)(
     const kc_redp2p_pub_input_t *input, void *userdata);
 typedef void (*kc_redp2p_con_receive_fn)(
@@ -73,9 +75,9 @@ typedef struct {
     const char *id;
     const char *index;
     int protocol;
-    uint16_t port;
     const char *pass;
     const char *stun;
+    kc_redp2p_pub_connect_fn connect;
     kc_redp2p_pub_receive_fn receive;
     void *userdata;
 } kc_redp2p_pub_options_t;
@@ -83,7 +85,6 @@ typedef struct {
 typedef struct {
     const char *id;
     const char *index;
-    uint16_t port;
     const char *stun;
     kc_redp2p_con_receive_fn receive;
     void *userdata;
@@ -107,14 +108,17 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
     const kc_redp2p_idx_options_t *options);
 
 /**
- * Publishes one native TCP or UDP capability through an index.
+ * Publishes one native TCP or UDP peer capability through an index.
  *
- * A nonzero options port adapts an existing local service. A zero port selects
- * direct mode and requires a receive function; REDP2P owns the private adapter.
- * Success means the publisher is registered and its runtime is active.
+ * REDP2P owns any transport-specific native adapters internally. Applications
+ * observe established peer channels through the optional connect function,
+ * receive application bytes through the optional receive function, and reply
+ * with kc_redp2p_client_respond().
+ *
+ * Success means the publisher is registered and ready to accept peer channels.
  *
  * @param out Destination publisher handle.
- * @param options Publisher identity, index, protocol, and data mode.
+ * @param options Publisher identity, index, protocol, and callbacks.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
 int kc_redp2p_pub(kc_redp2p_pub_t **out,
@@ -123,13 +127,13 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
 /**
  * Connects to one announced publisher.
  *
- * The publisher protocol is learned from the index. A nonzero options port
- * exposes the compatible local tunnel. A zero port selects direct mode, where
- * kc_redp2p_con_send() and the optional receive function carry application
- * data without a public local port.
+ * The publisher transport is learned from the index and remains an internal
+ * detail. Success means one peer channel is established and
+ * kc_redp2p_con_send() may be used immediately. The optional receive function
+ * delivers application bytes arriving from that peer.
  *
  * @param out Destination consumer handle.
- * @param options Target publisher, index, and data mode.
+ * @param options Target publisher, index, and receive callback.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
 int kc_redp2p_con(kc_redp2p_con_t **out,
@@ -165,7 +169,7 @@ void kc_redp2p_idx_close(kc_redp2p_idx_t *idx);
 void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
 
 /**
- * Closes the local tunnel and releases the consumer runtime.
+ * Closes the peer channel and releases the consumer runtime.
  * NULL is a safe no-op.
  * @param con Consumer runtime.
  * @return None.
@@ -173,13 +177,11 @@ void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
 void kc_redp2p_con_close(kc_redp2p_con_t *con);
 
 /**
- * Sends application data through a direct consumer capability.
+ * Sends application data through an established consumer channel.
  *
  * TCP preserves stream semantics. UDP sends one datagram per call.
- * This operation is available when the consumer was opened without a local
- * port. A port-backed consumer returns KC_REDP2P_EINVAL.
  *
- * @param con Consumer capability.
+ * @param con Consumer capability returned by kc_redp2p_con().
  * @param data Bytes to send.
  * @param size Byte count.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
