@@ -1,6 +1,6 @@
 /**
- * test.c - Contract tests for trust.c
- * Summary: Public API and grouped CLI contract tests.
+ * test.c - libtrust public API contract tests.
+ * Summary: Public API contract tests.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -22,17 +22,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#include <wchar.h>
 #else
 #include <unistd.h>
-#ifndef __EMSCRIPTEN__
-#include <sys/types.h>
-#include <sys/wait.h>
-#endif
-#endif
-
-#ifndef TRUST_TEST_CLI
-#define TRUST_TEST_CLI ""
 #endif
 
 static int test_case_total = 0;
@@ -91,25 +82,6 @@ static int expect_int(const char *name, int expected, int actual) {
     }
     return 0;
 }
-
-#ifndef __EMSCRIPTEN__
-/**
- * Checks one string test result.
- * @param name Name string.
- * @param expected Expected value.
- * @param actual Actual value.
- * @return 0 on success, or 1 on failure.
- */
-static int expect_str(const char *name, const char *expected,
-    const char *actual) {
-    if (!expected || !actual || strcmp(expected, actual) != 0) {
-        printf("[FAIL] %s: expected '%s', got '%s'\n", name,
-            expected ? expected : "(null)", actual ? actual : "(null)");
-        return 1;
-    }
-    return 0;
-}
-#endif
 
 /**
  * Sets one isolated trust state directory under the system temp path.
@@ -545,384 +517,13 @@ static int case_kc_trust_protocol(void) {
     return fail ? 1 : 0;
 }
 
-#ifndef __EMSCRIPTEN__
-typedef struct {
-    unsigned char out[16384];
-    size_t out_size;
-    char err[4096];
-    int status;
-} test_cli_result_t;
-
-#ifdef _WIN32
-/**
- * Appends one quoted argument to a Windows command line.
- * @param cmd Function parameter.
- * @param cap Buffer capacity.
- * @param arg Function parameter.
- * @return 0 on success, or 1 on failure.
- */
-static int test_cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
-    size_t n = wcslen(cmd);
-    size_t len = wcslen(arg);
-    int quote = len == 0U || wcschr(arg, L' ') != NULL ||
-        wcschr(arg, L'\t') != NULL || wcschr(arg, L'"') != NULL;
-    if (n > 0U) {
-        if (n + 1U >= cap) return 1;
-        cmd[n++] = L' ';
-    }
-    if (quote) {
-        if (n + 1U >= cap) return 1;
-        cmd[n++] = L'"';
-        for (size_t i = 0; i < len; i++) {
-            if (arg[i] == L'"') {
-                if (n + 1U >= cap) return 1;
-                cmd[n++] = L'\\';
-            }
-            if (n + 1U >= cap) return 1;
-            cmd[n++] = arg[i];
-        }
-        if (n + 1U >= cap) return 1;
-        cmd[n++] = L'"';
-    } else {
-        if (n + len >= cap) return 1;
-        memcpy(cmd + n, arg, len * sizeof(wchar_t));
-        n += len;
-    }
-    cmd[n] = L'\0';
-    return 0;
-}
-
-/**
- * Converts UTF-8 text to a Windows wide string.
- * @param in Input bytes.
- * @param out Destination output.
- * @param cap Buffer capacity.
- * @return 0 on success, or 1 on failure.
- */
-static int test_cli_to_wide(const char *in, wchar_t *out, size_t cap) {
-    return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
-}
-
-/**
- * Runs the trust CLI and captures its process streams.
- * @param argv Argument vector.
- * @param input Input bytes.
- * @param input_size Input byte count.
- * @param result Captured process result.
- * @return 0 on success, or 1 on harness failure.
- */
-static int test_cli_run(char *const argv[], const void *input,
-    size_t input_size, test_cli_result_t *result) {
-    wchar_t exe[4096];
-    wchar_t cmd[32768];
-    wchar_t wide[4096];
-    HANDLE in_pipe[2];
-    HANDLE out_pipe[2];
-    HANDLE err_pipe[2];
-    SECURITY_ATTRIBUTES sa;
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    DWORD exit_code = 1;
-    DWORD written = 0;
-    DWORD got = 0;
-    size_t err_size = 0;
-
-    memset(result, 0, sizeof(*result));
-    if (test_cli_to_wide(TRUST_TEST_CLI, exe,
-        sizeof(exe) / sizeof(exe[0])) != 0) return 1;
-
-    sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
-    sa.lpSecurityDescriptor = NULL;
-    if (!CreatePipe(&in_pipe[0], &in_pipe[1], &sa, 0)) return 1;
-    if (!CreatePipe(&out_pipe[0], &out_pipe[1], &sa, 0)) {
-        CloseHandle(in_pipe[0]); CloseHandle(in_pipe[1]); return 1;
-    }
-    if (!CreatePipe(&err_pipe[0], &err_pipe[1], &sa, 0)) {
-        CloseHandle(in_pipe[0]); CloseHandle(in_pipe[1]);
-        CloseHandle(out_pipe[0]); CloseHandle(out_pipe[1]); return 1;
-    }
-    SetHandleInformation(in_pipe[1], HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(out_pipe[0], HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(err_pipe[0], HANDLE_FLAG_INHERIT, 0);
-
-    memset(&si, 0, sizeof(si));
-    memset(&pi, 0, sizeof(pi));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = in_pipe[0];
-    si.hStdOutput = out_pipe[1];
-    si.hStdError = err_pipe[1];
-
-    cmd[0] = L'\0';
-    if (test_cli_append_arg(cmd, sizeof(cmd) / sizeof(cmd[0]), exe)) goto fail;
-    for (int i = 1; argv[i]; i++) {
-        if (test_cli_to_wide(argv[i], wide,
-            sizeof(wide) / sizeof(wide[0])) != 0 ||
-            test_cli_append_arg(cmd, sizeof(cmd) / sizeof(cmd[0]), wide))
-            goto fail;
-    }
-
-    if (!CreateProcessW(exe, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
-        goto fail;
-
-    CloseHandle(in_pipe[0]); in_pipe[0] = NULL;
-    CloseHandle(out_pipe[1]); out_pipe[1] = NULL;
-    CloseHandle(err_pipe[1]); err_pipe[1] = NULL;
-
-    if (input_size > 0U) {
-        if (input_size > 0xFFFFFFFFU ||
-            !WriteFile(in_pipe[1], input, (DWORD)input_size, &written, NULL) ||
-            written != (DWORD)input_size) {
-            TerminateProcess(pi.hProcess, 1);
-        }
-    }
-    CloseHandle(in_pipe[1]); in_pipe[1] = NULL;
-
-    while (result->out_size < sizeof(result->out) &&
-        ReadFile(out_pipe[0], result->out + result->out_size,
-            (DWORD)(sizeof(result->out) - result->out_size), &got, NULL) &&
-        got > 0U)
-        result->out_size += got;
-
-    while (err_size + 1U < sizeof(result->err) &&
-        ReadFile(err_pipe[0], result->err + err_size,
-            (DWORD)(sizeof(result->err) - err_size - 1U), &got, NULL) &&
-        got > 0U)
-        err_size += got;
-    result->err[err_size] = '\0';
-
-    CloseHandle(out_pipe[0]); out_pipe[0] = NULL;
-    CloseHandle(err_pipe[0]); err_pipe[0] = NULL;
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    GetExitCodeProcess(pi.hProcess, &exit_code);
-    result->status = (int)exit_code;
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    return 0;
-
-fail:
-    if (in_pipe[0]) CloseHandle(in_pipe[0]);
-    if (in_pipe[1]) CloseHandle(in_pipe[1]);
-    if (out_pipe[0]) CloseHandle(out_pipe[0]);
-    if (out_pipe[1]) CloseHandle(out_pipe[1]);
-    if (err_pipe[0]) CloseHandle(err_pipe[0]);
-    if (err_pipe[1]) CloseHandle(err_pipe[1]);
-    return 1;
-}
-#else
-/**
- * Runs the trust CLI and captures its process streams.
- * @param argv Argument vector.
- * @param input Input bytes.
- * @param input_size Input byte count.
- * @param result Captured process result.
- * @return 0 on success, or 1 on harness failure.
- */
-static int test_cli_run(char *const argv[], const void *input,
-    size_t input_size, test_cli_result_t *result) {
-    int in_pipe[2], out_pipe[2], err_pipe[2];
-    pid_t pid;
-    int status;
-    ssize_t n;
-    size_t done = 0;
-    memset(result, 0, sizeof(*result));
-    if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0 || pipe(err_pipe) != 0)
-        return 1;
-    pid = fork();
-    if (pid < 0) return 1;
-    if (pid == 0) {
-        dup2(in_pipe[0], STDIN_FILENO);
-        dup2(out_pipe[1], STDOUT_FILENO);
-        dup2(err_pipe[1], STDERR_FILENO);
-        close(in_pipe[0]); close(in_pipe[1]);
-        close(out_pipe[0]); close(out_pipe[1]);
-        close(err_pipe[0]); close(err_pipe[1]);
-        execv(argv[0], argv);
-        _exit(127);
-    }
-    close(in_pipe[0]);
-    close(out_pipe[1]);
-    close(err_pipe[1]);
-    while (done < input_size) {
-        n = write(in_pipe[1], (const unsigned char *)input + done,
-            input_size - done);
-        if (n <= 0) break;
-        done += (size_t)n;
-    }
-    close(in_pipe[1]);
-    while (result->out_size < sizeof(result->out) &&
-        (n = read(out_pipe[0], result->out + result->out_size,
-            sizeof(result->out) - result->out_size)) > 0)
-        result->out_size += (size_t)n;
-    close(out_pipe[0]);
-    done = 0;
-    while (done + 1 < sizeof(result->err) &&
-        (n = read(err_pipe[0], result->err + done,
-            sizeof(result->err) - done - 1)) > 0)
-        done += (size_t)n;
-    result->err[done] = '\0';
-    close(err_pipe[0]);
-    if (waitpid(pid, &status, 0) < 0) return 1;
-    result->status = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
-    return 0;
-}
-#endif
-
-/**
- * Extracts one compact JSON string field.
- * @param result Captured process result.
- * @param name Name string.
- * @param out Destination output.
- * @param cap Buffer capacity.
- * @return 0 on success, or 1 on failure.
- */
-static int test_json_field(const test_cli_result_t *result,
-    const char *name, char *out, size_t cap) {
-    char needle[128];
-    char text[16385];
-    char *start;
-    char *end;
-    size_t n;
-    if (result->out_size >= sizeof(text)) return 1;
-    memcpy(text, result->out, result->out_size);
-    text[result->out_size] = '\0';
-    snprintf(needle, sizeof(needle), "\"%s\":\"", name);
-    start = strstr(text, needle);
-    if (!start) return 1;
-    start += strlen(needle);
-    end = strchr(start, '"');
-    if (!end) return 1;
-    n = (size_t)(end - start);
-    if (n + 1 > cap) return 1;
-    memcpy(out, start, n);
-    out[n] = '\0';
-    return 0;
-}
-
-/**
- * Tests all trust CLI commands as one grouped case.
- * @return 0 on success, or 1 on failure.
- */
-static int case_kc_trust_cli(void) {
-    test_cli_result_t r;
-    char code[512];
-    char uid[64];
-    char joined_uid[64];
-    char confirmation[512];
-    char confirmed_uid[64];
-    unsigned char cipher[16384];
-    size_t cipher_size = 0;
-    int fail = 0;
-
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "--help", NULL };
-        fail += expect_int("CLI help runs", 0,
-            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
-        fail += expect_true("CLI help names invite",
-            r.out_size && strstr((char *)r.out, "invite") != NULL);
-    }
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "--version", NULL };
-        fail += expect_int("CLI version runs", 0,
-            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
-    }
-
-    test_set_dir(".trust-test-cli-init");
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "init", NULL };
-        fail += expect_int("CLI init runs", 0,
-            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
-    }
-
-    test_set_dir(".trust-test-cli-bob");
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "invite", NULL };
-        fail += expect_int("CLI invite runs", 0,
-            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
-        fail += expect_int("CLI invite uid parses", 0,
-            test_json_field(&r, "uid", uid, sizeof(uid)));
-        fail += expect_int("CLI invite code parses", 0,
-            test_json_field(&r, "code", code, sizeof(code)));
-    }
-
-    test_set_dir(".trust-test-cli-alice");
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "join", code, NULL };
-        fail += expect_int("CLI join runs", 0,
-            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
-        fail += expect_int("CLI join uid parses", 0,
-            test_json_field(&r, "uid", joined_uid, sizeof(joined_uid)));
-        fail += expect_int("CLI confirmation parses", 0,
-            test_json_field(&r, "confirmation", confirmation,
-                sizeof(confirmation)));
-        fail += expect_true("CLI join returns inviter uid",
-            strcmp(uid, joined_uid) != 0);
-    }
-
-    test_set_dir(".trust-test-cli-bob");
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "confirm",
-            confirmation, NULL };
-        fail += expect_int("CLI confirm runs", 0,
-            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
-        fail += expect_int("CLI confirm uid parses", 0,
-            test_json_field(&r, "uid", confirmed_uid, sizeof(confirmed_uid)));
-        fail += expect_str("CLI confirm returns same uid", uid, confirmed_uid);
-    }
-
-    {
-        static const char hello[] = "Hello Alice!";
-        char *args[] = { (char *)TRUST_TEST_CLI, "seal", uid, NULL };
-        fail += expect_int("CLI seal runs", 0,
-            test_cli_run(args, hello, sizeof(hello) - 1, &r) ? 1 : r.status);
-        fail += expect_true("CLI seal returns binary", r.out_size > sizeof(hello));
-        if (r.out_size <= sizeof(cipher)) {
-            memcpy(cipher, r.out, r.out_size);
-            cipher_size = r.out_size;
-        }
-    }
-
-    test_set_dir(".trust-test-cli-alice");
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "unseal", uid, NULL };
-        fail += expect_int("CLI unseal runs", 0,
-            test_cli_run(args, cipher, cipher_size, &r) ? 1 : r.status);
-        fail += expect_true("CLI unseal returns plaintext",
-            r.out_size == 12 && memcmp(r.out, "Hello Alice!", 12) == 0);
-    }
-
-    test_set_dir(".trust-test-cli-bob");
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "revoke", uid, NULL };
-        fail += expect_int("CLI bob revoke runs", 0,
-            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
-    }
-    test_set_dir(".trust-test-cli-alice");
-    {
-        char *args[] = { (char *)TRUST_TEST_CLI, "revoke", joined_uid, NULL };
-        fail += expect_int("CLI alice revoke runs", 0,
-            test_cli_run(args, NULL, 0, &r) ? 1 : r.status);
-    }
-
-    case_result(fail, "kc_trust_cli",
-        "init/invite/join/confirm/seal/unseal/revoke, help, and version");
-    return fail ? 1 : 0;
-}
-#endif
-
 /**
  * Runs all trust contract test cases.
  * @return 0 when all cases pass, or a failure count.
  */
 static int case_all(void) {
     int rc = 0;
-#ifdef __EMSCRIPTEN__
     test_case_total = 10;
-#else
-    int cli_enabled = TRUST_TEST_CLI[0] != '\0';
-    test_case_total = cli_enabled ? 11 : 10;
-#endif
     test_case_current = 0;
     run_case(&rc, case_kc_trust_version);
     run_case(&rc, case_kc_trust_init);
@@ -934,9 +535,6 @@ static int case_all(void) {
     run_case(&rc, case_kc_trust_revoke);
     run_case(&rc, case_kc_trust_free);
     run_case(&rc, case_kc_trust_protocol);
-#ifndef __EMSCRIPTEN__
-    if (cli_enabled) run_case(&rc, case_kc_trust_cli);
-#endif
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -963,9 +561,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_trust_revoke") == 0) return case_kc_trust_revoke();
     if (strcmp(argv[1], "kc_trust_free") == 0) return case_kc_trust_free();
     if (strcmp(argv[1], "kc_trust_protocol") == 0) return case_kc_trust_protocol();
-#ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "kc_trust_cli") == 0) return case_kc_trust_cli();
-#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

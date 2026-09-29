@@ -1,72 +1,9 @@
-# trust.c - Persistent Scoped Trust
+# libtrust.c - Persistent Scoped Trust
 
-`trust.c` is a small C library and CLI for establishing persistent scoped
-trust relationships and protecting binary messages with the Noise Protocol
+`libtrust.c` is a small C library for establishing persistent scoped trust
+relationships and protecting binary messages with the Noise Protocol
 Framework. It does not implement transport; applications move invitations,
 confirmations, UIDs, and protected messages themselves.
-
----
-
-## CLI
-
-Initialize the local trust store:
-
-```bash
-trust init
-```
-
-Create a one-use invitation:
-
-```bash
-trust invite
-{"uid":"<invited_uid>","code":"<invitation>"}
-```
-
-Join from an invitation:
-
-```bash
-trust join "<invitation>"
-{"uid":"<inviter_uid>","confirmation":"<confirmation>"}
-```
-
-Confirm the relationship:
-
-```bash
-trust confirm "<confirmation>"
-{"uid":"<invited_uid>"}
-```
-
-Seal stdin for a trusted remote UID:
-
-```bash
-printf "hello" | trust seal "<remote_uid>" > message.bin
-```
-
-Unseal stdin addressed to a local UID:
-
-```bash
-trust unseal "<local_uid>" < message.bin
-```
-
-Revoke a trusted remote UID:
-
-```bash
-trust revoke "<remote_uid>"
-```
-
-### Parameters
-
-| Command | Description |
-| :--- | :--- |
-| `init` | Ensure the local trust store exists |
-| `invite` | Create a one-use trust invitation |
-| `join <code>` | Join from an invitation code |
-| `confirm <confirmation>` | Confirm a joined invitation |
-| `seal <remote_uid>` | Protect stdin for a trusted remote UID |
-| `unseal <local_uid>` | Open stdin addressed to a local UID |
-| `revoke <remote_uid>` | Revoke an established or pending remote UID |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
 
 ---
 
@@ -278,10 +215,7 @@ make
 make test
 ```
 
-Native and Wine runs validate the reusable public API plus one grouped CLI
-case. WebAssembly validates only the reusable public API; native process
-helpers and the CLI case are excluded from the WASM test build at compile
-time.
+Native, Wine, and WebAssembly runs validate the reusable public API.
 
 To run through Wine:
 
@@ -297,14 +231,11 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/trust.wasm`
+- Artifacts: `bin/wasm32/wasm/libtrust.js` and `bin/wasm32/wasm/libtrust.wasm`
 - Exports: `kc_trust_init`, `kc_trust_invite`, `kc_trust_join`,
     `kc_trust_confirm`, `kc_trust_seal`, `kc_trust_unseal`,
     `kc_trust_revoke`, `kc_trust_close`, `kc_trust_free`,
     `kc_trust_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds

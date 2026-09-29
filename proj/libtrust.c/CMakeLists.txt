@@ -50,7 +50,7 @@ if(EMSCRIPTEN)
     add_executable(trust_wasm ${TRUST_SOURCES})
     target_include_directories(trust_wasm PRIVATE src lib/monocypher)
     set_target_properties(trust_wasm PROPERTIES
-        OUTPUT_NAME "trust"
+        OUTPUT_NAME "libtrust"
         SUFFIX ".js"
     )
     target_link_options(trust_wasm PRIVATE
@@ -61,13 +61,6 @@ if(EMSCRIPTEN)
 endif()
 
 if(NOT TRUST_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
-    add_executable(trust
-        src/trust.c
-        src/libtrust.c
-        lib/monocypher/monocypher.c
-    )
-    target_include_directories(trust PRIVATE src lib/monocypher)
-
     add_library(trust_static STATIC ${TRUST_SOURCES})
     set_target_properties(trust_static PROPERTIES OUTPUT_NAME "trust")
     target_include_directories(trust_static PRIVATE src lib/monocypher)
@@ -77,7 +70,6 @@ if(NOT TRUST_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     set_target_properties(trust_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_include_directories(trust_shared PRIVATE src lib/monocypher)
     if(WIN32)
-        target_link_libraries(trust PRIVATE bcrypt)
         target_link_libraries(trust_static PRIVATE bcrypt)
         target_link_libraries(trust_shared PRIVATE bcrypt)
     endif()
@@ -115,12 +107,6 @@ if(TRUST_BUILD_TESTS)
         add_executable(trust_contract_test src/test.c)
         target_include_directories(trust_contract_test PRIVATE src lib/monocypher)
         target_link_libraries(trust_contract_test PRIVATE ${TRUST_TEST_SHARED_TARGET})
-        if(DEFINED TRUST_TEST_CLI)
-            target_compile_definitions(trust_contract_test PRIVATE
-                TRUST_TEST_CLI="${TRUST_TEST_CLI}"
-            )
-        endif()
-
         add_custom_command(TARGET trust_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:${TRUST_TEST_SHARED_TARGET}>
