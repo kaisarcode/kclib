@@ -47,14 +47,24 @@ The public data model is the same for both transports: established peer
 channels, send, receive, and publisher responses. TCP behaves as a stream. UDP
 keeps datagram boundaries.
 
-### Browser use
+### WebRTC use
 
 Native applications use the C library and native TCP/UDP networking.
 
-The browser implementation under `imp/` uses WebRTC, but it connects through
+The JavaScript implementation under `imp/` uses WebRTC, but it connects through
 the same REDP2P index and uses the same publisher IDs. Its application-facing
 model is the same: publishers observe established clients and receive their
 data, while consumers return connected channels that can send and receive.
+
+Browsers provide the Web APIs expected by this implementation directly. Other
+JavaScript runtimes can use the same files when their host environment exposes
+compatible Web APIs.
+
+For Node.js or QuickJS-ng, provide a small runtime adapter before loading the
+REDP2P JavaScript implementation. The adapter should supply any missing host
+capabilities, such as WebRTC peer connections, `fetch`, Web Crypto,
+`TextEncoder`/`TextDecoder`, and timers. REDP2P itself does not depend on a
+specific external module; only a compatible host interface is required.
 
 ---
 
