@@ -2101,7 +2101,6 @@ static void kc_wch_dispatch_event(
 #endif
 }
 
-
 #if defined(_WIN32) && defined(__GNUC__)
 __attribute__((noinline))
 #endif
