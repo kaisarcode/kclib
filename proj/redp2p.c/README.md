@@ -1,16 +1,17 @@
 # redp2p.c - Peer-to-Peer Transport
 
-`redp2p.c` provides REDP2P transport for native applications and the CLI.
-Native peers use TCP or UDP; the browser implementation under `imp/` uses
-WebRTC. Both share the same index protocol and capability model.
+`redp2p.c` lets one application make a local service reachable from another
+machine without exposing that service directly to the Internet.
 
-Applications describe the tunnel they want. REDP2P owns registration,
-heartbeats, lookup, candidate exchange, hole punching, session setup, retries,
-and publisher deregistration. The index coordinates peers over HTTP but never
-relays application traffic.
+A publisher gives the service a name. A consumer connects to that name from
+somewhere else. REDP2P helps both sides find each other and then carries the
+connection directly between them.
 
-TCP uses vendored KCP over the direct peer UDP path. UDP preserves application
-datagram boundaries. Application bytes are opaque to REDP2P.
+The index is only there to help peers meet. It does not sit in the middle of
+their traffic.
+
+Use REDP2P when you want to reach a service running on another machine without
+setting up a public proxy, VPN, or relay for that service.
 
 ---
 
