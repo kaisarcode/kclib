@@ -70,7 +70,7 @@ make test wasm
 
 - Artifact: `bin/wasm32/wasm/libb64.wasm`
 - Exports: `kc_b64_version`, `kc_b64_encode`, `kc_b64_decode`,
-  `kc_b64_free`
+    `kc_b64_free`
 
 `wasm32/wasm` is included in `make all`.
 
