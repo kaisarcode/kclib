@@ -706,6 +706,8 @@ static int redp2p_consumer_tcp_accept(
     redp2p_fd_t client_fd;
     redp2p_fd_t peer_fd;
     int skip_iteration;
+    int establish_result;
+    int inserted;
 
     if (REDP2P_ISERR(runtime->tcp_listen_fd) ||
         !redp2p_consumer_poll_ready(runtime, runtime->tcp_listen_fd))
@@ -716,15 +718,24 @@ static int redp2p_consumer_tcp_accept(
         REDP2P_FD_CLOSE(client_fd);
         return 0;
     }
-    if (redp2p_consumer_establish_peer(runtime, 1, &peer_fd, &peer_addr,
-        session_bin, session_hex, &skip_iteration) != REDP2P_OK)
+    establish_result = redp2p_consumer_establish_peer(runtime, 1, &peer_fd,
+        &peer_addr, session_bin, session_hex, &skip_iteration);
+    if (establish_result != REDP2P_OK)
     {
+        if (runtime->ctx->direct_mode) {
+            atomic_store(&runtime->ctx->channel_status, establish_result);
+            atomic_store(&runtime->ctx->channel_state, -1);
+        }
         REDP2P_FD_CLOSE(client_fd);
         return skip_iteration;
     }
     if (redp2p_consumer_tcp_session_init(runtime, &session, peer_fd, &peer_addr,
         client_fd, session_bin, session_hex) != 0)
     {
+        if (runtime->ctx->direct_mode) {
+            atomic_store(&runtime->ctx->channel_status, REDP2P_ERROR);
+            atomic_store(&runtime->ctx->channel_state, -1);
+        }
         REDP2P_FD_CLOSE(peer_fd);
         REDP2P_FD_CLOSE(client_fd);
         crypto_wipe(session_bin, sizeof(session_bin));
@@ -733,7 +744,19 @@ static int redp2p_consumer_tcp_accept(
     }
     crypto_wipe(session_bin, sizeof(session_bin));
     crypto_wipe(session_hex, sizeof(session_hex));
-    return redp2p_consumer_session_insert(runtime, &session) < 0 ? 1 : 0;
+    inserted = redp2p_consumer_session_insert(runtime, &session);
+    if (inserted < 0) {
+        if (runtime->ctx->direct_mode) {
+            atomic_store(&runtime->ctx->channel_status, REDP2P_ERROR);
+            atomic_store(&runtime->ctx->channel_state, -1);
+        }
+        return 1;
+    }
+    if (runtime->ctx->direct_mode) {
+        atomic_store(&runtime->ctx->channel_status, REDP2P_OK);
+        atomic_store(&runtime->ctx->channel_state, 1);
+    }
+    return 0;
 }
 
 /**
@@ -755,6 +778,8 @@ redp2p_consumer_runtime_t *runtime)
     socklen_t fromlen;
     int found;
     int n;
+    int created;
+    int establish_result;
 
     if (!REDP2P_ISERR(runtime->tcp_listen_fd) ||
         !redp2p_consumer_poll_ready(runtime, runtime->local_fd))
@@ -769,20 +794,39 @@ redp2p_consumer_runtime_t *runtime)
         return 0;
     }
 
+    created = 0;
     found = redp2p_consumer_session_find(runtime, &from);
-    if (found < 0 && redp2p_consumer_establish_peer(runtime, 0, &peer_fd,
-        &peer_addr, session_bin, session_hex, NULL) == REDP2P_OK)
-    {
-        redp2p_consumer_udp_session_init(&session, peer_fd, &peer_addr, &from);
-        crypto_wipe(session_bin, sizeof(session_bin));
-        crypto_wipe(session_hex, sizeof(session_hex));
-        found = redp2p_consumer_session_insert(runtime, &session);
+    if (found < 0) {
+        establish_result = redp2p_consumer_establish_peer(runtime, 0, &peer_fd,
+            &peer_addr, session_bin, session_hex, NULL);
+        if (establish_result == REDP2P_OK) {
+            redp2p_consumer_udp_session_init(&session, peer_fd, &peer_addr,
+                &from);
+            crypto_wipe(session_bin, sizeof(session_bin));
+            crypto_wipe(session_hex, sizeof(session_hex));
+            found = redp2p_consumer_session_insert(runtime, &session);
+            if (found >= 0) {
+                created = 1;
+                if (runtime->ctx->direct_mode) {
+                    atomic_store(&runtime->ctx->channel_status, REDP2P_OK);
+                    atomic_store(&runtime->ctx->channel_state, 1);
+                }
+            } else if (runtime->ctx->direct_mode) {
+                atomic_store(&runtime->ctx->channel_status, REDP2P_ERROR);
+                atomic_store(&runtime->ctx->channel_state, -1);
+            }
+        } else if (runtime->ctx->direct_mode) {
+            atomic_store(&runtime->ctx->channel_status, establish_result);
+            atomic_store(&runtime->ctx->channel_state, -1);
+        }
     }
     if (found >= 0) {
-        redp2p_udp_send(runtime->sessions[found].fd,
-            &runtime->sessions[found].peer_addr,
-            REDP2P_SESSION_ROLE_INITIATOR, REDP2P_SESSION_TYPE_DATA,
-            buf, (size_t)n);
+        if (!(runtime->ctx->direct_mode && created && n == 0)) {
+            redp2p_udp_send(runtime->sessions[found].fd,
+                &runtime->sessions[found].peer_addr,
+                REDP2P_SESSION_ROLE_INITIATOR, REDP2P_SESSION_TYPE_DATA,
+                buf, (size_t)n);
+        }
         runtime->sessions[found].last_rx = redp2p_now_s();
     }
     return 1;
