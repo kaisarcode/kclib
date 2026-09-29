@@ -239,8 +239,6 @@ The public REDP2P capability does not expose ICE or SDP as application concepts.
 
 ## Compatibility
 
-The native CLI remains unchanged.
-
 Native TCP/UDP protocol operations remain accepted while the unified protocol is
 introduced.
 
