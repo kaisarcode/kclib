@@ -36,6 +36,9 @@
         constructor(peer, channel, handlers = {}) {
             this._peer = peer;
             this._channel = channel;
+            this._connect = typeof handlers.connect === "function"
+                ? handlers.connect
+                : null;
             this._receive = typeof handlers.receive === "function"
                 ? handlers.receive
                 : null;
@@ -47,6 +50,16 @@
                 : null;
 
             channel.binaryType = "arraybuffer";
+            const connected = () => {
+                if (this._connect) {
+                    this._connect(this);
+                }
+            };
+            if (channel.readyState === "open") {
+                connected();
+            } else {
+                channel.addEventListener("open", connected, {once: true});
+            }
             channel.addEventListener("message", event => {
                 if (this._receive) {
                     this._receive({
@@ -721,6 +734,7 @@
             this.connections = new Map();
             this.rejectedConnections = new Map();
             this.closed = false;
+            this.connect = typeof options.connect === "function" ? options.connect : null;
             this.receive = typeof options.receive === "function" ? options.receive : null;
             this.disconnect = typeof options.disconnect === "function"
                 ? options.disconnect
@@ -983,14 +997,15 @@
 
                 peer.addEventListener("datachannel", event => {
                     new core.Client(peer, event.channel, {
+                        connect: this.connect,
                         receive: this.receive,
-                        close_receive: client => {
+                        disconnect: client => {
                             this.connections.delete(pending.connection);
                             if (this.disconnect) {
                                 this.disconnect(client);
                             }
                         },
-                        error_receive: (error, client) => {
+                        error: (error, client) => {
                             if (this.error) {
                                 this.error(error, client);
                             }
