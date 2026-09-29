@@ -7097,44 +7097,25 @@ static int case_kc_redp2p_api(void)
 {
     const char *name = "kc_redp2p_api";
     const char *detail =
-        "idx/pub/con create a tunnel without exposing coordination plumbing";
+        "idx/pub/con expose direct peer data without application ports";
     const unsigned char payload[] = "redp2p-public-api";
-    kc_redp2p_idx_t *idx;
-    kc_redp2p_pub_t *pub;
-    kc_redp2p_con_t *con;
-    kc_redp2p_idx_entry_t *entries;
+    kc_redp2p_idx_t *idx = NULL;
+    kc_redp2p_pub_t *pub = NULL;
+    kc_redp2p_con_t *con = NULL;
+    kc_redp2p_idx_entry_t *entries = NULL;
     kc_redp2p_idx_options_t idx_options;
     kc_redp2p_pub_options_t pub_options;
     kc_redp2p_con_options_t con_options;
-    test_tcp_echo_t echo;
     char index[320];
     char local_ip[INET_ADDRSTRLEN];
-    unsigned short base;
     unsigned short idx_port;
-    unsigned short backend_port;
-    unsigned short con_port;
-    size_t count;
-    int echo_started;
-    int fail;
+    size_t count = 0;
+    int fail = 0;
     int status;
 
-    idx = NULL;
-    pub = NULL;
-    con = NULL;
-    entries = NULL;
-    count = 0;
-    echo_started = 0;
-    fail = 0;
-    base = test_port_base();
-    idx_port = (unsigned short)(base + 410U);
-    backend_port = (unsigned short)(base + 411U);
-    con_port = (unsigned short)(base + 412U);
-
+    idx_port = (unsigned short)(test_port_base() + 410U);
     fail += expect_int("resolve local unicast", 0,
         test_local_unicast_ipv4(local_ip));
-    fail += expect_int("start public API echo", 0,
-        test_tcp_echo_start(&echo, backend_port));
-    if (fail == 0) echo_started = 1;
 
     memset(&idx_options, 0, sizeof(idx_options));
     idx_options.host = local_ip;
@@ -7153,11 +7134,12 @@ static int case_kc_redp2p_api(void)
     }
 
     snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)idx_port);
+    memset(&test_direct_receive, 0, sizeof(test_direct_receive));
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "echo";
     pub_options.index = index;
     pub_options.protocol = KC_REDP2P_TCP;
-    pub_options.port = backend_port;
+    pub_options.receive = test_direct_pub_receive;
     if (fail == 0) {
         status = kc_redp2p_pub(&pub, &pub_options);
         fail += expect_int("public pub create", KC_REDP2P_OK, status);
@@ -7177,57 +7159,24 @@ static int case_kc_redp2p_api(void)
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = "echo";
     con_options.index = index;
-    con_options.port = con_port;
+    con_options.receive = test_direct_con_receive;
     if (fail == 0) {
         status = kc_redp2p_con(&con, &con_options);
         fail += expect_int("public con create", KC_REDP2P_OK, status);
         fail += expect_true("public con handle", con != NULL);
     }
     if (fail == 0) {
-        fail += expect_int("public TCP roundtrip", (int)sizeof(payload),
-            test_tcp_roundtrip(con_port, payload, sizeof(payload)));
-    }
-
-    kc_redp2p_con_close(con);
-    con = NULL;
-    kc_redp2p_pub_close(pub);
-    pub = NULL;
-
-    memset(&test_direct_receive, 0, sizeof(test_direct_receive));
-    memset(&pub_options, 0, sizeof(pub_options));
-    pub_options.id = "direct";
-    pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_TCP;
-    pub_options.receive = test_direct_pub_receive;
-    if (fail == 0) {
-        status = kc_redp2p_pub(&pub, &pub_options);
-        fail += expect_int("direct pub create", KC_REDP2P_OK, status);
-        fail += expect_true("direct pub handle", pub != NULL);
-    }
-
-    memset(&con_options, 0, sizeof(con_options));
-    con_options.id = "direct";
-    con_options.index = index;
-    con_options.receive = test_direct_con_receive;
-    if (fail == 0) {
-        status = kc_redp2p_con(&con, &con_options);
-        fail += expect_int("direct con create", KC_REDP2P_OK, status);
-        fail += expect_true("direct con handle", con != NULL);
-    }
-    if (fail == 0) {
         status = kc_redp2p_con_send(con, payload, sizeof(payload));
-        fail += expect_int("direct con send", KC_REDP2P_OK, status);
+        fail += expect_int("public con send", KC_REDP2P_OK, status);
     }
     if (fail == 0) {
         uint64_t deadline = test_now_ms() + 10000U;
         while (!atomic_load(&test_direct_receive.received) &&
             test_now_ms() < deadline)
             test_sleep_ms(10);
-        fail += expect_true("direct receive completed",
+        fail += expect_true("public receive completed",
             atomic_load(&test_direct_receive.received));
-        fail += expect_true("direct receive size",
-            test_direct_receive.size == sizeof(payload));
-        fail += expect_true("direct receive bytes",
+        fail += expect_true("public receive bytes",
             test_direct_receive.size == sizeof(payload) &&
             memcmp(test_direct_receive.data, payload, sizeof(payload)) == 0);
     }
@@ -7245,7 +7194,7 @@ static int case_kc_redp2p_api(void)
     pub_options.receive = test_direct_pub_receive;
     if (fail == 0) {
         status = kc_redp2p_pub(&pub, &pub_options);
-        fail += expect_int("direct UDP pub create", KC_REDP2P_OK, status);
+        fail += expect_int("public UDP pub create", KC_REDP2P_OK, status);
     }
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = "directudp";
@@ -7253,18 +7202,18 @@ static int case_kc_redp2p_api(void)
     con_options.receive = test_direct_con_receive;
     if (fail == 0) {
         status = kc_redp2p_con(&con, &con_options);
-        fail += expect_int("direct UDP con create", KC_REDP2P_OK, status);
+        fail += expect_int("public UDP con create", KC_REDP2P_OK, status);
     }
     if (fail == 0) {
         status = kc_redp2p_con_send(con, payload, sizeof(payload));
-        fail += expect_int("direct UDP send", KC_REDP2P_OK, status);
+        fail += expect_int("public UDP send", KC_REDP2P_OK, status);
     }
     if (fail == 0) {
         uint64_t deadline = test_now_ms() + 10000U;
         while (!atomic_load(&test_direct_receive.received) &&
             test_now_ms() < deadline)
             test_sleep_ms(10);
-        fail += expect_true("direct UDP datagram received",
+        fail += expect_true("public UDP datagram received",
             atomic_load(&test_direct_receive.received) &&
             test_direct_receive.size == sizeof(payload) &&
             memcmp(test_direct_receive.data, payload, sizeof(payload)) == 0);
@@ -7273,7 +7222,6 @@ static int case_kc_redp2p_api(void)
     kc_redp2p_con_close(con);
     kc_redp2p_pub_close(pub);
     kc_redp2p_idx_close(idx);
-    if (echo_started) test_tcp_echo_stop(&echo);
 
     fail += expect_string("public strerror OK", "OK",
         kc_redp2p_strerror(KC_REDP2P_OK));
