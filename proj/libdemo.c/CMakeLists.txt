@@ -35,57 +35,32 @@ set_source_files_properties(src/libdemo.c PROPERTIES
     COMPILE_DEFINITIONS KC_DEMO_BUILD_VERSION=${DEMO_BUILD_VERSION}
 )
 
-# Core library sources
 set(DEMO_CORE_SOURCES
     src/libdemo.c
 )
 
-# CLI sources
-set(DEMO_CLI_SOURCES
-    src/demo.c
-    ${DEMO_CORE_SOURCES}
-    )
-
-# wasm32/Emscripten library module (reusable library only, no CLI)
 if(EMSCRIPTEN)
-    add_executable(demo_wasm ${DEMO_CORE_SOURCES})
-    target_include_directories(demo_wasm PRIVATE src)
-    set_target_properties(demo_wasm PROPERTIES
-        OUTPUT_NAME "demo"
+    add_executable(libdemo_wasm ${DEMO_CORE_SOURCES})
+    target_include_directories(libdemo_wasm PRIVATE src)
+    set_target_properties(libdemo_wasm PROPERTIES
+        OUTPUT_NAME "libdemo"
         SUFFIX ".wasm"
     )
-    target_link_options(demo_wasm PRIVATE
+    target_link_options(libdemo_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_demo_greet,_kc_demo_free,_kc_demo_version
     )
-endif()
-
-if(NOT DEMO_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
-    # Main executable
-    add_executable(demo
-        ${DEMO_CLI_SOURCES}
-    )
-
-    target_include_directories(demo PRIVATE src)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(demo pthread m)
-    endif()
-
-    # Static library
+elseif(NOT DEMO_TEST_EXTERNAL_ARTIFACTS)
     add_library(demo_static STATIC ${DEMO_CORE_SOURCES})
-
     set_target_properties(demo_static PROPERTIES OUTPUT_NAME "demo")
-
     target_include_directories(demo_static PRIVATE src)
 
-    # Shared library
     add_library(demo_shared SHARED ${DEMO_CORE_SOURCES})
-
-    set_target_properties(demo_shared PROPERTIES OUTPUT_NAME "demo")
-    set_target_properties(demo_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-
+    set_target_properties(demo_shared PROPERTIES
+        OUTPUT_NAME "demo"
+        WINDOWS_EXPORT_ALL_SYMBOLS ON
+    )
     target_include_directories(demo_shared PRIVATE src)
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
@@ -113,18 +88,9 @@ if(DEMO_BUILD_TESTS)
                     IMPORTED_IMPLIB "${DEMO_TEST_IMPORT_LIBRARY}"
                 )
             endif()
+            set(DEMO_TEST_SHARED_TARGET demo_test_shared)
         else()
             set(DEMO_TEST_SHARED_TARGET demo_shared)
-        endif()
-
-        if(TARGET demo_test_shared)
-            set(DEMO_TEST_SHARED_TARGET demo_test_shared)
-        endif()
-
-        if(DEMO_TEST_CLI)
-            set(DEMO_TEST_CLI_TARGET_PATH "${DEMO_TEST_CLI}")
-        else()
-            set(DEMO_TEST_CLI_TARGET_PATH "$<TARGET_FILE:demo>")
         endif()
 
         add_executable(demo_contract_test src/test.c)
@@ -134,10 +100,6 @@ if(DEMO_BUILD_TESTS)
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(demo_contract_test PRIVATE pthread m)
         endif()
-
-        target_compile_definitions(demo_contract_test PRIVATE
-            KC_DEMO_TEST_CLI="${DEMO_TEST_CLI_TARGET_PATH}"
-        )
 
         add_custom_command(TARGET demo_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

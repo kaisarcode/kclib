@@ -1,6 +1,6 @@
 #!/bin/bash
 # kclib dist tool
-# Summary: Publishes project artifacts into the dist directory with checksums and manifest.
+# Summary: Publishes library artifacts into dist with checksums and a manifest.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
 # License: GNU General Public License v3.0
@@ -12,56 +12,27 @@ ROOT_DIR=$(dirname "$SCRIPT_DIR")
 PROJ_DIR="$ROOT_DIR/proj"
 DIST_DIR="$ROOT_DIR/dist"
 CACHE_FILE="$DIST_DIR/.build_state"
-readonly EXCLUDED_PROJECTS=("libr.c")
+readonly EXCLUDED_PROJECTS=("libr.c" "liblibr.c")
 
-# Computes a digest of all binary artifact paths, sizes, and mtimes.
-# @param proj_dir Projects directory.
-# @return 0 on success; the digest is written to stdout.
-compute_fingerprint() {
-    local proj_dir="$1"
-    local hasher name
-    local -a find_excludes=()
-
-    for name in "${EXCLUDED_PROJECTS[@]}"; do
-        find_excludes+=(! -path "$proj_dir/$name/*")
-    done
-
-    if command -v sha256sum >/dev/null 2>&1; then
-        hasher=sha256sum
-    else
-        hasher=md5sum
-    fi
-
-    {
-        find "$proj_dir" -type f -path "*/bin/*" "${find_excludes[@]}" \
-            ! -name "*.sync-conflict-*" \
-            -exec stat -c "%n-%s-%Y" {} + 2>/dev/null
-
-        for project_path in "$proj_dir"/*/; do
-            local project_name name header
-            project_name=$(basename "$project_path")
-            if is_excluded "$project_name"; then
-                continue
-            fi
-            name="${project_name%.c}"
-            header="$project_path/src/lib${name}.h"
-            if [ -f "$header" ]; then
-                stat -c "%n-%s-%Y" "$header" 2>/dev/null
-            fi
-        done
-    } |
-        sort |
-        "$hasher" |
-        awk '{print $1}'
+capability_name() {
+    local stem
+    stem="${1%.c}"
+    case "$stem" in
+        lib*) printf '%s\n' "${stem#lib}" ;;
+        *) printf '%s\n' "$stem" ;;
+    esac
 }
 
-# Checks whether a project is excluded from distribution.
-# @param project_name Project name.
-# @return 0 if excluded, 1 otherwise.
+is_migrated() {
+    case "$1" in
+        lib*.c) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 is_excluded() {
     local project_name="$1"
     local name
-
     for name in "${EXCLUDED_PROJECTS[@]}"; do
         if [ "$project_name" = "$name" ]; then
             return 0
@@ -70,12 +41,40 @@ is_excluded() {
     return 1
 }
 
-# Computes the SHA-256 digest of a file.
-# @param file Path to the file.
-# @return 0 on success; the digest is written to stdout.
+compute_fingerprint() {
+    local proj_dir="$1"
+    local hasher project_path project_name name header
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        hasher=sha256sum
+    else
+        hasher=md5sum
+    fi
+
+    {
+        for project_path in "$proj_dir"/*/; do
+            project_name=$(basename "$project_path")
+            if is_excluded "$project_name"; then
+                continue
+            fi
+            name=$(capability_name "$project_name")
+            if [ -d "$project_path/bin" ]; then
+                if is_migrated "$project_name"; then
+                    find "$project_path/bin" -type f -name "lib$name.*" ! -name "*.sync-conflict-*" -exec stat -c "%n-%s-%Y" {} + 2>/dev/null
+                else
+                    find "$project_path/bin" -type f ! -name "*.sync-conflict-*" -exec stat -c "%n-%s-%Y" {} + 2>/dev/null
+                fi
+            fi
+            header="$project_path/src/lib$name.h"
+            if [ -f "$header" ]; then
+                stat -c "%n-%s-%Y" "$header" 2>/dev/null
+            fi
+        done
+    } | sort | "$hasher" | awk '{print $1}'
+}
+
 compute_sha256() {
     local file="$1"
-
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$file" | awk '{print $1}'
     elif command -v shasum >/dev/null 2>&1; then
@@ -85,14 +84,11 @@ compute_sha256() {
     fi
 }
 
-# Copies clean project artifacts into the dist directory.
-# @param proj_dir Projects directory.
-# @param dist_dir Dist directory.
-# @return 0 on success.
 collect_artifacts() {
     local proj_dir="$1"
     local dist_dir="$2"
     local project_path project_name project_dist name header target_dir target_header
+    local artifact rel_path destination
 
     for project_path in "$proj_dir"/*/; do
         project_name=$(basename "$project_path")
@@ -107,29 +103,35 @@ collect_artifacts() {
         find "$project_path/bin" -type f -name "*.sync-conflict-*" -delete 2>/dev/null || true
         project_dist="$dist_dir/$project_name"
         mkdir -p "$project_dist"
-        cp -r "$project_path/bin/." "$project_dist/"
 
-        name="${project_name%.c}"
-        header="$project_path/src/lib${name}.h"
+        name=$(capability_name "$project_name")
+        if is_migrated "$project_name"; then
+            while IFS= read -r -d '' artifact; do
+                rel_path="${artifact#"$project_path/bin/"}"
+                destination="$project_dist/$rel_path"
+                mkdir -p "$(dirname "$destination")"
+                cp "$artifact" "$destination"
+            done < <(find "$project_path/bin" -type f -name "lib$name.*" -print0)
+        else
+            cp -r "$project_path/bin/." "$project_dist/"
+        fi
+
+        header="$project_path/src/lib$name.h"
         if [ ! -f "$header" ]; then
             echo "error: public header not found: $header" >&2
             return 1
         fi
 
         while IFS= read -r -d '' target_dir; do
-            target_header="$target_dir/lib${name}.h"
+            target_header="$target_dir/lib$name.h"
             cp "$header" "$target_header"
         done < <(find "$project_dist" -mindepth 2 -maxdepth 2 -type d -print0)
 
-        echo "    [+] Conflicts purged and artifacts collected in $project_dist/"
+        echo "    [+] Artifacts collected in $project_dist/"
     done
-
     return 0
 }
 
-# Writes manifest.json and per-project SHA256SUMS files.
-# @param dist_dir Dist directory.
-# @return 0 on success.
 generate_manifest() {
     local dist_dir="$1"
     local manifest_file first_project first_binary
@@ -153,38 +155,23 @@ generate_manifest() {
         project_sha_file="$project_dir/SHA256SUMS"
         : > "$project_sha_file"
 
-        if [ "$first_project" = true ]; then
-            first_project=false
-        else
-            echo "," >> "$manifest_file"
-        fi
-
+        if [ "$first_project" = true ]; then first_project=false; else echo "," >> "$manifest_file"; fi
         echo "    \"$project_name\": [" >> "$manifest_file"
 
         first_binary=true
         while IFS= read -r -d '' binary_path; do
             filename=$(basename "$binary_path")
-            case "$filename" in
-                SHA256SUMS|manifest.json|.build_state) continue ;;
-            esac
+            case "$filename" in SHA256SUMS|manifest.json|.build_state) continue ;; esac
 
             rel_path="${binary_path#"$project_dir"}"
             sha256=$(compute_sha256 "$binary_path")
             echo "$sha256  $rel_path" >> "$project_sha_file"
 
-            case "$filename" in
-                *.h) continue ;;
-            esac
-
+            case "$filename" in *.h) continue ;; esac
             IFS="/" read -r arch platform bin_name <<< "$rel_path"
             filesize=$(stat -c%s "$binary_path" 2>/dev/null || stat -f%z "$binary_path" 2>/dev/null)
 
-            if [ "$first_binary" = true ]; then
-                first_binary=false
-            else
-                echo "," >> "$manifest_file"
-            fi
-
+            if [ "$first_binary" = true ]; then first_binary=false; else echo "," >> "$manifest_file"; fi
             cat <<EOF >> "$manifest_file"
       {
         "arch": "$arch",
@@ -201,56 +188,38 @@ EOF
     done
 
     printf '\n  }\n}\n' >> "$manifest_file"
-
     return 0
 }
 
-# Stashes manually maintained files from the dist root before regeneration.
-# @param dist_dir Dist directory.
-# @param stash_dir Stash directory.
-# @return 0 on success.
 stash_root_files() {
     local dist_dir="$1"
     local stash_dir="$2"
     local name
-
     mkdir -p "$stash_dir"
     [ -d "$dist_dir" ] || return 0
-
     while IFS= read -r file; do
         name=$(basename "$file")
         cp -p "$file" "$stash_dir/$name"
-    done < <(find "$dist_dir" -maxdepth 1 -type f \
-        ! -name "manifest.json" ! -name ".build_state")
-
+    done < <(find "$dist_dir" -maxdepth 1 -type f ! -name "manifest.json" ! -name ".build_state")
     return 0
 }
 
-# Restores manually maintained files into the dist root after regeneration.
-# @param dist_dir Dist directory.
-# @param stash_dir Stash directory.
-# @return 0 on success.
 restore_root_files() {
     local dist_dir="$1"
     local stash_dir="$2"
-
-    find "$stash_dir" -maxdepth 1 -type f \
-        -exec cp -p {} "$dist_dir"/ \;
+    find "$stash_dir" -maxdepth 1 -type f -exec cp -p {} "$dist_dir"/ \;
 }
 
-
-# Checks the build state and rebuilds the dist directory when binaries change.
-# @return 0 on success.
 main() {
     local current_state prev_state stash_dir
 
-    echo "Checking for binary changes in $PROJ_DIR/..."
+    echo "Checking for artifact changes in $PROJ_DIR/..."
     current_state=$(compute_fingerprint "$PROJ_DIR")
 
     if [ -f "$CACHE_FILE" ]; then
         prev_state=$(cat "$CACHE_FILE")
         if [ "$current_state" = "$prev_state" ]; then
-            echo "No changes detected in binaries or public headers."
+            echo "No changes detected in artifacts or public headers."
             echo "Done."
             return 0
         fi
@@ -262,7 +231,6 @@ main() {
 
     rm -rf "$DIST_DIR"
     mkdir -p "$DIST_DIR"
-
     collect_artifacts "$PROJ_DIR" "$DIST_DIR"
 
     echo "Generating manifest.json and checksums..."
@@ -272,7 +240,6 @@ main() {
     rm -rf "$stash_dir"
 
     echo "$current_state" > "$CACHE_FILE"
-
     echo "Done. Fresh artifacts, SHA256SUMS and manifest.json ready in $DIST_DIR/"
 }
 

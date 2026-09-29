@@ -6,7 +6,7 @@ This repository is the public development monorepo for the native primitive
 libraries of the KaisarCode ecosystem.
 
 Individual kclibs live as project directories under `proj/`, using the
-`proj/NAME.c/` form. They are not separate Git repositories.
+`proj/libNAME.c/` form. They are not separate Git repositories.
 
 Repository-wide source-control files such as `.gitignore` and `.kcsignore`
 belong at the monorepo root rather than inside each kclib project.
@@ -14,8 +14,7 @@ belong at the monorepo root rather than inside each kclib project.
 Repository-wide tooling lives under `scripts/`. Generated distribution artifacts
 live under `dist/`; that directory is build output and is not versioned.
 
-A kclib is an independent native library built around one concrete capability,
-usually with a thin CLI.
+A kclib is an independent native library built around one concrete capability.
 
 No kclib depends on another kclib. Each library must remain independently
 buildable, usable, and distributable. Composition between capabilities belongs
@@ -27,14 +26,13 @@ than through kclib-to-kclib dependencies.
 Prefer:
 
 *  reusable behavior in the library;
-*  a thin CLI over the public API;
 *  a compact C-friendly public header;
 *  explicit ownership, lifetime, errors, and cleanup;
 *  ordinary native build artifacts;
 *  independent local use without hosted services or shared runtimes.
 
 Use the current kclib blueprint as the default for naming, layout, lifecycle,
-CLI style, configuration, build targets, tests, and README structure.
+build targets, tests, and README structure.
 
 Do not copy blueprint mechanics when the capability is materially different.
 
@@ -268,36 +266,12 @@ mechanisms are necessary.
 
 ## Compatibility
 
-Treat the public header and CLI behavior as compatibility contracts.
+Treat the public header and library behavior as compatibility contracts.
 
-Preserve existing public symbols, ownership semantics, return codes, CLI
-behavior, parseable output, configuration precedence, and lifecycle behavior
-unless the task explicitly requires a change.
+Preserve existing public symbols, ownership semantics, return codes, and lifecycle
+behavior unless the task explicitly requires a change.
 
 Do not rename or redesign stable APIs solely for family consistency.
-
-## Library and CLI
-
-Keep reusable capability logic in the library.
-
-The CLI may parse configuration and arguments, call the public API, print
-results or diagnostics, select exit status, and release resources.
-
-Do not implement the capability twice.
-
-Do not add public API solely to expose an internal CLI helper.
-
-## Configuration
-
-Where defaults, environment, and CLI configuration all exist, use:
-
-1.  built-in defaults;
-2.  documented environment values;
-3.  CLI arguments.
-
-Use established `KC_*` environment naming.
-
-Do not introduce generic configuration infrastructure.
 
 ## State and lifecycle
 
@@ -322,12 +296,11 @@ failures.
 Use the simplest interface appropriate to the capability. No transport or
 protocol is mandatory across kclibs.
 
-Preserve machine-parseable output where applicable.
 
 ## Structure and dependencies
 
-Keep public headers, library source, CLI source, tests, vendored code, and
-platform-specific code easy to identify.
+Keep public headers, library source, tests, vendored code, and platform-specific
+code easy to identify.
 
 Do not restructure stable code solely to match another kclib.
 
@@ -363,7 +336,6 @@ tutorial, implementation diary, design rationale, or ABI commentary.
 A README should focus on:
 
 *  what the kclib does;
-*  how to use its CLI;
 *  practical public API examples;
 *  user-visible options and behavior;
 *  supported platforms and dependencies;
@@ -389,11 +361,6 @@ the rest of the monorepo and should never need that context.
 Do not explain why a kclib does not support a platform or build target. Document
 supported targets only. If WebAssembly is supported, document how to build and
 test it. If it is not supported, omit WebAssembly entirely.
-
-README examples should show installed CLI names such as `trust`, `tray`, or
-`wvw`, not repository build paths such as `./bin/x86_64/linux/<command>`.
-Artifact paths may still be documented where the artifact location itself is
-relevant.
 
 Update documentation when public or operational behavior changes.
 

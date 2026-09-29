@@ -1,43 +1,8 @@
-# demo.c - Minimal C Library Example
+# libdemo.c - Minimal C Library Example
 
-`demo.c` is a minimal example library showing the standard kclib structure with
-one small reusable capability, a CLI consumer, portable tests, and a WebAssembly
-build.
-
----
-
-## CLI
-
-Run without arguments to greet the default name:
-
-```bash
-demo
-Hello World!
-```
-
-Provide a name:
-
-```bash
-demo -n John
-Hello John!
-```
-
-The long form is also available:
-
-```bash
-demo --name Jane
-Hello Jane!
-```
-
-### Parameters
-
-| Flag | Description |
-| :--- | :--- |
-| `-n`, `--name <name>` | Name to greet (default: `World`) |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
-
----
+`libdemo.c` is the reference kclib project. It demonstrates the standard
+library-only structure with one small reusable capability, portable tests, and a
+WebAssembly build.
 
 ## Public API
 
@@ -66,8 +31,6 @@ Use `kc_demo_free()` to release the returned string.
 
 `kc_demo_version()` returns the library build version.
 
----
-
 ## Build
 
 Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
@@ -87,11 +50,8 @@ make
 make test
 ```
 
-Native and Wine runs validate two reusable public-API cases plus one grouped CLI
-case. WebAssembly validates only the two reusable cases; native process helpers
-and the CLI case are excluded from the WASM test build at compile time.
-
-To run through Wine:
+The test suite validates the reusable public API. To run the Windows library
+tests through Wine:
 
 ```bash
 make x86_64/windows
@@ -105,13 +65,12 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/demo.wasm`
+- Artifact: `bin/wasm32/wasm/libdemo.wasm`
 - Exports: `kc_demo_greet`, `kc_demo_free`, `kc_demo_version`
-- The module contains the reusable library only; the CLI is not compiled into it.
 
 `wasm32/wasm` is included in `make all`.
 
-### Multiarch Builds
+### Multiarch builds
 
 A plain `make` builds only the current host architecture. `make all` builds
 all configured targets.
@@ -141,18 +100,16 @@ make s390x/linux
 make loongarch64/linux
 ```
 
----
+## Development requirements
 
-## Development Requirements
-
-### Build Tools
+### Build tools
 
 - `make` (GNU Make)
 - `cmake` >= 3.14
 - `ninja`
 - `gcc` or `clang` (C11 compatible)
 
-### Optional Cross-Compilation SDKs
+### Optional cross-compilation SDKs
 
 Required only for the corresponding targets:
 
@@ -162,21 +119,11 @@ Required only for the corresponding targets:
 - Android NDK for Android targets.
 - Emscripten SDK and Node.js for WebAssembly builds and tests.
 
----
+## Beta notice
 
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+This is a beta project tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You are free to test it, use it,
+and modify it.
 
 ## License
 

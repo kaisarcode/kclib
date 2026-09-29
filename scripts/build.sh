@@ -10,7 +10,7 @@ set -e
 # Prints command usage information.
 # @return 0 on success.
 usage() {
-    echo "Usage: $0 all|NAME.c" >&2
+    echo "Usage: $0 all|libNAME.c" >&2
 }
 
 # Builds one kclib project for every configured target.
@@ -49,6 +49,8 @@ main() {
     }
 
     if [ "$target" = "all" ]; then
+        # Keep legacy project directories discoverable until each project has
+        # completed the one-by-one rename to libNAME.c.
         for project_dir in "$proj_dir"/*.c; do
             [ -d "$project_dir" ] || continue
             build_project "$project_dir"
@@ -57,9 +59,9 @@ main() {
     fi
 
     case "$target" in
-        *.c) ;;
+        lib*.c) ;;
         *)
-            echo "error: project name must use the NAME.c form" >&2
+            echo "error: project name must use the libNAME.c form" >&2
             usage
             exit 1
             ;;

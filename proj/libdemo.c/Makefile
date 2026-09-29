@@ -133,12 +133,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libdemo.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libdemo.dll
 NATIVE_IMPORT_LIBRARY := -DDEMO_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libdemo.dll.a
 endif
@@ -194,7 +192,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/demo $(BIN_DIR)/$(1)/linux/demo
 	@echo "OK $(1)/linux"
 endef
 
@@ -251,7 +248,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,)
-	@cp $(BUILD_DIR)/$(1)-windows/out/demo.exe $(BIN_DIR)/$(1)/windows/demo.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libdemo.dll $(BIN_DIR)/$(1)/windows/libdemo.dll
 	@echo "OK $(1)/windows"
 endef
@@ -288,7 +284,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,)
-	@cp $(BUILD_DIR)/$(1)-macos/out/demo $(BIN_DIR)/$(1)/macos/demo
 	@echo "OK $(1)/macos"
 endef
 
@@ -332,14 +327,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),)
-	@if [ -f $(BUILD_DIR)/$(1)-$(2)/out/demo ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/demo $(BIN_DIR)/$(1)/$(2)/demo; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/demo.app/demo ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/demo.app/demo $(BIN_DIR)/$(1)/$(2)/demo; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi
 	@echo "OK $(1)/$(2)"
 endef
 
@@ -374,7 +361,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,)
-	@cp $(BUILD_DIR)/$(1)-android/out/demo $(BIN_DIR)/$(1)/android/demo
 	@echo "OK $(1)/android"
 endef
 
@@ -401,7 +387,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/demo.wasm $(BIN_DIR)/wasm32/wasm/demo.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libdemo.wasm $(BIN_DIR)/wasm32/wasm/libdemo.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -420,7 +406,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libdemo.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libdemo.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/demo.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libdemo.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libdemo.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -433,7 +419,6 @@ test:
 				-DDEMO_BUILD_VERSION=$(BUILD_VERSION) \
 				-DDEMO_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdemo.dll \
 				-DDEMO_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdemo.dll.a \
-				-DDEMO_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/demo.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -445,8 +430,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/demo.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/demo.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libdemo.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libdemo.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -464,7 +449,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/demo$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -474,7 +459,6 @@ test:
 				-DDEMO_BUILD_TESTS=ON \
 				-DDEMO_BUILD_VERSION=$(BUILD_VERSION) \
 				-DDEMO_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				-DDEMO_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/demo$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
