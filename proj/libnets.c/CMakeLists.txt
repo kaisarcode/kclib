@@ -10,7 +10,6 @@ endif()
 
 option(NETS_NATIVE "Enable native hardware optimizations" OFF)
 option(NETS_BUILD_TESTS "Build nets tests" OFF)
-set(NETS_TEST_CLI "" CACHE STRING "Path to the nets CLI used by contract tests")
 
 set(NETS_TEST_EXTERNAL_ARTIFACTS OFF)
 if(NETS_BUILD_TESTS AND NETS_TEST_SHARED_LIBRARY)
@@ -45,27 +44,6 @@ set_source_files_properties(src/libnets.c PROPERTIES
 set(NETS_SOURCES src/libnets.c)
 
 if(NOT NETS_TEST_EXTERNAL_ARTIFACTS)
-    # Main executable
-    add_executable(nets
-        src/nets.c
-        ${NETS_SOURCES}
-    )
-
-    target_include_directories(nets PRIVATE src)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(nets pthread m)
-    endif()
-
-    if(WIN32)
-        target_link_libraries(nets ws2_32)
-    endif()
-
-    if(OPENSSL_INCLUDE_DIR AND OPENSSL_SSL_LIBRARY AND OPENSSL_CRYPTO_LIBRARY)
-        target_include_directories(nets PRIVATE ${OPENSSL_INCLUDE_DIR})
-        target_link_libraries(nets ${OPENSSL_SSL_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY})
-    endif()
-
     # Static library
     add_library(nets_static STATIC ${NETS_SOURCES})
 
@@ -119,12 +97,6 @@ if(NETS_BUILD_TESTS)
     add_executable(nets_contract_test src/test.c)
     target_include_directories(nets_contract_test PRIVATE src)
     target_link_libraries(nets_contract_test PRIVATE ${NETS_TEST_SHARED_TARGET})
-
-    if(NETS_TEST_CLI)
-        target_compile_definitions(nets_contract_test PRIVATE NETS_TEST_CLI="${NETS_TEST_CLI}")
-    elseif(TARGET nets)
-        target_compile_definitions(nets_contract_test PRIVATE NETS_TEST_CLI="$<TARGET_FILE:nets>")
-    endif()
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(nets_contract_test PRIVATE pthread m)

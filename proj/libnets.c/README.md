@@ -1,32 +1,6 @@
-# nets.c - Network Sender
+# libnets.c - Network Sender
 
-`nets.c` provides a native asynchronous library and a one-shot CLI for sending raw bytes to one TCP, UDP, or optional TLS destination.
-
----
-
-## CLI
-
-The CLI reads all input from standard input, sends it to one target, and prints stream response bytes to standard output.
-
-```bash
-echo 'hello' | nets 127.0.0.1:8080
-echo 'hello' | nets 127.0.0.1:8080 --udp
-nets https://example.com <<< 'payload'
-```
-
-Usage:
-
-```text
-nets <target> [--tcp|--udp|--tls]
-```
-
-Targets may be a host, `host:port`, bracketed IPv6 address, or a URL-shaped `http://`, `https://`, `tcp://`, or `udp://` target.
-
-URL-shaped targets select transport and authority defaults only. They do not add HTTP framing, headers, redirects, parsing, or other application-protocol behavior.
-
-`http://` selects TCP port 80, `https://` selects TLS port 443, and `tcp://` or `udp://` select their corresponding transport with port 80 when no explicit port is present.
-
-TLS is available only when the library is compiled with OpenSSL. The TLS transport sets SNI but does not verify the server certificate or hostname, so it must not be treated as authenticated transport.
+`libnets.c` provides a native asynchronous library for sending raw bytes to one TCP, UDP, or optional TLS destination.
 
 ---
 

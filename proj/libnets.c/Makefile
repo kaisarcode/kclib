@@ -186,8 +186,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DNETS_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/nets $(BIN_DIR)/$(1)/linux/nets.tmp
-	@mv -f $(BIN_DIR)/$(1)/linux/nets.tmp $(BIN_DIR)/$(1)/linux/nets
 	@echo "OK $(1)/linux"
 endef
 
@@ -243,8 +241,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DNETS_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/nets.exe $(BIN_DIR)/$(1)/windows/nets.exe.tmp
-	@mv -f $(BIN_DIR)/$(1)/windows/nets.exe.tmp $(BIN_DIR)/$(1)/windows/nets.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libnets.dll $(BIN_DIR)/$(1)/windows/libnets.dll.tmp
 	@mv -f $(BIN_DIR)/$(1)/windows/libnets.dll.tmp $(BIN_DIR)/$(1)/windows/libnets.dll
 	@echo "OK $(1)/windows"
@@ -290,7 +286,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/nets $(BIN_DIR)/$(1)/macos/nets && \
 	echo "OK $(1)/macos"
 endef
 
@@ -342,14 +337,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
-	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/nets ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/nets $(BIN_DIR)/$(1)/$(2)/nets; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/nets.app/nets ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/nets.app/nets $(BIN_DIR)/$(1)/$(2)/nets; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi && \
 	echo "OK $(1)/$(2)"
 endef
 
@@ -383,8 +370,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DNETS_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-android/out/nets $(BIN_DIR)/$(1)/android/nets.tmp
-	@mv -f $(BIN_DIR)/$(1)/android/nets.tmp $(BIN_DIR)/$(1)/android/nets
 	@echo "OK $(1)/android"
 endef
 
@@ -414,10 +399,6 @@ test:
 			echo "missing Windows import library: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/nets.exe" ]; then \
-			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
-			exit 1; \
-		fi; \
 		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -427,11 +408,9 @@ test:
 				-DNETS_BUILD_TESTS=ON \
 				-DNETS_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll \
 				-DNETS_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll.a \
-				-DNETS_TEST_CLI=nets.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target nets_contract_test; \
-		cp $(CURDIR)/$(BIN_DIR)/x86_64/windows/nets.exe $(BUILD_DIR)/test-wine/nets.exe; \
 		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) nets_contract_test.exe all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
@@ -442,16 +421,11 @@ test:
 			echo "missing native shared library: run make first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/nets" ]; then \
-			echo "missing native CLI: run make first" >&2; \
-			exit 1; \
-		fi; \
 		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DNETS_BUILD_TESTS=ON \
 				-DNETS_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libnets.so \
-				-DNETS_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/nets \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target nets_contract_test; \
