@@ -32,8 +32,6 @@
 #define mkdir_one(path) mkdir(path, 0700)
 #endif
 
-#endif
-
 static int test_case_total;
 static int test_case_current;
 
