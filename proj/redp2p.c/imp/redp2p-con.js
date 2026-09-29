@@ -50,8 +50,9 @@
                 : null;
 
             channel.binaryType = "arraybuffer";
+
             /**
-             * Reports an opened peer channel to the publisher.
+             * Reports an opened channel.
              * @return None.
              */
             const connected = () => {
