@@ -29,13 +29,17 @@ protocol, including WebRTC signaling.
 
 The library is the primary interface to REDP2P.
 
-The index listens on an explicit port because peers need a stable place to
-register and resolve publishers.
+The index is the only role that binds a caller-selected port, because
+publishers and consumers need a stable endpoint for registration and discovery.
 
-A publisher receives data from connected consumers through a callback. A
-consumer sends data with `kc_redp2p_con_send()` and receives replies through
-its callback. What happens to those bytes after the callback is entirely up to
-the application.
+Publishers and consumers do not expose application ports. Their transport
+sockets use ports assigned by the operating system. A publisher receives
+application data through `kc_redp2p_pub_receive_fn`; a consumer sends with
+`kc_redp2p_con_send()` and receives through `kc_redp2p_con_receive_fn`.
+
+The library does not decide what happens to those bytes next. Processing them,
+forwarding them to another socket, storing them, or translating them to another
+protocol is application behavior.
 
 ### Publisher
 
@@ -75,15 +79,13 @@ int main(void)
 }
 ```
 
-With `port = 0`, which is the default above, the publisher uses direct library
-I/O. Its network port is not selected by the application; the operating system
-assigns the transport port used by REDP2P.
-
 Each received `kc_redp2p_pub_input_t` identifies the consumer that sent the
-data. The application may process those bytes directly, store them, transform
-them, forward them to another service, or answer that consumer with
-`kc_redp2p_client_respond()`. The client can also be closed explicitly with
-`kc_redp2p_client_close()`.
+data. The application may process those bytes directly or answer that consumer
+with `kc_redp2p_client_respond()`. The client can also be closed explicitly
+with `kc_redp2p_client_close()`.
+
+The publisher transport port is selected by the operating system; it is not
+part of the public publisher configuration.
 
 ### Consumer
 
@@ -119,45 +121,8 @@ int main(void)
 ```
 
 The consumer does not choose TCP or UDP. It learns the publisher transport from
-the index. In direct mode its REDP2P transport also uses ports assigned by the
-operating system rather than an application-selected local port.
-
-### Adapting to local ports
-
-The callback API is intentionally not tied to a local port. An application can
-do anything with the received data, including forwarding it to a specific local
-TCP or UDP service.
-
-For convenience, the C API also includes that common forwarding pattern
-directly. For a publisher, setting `options.port` adapts an existing local
-service:
-
-```c
-kc_redp2p_pub_options_t options = {0};
-
-options.id = "web";
-options.index = "index.example.com:9876";
-options.protocol = KC_REDP2P_TCP;
-options.port = 8080;
-```
-
-For a consumer, setting `options.port` exposes the remote publisher through a
-local loopback port:
-
-```c
-kc_redp2p_con_options_t options = {0};
-
-options.id = "web";
-options.index = "index.example.com:9876";
-options.port = 9000;
-```
-
-The remote service is then available locally at `127.0.0.1:9000`.
-
-This port-backed form is a convenience for existing socket-based applications.
-Conceptually it is equivalent to receiving REDP2P data through the library and
-forwarding it to a chosen local port. The CLI is built around this convenience
-mode.
+the index. REDP2P manages the transport sockets internally and the operating
+system assigns their local ports.
 
 ### Index
 
@@ -311,10 +276,9 @@ Index policy can be configured with `REDP2P_SEATS`, `REDP2P_POW`,
 
 ## CLI
 
-The CLI is a convenience interface built on top of the library's local-port
-adapter. It is useful when the desired behavior is specifically to bridge an
-existing TCP or UDP service through REDP2P, but it is not the primary data model
-of the library.
+The CLI is a separate convenience tool for bridging existing local TCP or UDP
+services through REDP2P. Its local-port behavior belongs to the CLI and is not
+part of the public publisher or consumer API.
 
 It maps the same three roles to commands:
 
