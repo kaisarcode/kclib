@@ -136,7 +136,6 @@ the same REDP2P index and uses the same publisher IDs. Its application-facing
 model is the same: publishers observe established clients and receive their
 data, while consumers return connected channels that can send and receive.
 
-
 ---
 
 ## Build
