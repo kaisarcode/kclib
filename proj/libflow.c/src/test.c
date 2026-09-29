@@ -875,6 +875,7 @@ static int case_kc_flow_version(void) {
 }
 
 /**
+ * Runs all public API contract test cases.
  * @return 0 on success, nonzero on failure.
  */
 static int case_all(void) {
