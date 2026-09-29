@@ -144,12 +144,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libmin.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libmin.dll
 NATIVE_IMPORT_LIBRARY := -DMIN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libmin.dll.a
 endif
@@ -298,7 +296,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/min $(BIN_DIR)/$(1)/macos/min && \
 	echo "OK $(1)/macos"
 endef
 
@@ -350,14 +347,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
-	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/min ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/min $(BIN_DIR)/$(1)/$(2)/min; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/min.app/min ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/min.app/min $(BIN_DIR)/$(1)/$(2)/min; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi && \
 	echo "OK $(1)/$(2)"
 endef
 
@@ -417,7 +406,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DMIN_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/min.wasm $(BIN_DIR)/wasm32/wasm/min.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libmin.wasm $(BIN_DIR)/wasm32/wasm/libmin.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -436,11 +425,11 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libmin.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmin.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/min.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libmin.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmin.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -q '^MIN_TEST_CLI:' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
@@ -448,7 +437,6 @@ test:
 				-DMIN_BUILD_TESTS=ON \
 				-DMIN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmin.dll \
 				-DMIN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmin.dll.a \
-				-DMIN_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/min.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -460,8 +448,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/min.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/min.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libmin.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libmin.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -483,16 +471,15 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/min$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -q '^MIN_TEST_CLI:' $(BUILD_DIR)/test/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DMIN_BUILD_TESTS=ON \
 				-DMIN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				-DMIN_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/min$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \

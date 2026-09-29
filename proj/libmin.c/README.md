@@ -1,44 +1,4 @@
-# min.c - Asset Minifier
-
----
-## CLI
-
-### Examples
-
-Minify CSS:
-
-```bash
-echo 'body { color: red; }' | min --css
-```
-
-```bash
-echo 'const x = 1; // comment' | min --js
-```
-
-Minify HTML:
-
-```bash
-echo '<div>  hello  </div>' | min --html
-```
-
-Minify generic text:
-
-```bash
-echo '  hello   world  ' | min --txt
-```
-
-Pass a value directly instead of stdin:
-
-```bash
-min -txt "Hello                      World  !"
-```
-
----
-
-### Parameters
-
-When a value argument is omitted, the CLI reads the source from stdin. When a
-value is present after the mode flag, that value is minified directly.
+# libmin.c - Asset Minifier
 
 ---
 ## Public API
@@ -111,11 +71,8 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/min.wasm`
+- Artifact: `bin/wasm32/wasm/libmin.wasm`
 - Exports: `kc_min_css`, `kc_min_js`, `kc_min_html`, `kc_min_txt`, `kc_min_free`, `kc_min_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds

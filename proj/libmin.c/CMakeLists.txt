@@ -38,7 +38,7 @@ if(EMSCRIPTEN)
     add_executable(min_wasm ${MIN_SOURCES})
     target_include_directories(min_wasm PRIVATE src)
     set_target_properties(min_wasm PROPERTIES
-        OUTPUT_NAME "min"
+        OUTPUT_NAME "libmin"
         SUFFIX ".wasm"
     )
     target_link_options(min_wasm PRIVATE
@@ -49,17 +49,6 @@ if(EMSCRIPTEN)
 endif()
 
 if(NOT MIN_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
-    add_executable(min
-        src/min.c
-        ${MIN_SOURCES}
-    )
-
-    target_include_directories(min PRIVATE src)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(min pthread m)
-    endif()
-
     add_library(min_static STATIC ${MIN_SOURCES})
     set_target_properties(min_static PROPERTIES OUTPUT_NAME "min")
     target_include_directories(min_static PRIVATE src)
@@ -115,13 +104,3 @@ if(MIN_BUILD_TESTS)
     endif()
 endif()
 
-if(MIN_BUILD_TESTS)
-    if(MIN_TEST_CLI)
-        set(MIN_TEST_CLI_TARGET_PATH "${MIN_TEST_CLI}")
-    else()
-        set(MIN_TEST_CLI_TARGET_PATH "")
-    endif()
-    target_compile_definitions(min_contract_test PRIVATE
-        MIN_TEST_CLI="${MIN_TEST_CLI_TARGET_PATH}"
-    )
-endif()
