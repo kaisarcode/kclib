@@ -64,7 +64,6 @@ struct kc_redp2p_pub {
     uint16_t index_port;
     char id[KC_REDP2P_ID_MAX + 1];
     uint16_t port;
-    int direct;
     int adapter_platform;
     redp2p_fd_t adapter_fd;
 #ifdef _WIN32
@@ -93,7 +92,6 @@ struct kc_redp2p_con {
     char id[KC_REDP2P_ID_MAX + 1];
     char self_id[KC_REDP2P_ID_MAX + 1];
     uint16_t port;
-    int direct;
     int adapter_platform;
     redp2p_fd_t adapter_fd;
 #ifdef _WIN32
@@ -161,7 +159,7 @@ int redp2p_test_api_io_entered(void)
 
 /**
  * Sets the test-only ephemeral-port hold gate.
- * Summary: Pauses direct consumer startup after choosing an ephemeral port.
+ * Summary: Pauses consumer startup after choosing an ephemeral port.
  * @param hold Nonzero to hold, zero to release.
  * @return None.
  */
@@ -197,7 +195,7 @@ static void kc_redp2p_test_io_point(void)
 /**
  * Waits at the test-only ephemeral-port synchronization point when enabled.
  * Summary: Publishes the selected port before the private bind-race test.
- * @param port Selected direct consumer port.
+ * @param port Selected consumer transport port.
  * @return None.
  */
 static void kc_redp2p_test_port_point(uint16_t port)
@@ -330,7 +328,7 @@ static redp2p_fd_t kc_redp2p_loopback_socket(int type, int listen_socket,
 }
 
 /**
- * Reserves and releases one OS-selected loopback port for direct consumption.
+ * Reserves and releases one OS-selected loopback port for consumer transport.
  * @param port_out Effective port.
  * @return KC_REDP2P_OK on success or KC_REDP2P_ENET.
  */
@@ -442,7 +440,7 @@ static void kc_redp2p_pub_emit(kc_redp2p_pub_t *pub,
     pub->receive(&input, pub->userdata);
 }
 
-/** Runs the direct publisher loopback adapter. */
+/** Runs the private publisher callback adapter. */
 #ifdef _WIN32
 static DWORD WINAPI kc_redp2p_pub_adapter_worker(LPVOID arg)
 #else
@@ -458,7 +456,7 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
         size_t i;
         int ready;
 
-        if (!pub->direct || REDP2P_ISERR(pub->adapter_fd)) break;
+        if (REDP2P_ISERR(pub->adapter_fd)) break;
         if (pub->runtime.ctx->proto == REDP2P_PROTO_TCP) {
             for (i = 0; i < pub->client_count; i++) {
                 kc_redp2p_client_t *client = pub->clients[i];
@@ -540,7 +538,7 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
 #endif
 }
 
-/** Runs the direct consumer receive adapter. */
+/** Runs the private consumer receive adapter. */
 #ifdef _WIN32
 static DWORD WINAPI kc_redp2p_con_adapter_worker(LPVOID arg)
 #else
@@ -651,7 +649,7 @@ static int kc_redp2p_con_adapter_is_current(kc_redp2p_con_t *con)
 
 /**
  * Joins a publisher adapter thread if one was started.
- * Summary: Waits for the direct adapter worker to finish.
+ * Summary: Waits for the private adapter worker to finish.
  * @param pub Publisher capability.
  * @return None.
  */
@@ -687,7 +685,7 @@ static void kc_redp2p_con_adapter_join(kc_redp2p_con_t *con)
 }
 
 /**
- * Opens the direct consumer's connection to its private local adapter.
+ * Opens the consumer connection to its private callback adapter.
  * @param con Consumer capability.
  * @return KC_REDP2P_OK on success or an error code.
  */
@@ -716,7 +714,7 @@ static int kc_redp2p_con_adapter_open(kc_redp2p_con_t *con)
 }
 
 /**
- * Stops and releases the direct publisher adapter.
+ * Stops and releases the private publisher callback adapter.
  * @param pub Publisher capability.
  * @return None.
  */
@@ -753,7 +751,7 @@ static void kc_redp2p_pub_adapter_close(kc_redp2p_pub_t *pub)
 }
 
 /**
- * Stops and releases the direct consumer adapter.
+ * Stops and releases the private consumer callback adapter.
  * @param con Consumer capability.
  * @return None.
  */
@@ -1249,7 +1247,6 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     pub = (kc_redp2p_pub_t *)calloc(1, sizeof(*pub));
     if (!pub) return KC_REDP2P_ERROR;
     pub->adapter_fd = REDP2P_FD_INVALID;
-    pub->direct = 1;
     pub->receive = options->receive;
     pub->userdata = options->userdata;
     if (!kc_redp2p_parse_index(options->index, pub->index_host,
@@ -1349,7 +1346,6 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     con = (kc_redp2p_con_t *)calloc(1, sizeof(*con));
     if (!con) return KC_REDP2P_ERROR;
     con->adapter_fd = REDP2P_FD_INVALID;
-    con->direct = 1;
     con->receive = options->receive;
     con->userdata = options->userdata;
     if (!kc_redp2p_parse_index(options->index, con->index_host,
