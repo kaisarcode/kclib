@@ -39,7 +39,7 @@ if(EMSCRIPTEN)
     add_executable(tpm_wasm ${TPM_SOURCES})
     target_include_directories(tpm_wasm PRIVATE src)
     set_target_properties(tpm_wasm PROPERTIES
-        OUTPUT_NAME "tpm"
+        OUTPUT_NAME "libtpm"
         SUFFIX ".wasm"
     )
     target_link_options(tpm_wasm PRIVATE
@@ -64,18 +64,12 @@ if(NOT TPM_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     )
     target_include_directories(tpm_static PRIVATE src)
 
-    add_executable(tpm_exe src/tpm.c ${TPM_SOURCES})
-    set_target_properties(tpm_exe PROPERTIES OUTPUT_NAME tpm)
-    target_include_directories(tpm_exe PRIVATE src)
-
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(tpm_shared m)
         target_link_libraries(tpm_static m)
-        target_link_libraries(tpm_exe m)
     elseif(ANDROID)
         target_link_libraries(tpm_shared m)
         target_link_libraries(tpm_static m)
-        target_link_libraries(tpm_exe m)
     endif()
 endif()
 
@@ -108,12 +102,6 @@ if(TPM_BUILD_TESTS)
         add_executable(tpm_contract_test src/test.c)
         target_include_directories(tpm_contract_test PRIVATE src)
         target_link_libraries(tpm_contract_test PRIVATE ${TPM_TEST_SHARED_TARGET})
-        if(TPM_TEST_CLI)
-            target_compile_definitions(tpm_contract_test PRIVATE
-                KC_TPM_TEST_CLI="${TPM_TEST_CLI}"
-            )
-        endif()
-
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(tpm_contract_test PRIVATE m)
         elseif(ANDROID)

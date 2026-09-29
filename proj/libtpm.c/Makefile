@@ -144,12 +144,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libtpm.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libtpm.dll
 NATIVE_IMPORT_LIBRARY := -DTPM_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libtpm.dll.a
 endif
@@ -199,7 +197,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,$(CMAKE) -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_C_COMPILER=$(2) -DKC_TPM_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/tpm $(BIN_DIR)/$(1)/linux/tpm
 	@echo "OK $(1)/linux"
 endef
 
@@ -254,7 +251,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=$(2) -DKC_TPM_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/tpm.exe $(BIN_DIR)/$(1)/windows/tpm.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libtpm.dll $(BIN_DIR)/$(1)/windows/libtpm.dll
 	@echo "OK $(1)/windows"
 endef
@@ -299,7 +295,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/tpm $(BIN_DIR)/$(1)/macos/tpm && \
 	echo "OK $(1)/macos"
 endef
 
@@ -351,14 +346,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
-	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/tpm ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/tpm $(BIN_DIR)/$(1)/$(2)/tpm; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/tpm.app/tpm ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/tpm.app/tpm $(BIN_DIR)/$(1)/$(2)/tpm; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi && \
 	echo "OK $(1)/$(2)"
 endef
 
@@ -391,7 +378,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DKC_TPM_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-android/out/tpm $(BIN_DIR)/$(1)/android/tpm
 	@echo "OK $(1)/android"
 endef
 
@@ -417,7 +403,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(CMAKE) -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DKC_TPM_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/tpm.wasm $(BIN_DIR)/wasm32/wasm/tpm.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libtpm.wasm $(BIN_DIR)/wasm32/wasm/libtpm.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -436,7 +422,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libtpm.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libtpm.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/tpm.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libtpm.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libtpm.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -449,7 +435,6 @@ test:
 				-DKC_TPM_BUILD_VERSION=$$(date +%s) \
 				-DTPM_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtpm.dll \
 				-DTPM_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtpm.dll.a \
-				-DTPM_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/tpm.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -461,8 +446,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/tpm.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/tpm.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libtpm.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libtpm.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -484,7 +469,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/tpm$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -494,7 +479,6 @@ test:
 				-DTPM_BUILD_TESTS=ON \
 				-DKC_TPM_BUILD_VERSION=$$(date +%s) \
 				-DTPM_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				-DTPM_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/tpm$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \

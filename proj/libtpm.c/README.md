@@ -1,93 +1,8 @@
-# tpm.c - Text Profile Matcher
+# libtpm.c - Text Profile Matcher
 
-`tpm.c` tells you how similar a piece of text is to a reference text. Create a
+`libtpm.c` tells you how similar a piece of text is to a reference text. Create a
 profile from representative samples, then score any input from 0.0 (dissimilar)
 to 1.0 (very similar).
-
----
-## CLI
-
-### Example
-
-Create a map file with Python code:
-
-```bash
-cat > python.map <<EOF
-def hello():
-    print("hello world")
-```
-
-Score Python input against it:
-
-```bash
-echo "def foo(): pass" | tpm python.map
-0.999992
-```
-
-### Demo: use cases
-
-Create profiles for different domains and compare how inputs score against
-matching vs mismatching profiles.
-
-**Natural language - English vs Spanish:**
-
-```
-cat > english.map <<EOF
-The quick brown fox jumps over the lazy dog.
-Pack my box with five dozen liquor jugs.
-The five boxing wizards jump quickly.
-EOF
-
-cat > spanish.map <<EOF
-El zorro marron salta sobre el perro perezoso.
-Los exploradores descubrieron una nueva especie.
-Las civilizaciones antiguas construyeron estructuras magnificas.
-EOF
-```
-
-| Input | vs english.map | vs spanish.map |
-| :---- | :------------: | :------------: |
-| "The quick brown fox jumps over the lazy dog near the river bank." | 0.445819 | 0.000334 |
-| "El zorro marron salta sobre el perro perezoso cerca del arroyo." | 0.001779 | 0.131115 |
-
-Tells Python and JS syntax apart. Python input scores higher on the Python
-profile than on the JS profile.
-
-**Log format - Apache vs Syslog:**
-
-Distinguishes HTTP access logs from system logs by their line structure.
-
-| Input | vs apache.map | vs syslog.map |
-| :---- | :-----------: | :-----------: |
-| '127.0.0.1 - admin [12/May/2026:08:30:00 +0000] "GET /dashboard HTTP/1.1" 200 4567' | 0.390322 | 0.000875 |
-| 'May 12 08:30:00 laptop kernel: PCI device enabled for power management' | 0.001641 | 0.016910 |
-
-### Parameters
-
-| Flag | Description |
-| :--- | :--- |
-| `-n <size>` | N-gram size (default 3, max 8) |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
-
-### Input
-
-Map file: one or more lines of representative text. Stdin: text to score.
-
-### Output
-
-A single line with the score formatted to six decimal places:
-
-```
-0.763264
-```
-
-### Exit codes
-
-| Code | Meaning |
-| :--- | :------ |
-| 0 | Success |
-| 1 | Error (missing map, invalid args, I/O failure, profile build error) |
 
 ---
 ## Public API
@@ -176,11 +91,8 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/tpm.wasm`
+- Artifact: `bin/wasm32/wasm/libtpm.wasm`
 - Exports: `kc_tpm_score`, `kc_tpm_open`, `kc_tpm_close`, `kc_tpm_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
