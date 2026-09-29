@@ -36,6 +36,9 @@
         constructor(peer, channel, handlers = {}) {
             this._peer = peer;
             this._channel = channel;
+            this._connect = typeof handlers.connect === "function"
+                ? handlers.connect
+                : null;
             this._receive = typeof handlers.receive === "function"
                 ? handlers.receive
                 : null;
@@ -47,6 +50,16 @@
                 : null;
 
             channel.binaryType = "arraybuffer";
+            const connected = () => {
+                if (this._connect) {
+                    this._connect(this);
+                }
+            };
+            if (channel.readyState === "open") {
+                connected();
+            } else {
+                channel.addEventListener("open", connected, {once: true});
+            }
             channel.addEventListener("message", event => {
                 if (this._receive) {
                     this._receive({
