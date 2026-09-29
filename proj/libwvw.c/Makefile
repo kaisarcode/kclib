@@ -122,7 +122,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DWVW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/wvw $(BIN_DIR)/$(1)/linux/wvw
 	@echo "OK $(1)/linux"
 endef
 
@@ -145,7 +144,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DWVW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/wvw.exe $(BIN_DIR)/$(1)/windows/wvw.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libwvw.dll $(BIN_DIR)/$(1)/windows/libwvw.dll
 	@cp lib/webview2/WebView2Loader.dll $(BIN_DIR)/$(1)/windows/WebView2Loader.dll
 	@echo "OK $(1)/windows"
@@ -188,7 +186,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/wvw $(BIN_DIR)/$(1)/macos/wvw && \
 	echo "OK $(1)/macos"
 endef
 
@@ -218,7 +215,6 @@ test:
 				-DWVW_BUILD_TESTS=ON \
 				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll \
 				-DWVW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll.a \
-				-DWVW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/wvw.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -230,7 +226,6 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DWVW_BUILD_TESTS=ON \
 				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/$(NATIVE_SHARED_LIBRARY) \
-				-DWVW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/wvw \
 				$(NATIVE_IMPORT_ARGUMENT) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
