@@ -144,12 +144,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libb64.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libb64.dll
 NATIVE_IMPORT_LIBRARY := -DB64_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libb64.dll.a
 endif
@@ -204,7 +202,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DB64_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/b64 $(BIN_DIR)/$(1)/linux/b64
 	@echo "OK $(1)/linux"
 endef
 
@@ -260,7 +257,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DB64_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/b64.exe $(BIN_DIR)/$(1)/windows/b64.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libb64.dll $(BIN_DIR)/$(1)/windows/libb64.dll
 	@echo "OK $(1)/windows"
 endef
@@ -305,7 +301,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/b64 $(BIN_DIR)/$(1)/macos/b64 && \
 	echo "OK $(1)/macos"
 endef
 
@@ -349,14 +344,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(5) -DCMAKE_OSX_ARCHITECTURES=$(6) -DB64_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(3) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
-	@if [ -f $(BUILD_DIR)/$(1)-$(2)/out/b64 ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/b64 $(BIN_DIR)/$(1)/$(2)/b64; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/b64.app/b64 ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/b64.app/b64 $(BIN_DIR)/$(1)/$(2)/b64; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi
 	@echo "OK $(1)/$(2)"
 endef
 
@@ -390,7 +377,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DB64_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-android/out/b64 $(BIN_DIR)/$(1)/android/b64
 	@echo "OK $(1)/android"
 endef
 
@@ -417,7 +403,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,true)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/b64.wasm $(BIN_DIR)/wasm32/wasm/b64.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libb64.wasm $(BIN_DIR)/wasm32/wasm/libb64.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -436,11 +422,11 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libb64.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libb64.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/b64.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libb64.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libb64.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -q '^B64_TEST_CLI:' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
@@ -449,7 +435,6 @@ test:
 				-DB64_BUILD_VERSION=$(BUILD_VERSION) \
 				-DB64_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libb64.dll \
 				-DB64_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libb64.dll.a \
-				-DB64_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/b64.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target b64_contract_test || exit 1; \
@@ -460,8 +445,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/b64.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/b64.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libb64.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libb64.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -479,17 +464,16 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/b64$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -q '^B64_TEST_CLI:' $(BUILD_DIR)/test/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DB64_BUILD_TESTS=ON \
 				-DB64_BUILD_VERSION=$(BUILD_VERSION) \
 				-DB64_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				-DB64_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/b64$(NATIVE_EXE_EXT) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target b64_contract_test || exit 1; \

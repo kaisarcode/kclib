@@ -37,15 +37,15 @@ set(B64_CORE_SOURCES
     src/libb64.c
 )
 
-# wasm32/Emscripten library module (reusable library only, no CLI)
+# wasm32/Emscripten library module
 if(EMSCRIPTEN)
-    add_executable(b64_wasm ${B64_CORE_SOURCES})
-    target_include_directories(b64_wasm PRIVATE src)
-    set_target_properties(b64_wasm PROPERTIES
-        OUTPUT_NAME "b64"
+    add_executable(libb64_wasm ${B64_CORE_SOURCES})
+    target_include_directories(libb64_wasm PRIVATE src)
+    set_target_properties(libb64_wasm PROPERTIES
+        OUTPUT_NAME "libb64"
         SUFFIX ".wasm"
     )
-    target_link_options(b64_wasm PRIVATE
+    target_link_options(libb64_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_b64_version,_kc_b64_encode,_kc_b64_decode,_kc_b64_free
@@ -62,8 +62,6 @@ if(NOT B64_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     set_target_properties(b64_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_include_directories(b64_shared PUBLIC src)
 
-    add_executable(b64 src/b64.c)
-    target_link_libraries(b64 b64_static)
 endif()
 
 if(B64_BUILD_TESTS)
@@ -104,13 +102,4 @@ if(B64_BUILD_TESTS)
                 $<TARGET_FILE_DIR:b64_contract_test>
         )
     endif()
-
-    if(B64_TEST_CLI)
-        set(B64_TEST_CLI_TARGET_PATH "${B64_TEST_CLI}")
-    else()
-        set(B64_TEST_CLI_TARGET_PATH "")
-    endif()
-    target_compile_definitions(b64_contract_test PRIVATE
-        KC_B64_TEST_CLI="${B64_TEST_CLI_TARGET_PATH}"
-    )
 endif()
