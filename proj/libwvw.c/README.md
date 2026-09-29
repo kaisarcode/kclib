@@ -1,4 +1,4 @@
-# wvw.c - Native WebView Window
+# libwvw.c - Native WebView Window
 
 `libwvw.c` provides a reusable native WebView window library with portable
 contract tests and platform backends for Windows, Linux, and macOS.
@@ -152,7 +152,7 @@ bridge options.
 `background` accepts `RRGGBB` and `AARRGGBB`.
 
 `icon` accepts an icon file path or platform icon name, following the same
-convention as `tray.c`. NULL leaves the platform default icon in use.
+convention as `libtray.c`. NULL leaves the platform default icon in use.
 
 `always_on_top`, `click_through`, and `no_focus` configure the native host
 window at startup.
