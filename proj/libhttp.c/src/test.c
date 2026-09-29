@@ -14,6 +14,7 @@
 
 static int test_case_total;
 static int test_case_current;
+
 /**
  * expect true.
  * @return Function result.
