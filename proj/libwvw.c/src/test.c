@@ -379,6 +379,7 @@ static void run_all(void) {
     case_kc_wvw_size();
     case_kc_wvw_position();
     case_kc_wvw_booleans();
+    printf("\n%d passed, %d failed\n", total - failures, failures);
 }
 
 /**
