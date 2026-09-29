@@ -97,7 +97,8 @@ anything else.
 ### Using the C library
 
 The C library exposes peer channels directly. It does not expose application
-service ports or perform local port forwarding.
+service ports or perform local port forwarding. The index listener is the only
+library capability with an explicit port.
 
 A publisher registers an ID and is notified when a peer channel is established.
 Incoming bytes are delivered to its receive callback together with the client
