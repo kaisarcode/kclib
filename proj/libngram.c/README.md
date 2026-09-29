@@ -1,45 +1,6 @@
-# ngram.c - Sliding-window n-gram traversal
+# libngram.c - Sliding-window n-gram traversal
 
-\`ngram.c\` traverses descending sliding windows over byte-delimited text tokens. The CLI can also run one command for each emitted window.
-
----
-
-## CLI
-
-Traverse positional text:
-
-\`\`\`bash
-ngram "The quick brown fox"
-\`\`\`
-
-Read the complete input from stdin:
-
-\`\`\`bash
-echo "The quick brown fox" | ngram
-\`\`\`
-
-Override traversal bounds or separator bytes:
-
-\`\`\`bash
-ngram --max 3 --min 2 --sep " ," "The quick brown fox"
-\`\`\`
-
-Run one command for each emitted span:
-
-\`\`\`bash
-ngram --cmd "grep fox" "The quick brown fox"
-\`\`\`
-
-The CLI contract is unchanged:
-
-| Flag | Description |
-| :--- | :--- |
-| \`--max\`, \`-max <n>\` | Maximum tokens per block |
-| \`--min\`, \`-min <n>\` | Minimum tokens per block |
-| \`--sep\`, \`-sep <s>\` | Custom separator characters |
-| \`--cmd\`, \`-cmd <cmd>\` | Execute command for each chunk |
-| \`--help\`, \`-h\` | Show help and usage |
-| \`--version\`, \`-v\` | Show version |
+\`libngram.c\` traverses descending sliding windows over byte-delimited text tokens.
 
 ---
 
@@ -176,11 +137,8 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/ngram.wasm`
+- Artifact: `bin/wasm32/wasm/libngram.wasm`
 - Exports: `kc_ngram_traverse`, `kc_ngram_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds

@@ -37,7 +37,7 @@ if(EMSCRIPTEN)
     add_executable(ngram_wasm ${NGRAM_SOURCES})
     target_include_directories(ngram_wasm PRIVATE src)
     set_target_properties(ngram_wasm PROPERTIES
-        OUTPUT_NAME "ngram"
+        OUTPUT_NAME "libngram"
         SUFFIX ".wasm"
     )
     target_link_options(ngram_wasm PRIVATE
@@ -56,10 +56,6 @@ if(NOT NGRAM_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     set_target_properties(ngram_static PROPERTIES OUTPUT_NAME ngram PREFIX "lib" POSITION_INDEPENDENT_CODE ON)
     target_include_directories(ngram_static PRIVATE src)
 
-    add_executable(ngram_exe src/ngram.c)
-    set_target_properties(ngram_exe PROPERTIES OUTPUT_NAME ngram)
-    target_include_directories(ngram_exe PRIVATE src)
-    target_link_libraries(ngram_exe PRIVATE ngram_static)
 endif()
 
 if(NGRAM_BUILD_TESTS)
@@ -98,12 +94,4 @@ if(NGRAM_BUILD_TESTS)
         )
     endif()
 
-    if(NGRAM_TEST_CLI)
-        set(NGRAM_TEST_CLI_TARGET_PATH "${NGRAM_TEST_CLI}")
-    else()
-        set(NGRAM_TEST_CLI_TARGET_PATH "")
-    endif()
-    target_compile_definitions(ngram_contract_test PRIVATE
-        KC_NGRAM_TEST_CLI="${NGRAM_TEST_CLI_TARGET_PATH}"
-    )
 endif()
