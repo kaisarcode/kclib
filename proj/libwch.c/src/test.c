@@ -31,10 +31,6 @@
 #define mkdir_one(path) mkdir(path, 0700)
 #endif
 
-#ifndef WCH_TEST_CLI
-#define WCH_TEST_CLI ""
-#endif
-
 static int test_case_total;
 static int test_case_current;
 
@@ -326,18 +322,6 @@ static int wait_event(event_state_t *state) {
 }
 
 /**
- * Configure the Windows companion executable for tests.
- * @return None.
- */
-static void configure_test_cli(void) {
-#ifdef _WIN32
-    if (WCH_TEST_CLI[0] != '\0') {
-        (void)_putenv_s("KC_WCH_EXE", WCH_TEST_CLI);
-    }
-#endif
-}
-
-/**
  * Test kc_wch_create.
  * @return Zero on success, nonzero on failure.
  */
@@ -346,7 +330,6 @@ static int case_kc_wch_create(void) {
     char watched[1024];
     int fail = 0;
 
-    configure_test_cli();
     if (make_test_dir(dir, sizeof(dir), "create") != 0) return 1;
     if (make_watched_dir(watched, sizeof(watched), dir) != 0) return 1;
 
@@ -416,7 +399,6 @@ static int case_kc_wch_list(void) {
     int found = 0;
     int fail = 0;
 
-    configure_test_cli();
     if (make_test_dir(dir, sizeof(dir), "list") != 0) return 1;
     if (make_watched_dir(watched, sizeof(watched), dir) != 0) return 1;
     fail += expect_int(
@@ -478,7 +460,6 @@ static int case_wch_path(const char *case_name) {
     kc_wch_t *watcher = NULL;
     int fail = 0;
 
-    configure_test_cli();
     if (make_test_dir(dir, sizeof(dir), "path") != 0) return 1;
     if (make_watched_dir(watched, sizeof(watched), dir) != 0) return 1;
 #ifdef _WIN32
@@ -568,7 +549,6 @@ static int case_wch_cmd(const char *case_name) {
     kc_wch_t *watcher = NULL;
     int fail = 0;
 
-    configure_test_cli();
     if (make_test_dir(dir, sizeof(dir), "cmd") != 0) return 1;
     if (make_watched_dir(watched, sizeof(watched), dir) != 0) return 1;
     fail += expect_int(
@@ -630,7 +610,6 @@ static int case_wch_recursive(const char *case_name) {
     kc_wch_t *watcher = NULL;
     int fail = 0;
 
-    configure_test_cli();
     if (make_test_dir(dir, sizeof(dir), "recursive") != 0) return 1;
     if (make_watched_dir(watched, sizeof(watched), dir) != 0) return 1;
     fail += expect_int(
@@ -704,7 +683,6 @@ static int case_kc_wch_on(void) {
     FILE *file;
 #endif
 
-    configure_test_cli();
     atomic_init(&state.count, 0);
     state.path[0] = '\0';
 
@@ -840,67 +818,13 @@ static int case_kc_wch_version(void) {
 }
 
 /**
- * Test the grouped CLI contract.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_wch_cli(void) {
-    char command[4096];
-    int fail = 0;
-    int rc;
-
-    if (WCH_TEST_CLI[0] == '\0') {
-        case_result(1, "kc_wch_cli", "covers stable CLI parsing");
-        return 1;
-    }
-
-#ifdef _WIN32
-    snprintf(
-        command,
-        sizeof(command),
-        "\"%s\" --help > NUL 2>&1",
-        WCH_TEST_CLI
-    );
-#else
-    snprintf(
-        command,
-        sizeof(command),
-        "\"%s\" --help > /dev/null 2>&1",
-        WCH_TEST_CLI
-    );
-#endif
-    rc = system(command);
-    fail += expect_true("CLI help succeeds", rc == 0);
-
-#ifdef _WIN32
-    snprintf(
-        command,
-        sizeof(command),
-        "\"%s\" --version > NUL 2>&1",
-        WCH_TEST_CLI
-    );
-#else
-    snprintf(
-        command,
-        sizeof(command),
-        "\"%s\" --version > /dev/null 2>&1",
-        WCH_TEST_CLI
-    );
-#endif
-    rc = system(command);
-    fail += expect_true("CLI version succeeds", rc == 0);
-
-    case_result(fail, "kc_wch_cli", "covers stable CLI parsing");
-    return fail != 0;
-}
-
-/**
  * Run all public contract cases.
  * @return Failed case count.
  */
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 15;
+    test_case_total = 14;
     test_case_current = 0;
     run_case(&rc, case_kc_wch_create);
     run_case(&rc, case_kc_wch_open);
@@ -916,7 +840,6 @@ static int case_all(void) {
     run_case(&rc, case_kc_wch_free);
     run_case(&rc, case_kc_wch_close);
     run_case(&rc, case_kc_wch_version);
-    run_case(&rc, case_kc_wch_cli);
 
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -953,7 +876,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_wch_free") == 0) return case_kc_wch_free();
     if (strcmp(argv[1], "kc_wch_close") == 0) return case_kc_wch_close();
     if (strcmp(argv[1], "kc_wch_version") == 0) return case_kc_wch_version();
-    if (strcmp(argv[1], "kc_wch_cli") == 0) return case_kc_wch_cli();
 
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;

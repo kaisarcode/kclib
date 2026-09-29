@@ -1,6 +1,6 @@
-# wch.c - Resident File Watcher
+# libwch.c - Resident File Watcher
 
-`wch.c` manages named resident filesystem watchers.
+`libwch.c` manages named resident filesystem watchers.
 
 A watcher has its own system lifecycle. Creating one starts a resident process
 that continues watching after the caller exits. Opening a watcher creates only a
@@ -12,48 +12,10 @@ be observed temporarily by processes that open the watcher and subscribe with
 
 ---
 
-## CLI
-
-The CLI contract remains:
-
-```text
-wch <name> <path> <cmd>
-wch <name> -r <path> <cmd>
-wch -l [name]
-wch <name> -l
-wch -d <name>
-wch <name> -d
-wch -h
-wch -v
-```
-
-Examples:
-
-```bash
-wch frontend ./src make build
-wch frontend --recursive ./src make build
-wch --list
-wch frontend --list
-wch frontend --delete
-```
-
-Registering an existing name replaces that watcher while preserving its logical
-identity.
-
-For each filesystem event, the persistent command receives the normalized event
-name and path:
-
-```text
-<command...> <event> <path>
-```
-
-The event names are `add`, `upd`, and `del`.
-
-`KC_WCH_DIR` is an advanced process-level override for the runtime directory. Normal API and CLI callers do not need to select a directory.
-
----
-
 ## Public API
+
+`KC_WCH_DIR` is an advanced process-level override for the runtime directory. Normal API callers do not need to select a directory.
+
 
 ```c
 typedef struct kc_wch kc_wch_t;

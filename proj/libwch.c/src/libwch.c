@@ -75,7 +75,6 @@ typedef struct {
     int recursive;
 } kc_wch_registration_t;
 
-#if !defined(_WIN32) || defined(KC_WCH_CLI)
 typedef struct {
     const char *command;
     const char *dir;
@@ -1304,7 +1303,6 @@ static void kc_wch_native_close(kc_wch_native_t *w) {
 
     kc_wch_release(w);
 }
-#endif
 
 struct kc_wch {
     char name[KC_WCH_NAME_MAX];
@@ -1825,7 +1823,6 @@ static int kc_wch_reset_events(
     return 0;
 }
 
-#if !defined(_WIN32) || defined(KC_WCH_CLI)
 /**
  * Append one normalized event to the private event stream.
  * @param dir Runtime directory.
@@ -2104,9 +2101,7 @@ static void kc_wch_dispatch_event(
 #endif
 }
 
-#endif
 
-#if !defined(_WIN32) || defined(KC_WCH_CLI)
 #if defined(_WIN32) && defined(__GNUC__)
 __attribute__((noinline))
 #endif
@@ -2174,41 +2169,17 @@ static int kc_wch_serve_resident(
     return 0;
 #endif
 }
-#endif
-
-#ifdef KC_WCH_CLI
-/**
- * Run the private resident service entry for the CLI.
- * @param dir Runtime directory.
- * @param name Watcher name.
- * @return Process exit status.
- */
-int kc_wch_internal_serve(
-    const char *dir,
-    const char *name
-) {
-    return kc_wch_serve_resident(dir, name);
-}
-#endif
 
 #ifdef _WIN32
 /**
- * Locate the companion Windows wch executable.
- * @param out Output executable path.
- * @param cap Output buffer capacity.
+ * Locate the loaded libwch module.
+ * @param out Output module path.
+ * @param cap Output path capacity.
  * @return Zero on success, nonzero on failure.
  */
-static int kc_wch_companion_exe(char *out, size_t cap) {
-    const char *override = getenv("KC_WCH_EXE");
+static int kc_wch_module_path(char *out, size_t cap) {
     HMODULE module;
-    char module_path[KC_WCH_PATH_MAX];
-    char *slash;
-    char *backslash;
     DWORD size;
-
-    if (override != NULL && override[0] != '\0') {
-        return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : 1;
-    }
 
     if (!GetModuleHandleExA(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -2218,30 +2189,36 @@ static int kc_wch_companion_exe(char *out, size_t cap) {
         )) {
         return 1;
     }
-    size = GetModuleFileNameA(
-        module,
-        module_path,
-        (DWORD)sizeof(module_path)
-    );
-    if (size == 0 || size >= (DWORD)sizeof(module_path)) return 1;
+    size = GetModuleFileNameA(module, out, (DWORD)cap);
+    if (size == 0 || size >= (DWORD)cap) return 1;
+    return 0;
+}
 
-    slash = strrchr(module_path, '/');
-    backslash = strrchr(module_path, '\\');
-    if (backslash != NULL && (slash == NULL || backslash > slash)) {
-        slash = backslash;
-    }
-    if (slash != NULL) {
-        slash[1] = '\0';
-    } else {
-        module_path[0] = '\0';
-    }
+/**
+ * Run one resident watcher through the Windows rundll32 host.
+ * @param window Unused window handle.
+ * @param instance Unused module instance.
+ * @param command_line Watcher name.
+ * @param show Unused show mode.
+ * @return None.
+ */
+__declspec(dllexport) void CALLBACK kc_wch_internal_serve_entry(
+    HWND window,
+    HINSTANCE instance,
+    LPSTR command_line,
+    int show
+) {
+    char dir[KC_WCH_PATH_MAX];
+    char *name = command_line;
 
-    return (size_t)snprintf(
-        out,
-        cap,
-        "%swch.exe",
-        module_path
-    ) < cap ? 0 : 1;
+    (void)window;
+    (void)instance;
+    (void)show;
+
+    while (name != NULL && (*name == ' ' || *name == '\t')) name++;
+    if (!kc_wch_name_valid(name)) return;
+    if (kc_wch_default_dir(dir, sizeof(dir)) != 0) return;
+    (void)kc_wch_serve_resident(dir, name);
 }
 #endif
 
@@ -2277,24 +2254,23 @@ static int kc_wch_run_update(
 
 #ifdef _WIN32
     {
-        char exe[KC_WCH_PATH_MAX];
+        char module[KC_WCH_PATH_MAX];
         char command[
-            KC_WCH_PATH_MAX * 2 + KC_WCH_NAME_MAX + 64
+            KC_WCH_PATH_MAX + KC_WCH_NAME_MAX + 96
         ];
         STARTUPINFOA startup;
         PROCESS_INFORMATION process;
 
-        if (kc_wch_companion_exe(exe, sizeof(exe)) != 0) {
+        if (kc_wch_module_path(module, sizeof(module)) != 0) {
             kc_wch_remove_state(dir, registration->name);
             return 1;
         }
         if ((size_t)snprintf(
                 command,
                 sizeof(command),
-                "\"%s\" --_serve \"%s\" \"%s\"",
-                exe,
-                registration->name,
-                dir
+                "rundll32.exe \"%s\",kc_wch_internal_serve_entry %s",
+                module,
+                registration->name
             ) >= sizeof(command)) {
             kc_wch_remove_state(dir, registration->name);
             return 1;

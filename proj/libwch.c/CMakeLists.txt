@@ -8,7 +8,6 @@ endif()
 
 option(WCH_NATIVE "Enable native hardware optimizations" OFF)
 option(WCH_BUILD_TESTS "Build wch tests" OFF)
-set(WCH_TEST_CLI "" CACHE STRING "Path to the wch CLI used by contract tests")
 
 set(WCH_TEST_EXTERNAL_ARTIFACTS OFF)
 if(WCH_BUILD_TESTS AND WCH_TEST_SHARED_LIBRARY)
@@ -42,18 +41,6 @@ set_source_files_properties(src/libwch.c PROPERTIES
 )
 
 if(NOT WCH_TEST_EXTERNAL_ARTIFACTS)
-    add_executable(wch
-        src/wch.c
-        src/libwch.c
-    )
-
-    target_include_directories(wch PRIVATE src)
-    target_compile_definitions(wch PRIVATE KC_WCH_CLI=1)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(wch pthread m)
-    endif()
-
     add_library(wch_static STATIC src/libwch.c)
     set_target_properties(wch_static PROPERTIES OUTPUT_NAME "wch")
     target_include_directories(wch_static PRIVATE src)
@@ -62,6 +49,10 @@ if(NOT WCH_TEST_EXTERNAL_ARTIFACTS)
     set_target_properties(wch_shared PROPERTIES OUTPUT_NAME "wch")
     set_target_properties(wch_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_include_directories(wch_shared PRIVATE src)
+
+    if(MINGW)
+        target_link_options(wch_shared PRIVATE "-Wl,--kill-at")
+    endif()
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(wch_shared pthread m)
@@ -92,18 +83,6 @@ if(WCH_BUILD_TESTS)
     add_executable(wch_contract_test src/test.c)
     target_include_directories(wch_contract_test PRIVATE src)
     target_link_libraries(wch_contract_test PRIVATE ${WCH_TEST_SHARED_TARGET})
-
-    if(WCH_TEST_CLI)
-        target_compile_definitions(
-            wch_contract_test
-            PRIVATE WCH_TEST_CLI="${WCH_TEST_CLI}"
-        )
-    elseif(TARGET wch)
-        target_compile_definitions(
-            wch_contract_test
-            PRIVATE WCH_TEST_CLI="$<TARGET_FILE:wch>"
-        )
-    endif()
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(wch_contract_test PRIVATE m)
