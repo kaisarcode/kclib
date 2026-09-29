@@ -187,7 +187,7 @@ Use `kc_trust_free()` to release strings and buffers returned by the library.
 trust relationships.
 
 Normal callers do not select a storage directory. On XDG environments,
-trust.c uses `$XDG_DATA_HOME/kaisarcode/trust.c`, falling back to
+libtrust.c uses `$XDG_DATA_HOME/kaisarcode/trust.c`, falling back to
 `$HOME/.local/share/kaisarcode/trust.c`. Windows uses the corresponding
 per-user application-data directory under `kaisarcode\trust.c`.
 
