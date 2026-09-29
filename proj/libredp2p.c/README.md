@@ -6,9 +6,7 @@
 
 ## Library
 
-The library connects two applications directly through REDP2P.
-
-A REDP2P setup has three parts:
+A REDP2P setup has three entities:
 
 - an index, which helps the two sides find each other;
 - a publisher, which makes a service available;
