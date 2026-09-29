@@ -52,9 +52,9 @@ if(NOT FLOW_TEST_EXTERNAL_ARTIFACTS)
         target_link_libraries(flow_shared PRIVATE Threads::Threads)
     endif()
 
-    add_executable(flow src/flow.c)
-    target_include_directories(flow PRIVATE src)
-    target_link_libraries(flow flow_static)
+    
+    
+    
 endif()
 
 if(FLOW_BUILD_TESTS)
@@ -81,10 +81,7 @@ if(FLOW_BUILD_TESTS)
     add_executable(flow_contract_test src/test.c)
     target_include_directories(flow_contract_test PRIVATE src)
     target_link_libraries(flow_contract_test PRIVATE ${FLOW_TEST_SHARED_TARGET})
-    target_compile_definitions(flow_contract_test PRIVATE
-        FLOW_TEST_ETC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/etc"
-        FLOW_TEST_CLI="${FLOW_TEST_CLI}"
-    )
+    
 
     add_custom_command(TARGET flow_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
