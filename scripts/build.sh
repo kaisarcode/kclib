@@ -20,11 +20,6 @@ resolve_project() {
         return 0
     fi
 
-    if [ -d "$proj_dir/$name.c" ]; then
-        printf '%s\n' "$proj_dir/$name.c"
-        return 0
-    fi
-
     return 1
 }
 
@@ -56,7 +51,7 @@ main() {
     }
 
     if [ "$target" = "all" ]; then
-        for project_dir in "$proj_dir"/*.c; do
+        for project_dir in "$proj_dir"/lib*.c; do
             [ -d "$project_dir" ] || continue
             build_project "$project_dir"
         done
