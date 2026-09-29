@@ -32,11 +32,6 @@ The library is the primary interface to REDP2P.
 The index listens on an explicit port because peers need a stable place to
 register and resolve publishers.
 
-Publishers and consumers work differently. In direct library use they do not
-expose fixed application ports: REDP2P opens the peer transport using ports
-assigned by the operating system, and application data is delivered through the
-public API.
-
 A publisher receives data from connected consumers through a callback. A
 consumer sends data with `kc_redp2p_con_send()` and receives replies through
 its callback. What happens to those bytes after the callback is entirely up to
