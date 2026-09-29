@@ -40,7 +40,7 @@ is_excluded() {
     return 1
 }
 
-# Computes a digest of library artifact paths, sizes, mtimes, and public headers.
+# Computes a digest of library artifacts and public headers.
 # @param proj_dir Projects directory.
 # @return 0 on success; the digest is written to stdout.
 compute_fingerprint() {
