@@ -14,6 +14,7 @@
 #include "parson.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
