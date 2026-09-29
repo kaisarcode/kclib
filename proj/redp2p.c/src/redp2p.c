@@ -1,6 +1,6 @@
 /**
  * redp2p.c - REDP2P command-line interface.
- * Summary: Thin CLI over the idx/pub/con public capability API.
+ * Summary: CLI utilities and local-port adapters over the REDP2P engine.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -131,6 +131,221 @@ static int redp2p_cli_spec(const char *text, char id[KC_REDP2P_ID_MAX + 1],
     id[id_len] = '\0';
     memcpy(index, at + 1, index_len + 1);
     return redp2p_is_valid_id(id);
+}
+
+
+typedef struct {
+    redp2p_t *ctx;
+#ifdef _WIN32
+    HANDLE thread;
+#else
+    pthread_t thread;
+#endif
+    int thread_started;
+    _Atomic int done;
+    int result;
+    int consumer;
+    char index_host[256];
+    uint16_t index_port;
+    char id[KC_REDP2P_ID_MAX + 1];
+    char self_id[KC_REDP2P_ID_MAX + 1];
+    uint16_t local_port;
+} redp2p_cli_runtime_t;
+
+/**
+ * Parses one index endpoint with the default REDP2P port.
+ * @param text Index endpoint.
+ * @param host Destination host.
+ * @param port Destination port.
+ * @return 1 on success, 0 on invalid input.
+ */
+static int redp2p_cli_index(const char *text, char host[256], uint16_t *port)
+{
+    const char *colon;
+    size_t len;
+
+    if (!text || !text[0] || !host || !port) return 0;
+    *port = KC_REDP2P_PORT_DEFAULT;
+
+    if (text[0] == '[') {
+        const char *end = strchr(text + 1, ']');
+        if (!end || end == text + 1) return 0;
+        len = (size_t)(end - text - 1);
+        if (len >= 256) return 0;
+        memcpy(host, text + 1, len);
+        host[len] = '\0';
+        if (end[1] == '\0') return 1;
+        return end[1] == ':' && redp2p_cli_u16(end + 2, port);
+    }
+
+    colon = strrchr(text, ':');
+    if (colon && strchr(text, ':') == colon) {
+        len = (size_t)(colon - text);
+        if (len == 0 || len >= 256 || !redp2p_cli_u16(colon + 1, port))
+            return 0;
+        memcpy(host, text, len);
+        host[len] = '\0';
+        return 1;
+    }
+
+    len = strlen(text);
+    if (len == 0 || len >= 256) return 0;
+    memcpy(host, text, len + 1);
+    return 1;
+}
+
+/**
+ * Generates one private consumer identifier.
+ * @param out Destination identifier.
+ * @return 1 on success, 0 on random-source failure.
+ */
+static int redp2p_cli_self_id(char out[KC_REDP2P_ID_MAX + 1])
+{
+    static const char hex[] = "0123456789abcdef";
+    unsigned char random[8];
+    size_t i;
+
+    if (redp2p_fill_random(random, sizeof(random)) != 0) return 0;
+    out[0] = 'c';
+    for (i = 0; i < sizeof(random); i++) {
+        out[1 + i * 2] = hex[random[i] >> 4];
+        out[2 + i * 2] = hex[random[i] & 15];
+    }
+    out[17] = '\0';
+    memset(random, 0, sizeof(random));
+    return 1;
+}
+
+/**
+ * Applies the public runtime defaults used by the native API.
+ * @param ctx Runtime context.
+ * @return None.
+ */
+static void redp2p_cli_defaults(redp2p_t *ctx)
+{
+    ctx->sweep = REDP2P_SWEEP_DEFAULT;
+    ctx->prune_interval_s = 60;
+    ctx->etimeout_sec = 120;
+    ctx->heartbeat_s = 15;
+    ctx->punch_poll_ms = 500;
+    ctx->pending_ttl_s = 30;
+    ctx->max_consumers_per_publisher =
+        REDP2P_MAX_CONSUMERS_PER_PUBLISHER;
+}
+
+#ifdef _WIN32
+/**
+ * Runs one CLI pub/con local-port adapter.
+ * @param arg CLI runtime.
+ * @return Thread status.
+ */
+static DWORD WINAPI redp2p_cli_runtime_worker(LPVOID arg)
+#else
+/**
+ * Runs one CLI pub/con local-port adapter.
+ * @param arg CLI runtime.
+ * @return NULL after exit.
+ */
+static void *redp2p_cli_runtime_worker(void *arg)
+#endif
+{
+    redp2p_cli_runtime_t *runtime = (redp2p_cli_runtime_t *)arg;
+
+    if (runtime->consumer) {
+        runtime->result = redp2p_con_run(runtime->ctx,
+            runtime->index_host, runtime->index_port, runtime->self_id,
+            runtime->id, runtime->local_port);
+    } else {
+        runtime->result = redp2p_pub_run(runtime->ctx,
+            runtime->index_host, runtime->index_port, runtime->id,
+            runtime->local_port);
+    }
+    atomic_store(&runtime->done, 1);
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+/**
+ * Starts one CLI local-port adapter worker.
+ * @param runtime Initialized runtime.
+ * @return REDP2P_OK on success or an error code.
+ */
+static int redp2p_cli_runtime_start(redp2p_cli_runtime_t *runtime)
+{
+    atomic_store(&runtime->done, 0);
+    runtime->result = REDP2P_ERROR;
+    atomic_store(&runtime->ctx->ready_state, 0);
+    atomic_store(&runtime->ctx->ready_status, REDP2P_ERROR);
+#ifdef _WIN32
+    runtime->thread = CreateThread(NULL, 0, redp2p_cli_runtime_worker,
+        runtime, 0, NULL);
+    if (!runtime->thread) return REDP2P_ERROR;
+#else
+    if (pthread_create(&runtime->thread, NULL, redp2p_cli_runtime_worker,
+        runtime) != 0) return REDP2P_ERROR;
+#endif
+    runtime->thread_started = 1;
+    return REDP2P_OK;
+}
+
+/**
+ * Waits until a CLI pub/con runtime is ready.
+ * @param runtime Started runtime.
+ * @return Runtime status.
+ */
+static int redp2p_cli_runtime_ready(redp2p_cli_runtime_t *runtime)
+{
+    uint64_t deadline = redp2p_now_ms() + 10000U;
+
+    for (;;) {
+        int state = atomic_load(&runtime->ctx->ready_state);
+        if (state > 0) return REDP2P_OK;
+        if (state < 0) return atomic_load(&runtime->ctx->ready_status);
+        if (atomic_load(&runtime->done))
+            return runtime->result == REDP2P_OK ?
+                REDP2P_ERROR : runtime->result;
+        if (redp2p_now_ms() >= deadline) return REDP2P_ETIMEOUT;
+#ifdef _WIN32
+        Sleep(1);
+#else
+        {
+            struct timespec ts = {0, 1000000L};
+            nanosleep(&ts, NULL);
+        }
+#endif
+    }
+}
+
+/**
+ * Stops and releases one CLI pub/con runtime.
+ * @param runtime Runtime to close.
+ * @return Final worker result.
+ */
+static int redp2p_cli_runtime_close(redp2p_cli_runtime_t *runtime)
+{
+    int result;
+
+    if (!runtime) return REDP2P_EINVAL;
+    if (runtime->ctx) redp2p_context_request_stop(runtime->ctx);
+    if (runtime->thread_started) {
+#ifdef _WIN32
+        WaitForSingleObject(runtime->thread, INFINITE);
+        CloseHandle(runtime->thread);
+        runtime->thread = NULL;
+#else
+        pthread_join(runtime->thread, NULL);
+#endif
+        runtime->thread_started = 0;
+    }
+    result = runtime->result;
+    if (runtime->ctx) {
+        redp2p_context_destroy(runtime->ctx);
+        runtime->ctx = NULL;
+    }
+    return result;
 }
 
 /**
@@ -379,13 +594,13 @@ static int redp2p_cli_idx(int argc, char **argv)
  */
 static int redp2p_cli_pub(int argc, char **argv)
 {
-    kc_redp2p_pub_options_t options;
-    kc_redp2p_pub_t *pub = NULL;
+    redp2p_cli_runtime_t runtime;
     char id[KC_REDP2P_ID_MAX + 1];
     char index[320];
     uint16_t port = 0;
     int protocol = 0;
     const char *stun = getenv("REDP2P_STUN");
+    const char *pass = getenv("REDP2P_PASS");
     int status;
 
     if (argc < 5 || !redp2p_cli_spec(argv[2], id, index)) {
@@ -418,18 +633,35 @@ static int redp2p_cli_pub(int argc, char **argv)
         return 1;
     }
 
-    memset(&options, 0, sizeof(options));
-    options.id = id;
-    options.index = index;
-    options.protocol = protocol;
-    options.port = port;
-    options.pass = getenv("REDP2P_PASS");
-    options.stun = stun;
+    memset(&runtime, 0, sizeof(runtime));
+    if (!redp2p_cli_index(index, runtime.index_host, &runtime.index_port)) {
+        fprintf(stderr, "redp2p: invalid index endpoint\n");
+        return 1;
+    }
+    memcpy(runtime.id, id, strlen(id) + 1);
+    runtime.local_port = port;
 
-    status = kc_redp2p_pub(&pub, &options);
-    if (status != KC_REDP2P_OK) {
-        fprintf(stderr, "redp2p: pub failed: %s\n",
-            kc_redp2p_strerror(status));
+    status = redp2p_context_create(&runtime.ctx);
+    if (status != REDP2P_OK) return 1;
+    redp2p_cli_defaults(runtime.ctx);
+    status = redp2p_pub_set_protocol(runtime.ctx, protocol);
+    if (status == REDP2P_OK)
+        status = redp2p_set_local_port(runtime.ctx, port);
+    if (status == REDP2P_OK && pass)
+        status = redp2p_set_registration_pass(runtime.ctx, pass);
+    if (status == REDP2P_OK && stun)
+        status = redp2p_set_stun_server(runtime.ctx, stun);
+    if (status != REDP2P_OK) {
+        fprintf(stderr, "redp2p: pub failed: %s\n", redp2p_strerror(status));
+        redp2p_context_destroy(runtime.ctx);
+        return 1;
+    }
+
+    status = redp2p_cli_runtime_start(&runtime);
+    if (status == REDP2P_OK) status = redp2p_cli_runtime_ready(&runtime);
+    if (status != REDP2P_OK) {
+        fprintf(stderr, "redp2p: pub failed: %s\n", redp2p_strerror(status));
+        redp2p_cli_runtime_close(&runtime);
         return 1;
     }
 
@@ -438,9 +670,11 @@ static int redp2p_cli_pub(int argc, char **argv)
     redp2p_cli_stop = 0;
     signal(SIGINT, redp2p_cli_signal);
     signal(SIGTERM, redp2p_cli_signal);
-    while (!redp2p_cli_stop) redp2p_cli_sleep();
-    kc_redp2p_pub_close(pub);
-    return 0;
+    while (!redp2p_cli_stop && !atomic_load(&runtime.done))
+        redp2p_cli_sleep();
+
+    status = redp2p_cli_runtime_close(&runtime);
+    return status == REDP2P_OK ? 0 : 1;
 }
 
 /**
@@ -451,8 +685,7 @@ static int redp2p_cli_pub(int argc, char **argv)
  */
 static int redp2p_cli_con(int argc, char **argv)
 {
-    kc_redp2p_con_options_t options;
-    kc_redp2p_con_t *con = NULL;
+    redp2p_cli_runtime_t runtime;
     char id[KC_REDP2P_ID_MAX + 1];
     char index[320];
     uint16_t port;
@@ -480,16 +713,34 @@ static int redp2p_cli_con(int argc, char **argv)
         }
     }
 
-    memset(&options, 0, sizeof(options));
-    options.id = id;
-    options.index = index;
-    options.port = port;
-    options.stun = stun;
+    memset(&runtime, 0, sizeof(runtime));
+    runtime.consumer = 1;
+    if (!redp2p_cli_index(index, runtime.index_host, &runtime.index_port) ||
+        !redp2p_cli_self_id(runtime.self_id))
+    {
+        fprintf(stderr, "redp2p: invalid consumer configuration\n");
+        return 1;
+    }
+    memcpy(runtime.id, id, strlen(id) + 1);
+    runtime.local_port = port;
 
-    status = kc_redp2p_con(&con, &options);
-    if (status != KC_REDP2P_OK) {
-        fprintf(stderr, "redp2p: con failed: %s\n",
-            kc_redp2p_strerror(status));
+    status = redp2p_context_create(&runtime.ctx);
+    if (status != REDP2P_OK) return 1;
+    redp2p_cli_defaults(runtime.ctx);
+    status = redp2p_set_local_port(runtime.ctx, port);
+    if (status == REDP2P_OK && stun)
+        status = redp2p_set_stun_server(runtime.ctx, stun);
+    if (status != REDP2P_OK) {
+        fprintf(stderr, "redp2p: con failed: %s\n", redp2p_strerror(status));
+        redp2p_context_destroy(runtime.ctx);
+        return 1;
+    }
+
+    status = redp2p_cli_runtime_start(&runtime);
+    if (status == REDP2P_OK) status = redp2p_cli_runtime_ready(&runtime);
+    if (status != REDP2P_OK) {
+        fprintf(stderr, "redp2p: con failed: %s\n", redp2p_strerror(status));
+        redp2p_cli_runtime_close(&runtime);
         return 1;
     }
 
@@ -498,9 +749,11 @@ static int redp2p_cli_con(int argc, char **argv)
     redp2p_cli_stop = 0;
     signal(SIGINT, redp2p_cli_signal);
     signal(SIGTERM, redp2p_cli_signal);
-    while (!redp2p_cli_stop) redp2p_cli_sleep();
-    kc_redp2p_con_close(con);
-    return 0;
+    while (!redp2p_cli_stop && !atomic_load(&runtime.done))
+        redp2p_cli_sleep();
+
+    status = redp2p_cli_runtime_close(&runtime);
+    return status == REDP2P_OK ? 0 : 1;
 }
 
 /**
