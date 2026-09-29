@@ -1,6 +1,6 @@
-# http.c - HTTP Protocol Parser and Builder
+# libhttp.c - HTTP Protocol Parser and Builder
 
-`http.c` is an HTTP protocol layer. It incrementally parses HTTP byte streams
+`libhttp.c` is an HTTP protocol layer. It incrementally parses HTTP byte streams
 into complete structured requests/responses and builds HTTP wire bytes from
 structured requests/responses.
 
@@ -10,79 +10,6 @@ network transfers. Those responsibilities belong to transport libraries such as
 
 One parser belongs to one HTTP byte stream. A write may complete zero, one, or
 multiple HTTP messages.
-
----
-
-## CLI
-
-### Parse
-
-`http parse` reads stdin incrementally and exits as soon as one complete HTTP
-message is available. It does not wait for EOF after the message has completed.
-
-```bash
-printf 'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n' | http parse
-```
-
-Default request output contains the application-facing fields and headers:
-
-```text
-request.method=GET
-request.target=/
-request.path=/
-request.query=
-header.host=localhost
-```
-
-If a logical body is present, one blank line is followed by its raw bytes.
-
-`--all` prints the same message plus protocol metadata, logical body length,
-and trailers:
-
-```bash
-printf 'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n' | http parse --all
-```
-
-Additional fields include:
-
-```text
-http.type=request
-http.version=1.1
-body.length=0
-```
-
-### Build request
-
-```bash
-printf 'hello' | http build request \
-    --method POST \
-    --target /api \
-    --header 'host: localhost' \
-    --header 'content-type: text/plain'
-```
-
-### Build response
-
-```bash
-printf 'hello' | http build response \
-    --status 200 \
-    --header 'content-type: text/plain'
-```
-
-Request and response builders support:
-
-- `--version <version>`
-- repeatable `--header <name: value>`
-- `--chunked`
-- `--chunk-size <n>`
-
-Requests additionally support `--method` and `--target`. Responses support
-`--status`, `--reason`, and repeatable `--trailer <name: value>`.
-
-Common options:
-
-- `-h`, `--help`
-- `-v`, `--version`
 
 ---
 
@@ -211,7 +138,6 @@ be fed to an HTTP parser when that transfer carries HTTP.
 
 | File | Role |
 | :--- | :--- |
-| `src/http.c` | CLI projection of the public API |
 | `src/libhttp.c` | Reusable parser and builders |
 | `src/libhttp.h` | Public C contract |
 | `src/test.c` | Public contract tests |
@@ -251,11 +177,8 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/http.wasm`
+- Artifact: `bin/wasm32/wasm/libhttp.wasm`
 - Exports: `kc_http_parser_open`, `kc_http_parser_write`, `kc_http_parser_close`, `kc_http_free`, `kc_http_request`, `kc_http_response`, `kc_http_strerror`, `kc_http_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds

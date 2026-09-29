@@ -36,7 +36,7 @@ if(EMSCRIPTEN)
     add_executable(http_wasm src/libhttp.c)
     target_include_directories(http_wasm PRIVATE src)
     set_target_properties(http_wasm PROPERTIES
-        OUTPUT_NAME "http"
+        OUTPUT_NAME "libhttp"
         SUFFIX ".wasm"
     )
     target_link_options(http_wasm PRIVATE
@@ -48,17 +48,6 @@ if(EMSCRIPTEN)
 endif()
 
 if(NOT HTTP_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
-    add_executable(http
-        src/http.c
-        src/libhttp.c
-    )
-
-    target_include_directories(http PRIVATE src)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(http m)
-    endif()
-
     add_library(http_static STATIC src/libhttp.c)
     set_target_properties(http_static PROPERTIES OUTPUT_NAME "http")
     target_include_directories(http_static PRIVATE src)
@@ -113,18 +102,5 @@ if(HTTP_BUILD_TESTS)
                 $<TARGET_FILE_DIR:http_contract_test>
         )
 
-        if(HTTP_TEST_CLI_EXECUTABLE)
-            add_custom_command(TARGET http_contract_test POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${HTTP_TEST_CLI_EXECUTABLE}"
-                    "$<TARGET_FILE_DIR:http_contract_test>/http${CMAKE_EXECUTABLE_SUFFIX}"
-            )
-        elseif(TARGET http)
-            add_custom_command(TARGET http_contract_test POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:http>
-                    "$<TARGET_FILE_DIR:http_contract_test>/http${CMAKE_EXECUTABLE_SUFFIX}"
-            )
-        endif()
     endif()
 endif()

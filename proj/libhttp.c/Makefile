@@ -144,12 +144,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libhttp.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libhttp.dll
 NATIVE_IMPORT_LIBRARY := -DHTTP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libhttp.dll.a
 endif
@@ -200,7 +198,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DHTTP_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/http $(BIN_DIR)/$(1)/linux/http
 	@echo "OK $(1)/linux"
 endef
 
@@ -256,7 +253,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DHTTP_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/http.exe $(BIN_DIR)/$(1)/windows/http.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libhttp.dll $(BIN_DIR)/$(1)/windows/libhttp.dll
 	@echo "OK $(1)/windows"
 endef
@@ -301,7 +297,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/http $(BIN_DIR)/$(1)/macos/http && \
 	echo "OK $(1)/macos"
 endef
 
@@ -353,14 +348,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
-	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/http ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/http $(BIN_DIR)/$(1)/$(2)/http; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/http.app/http ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/http.app/http $(BIN_DIR)/$(1)/$(2)/http; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi && \
 	echo "OK $(1)/$(2)"
 endef
 
@@ -394,7 +381,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DHTTP_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-android/out/http $(BIN_DIR)/$(1)/android/http
 	@echo "OK $(1)/android"
 endef
 
@@ -421,7 +407,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DHTTP_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/http.wasm $(BIN_DIR)/wasm32/wasm/http.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libhttp.wasm $(BIN_DIR)/wasm32/wasm/libhttp.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -440,7 +426,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libhttp.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libhttp.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/http.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libhttp.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libhttp.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -452,7 +438,6 @@ test:
 				-DHTTP_BUILD_TESTS=ON \
 				-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll \
 				-DHTTP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll.a \
-				-DHTTP_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/x86_64/windows/http.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -463,7 +448,6 @@ test:
 			-DHTTP_BUILD_TESTS=ON \
 			-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll \
 			-DHTTP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll.a \
-			-DHTTP_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/x86_64/windows/http.exe \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target http_contract_test || exit 1; \
@@ -474,8 +458,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/http.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/http.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libhttp.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libhttp.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -497,7 +481,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/http$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -506,7 +490,6 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DHTTP_BUILD_TESTS=ON \
 				-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				-DHTTP_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/http$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -514,7 +497,6 @@ test:
 			-DCMAKE_BUILD_TYPE=Release \
 			-DHTTP_BUILD_TESTS=ON \
 			-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-			-DHTTP_TEST_CLI_EXECUTABLE=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/http$(NATIVE_EXE_EXT) \
 			$(NATIVE_IMPORT_LIBRARY) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target http_contract_test || exit 1; \
