@@ -89,12 +89,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libmenu.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libmenu.dll
 NATIVE_IMPORT_LIBRARY := -DMENU_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libmenu.dll.a
 endif
@@ -209,7 +207,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libmenu.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmenu.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/menu.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libmenu.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmenu.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -220,18 +218,16 @@ test:
 			-DMENU_BUILD_TESTS=ON \
 			-DMENU_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmenu.dll \
 			-DMENU_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmenu.dll.a \
-			-DMENU_TEST_CLI=menu.exe \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target menu_contract_test || exit 1; \
-		cp $(CURDIR)/$(BIN_DIR)/x86_64/windows/menu.exe $(BUILD_DIR)/test-wine/menu.exe; \
 		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) menu_contract_test.exe all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/menu$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -239,7 +235,6 @@ test:
 			-DCMAKE_BUILD_TYPE=Release \
 			-DMENU_BUILD_TESTS=ON \
 			-DMENU_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-			-DMENU_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/menu$(NATIVE_EXE_EXT) \
 			$(NATIVE_IMPORT_LIBRARY) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target menu_contract_test || exit 1; \

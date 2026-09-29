@@ -1,47 +1,9 @@
-# menu.c - Native Application Menu Entries
+# libmenu.c - Native Application Menu Entries
 
-`menu.c` adds applications to the native application menu.
+`libmenu.c` adds applications to the native application menu.
 
 It uses the current user's application menu and selects the platform mechanism
 internally.
-
----
-
-## CLI
-
-Add an application menu entry:
-
-```bash
-menu myapp \
-  --name "My App" \
-  --description "My application" \
-  --command "/path/to/myapp --foo bar" \
-  --icon "/path/to/icon.png" \
-  --category "Network"
-```
-
-Delete an entry:
-
-```bash
-menu --delete myapp
-```
-
-### Parameters
-
-| Flag | Description |
-| :--- | :--- |
-| `-n`, `--name <name>` | Set the display name. |
-| `-D`, `--description <text>` | Set the optional description. |
-| `-c`, `--command <command>` | Set the command executed by the entry. |
-| `-i`, `--icon <path>` | Set the optional icon. |
-| `-C`, `--category <category>` | Set the optional menu category. |
-| `-d`, `--delete <id>` | Delete an entry by id. |
-| `-h`, `--help` | Show help and usage. |
-| `-v`, `--version` | Show the build version. |
-
-`id`, `name`, and `command` are required when adding an entry. Adding an
-existing id fails without changing the existing entry. Delete it first when a
-new definition is needed. Deleting a missing id succeeds without error.
 
 ---
 

@@ -13,7 +13,6 @@ endif()
 
 option(MENU_NATIVE "Enable native hardware optimizations" OFF)
 option(MENU_BUILD_TESTS "Build menu tests" OFF)
-set(MENU_TEST_CLI "" CACHE STRING "Path to the menu CLI used by contract tests")
 
 set(MENU_TEST_EXTERNAL_ARTIFACTS OFF)
 if(MENU_BUILD_TESTS AND MENU_TEST_SHARED_LIBRARY)
@@ -37,13 +36,6 @@ set_source_files_properties(src/libmenu.c PROPERTIES
 )
 
 if(NOT MENU_TEST_EXTERNAL_ARTIFACTS)
-    add_executable(menu
-        src/menu.c
-        src/libmenu.c
-    )
-
-    target_include_directories(menu PRIVATE src)
-
     add_library(menu_static STATIC src/libmenu.c)
     set_target_properties(menu_static PROPERTIES OUTPUT_NAME "menu")
     target_include_directories(menu_static PRIVATE src)
@@ -54,7 +46,6 @@ if(NOT MENU_TEST_EXTERNAL_ARTIFACTS)
     target_include_directories(menu_shared PRIVATE src)
 
     if(WIN32)
-        target_link_libraries(menu PRIVATE ole32 shell32 uuid)
         target_link_libraries(menu_static PRIVATE ole32 shell32 uuid)
         target_link_libraries(menu_shared PRIVATE ole32 shell32 uuid)
     endif()
@@ -84,12 +75,6 @@ if(MENU_BUILD_TESTS)
     add_executable(menu_contract_test src/test.c)
     target_include_directories(menu_contract_test PRIVATE src)
     target_link_libraries(menu_contract_test PRIVATE ${MENU_TEST_SHARED_TARGET})
-
-    if(MENU_TEST_CLI)
-        target_compile_definitions(menu_contract_test PRIVATE MENU_TEST_CLI="${MENU_TEST_CLI}")
-    elseif(TARGET menu)
-        target_compile_definitions(menu_contract_test PRIVATE MENU_TEST_CLI="$<TARGET_FILE:menu>")
-    endif()
 
     if(WIN32)
         target_link_libraries(menu_contract_test PRIVATE ole32 shell32 uuid)
