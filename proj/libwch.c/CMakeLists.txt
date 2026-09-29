@@ -51,7 +51,10 @@ if(NOT WCH_TEST_EXTERNAL_ARTIFACTS)
     target_include_directories(wch_shared PRIVATE src)
 
     if(MINGW)
-        target_link_options(wch_shared PRIVATE "-Wl,--kill-at")
+        target_link_options(wch_shared PRIVATE
+            "-Wl,--export-all-symbols"
+            "-Wl,--kill-at"
+        )
     endif()
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
