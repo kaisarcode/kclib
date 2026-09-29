@@ -56,117 +56,87 @@ Common options are `-h` / `--help` and `-v` / `--version`.
 
 ---
 
-## Public API
+## Library
 
-The library exposes the same three roles as the CLI:
+Use the library when you want to connect two applications directly through
+REDP2P instead of driving the command-line program.
 
-```text
-idx  -> coordinates peers
-pub  -> publishes one service
-con  -> connects to one published service
+A REDP2P setup has three parts:
+
+- an index, which helps the two sides find each other;
+- a publisher, which makes a service available;
+- a consumer, which connects to that published service.
+
+The index is only used to introduce the peers. It does not carry the
+application traffic.
+
+### Example
+
+Suppose a machine has a web server listening on port 8080 and you want to reach
+it from another machine.
+
+On a reachable host, start an index:
+
+```bash
+redp2p idx 9876
 ```
 
-An index maintains the control plane. Publishers register an ID and keep that
-registration alive. Consumers request an ID and establish a direct path to the
-matching publisher. Application traffic does not pass through the index.
+On the machine running the web server, publish it as `web`:
 
-### Publisher and consumer modes
-
-A publisher can expose an existing local TCP or UDP service, or receive traffic
-directly through the library.
-
-A consumer can expose the remote publisher as a local port, or exchange bytes
-directly through the library.
-
-```text
-local service mode
-
-application <-> local port <-> REDP2P <==== direct peer path ====> REDP2P
-                                                                   |
-                                                                   v
-                                                             local service
-
-
-direct mode
-
-application <-> REDP2P <==== direct peer path ====> REDP2P <-> application
+```bash
+redp2p pub web@idx.example.com:9876 --tcp 8080
 ```
 
-The transport protocol belongs to the publisher. A consumer selects only the
-publisher ID; REDP2P derives TCP or UDP from the publisher record.
+On the other machine, open that published service on local port 9000:
 
-TCP is a byte stream. UDP preserves datagram boundaries. REDP2P does not
-interpret application payloads.
-
-### Capabilities
-
-`kc_redp2p_idx_t` represents a running index. It can list the publisher IDs
-currently known by that index and is closed when coordination is no longer
-needed.
-
-`kc_redp2p_pub_t` represents one published service. REDP2P owns registration,
-heartbeats, lookup state, peer setup, retries, and deregistration for the
-lifetime of that capability.
-
-`kc_redp2p_con_t` represents one consumer connection to a publisher ID. In
-local-port mode it exposes the tunnel on loopback. In direct mode the
-application sends through the capability and may receive through a callback.
-
-`kc_redp2p_client_t` identifies one direct publisher-side client. It exists so
-a publisher callback can respond to or close the peer that delivered the input.
-
-### Configuration
-
-Index configuration controls the listening address, port, publisher capacity,
-proof-of-work admission, passwords, VIP reservations, and pending-consumer
-limits.
-
-Publisher configuration selects an ID, index endpoint, TCP or UDP, and either a
-local service port or a direct receive callback. Optional password and STUN
-settings apply to registration and peer discovery.
-
-Consumer configuration selects a publisher ID and index endpoint. A nonzero
-local port enables the loopback adapter. With no local port, the consumer uses
-the direct send/receive interface.
-
-### Ownership and lifecycle
-
-REDP2P owns the internal coordination state, sockets, adapter threads, session
-state, and peer-negotiation details associated with each capability.
-
-Applications own only the public handles and data they explicitly allocate.
-Memory returned by REDP2P is released with `kc_redp2p_free()`. Capability
-handles are released with their corresponding close function.
-
-The public contract intentionally does not expose registration messages,
-heartbeats, lookup, hole punching, candidates, KCP state, session keys, control
-sequences, SDP, ICE, or private adapter ports.
-
-The exact C types, option fields, status codes, callbacks, and function
-signatures are defined in `src/libredp2p.h`.
-
-### Runtime model
-
-```text
-                 control plane
-    pub  ------------------------------>  idx
-     ^                                     ^
-     |                                     |
-     |                                     |
-     +=========== direct path ==========  con
-
-                 application data
+```bash
+redp2p con web@idx.example.com:9876 9000
 ```
 
-The index coordinates discovery and session setup. Once peers establish the
-direct path, application traffic flows between publisher and consumer without
-being relayed by the index.
+Now the remote web server is available locally:
 
-### Platform scope
+```bash
+curl http://127.0.0.1:9000/
+```
 
-REDP2P depends on native TCP/UDP sockets and direct UDP hole punching. The
-browser implementation under `imp/` uses WebRTC while sharing the same index
-protocol and publisher/consumer model.
+REDP2P only carries the bytes between the two applications. It does not need to
+know whether those bytes are HTTP, a database protocol, a game protocol, or
+anything else.
+
+### Using the C library
+
+The C library provides the same operations as the CLI:
+
+- start an index;
+- publish a service;
+- connect to a published service;
+- send and receive data directly when a local port is not wanted;
+- close the index, publisher, or connection when finished.
+
+For normal port-based use, the application gives REDP2P a local service port on
+the publishing side and a local listening port on the consuming side.
+
+Applications that already manage their own I/O can skip those local ports and
+send or receive through callbacks instead.
+
+The exact C declarations, option fields, return codes, and callback types are
+documented in `src/libredp2p.h`.
+
+### TCP and UDP
+
+The publisher decides whether a service uses TCP or UDP.
+
+The consumer does not have to specify the protocol again. It connects by
+publisher ID and uses whatever protocol that publisher announced.
+
+TCP behaves as a stream. UDP keeps datagram boundaries.
+
+### Browser use
+
+Native applications use the C library and native TCP/UDP networking.
+
+The browser implementation under `imp/` uses WebRTC, but it connects through
+the same REDP2P index and uses the same publisher IDs.
 
 
 ---
