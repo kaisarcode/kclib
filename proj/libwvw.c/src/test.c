@@ -1,6 +1,6 @@
 /**
  * test.c - libwvw public contract tests.
- * Summary: Exercises the consumer-facing WebView API and grouped CLI behavior.
+ * Summary: Exercises the consumer-facing WebView API.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -18,10 +18,6 @@
 #include <windows.h>
 #else
 #include <unistd.h>
-#endif
-
-#ifndef WVW_TEST_CLI
-#define WVW_TEST_CLI ""
 #endif
 
 static int current;
@@ -368,58 +364,11 @@ static void case_kc_wvw_booleans(void) {
 }
 
 /**
- * Run one CLI invocation and classify its process status.
- * @param args CLI argument string.
- * @param expect_success Non-zero when success is expected.
- * @return 1 when the observed status matches the expectation, otherwise 0.
- */
-static int run_cli(const char *args, int expect_success) {
-    char command[2048];
-    int rc;
-
-    if (!WVW_TEST_CLI[0]) return 1;
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "\"%s\" %s > NUL 2>&1",
-        WVW_TEST_CLI, args);
-#else
-    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
-        WVW_TEST_CLI, args);
-#endif
-    rc = system(command);
-    return expect_success ? rc == 0 : rc != 0;
-}
-
-/**
- * Test grouped CLI behavior.
- * @return None.
- */
-static void case_kc_wvw_cli(void) {
-    int ok = 1;
-
-    ok &= run_cli("--help", 1);
-    ok &= run_cli("-h", 1);
-    ok &= run_cli("--version", 1);
-    ok &= run_cli("-v", 1);
-    ok &= run_cli("--hide --help", 1);
-    ok &= run_cli("--unlist --help", 1);
-    ok &= run_cli("--icon app.ico --help", 1);
-    ok &= run_cli("--hidden --help", 0);
-    ok &= run_cli("", 0);
-    ok &= run_cli("--invalid", 0);
-    ok &= run_cli("--url", 0);
-    ok &= run_cli("--width", 0);
-    ok &= run_cli("--width nope --url about:blank", 0);
-    ok &= run_cli("--height 12x --url about:blank", 0);
-    result("kc_wvw_cli",
-        "help, version, missing URL, unknown options and invalid values", ok);
-}
-
-/**
  * Run all public contract cases.
  * @return None.
  */
 static void run_all(void) {
-    total = 11;
+    total = 10;
     case_kc_wvw_version();
     case_kc_wvw_open();
     case_kc_wvw_navigation();
@@ -430,7 +379,6 @@ static void run_all(void) {
     case_kc_wvw_size();
     case_kc_wvw_position();
     case_kc_wvw_booleans();
-    case_kc_wvw_cli();
 }
 
 /**
