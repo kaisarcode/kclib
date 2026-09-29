@@ -260,6 +260,9 @@ struct redp2p {
     redp2p_fd_t wake_write_fd;
     _Atomic int ready_state;
     _Atomic int ready_status;
+    int direct_mode;
+    _Atomic int channel_state;
+    _Atomic int channel_status;
 };
 
 /**
