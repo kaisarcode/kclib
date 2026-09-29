@@ -375,9 +375,6 @@ test:
 			echo "missing native shared library: run make first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/hnsw" ]; then \
-			exit 1; \
-		fi; \
 		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
