@@ -58,241 +58,116 @@ Common options are `-h` / `--help` and `-v` / `--version`.
 
 ## Public API
 
-Start an index:
-
-```c
-#include "libredp2p.h"
-
-kc_redp2p_idx_t *idx = NULL;
-kc_redp2p_idx_options_t options = {0};
-
-options.port = 9876;
-options.pow = 16;
-
-if (kc_redp2p_idx(&idx, &options) != KC_REDP2P_OK) {
-    return 1;
-}
-```
-
-Publish a local TCP service:
-
-```c
-kc_redp2p_pub_t *pub = NULL;
-kc_redp2p_pub_options_t options = {0};
-
-options.id = "web";
-options.index = "idx.example.com:9876";
-options.protocol = KC_REDP2P_TCP;
-options.port = 8080;
-
-if (kc_redp2p_pub(&pub, &options) != KC_REDP2P_OK) {
-    return 1;
-}
-```
-
-Expose that publisher locally:
-
-```c
-kc_redp2p_con_t *con = NULL;
-kc_redp2p_con_options_t options = {0};
-
-options.id = "web";
-options.index = "idx.example.com:9876";
-options.port = 9000;
-
-if (kc_redp2p_con(&con, &options) != KC_REDP2P_OK) {
-    return 1;
-}
-```
-
-After success, `127.0.0.1:9000` is the application-facing tunnel endpoint.
-REDP2P does not interpret the bytes sent through that port. Any process or
-socket library may use it.
-
-For example:
-
-```bash
-curl http://127.0.0.1:9000/
-nc 127.0.0.1 9000
-```
-
-Native applications can also use REDP2P directly without exposing an
-application-facing local port. Set `port` to zero and provide `receive`.
-
-```c
-static void pub_receive(const kc_redp2p_pub_input_t *input, void *userdata)
-{
-    (void)userdata;
-    kc_redp2p_client_respond(input->client, "pong", 4);
-}
-
-static void con_receive(const void *data, size_t size, void *userdata)
-{
-    (void)data;
-    (void)size;
-    (void)userdata;
-}
-
-kc_redp2p_pub_options_t pub_options = {0};
-pub_options.id = "service";
-pub_options.index = "idx.example.com:9876";
-pub_options.protocol = KC_REDP2P_TCP;
-pub_options.receive = pub_receive;
-
-kc_redp2p_con_options_t con_options = {0};
-con_options.id = "service";
-con_options.index = "idx.example.com:9876";
-con_options.receive = con_receive;
-
-kc_redp2p_pub_t *pub = NULL;
-kc_redp2p_con_t *con = NULL;
-
-kc_redp2p_pub(&pub, &pub_options);
-kc_redp2p_con(&con, &con_options);
-kc_redp2p_con_send(con, "ping", 4);
-```
-
-With direct mode, REDP2P owns the private loopback adapter and its ephemeral
-port. TCP callbacks receive stream chunks; UDP callbacks receive one datagram
-per delivery.
-
-Inspect publisher IDs known by a live index:
-
-```c
-kc_redp2p_idx_entry_t *entries = NULL;
-size_t count = 0;
-
-if (kc_redp2p_idx_list(idx, &entries, &count) == KC_REDP2P_OK) {
-    for (size_t i = 0; i < count; i++) {
-        printf("%s\n", entries[i].id);
-    }
-}
-kc_redp2p_free(entries);
-```
-
-Close handles when the application no longer needs them:
-
-```c
-kc_redp2p_con_close(con);
-kc_redp2p_pub_close(pub);
-kc_redp2p_idx_close(idx);
-```
-
-The public API is:
-
-```c
-typedef struct kc_redp2p_idx kc_redp2p_idx_t;
-typedef struct kc_redp2p_pub kc_redp2p_pub_t;
-typedef struct kc_redp2p_con kc_redp2p_con_t;
-typedef struct kc_redp2p_client kc_redp2p_client_t;
-
-int kc_redp2p_idx(
-    kc_redp2p_idx_t **out,
-    const kc_redp2p_idx_options_t *options
-);
-
-int kc_redp2p_pub(
-    kc_redp2p_pub_t **out,
-    const kc_redp2p_pub_options_t *options
-);
-
-int kc_redp2p_con(
-    kc_redp2p_con_t **out,
-    const kc_redp2p_con_options_t *options
-);
-
-int kc_redp2p_idx_list(
-    kc_redp2p_idx_t *idx,
-    kc_redp2p_idx_entry_t **out_entries,
-    size_t *out_count
-);
-
-void kc_redp2p_idx_close(kc_redp2p_idx_t *idx);
-void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
-void kc_redp2p_con_close(kc_redp2p_con_t *con);
-
-int kc_redp2p_con_send(
-    kc_redp2p_con_t *con,
-    const void *data,
-    size_t size
-);
-
-int kc_redp2p_client_respond(
-    kc_redp2p_client_t *client,
-    const void *data,
-    size_t size
-);
-
-void kc_redp2p_client_close(kc_redp2p_client_t *client);
-void kc_redp2p_free(void *ptr);
-
-const char *kc_redp2p_strerror(int status);
-uint64_t kc_redp2p_version(void);
-```
-
-The public API intentionally does not expose registration, heartbeat, lookup,
-punching, candidates, KCP state, session keys, control sequences, SDP, ICE, or
-internal adapter ports.
-
-### Model
-
-REDP2P exposes three persistent capability objects:
+The library exposes the same three roles as the CLI:
 
 ```text
-idx
-  +-- coordinates publishers and consumers
-  +-- applies admission and abuse-control policy
-  +-- lists active publisher IDs
-
-pub
-  +-- publishes TCP or UDP
-  +-- either adapts a local port or receives data directly
-  +-- maintains its registration automatically
-
-con
-  +-- selects only a publisher ID
-  +-- derives TCP or UDP from the publisher record
-  +-- either exposes a local port or sends/receives directly
+idx  -> coordinates peers
+pub  -> publishes one service
+con  -> connects to one published service
 ```
 
-The CLI remains port-oriented for compatibility. The library can use the same
-transport through direct capability-level `receive`, `respond`, and `send`
-operations.
+An index maintains the control plane. Publishers register an ID and keep that
+registration alive. Consumers request an ID and establish a direct path to the
+matching publisher. Application traffic does not pass through the index.
 
-### Options
+### Publisher and consumer modes
 
-For `kc_redp2p_idx_options_t`:
+A publisher can expose an existing local TCP or UDP service, or receive traffic
+directly through the library.
 
-- Omit `host` to listen on all interfaces.
-- `port == 0` uses port 9876.
-- Omit `seats` for no publisher-capacity limit.
-- `pow == 0` disables registration proof of work.
-- Omit `pass` to leave global registration admission open.
-- VIP entries reserve IDs and may provide per-ID admission passwords.
-- `max_consumers == 0` uses the protocol safety default of 32 pending
-    consumers per publisher.
+A consumer can expose the remote publisher as a local port, or exchange bytes
+directly through the library.
 
-For `kc_redp2p_pub_options_t`, `id`, `index`, and `protocol` are required.
-`protocol` is `KC_REDP2P_TCP` or `KC_REDP2P_UDP`. Set a nonzero `port` to
-publish an existing local service, or leave `port` zero and provide `receive`
-for direct mode. `pass` and `stun` are optional.
+```text
+local service mode
 
-For `kc_redp2p_con_options_t`, `id` and `index` are required. Set a nonzero
-`port` for the compatible local-port adapter, or leave `port` zero for direct
-mode and use `kc_redp2p_con_send()`; `receive` is optional for a send-only
-direct consumer. The consumer derives TCP or UDP from the publisher record.
+application <-> local port <-> REDP2P <==== direct peer path ====> REDP2P
+                                                                   |
+                                                                   v
+                                                             local service
 
-### Runtime Model
 
-The index coordinates publishers and consumers but never relays application
-payloads. Native publishers use TCP or UDP, browser publishers use RTC, and
-consumers select only the public publisher ID.
+direct mode
+
+application <-> REDP2P <==== direct peer path ====> REDP2P <-> application
+```
+
+The transport protocol belongs to the publisher. A consumer selects only the
+publisher ID; REDP2P derives TCP or UDP from the publisher record.
+
+TCP is a byte stream. UDP preserves datagram boundaries. REDP2P does not
+interpret application payloads.
+
+### Capabilities
+
+`kc_redp2p_idx_t` represents a running index. It can list the publisher IDs
+currently known by that index and is closed when coordination is no longer
+needed.
+
+`kc_redp2p_pub_t` represents one published service. REDP2P owns registration,
+heartbeats, lookup state, peer setup, retries, and deregistration for the
+lifetime of that capability.
+
+`kc_redp2p_con_t` represents one consumer connection to a publisher ID. In
+local-port mode it exposes the tunnel on loopback. In direct mode the
+application sends through the capability and may receive through a callback.
+
+`kc_redp2p_client_t` identifies one direct publisher-side client. It exists so
+a publisher callback can respond to or close the peer that delivered the input.
+
+### Configuration
+
+Index configuration controls the listening address, port, publisher capacity,
+proof-of-work admission, passwords, VIP reservations, and pending-consumer
+limits.
+
+Publisher configuration selects an ID, index endpoint, TCP or UDP, and either a
+local service port or a direct receive callback. Optional password and STUN
+settings apply to registration and peer discovery.
+
+Consumer configuration selects a publisher ID and index endpoint. A nonzero
+local port enables the loopback adapter. With no local port, the consumer uses
+the direct send/receive interface.
+
+### Ownership and lifecycle
+
+REDP2P owns the internal coordination state, sockets, adapter threads, session
+state, and peer-negotiation details associated with each capability.
+
+Applications own only the public handles and data they explicitly allocate.
+Memory returned by REDP2P is released with `kc_redp2p_free()`. Capability
+handles are released with their corresponding close function.
+
+The public contract intentionally does not expose registration messages,
+heartbeats, lookup, hole punching, candidates, KCP state, session keys, control
+sequences, SDP, ICE, or private adapter ports.
+
+The exact C types, option fields, status codes, callbacks, and function
+signatures are defined in `src/libredp2p.h`.
+
+### Runtime model
+
+```text
+                 control plane
+    pub  ------------------------------>  idx
+     ^                                     ^
+     |                                     |
+     |                                     |
+     +=========== direct path ==========  con
+
+                 application data
+```
+
+The index coordinates discovery and session setup. Once peers establish the
+direct path, application traffic flows between publisher and consumer without
+being relayed by the index.
 
 ### Platform scope
 
-REDP2P requires native TCP/UDP listeners and direct UDP hole punching. It is
-intended for the native platforms supported by the project, including POSIX
-systems and Windows.
+REDP2P depends on native TCP/UDP sockets and direct UDP hole punching. The
+browser implementation under `imp/` uses WebRTC while sharing the same index
+protocol and publisher/consumer model.
+
 
 ---
 
