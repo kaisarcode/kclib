@@ -1,57 +1,9 @@
-# emb.c - Vector Embedding Library
-
-`emb.c` is a portable C library and CLI for generating text embeddings with one fixed local model: [BAAI/bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5). The model is embedded into the built artifact and inference runs locally through vendored GGML.
-
----
-## CLI
-
-Generate vector embeddings from command-line arguments or standard input.
-
-### Examples
-
-Single sentence embedding:
-
-```bash
-emb "The quick brown fox"
-```
-
-Batch processing via standard input:
-
-```bash
-echo "The quick brown fox" | emb
-cat sentences.txt | emb
-```
-
-Read the fixed model dimension:
-
-```bash
-emb --dim
-```
-
----
-
-### Parameters
-
-| Flag | Description |
-| :--- | :--- |
-| `-d`, `--dim` | Print the embedded model vector dimension |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
-
----
-
-### Output
-
-Results are printed as space-separated floats, one line per input text:
-
-```
-0.123456 0.234567 ... 0.345678
-```
+# libemb.c - Vector Embedding Library
 
 ---
 ## Public API
 
-`emb.c` exposes one embedding operation because it ships one predefined model and one input type: text.
+`libemb.c` exposes one embedding operation because it ships one predefined model and one input type: text.
 
 ```c
 #include "libemb.h"
@@ -104,7 +56,7 @@ The embedded model is **BAAI/bge-small-en-v1.5**, published by the Beijing Acade
 - FlagEmbedding: https://github.com/FlagOpen/FlagEmbedding
 - Upstream license: MIT
 
-`lib/model.gguf` contains the local GGUF representation used by this project. The model is linked into the produced artifacts; `emb.c` performs no downloads and has no network or hosted-service dependency.
+`lib/model.gguf` contains the local GGUF representation used by this project. The model is linked into the produced artifacts; `libemb.c` performs no downloads and has no network or hosted-service dependency.
 
 ---
 ## Build
@@ -142,7 +94,6 @@ make test wasm
 
 - Artifact: `bin/wasm32/wasm/emb.wasm`
 - Exports: `kc_emb_dimension`, `kc_emb_free`, `kc_emb_embed`, `kc_emb_version`
-- The module contains the reusable library only; the CLI is not compiled into
     it.
 
 `wasm32/wasm` is included in `make all`.

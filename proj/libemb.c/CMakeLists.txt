@@ -154,7 +154,7 @@ if(EMSCRIPTEN)
     add_executable(emb_wasm ${LIB_SOURCES} ${MODEL_EMBED_SOURCES})
     target_include_directories(emb_wasm PRIVATE src lib/ggml/include lib/ggml/src lib/ggml/src/ggml-cpu)
     set_target_properties(emb_wasm PROPERTIES
-        OUTPUT_NAME "emb"
+        OUTPUT_NAME "libemb"
         SUFFIX ".wasm"
     )
     target_link_options(emb_wasm PRIVATE
@@ -202,20 +202,20 @@ if(NOT EMB_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
         target_link_libraries(emb_shared dl m)
     endif()
 
-    add_executable(emb src/emb.c)
-    target_include_directories(emb PRIVATE src)
-    target_link_libraries(emb emb_static)
+    
+    
+    
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(emb pthread dl m)
+        
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "armv7|arm|mips")
-            target_link_libraries(emb atomic)
+            
         endif()
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "mips")
-            target_link_options(emb PRIVATE -Wl,--no-warn-mismatch)
+            
         endif()
     elseif(ANDROID)
-        target_link_libraries(emb dl m)
+        
     endif()
 endif()
 
@@ -267,12 +267,5 @@ if(EMB_BUILD_TESTS)
 endif()
 
 if(EMB_BUILD_TESTS)
-    if(EMB_TEST_CLI)
-        set(EMB_TEST_CLI_TARGET_PATH "${EMB_TEST_CLI}")
-    else()
-        set(EMB_TEST_CLI_TARGET_PATH "")
-    endif()
-    target_compile_definitions(emb_contract_test PRIVATE
-        EMB_TEST_CLI="${EMB_TEST_CLI_TARGET_PATH}"
-    )
+    
 endif()

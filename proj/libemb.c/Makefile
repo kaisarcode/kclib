@@ -161,12 +161,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libemb.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libemb.dll
 NATIVE_IMPORT_LIBRARY := -DEMB_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libemb.dll.a
 endif
@@ -228,7 +226,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$(2) -DEMB_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_C_COMPILER=$(3) -DCMAKE_CXX_COMPILER=$(4) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null,$(5))
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/emb $(BIN_DIR)/$(1)/linux/emb
 	@echo "OK $(1)/linux"
 endef
 
@@ -293,7 +290,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=$(2) -DEMB_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_C_COMPILER=$(3) -DCMAKE_CXX_COMPILER=$(4) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null,CMAKE_BUILD_PARALLEL_LEVEL=1)
-	@cp $(BUILD_DIR)/$(1)-windows/out/emb.exe $(BIN_DIR)/$(1)/windows/emb.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libemb.dll $(BIN_DIR)/$(1)/windows/libemb.dll
 	@echo "OK $(1)/windows"
 endef
@@ -335,7 +331,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
-	@cp $(BUILD_DIR)/$(1)-macos/out/emb $(BIN_DIR)/$(1)/macos/emb
 	@echo "OK $(1)/macos"
 endef
 
@@ -384,14 +379,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
-	@if [ -f $(BUILD_DIR)/$(1)-$(2)/out/emb ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/emb $(BIN_DIR)/$(1)/$(2)/emb; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/emb.app/emb ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/emb.app/emb $(BIN_DIR)/$(1)/$(2)/emb; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi
 	@echo "OK $(1)/$(2)"
 endef
 
@@ -425,7 +412,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,,)
-	@cp $(BUILD_DIR)/$(1)-android/out/emb $(BIN_DIR)/$(1)/android/emb
 	@echo "OK $(1)/android"
 endef
 
@@ -452,7 +438,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DEMB_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/emb.wasm $(BIN_DIR)/wasm32/wasm/emb.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libemb.wasm $(BIN_DIR)/wasm32/wasm/libemb.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -475,11 +461,11 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CXX)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libemb.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libemb.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/emb.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libemb.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libemb.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -q '^EMB_TEST_CLI:' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
@@ -490,7 +476,6 @@ test:
 				-DEMB_BUILD_VERSION=$(BUILD_VERSION) \
 				-DEMB_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libemb.dll \
 				-DEMB_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libemb.dll.a \
-				-DEMB_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/emb.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -511,8 +496,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/emb.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/emb.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libemb.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libemb.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -534,18 +519,17 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/emb$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -q '^EMB_TEST_CLI:' $(BUILD_DIR)/test/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_PROCESSOR=$(NATIVE_ARCH) \
 				-DEMB_BUILD_TESTS=ON \
 				-DEMB_BUILD_VERSION=$(BUILD_VERSION) \
 				-DEMB_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				-DEMB_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/emb$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
