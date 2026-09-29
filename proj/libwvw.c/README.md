@@ -1,76 +1,10 @@
 # wvw.c - Native WebView Window
 
-`wvw.c` provides a reusable native WebView window library with a CLI consumer,
-portable contract tests, and platform backends for Windows, Linux, and macOS.
+`libwvw.c` provides a reusable native WebView window library with portable
+contract tests and platform backends for Windows, Linux, and macOS.
 
 The native backends are WebView2 on Windows, WebKitGTK on Linux, and WKWebView
 on macOS.
-
----
-
-## CLI
-
-Open a URL with the default window settings:
-
-```bash
-wvw --url https://example.com
-```
-
-Set the title, size, and position:
-
-```bash
-wvw \
-    --url https://example.com \
-    --title Example \
-    --width 1280 \
-    --height 720 \
-    --posx 100 \
-    --posy 100
-```
-
-### Parameters
-
-| Flag | Description |
-| :--- | :--- |
-| `--url <url>` | Initial URL |
-| `--title <title>` | Window title |
-| `--background <hex>` | Background as `RRGGBB` or `AARRGGBB` |
-| `--icon <icon>` | Window icon file path or platform icon name |
-| `--width <px>` | Initial window width |
-| `--height <px>` | Initial window height |
-| `--posx <px>` | Initial horizontal position |
-| `--posy <px>` | Initial vertical position |
-| `--fullscreen` | Start in fullscreen mode |
-| `--borderless` | Start without window decorations |
-| `--always-on-top` | Keep the window above normal windows |
-| `--click-through` | Ignore mouse input on the host window |
-| `--no-focus` | Do not activate the window for keyboard focus |
-| `--hide` | Start with the window hidden |
-| `--unlist` | Exclude the window from the window list |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
-
-The same settings can be supplied through environment variables:
-
-```text
-KC_WVW_URL
-KC_WVW_TITLE
-KC_WVW_BACKGROUND
-KC_WVW_ICON
-KC_WVW_WIDTH
-KC_WVW_HEIGHT
-KC_WVW_POSX
-KC_WVW_POSY
-KC_WVW_FULLSCREEN
-KC_WVW_BORDERLESS
-KC_WVW_ALWAYS_ON_TOP
-KC_WVW_CLICK_THROUGH
-KC_WVW_NO_FOCUS
-KC_WVW_HIDDEN
-KC_WVW_UNLIST
-```
-
-Command-line arguments override environment defaults.
 
 ---
 
@@ -254,7 +188,7 @@ make
 make test
 ```
 
-The test suite validates the reusable public API and one grouped CLI case.
+The test suite validates the reusable public API.
 
 To run the Windows contract suite through Wine:
 
@@ -298,8 +232,8 @@ make aarch64/macos
 - Microsoft Edge WebView2 Runtime for execution.
 - `wine` for Windows tests on Linux.
 
-The Windows build places `WebView2Loader.dll` beside the generated executable
-and shared library.
+The Windows build places `WebView2Loader.dll` beside the generated shared
+library.
 
 ### macOS
 
