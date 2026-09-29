@@ -1,54 +1,65 @@
-#!/bin/bash
+#!/bin/sh
 # kclib test tool
-# Summary: Tests one or all kclib projects natively, through Wine, and through WASM when supported.
+# Summary: Tests one or all kclib projects on their supported test runtimes.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
 # License: GNU General Public License v3.0
 
 set -e
 
-# Prints command usage information.
-# @return 0 on success.
 usage() {
-    echo "Usage: $0 all|NAME.c" >&2
+    echo "Usage: $0 all|NAME" >&2
 }
 
-# Tests one kclib project on every supported test runtime.
-# @param project_dir Project directory.
-# @return 0 on success.
-test_project() {
-    local project_dir="$1"
-    local project_name
+resolve_project() {
+    proj_dir=$1
+    name=$2
 
+    if [ -d "$proj_dir/lib$name.c" ]; then
+        printf '%s\n' "$proj_dir/lib$name.c"
+        return 0
+    fi
+
+    if [ -d "$proj_dir/$name.c" ]; then
+        printf '%s\n' "$proj_dir/$name.c"
+        return 0
+    fi
+
+    return 1
+}
+
+test_project() {
+    project_dir=$1
     project_name=$(basename "$project_dir")
+
     echo "Testing $project_name..."
     (
         cd "$project_dir"
         make test
-        make test wine
+
+        if grep -Eq '^wine[[:space:]]*:' Makefile; then
+            make test wine
+        fi
+
         if grep -Eq '^wasm[[:space:]]*:' Makefile; then
             make test wasm
         fi
     )
 }
 
-# Dispatches one project test run or all project test runs.
-# @return 0 on success.
 main() {
-    local script_dir root_dir proj_dir target project_dir
-
     [ "$#" -eq 1 ] || {
         usage
         exit 1
     }
 
-    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
     root_dir=$(dirname "$script_dir")
     proj_dir="$root_dir/proj"
-    target="$1"
+    target=$1
 
     [ -d "$proj_dir" ] || {
-        echo "error: projects directory not found: proj/" >&2
+        echo "error: projects directory not found: $proj_dir" >&2
         exit 1
     }
 
@@ -61,16 +72,14 @@ main() {
     fi
 
     case "$target" in
-        *.c) ;;
-        *)
-            echo "error: project name must use the NAME.c form" >&2
+        *[!A-Za-z0-9_-]*|'')
+            echo "error: invalid project name: $target" >&2
             usage
             exit 1
             ;;
     esac
 
-    project_dir="$proj_dir/$target"
-    [ -d "$project_dir" ] || {
+    project_dir=$(resolve_project "$proj_dir" "$target") || {
         echo "error: project not found: $target" >&2
         exit 1
     }

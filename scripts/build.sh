@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # kclib build tool
 # Summary: Builds one or all kclib projects with make all.
 # Author:  KaisarCode
@@ -7,20 +7,31 @@
 
 set -e
 
-# Prints command usage information.
-# @return 0 on success.
 usage() {
-    echo "Usage: $0 all|libNAME.c" >&2
+    echo "Usage: $0 all|NAME" >&2
 }
 
-# Builds one kclib project for every configured target.
-# @param project_dir Project directory.
-# @return 0 on success.
-build_project() {
-    local project_dir="$1"
-    local project_name
+resolve_project() {
+    proj_dir=$1
+    name=$2
 
+    if [ -d "$proj_dir/lib$name.c" ]; then
+        printf '%s\n' "$proj_dir/lib$name.c"
+        return 0
+    fi
+
+    if [ -d "$proj_dir/$name.c" ]; then
+        printf '%s\n' "$proj_dir/$name.c"
+        return 0
+    fi
+
+    return 1
+}
+
+build_project() {
+    project_dir=$1
     project_name=$(basename "$project_dir")
+
     echo "Building $project_name..."
     (
         cd "$project_dir"
@@ -28,29 +39,23 @@ build_project() {
     )
 }
 
-# Dispatches one project build or all project builds.
-# @return 0 on success.
 main() {
-    local script_dir root_dir proj_dir target project_dir
-
     [ "$#" -eq 1 ] || {
         usage
         exit 1
     }
 
-    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
     root_dir=$(dirname "$script_dir")
     proj_dir="$root_dir/proj"
-    target="$1"
+    target=$1
 
     [ -d "$proj_dir" ] || {
-        echo "error: projects directory not found: proj/" >&2
+        echo "error: projects directory not found: $proj_dir" >&2
         exit 1
     }
 
     if [ "$target" = "all" ]; then
-        # Keep legacy project directories discoverable until each project has
-        # completed the one-by-one rename to libNAME.c.
         for project_dir in "$proj_dir"/*.c; do
             [ -d "$project_dir" ] || continue
             build_project "$project_dir"
@@ -59,16 +64,14 @@ main() {
     fi
 
     case "$target" in
-        lib*.c) ;;
-        *)
-            echo "error: project name must use the libNAME.c form" >&2
+        *[!A-Za-z0-9_-]*|'')
+            echo "error: invalid project name: $target" >&2
             usage
             exit 1
             ;;
     esac
 
-    project_dir="$proj_dir/$target"
-    [ -d "$project_dir" ] || {
+    project_dir=$(resolve_project "$proj_dir" "$target") || {
         echo "error: project not found: $target" >&2
         exit 1
     }

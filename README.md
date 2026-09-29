@@ -136,13 +136,13 @@ Build every kclib sequentially:
 ./scripts/build.sh all
 ```
 
-Build one migrated project:
+Build one project:
 
 ```sh
-./scripts/build.sh libdemo.c
+./scripts/build.sh demo
 ```
 
-The build script enters each selected project directory and runs `make all`.
+The build script resolves the logical library name to its project directory and runs `make all`.
 
 The normal project-local entry points are:
 
