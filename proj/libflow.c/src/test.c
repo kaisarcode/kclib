@@ -1,4 +1,6 @@
 /**
+ * test.c - libflow public API contract tests.
+ * Summary: Validates opened flow runtimes, overrides, and execution.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -27,8 +29,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#endif
-
 #endif
 
 static int test_case_total = 0;
@@ -285,29 +285,6 @@ static int write_all_fixtures(const char *dir) {
         return 1;
     return 0;
 }
-
-#ifdef _WIN32
-/**
- * Append one argument to a Windows command line.
- * @param cmd Command-line buffer.
- * @param cap Buffer capacity in wide characters.
- * @param arg Argument to append.
- * @return 0 on success, 1 on failure.
- */
-
-#else
-/**
- * @param argv Argument vector.
- * @param input Optional standard input text.
- * @param out Standard output buffer.
- * @param out_size Standard output capacity.
- * @param err Standard error buffer.
- * @param err_size Standard error capacity.
- * @param status Output process status.
- * @return 0 on launch success, 1 on failure.
- */
-
-#endif
 
 typedef struct {
     void *data;
@@ -878,8 +855,7 @@ static int case_kc_flow_version(void) {
  * Runs all public API contract test cases.
  * @return 0 on success, nonzero on failure.
  */
-static int case_all(void) {
-    int rc = 0;
+static int case_all(void) {    int rc = 0;
 
     test_case_total = 10;
     test_case_current = 0;
