@@ -1,17 +1,7 @@
 # redp2p.c - Peer-to-Peer Transport
 
-`redp2p.c` lets one application make a local service reachable from another
-machine without exposing that service directly to the Internet.
-
-A publisher gives the service a name. A consumer connects to that name from
-somewhere else. REDP2P helps both sides find each other and then carries the
-connection directly between them.
-
-The index is only there to help peers meet. It does not sit in the middle of
-their traffic.
-
-Use REDP2P when you want to reach a service running on another machine without
-setting up a public proxy, VPN, or relay for that service.
+`redp2p.c` connects two machines directly so one can access a service running
+on the other.
 
 ---
 
