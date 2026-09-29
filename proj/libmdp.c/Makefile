@@ -144,12 +144,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libmdp.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libmdp.dll
 NATIVE_IMPORT_LIBRARY := -DMDP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libmdp.dll.a
 endif
@@ -298,7 +296,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/mdp $(BIN_DIR)/$(1)/macos/mdp && \
 	echo "OK $(1)/macos"
 endef
 
@@ -350,14 +347,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
-	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/mdp ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/mdp $(BIN_DIR)/$(1)/$(2)/mdp; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/mdp.app/mdp ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/mdp.app/mdp $(BIN_DIR)/$(1)/$(2)/mdp; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi && \
 	echo "OK $(1)/$(2)"
 endef
 
@@ -417,7 +406,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DMDP_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/mdp.wasm $(BIN_DIR)/wasm32/wasm/mdp.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libmdp.wasm $(BIN_DIR)/wasm32/wasm/libmdp.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -436,11 +425,11 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libmdp.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmdp.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/mdp.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libmdp.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmdp.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -q '^MDP_TEST_CLI:' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
@@ -448,7 +437,6 @@ test:
 				-DMDP_BUILD_TESTS=ON \
 				-DMDP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmdp.dll \
 				-DMDP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmdp.dll.a \
-				-DMDP_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/mdp.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -460,8 +448,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/mdp.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/mdp.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libmdp.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libmdp.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -483,16 +471,15 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/mdp$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -q '^MDP_TEST_CLI:' $(BUILD_DIR)/test/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DMDP_BUILD_TESTS=ON \
 				-DMDP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				-DMDP_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/mdp$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \

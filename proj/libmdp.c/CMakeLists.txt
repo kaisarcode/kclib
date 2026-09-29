@@ -38,7 +38,7 @@ if(EMSCRIPTEN)
     add_executable(mdp_wasm ${MDP_SOURCES})
     target_include_directories(mdp_wasm PRIVATE src)
     set_target_properties(mdp_wasm PROPERTIES
-        OUTPUT_NAME "mdp"
+        OUTPUT_NAME "libmdp"
         SUFFIX ".wasm"
     )
     target_link_options(mdp_wasm PRIVATE
@@ -49,13 +49,6 @@ if(EMSCRIPTEN)
 endif()
 
 if(NOT MDP_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
-    add_executable(mdp src/mdp.c ${MDP_SOURCES})
-    target_include_directories(mdp PRIVATE src)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(mdp pthread m)
-    endif()
-
     add_library(mdp_static STATIC ${MDP_SOURCES})
     set_target_properties(mdp_static PROPERTIES OUTPUT_NAME "mdp")
     target_include_directories(mdp_static PRIVATE src)
@@ -108,13 +101,3 @@ if(MDP_BUILD_TESTS)
     endif()
 endif()
 
-if(MDP_BUILD_TESTS)
-    if(MDP_TEST_CLI)
-        set(MDP_TEST_CLI_TARGET_PATH "${MDP_TEST_CLI}")
-    else()
-        set(MDP_TEST_CLI_TARGET_PATH "")
-    endif()
-    target_compile_definitions(mdp_contract_test PRIVATE
-        MDP_TEST_CLI="${MDP_TEST_CLI_TARGET_PATH}"
-    )
-endif()

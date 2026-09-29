@@ -1,41 +1,6 @@
-# mdp.c - Markdown Parser
+# libmdp.c - Markdown Parser
 
-`mdp.c` parses Markdown text, extracts optional YAML frontmatter, and renders the body as an HTML fragment through a small C library and stdin/stdout CLI.
-
----
-## CLI
-
-### Examples
-
-Send a Markdown document through the CLI:
-
-```bash
-echo '# Hello' | mdp
-```
-
-Extract frontmatter only:
-
-```bash
-echo $'---\ntitle: Home\n---\n# Hello' | mdp --meta
-```
-
-Extract body without frontmatter:
-
-```bash
-echo $'---\ntitle: Home\n---\n# Hello' | mdp --body
-```
-
----
-
-### Parameters
-
-| Flag | Description |
-| :--- | :--- |
-| `--html` | Render Markdown body as HTML fragment (default) |
-| `--body` | Output raw body without frontmatter |
-| `--meta` | Output raw frontmatter block |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
+`libmdp.c` parses Markdown text, extracts optional YAML frontmatter, and renders the body as an HTML fragment through a reusable C library.
 
 ---
 ## Public API
@@ -149,11 +114,8 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/mdp.wasm`
+- Artifact: `bin/wasm32/wasm/libmdp.wasm`
 - Exports: `kc_mdp_open`, `kc_mdp_close`, `kc_mdp_html`, `kc_mdp_body`, `kc_mdp_meta`, `kc_mdp_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
