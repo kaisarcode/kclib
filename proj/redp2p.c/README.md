@@ -1,14 +1,13 @@
 # redp2p.c - Peer-to-Peer Connectivity
 
-`redp2p.c` is a library designed to provide peer-to-peer connectivity.
+`redp2p.c` is a library for direct peer-to-peer communication.
 
-It's based on three roles: an index, a publisher, and a consumer.
+It is organized around three roles:
 
-- The publisher registers an identifier in an index and exposes a service or data
-endpoint under that identifier.
-- The consumer resolves that identifier through the same index and requests a connection.
-- The index coordinates discovery and connection establishment; once the
-peers are connected, application traffic flows directly between publisher and consumer.
+- the **index**, which keeps publisher registrations and coordinates connection
+  establishment;
+- the **publisher**, which registers an ID and accepts consumers;
+- the **consumer**, which resolves that ID and connects to the publisher.
 
 ```text
            index
@@ -16,17 +15,297 @@ peers are connected, application traffic flows directly between publisher and co
    publisher - consumer
 ```
 
-The same model is used by the native and browser implementations. Native peers
-publish and consume TCP or UDP services, while browser peers use WebRTC data
-channels. The project provides two compatible index implementations: the native
-C index and the PHP index. Both implement the REDP2P index protocol, including
-the signaling required by WebRTC peers.
+The index participates in discovery and connection setup. Once a connection is
+established, application data flows directly between publisher and consumer.
+
+The same model is used by the native C library and the browser implementation.
+Native peers use the REDP2P native transport; browser peers use WebRTC data
+channels. The native C index and the PHP index implement the same REDP2P index
+protocol, including WebRTC signaling.
 
 ---
 
-## Native CLI
+## Public C API
 
-The native command follows the three REDP2P roles:
+The library is the primary interface to REDP2P.
+
+A publisher receives data from connected consumers through a callback. A
+consumer sends data with `kc_redp2p_con_send()` and may receive replies through
+its own callback.
+
+No application-facing TCP or UDP port is required in this mode.
+
+### Publisher
+
+```c
+#include "libredp2p.h"
+
+static void receive(const kc_redp2p_pub_input_t *input, void *userdata)
+{
+    (void)userdata;
+
+    /* input->data / input->size came from one consumer. */
+
+    kc_redp2p_client_respond(
+        input->client,
+        "pong",
+        4
+    );
+}
+
+int main(void)
+{
+    kc_redp2p_pub_t *pub = NULL;
+    kc_redp2p_pub_options_t options = {0};
+
+    options.id = "echo";
+    options.index = "index.example.com:9876";
+    options.protocol = KC_REDP2P_TCP;
+    options.receive = receive;
+
+    if (kc_redp2p_pub(&pub, &options) != KC_REDP2P_OK)
+        return 1;
+
+    /* Keep the application alive while the publisher is in use. */
+
+    kc_redp2p_pub_close(pub);
+    return 0;
+}
+```
+
+With `port = 0`, which is the default above, the publisher works directly
+through the library callback. REDP2P owns the transport-side adapter needed to
+carry application data.
+
+Each received `kc_redp2p_pub_input_t` identifies the consumer that sent the
+data. The publisher can answer that consumer with
+`kc_redp2p_client_respond()` or close it with
+`kc_redp2p_client_close()`.
+
+### Consumer
+
+```c
+#include "libredp2p.h"
+
+static void receive(const void *data, size_t size, void *userdata)
+{
+    (void)userdata;
+
+    /* data / size came from the publisher. */
+}
+
+int main(void)
+{
+    kc_redp2p_con_t *con = NULL;
+    kc_redp2p_con_options_t options = {0};
+
+    options.id = "echo";
+    options.index = "index.example.com:9876";
+    options.receive = receive;
+
+    if (kc_redp2p_con(&con, &options) != KC_REDP2P_OK)
+        return 1;
+
+    kc_redp2p_con_send(con, "ping", 4);
+
+    /* Keep the application alive while the connection is in use. */
+
+    kc_redp2p_con_close(con);
+    return 0;
+}
+```
+
+The consumer does not choose TCP or UDP. It learns the publisher transport from
+the index.
+
+### Port adapters
+
+The public API can also adapt an existing local TCP or UDP service instead of
+handling application data directly.
+
+For a publisher, setting `options.port` publishes an existing local service:
+
+```c
+kc_redp2p_pub_options_t options = {0};
+
+options.id = "web";
+options.index = "index.example.com:9876";
+options.protocol = KC_REDP2P_TCP;
+options.port = 8080;
+```
+
+For a consumer, setting `options.port` exposes the remote publisher through a
+local loopback port:
+
+```c
+kc_redp2p_con_options_t options = {0};
+
+options.id = "web";
+options.index = "index.example.com:9876";
+options.port = 9000;
+```
+
+The remote service is then available locally at `127.0.0.1:9000`.
+
+This port-backed form is an adapter for existing socket-based applications. It
+is also the mode exposed by the CLI.
+
+### Index
+
+The C library can run an index directly:
+
+```c
+#include "libredp2p.h"
+
+kc_redp2p_idx_t *idx = NULL;
+kc_redp2p_idx_options_t options = {0};
+
+options.port = 9876;
+
+if (kc_redp2p_idx(&idx, &options) == KC_REDP2P_OK) {
+    /* Keep the index alive while it is in use. */
+    kc_redp2p_idx_close(idx);
+}
+```
+
+The index handles native peer coordination as well as the WebRTC signaling used
+by browser peers.
+
+Publisher IDs currently known by a live C index can be obtained with
+`kc_redp2p_idx_list()`.
+
+---
+
+## Browser / WebRTC
+
+The browser implementation follows the same publisher/consumer model, but uses
+WebRTC data channels as the direct peer transport.
+
+A browser publisher registers an ID in an index. A browser consumer connects to
+that ID. The index carries the WebRTC signaling needed to establish the peer
+connection; once the data channel is open, application data flows directly
+between the browsers.
+
+The browser implementation is provided by:
+
+```text
+imp/redp2p-pub.js
+imp/redp2p-con.js
+```
+
+### Publisher
+
+```html
+<script src="redp2p-pub.js"></script>
+```
+
+```js
+const pub = await RedP2P.pub({
+    id: "echo",
+    index: "https://example.com/index",
+
+    receive(input) {
+        input.client.respond("pong");
+    }
+});
+```
+
+The callback receives the data together with the connected client. The client
+can be answered with `respond()` or closed with `close()`.
+
+Stop publishing with:
+
+```js
+await pub.close();
+```
+
+### Consumer
+
+```html
+<script src="redp2p-pub.js"></script>
+<script src="redp2p-con.js"></script>
+```
+
+```js
+const con = await RedP2P.con({
+    id: "echo",
+    index: "https://example.com/index",
+
+    receive(data) {
+        console.log(data);
+    }
+});
+
+con.send("ping");
+```
+
+Close the connection with:
+
+```js
+con.close();
+```
+
+WebRTC ICE servers can be supplied through `iceServers`:
+
+```js
+iceServers: [
+    {urls: "stun:stun.example.com:3478"}
+]
+```
+
+Remote browser indexes must use HTTPS. Plain HTTP is accepted for localhost
+development.
+
+---
+
+## Index implementations
+
+REDP2P includes two compatible index implementations.
+
+### Native C index
+
+The native index is part of `libredp2p` and can be created with
+`kc_redp2p_idx()` or started through the CLI.
+
+It maintains publisher registrations, coordinates native peer connections, and
+handles the signaling operations used by WebRTC publishers and consumers.
+
+### PHP index
+
+`imp/redp2p-idx.php` implements the same REDP2P index protocol over HTTP/JSON.
+
+A minimal SQLite endpoint:
+
+```php
+<?php
+require 'redp2p-idx.php';
+
+\KaisarCode\Redp2pIndex::serve([
+    'dsn' => 'sqlite:/var/lib/redp2p/index.sqlite',
+]);
+```
+
+The PHP implementation uses PDO and supports SQLite or MySQL.
+
+Requirements:
+
+- PHP
+- PDO
+- Sodium
+- the PDO driver for the selected database
+
+Index policy can be configured with `REDP2P_SEATS`, `REDP2P_POW`,
+`REDP2P_PASS`, `REDP2P_VIP`, and
+`REDP2P_MAX_CONSUMERS_PER_PUBLISHER`.
+
+---
+
+## CLI
+
+The CLI is a convenience interface for exposing existing local TCP or UDP
+services through REDP2P.
+
+It maps the same three roles to commands:
 
 ```text
 redp2p idx ...
@@ -36,67 +315,42 @@ redp2p con ...
 
 ### Example
 
-Suppose machine A has a TCP service running on port `8080`.
-
-First run an index somewhere reachable by both peers:
+Run an index:
 
 ```bash
 redp2p idx 9876
 ```
 
-On machine A, publish the local service under the name `web`:
+Publish an existing TCP service running on local port `8080`:
 
 ```bash
 redp2p pub web@index.example.com:9876 --tcp 8080
 ```
 
-On machine B, connect to `web` and make it available locally on port `9000`:
+On another machine, expose that publisher on local port `9000`:
 
 ```bash
 redp2p con web@index.example.com:9876 9000
 ```
 
-Machine B can now use:
+The service is then available through:
 
 ```text
 127.0.0.1:9000
 ```
 
-as if the service were local.
-
-The index coordinates the connection, but service traffic travels directly
-between the peers.
-
-The same works for UDP:
+For UDP:
 
 ```bash
 redp2p pub dns@index.example.com:9876 --udp 5353
 redp2p con dns@index.example.com:9876 9001
 ```
 
-The consumer does not need to specify TCP or UDP. It learns that from the
-publisher registration.
+The consumer learns the publisher protocol from the index.
 
 If the index port is omitted, REDP2P uses port `9876`.
 
-### Index
-
-Start an index:
-
-```bash
-redp2p idx 9876
-```
-
-The native index coordinates TCP/UDP peers and also implements the WebRTC
-signaling used by browser peers.
-
-List the publishers currently known by a local index:
-
-```bash
-redp2p idx 9876 --list
-```
-
-Optional limits can be applied when running an index:
+### Index options
 
 ```bash
 redp2p idx 9876 --seats 100
@@ -104,29 +358,11 @@ redp2p idx 9876 --pow 16
 redp2p idx 9876 --max-consumers 20
 ```
 
-### Publish
-
-Publish a TCP service:
+List publishers known by a local index:
 
 ```bash
-redp2p pub myservice@index.example.com --tcp 8080
+redp2p idx 9876 --list
 ```
-
-Publish a UDP service:
-
-```bash
-redp2p pub myservice@index.example.com --udp 5353
-```
-
-### Connect
-
-Connect to a published service:
-
-```bash
-redp2p con myservice@index.example.com 9000
-```
-
-The service becomes available on `127.0.0.1:9000`.
 
 ### Parameters
 
@@ -139,7 +375,7 @@ The service becomes available on `127.0.0.1:9000`.
 | `--max-consumers <N>` | Maximum pending consumers per publisher |
 | `pub <id>@<index[:port]> --tcp <port>` | Publish a local TCP service |
 | `pub <id>@<index[:port]> --udp <port>` | Publish a local UDP service |
-| `con <id>@<index[:port]> <local-port>` | Connect to a publisher |
+| `con <id>@<index[:port]> <local-port>` | Expose a publisher on a local port |
 | `--stun <url>` | STUN server used by native peers |
 | `-h`, `--help` | Show help |
 | `-v`, `--version` | Show version |
@@ -157,239 +393,20 @@ The service becomes available on `127.0.0.1:9000`.
 
 CLI values override environment defaults.
 
-`idx`, `pub`, and `con` keep running until interrupted with SIGINT or
-SIGTERM.
-
----
-
-## Browser / WebRTC
-
-The browser implementation uses the same index/publisher/consumer model, with
-WebRTC as the peer transport.
-
-A browser publisher registers an ID in the index. A browser consumer resolves
-that ID and submits a WebRTC offer through the index. The publisher receives the
-offer through the same index and returns an answer. After negotiation completes,
-the resulting data channel carries application traffic directly between the two
-browsers.
-
-The browser implementation is under:
-
-```text
-imp/redp2p-pub.js
-imp/redp2p-con.js
-```
-
-### Publish from a browser
-
-```html
-<script src="redp2p-pub.js"></script>
-```
-
-```js
-const pub = await RedP2P.pub({
-    id: "chat",
-    index: "https://example.com/index",
-
-    receive(input) {
-        console.log(input.data);
-        input.client.respond("hello back");
-    }
-});
-```
-
-The publisher remains registered while the returned publisher object is open.
-
-When a consumer sends data, `receive()` receives the data together with the
-connected client. The publisher can answer that client with:
-
-```js
-input.client.respond(data);
-```
-
-Stop publishing with:
-
-```js
-await pub.close();
-```
-
-### Connect from a browser
-
-Load the browser files:
-
-```html
-<script src="redp2p-pub.js"></script>
-<script src="redp2p-con.js"></script>
-```
-
-Then connect to the published ID:
-
-```js
-const con = await RedP2P.con({
-    id: "chat",
-    index: "https://example.com/index",
-
-    receive(data) {
-        console.log(data);
-    }
-});
-
-con.send("hello");
-```
-
-Close the connection with:
-
-```js
-con.close();
-```
-
-Both publisher and consumer may receive WebRTC ICE server configuration through
-`iceServers`:
-
-```js
-iceServers: [
-    {urls: "stun:stun.example.com:3478"}
-]
-```
-
-For remote browser use, the index URL must use HTTPS. Plain HTTP is accepted for
-localhost development.
-
----
-
-## Index implementations
-
-The index maintains publisher registrations and coordinates connection setup. It
-supports both native peer discovery and WebRTC signaling, but it is not a relay
-for application data.
-
-The project includes two compatible implementations.
-
-### Native C index
-
-The native index is part of the C library and can be started through the CLI:
-
-```bash
-redp2p idx 9876
-```
-
-It handles native TCP/UDP coordination and the WebRTC signaling operations used
-by browser publishers and consumers.
-
-### PHP index
-
-`imp/redp2p-idx.php` implements the same REDP2P index protocol over HTTP/JSON.
-
-A minimal SQLite endpoint looks like this:
-
-```php
-<?php
-require 'redp2p-idx.php';
-
-\KaisarCode\Redp2pIndex::serve([
-    'dsn' => 'sqlite:/var/lib/redp2p/index.sqlite',
-]);
-```
-
-The PHP implementation uses PDO and supports SQLite or MySQL.
-
-It requires:
-
-- PHP;
-- PDO;
-- Sodium;
-- the PDO driver for the selected database.
-
-The same index limits and registration settings are available through
-`REDP2P_SEATS`, `REDP2P_POW`, `REDP2P_PASS`, `REDP2P_VIP`, and
-`REDP2P_MAX_CONSUMERS_PER_PUBLISHER`.
-
----
-
-## Public C API
-
-The library exposes the same three roles directly:
-
-```c
-kc_redp2p_idx(...)
-kc_redp2p_pub(...)
-kc_redp2p_con(...)
-```
-
-### Start an index
-
-```c
-#include "libredp2p.h"
-
-kc_redp2p_idx_options_t options = {0};
-kc_redp2p_idx_t *idx = NULL;
-
-options.port = 9876;
-
-if (kc_redp2p_idx(&idx, &options) == KC_REDP2P_OK) {
-    kc_redp2p_idx_close(idx);
-}
-```
-
-### Publish a local service
-
-```c
-#include "libredp2p.h"
-
-kc_redp2p_pub_options_t options = {0};
-kc_redp2p_pub_t *pub = NULL;
-
-options.id = "web";
-options.index = "index.example.com:9876";
-options.protocol = KC_REDP2P_TCP;
-options.port = 8080;
-
-if (kc_redp2p_pub(&pub, &options) == KC_REDP2P_OK) {
-    kc_redp2p_pub_close(pub);
-}
-```
-
-Use `KC_REDP2P_UDP` to publish UDP instead.
-
-### Connect to a publisher
-
-```c
-#include "libredp2p.h"
-
-kc_redp2p_con_options_t options = {0};
-kc_redp2p_con_t *con = NULL;
-
-options.id = "web";
-options.index = "index.example.com:9876";
-options.port = 9000;
-
-if (kc_redp2p_con(&con, &options) == KC_REDP2P_OK) {
-    /* The published service is available on 127.0.0.1:9000. */
-    kc_redp2p_con_close(con);
-}
-```
-
-The C API can also exchange application data directly without exposing a local
-TCP or UDP port. In that form, consumers send with `kc_redp2p_con_send()` and
-publishers receive clients through their callback and answer with
-`kc_redp2p_client_respond()`.
-
-The public header is `src/libredp2p.h`.
+`idx`, `pub`, and `con` run until interrupted with SIGINT or SIGTERM.
 
 ---
 
 ## Protocol
 
-The common REDP2P index protocol is documented in:
+The REDP2P index protocol is documented in:
 
 ```text
 doc/protocol.md
 ```
 
-The native C index, the PHP index, and the browser implementations use that same
-contract.
-
-Applications normally do not need to implement the protocol themselves.
+The native C index, PHP index, and browser implementations use the same
+coordination contract.
 
 ---
 
@@ -424,8 +441,6 @@ The browser/PHP integration test is:
 ```bash
 ./tests/test.sh
 ```
-
-It starts a local PHP index and prints the browser test URL to open.
 
 ### Multiarch Builds
 
@@ -474,10 +489,10 @@ Protocol dependencies used by the C implementation are included in the project.
 
 Required only for their respective targets:
 
-- MinGW for Windows;
-- `wine` for Windows tests on Linux;
-- `osxcross` with Apple SDKs for macOS and iOS;
-- Android NDK for Android.
+- MinGW for Windows
+- `wine` for Windows tests on Linux
+- `osxcross` with Apple SDKs for macOS and iOS
+- Android NDK for Android
 
 ---
 
