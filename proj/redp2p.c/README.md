@@ -96,31 +96,35 @@ anything else.
 
 ### Using the C library
 
-The C library provides the same operations as the CLI:
+The C library exposes peer channels directly. It does not expose application
+service ports or perform local port forwarding.
 
-- start an index;
-- publish a service;
-- connect to a published service;
-- send and receive data directly when a local port is not wanted;
-- close the index, publisher, or connection when finished.
+A publisher registers an ID and is notified when a peer channel is established.
+Incoming bytes are delivered to its receive callback together with the client
+that sent them. The publisher can send bytes back with
+`kc_redp2p_client_respond()`.
 
-For normal port-based use, the application gives REDP2P a local service port on
-the publishing side and a local listening port on the consuming side.
+A consumer connects by publisher ID. A successful `kc_redp2p_con()` returns an
+established peer channel; the application can immediately send with
+`kc_redp2p_con_send()`, and incoming bytes are delivered to its receive
+callback.
 
-Applications that already manage their own I/O can skip those local ports and
-send or receive through callbacks instead.
+What those bytes mean is an application decision. An application can process
+them directly, store them, feed another protocol, or bridge them to a local
+socket. The `redp2p` CLI implements that last option itself, which is why its
+`pub` and `con` commands still accept local ports.
 
 The exact C declarations, option fields, return codes, and callback types are
 documented in `src/libredp2p.h`.
 
 ### TCP and UDP
 
-The publisher decides whether a service uses TCP or UDP.
+The native publisher selects TCP or UDP when it registers. The consumer selects
+only the publisher ID and learns the transport from the index.
 
-The consumer does not have to specify the protocol again. It connects by
-publisher ID and uses whatever protocol that publisher announced.
-
-TCP behaves as a stream. UDP keeps datagram boundaries.
+The public data model is the same for both transports: established peer
+channels, send, receive, and publisher responses. TCP behaves as a stream. UDP
+keeps datagram boundaries.
 
 ### Browser use
 
