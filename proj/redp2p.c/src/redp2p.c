@@ -1149,7 +1149,7 @@ static int redp2p_cli_con(int argc, char **argv)
     char index[320];
     uint16_t port;
     const char *stun = getenv("REDP2P_STUN");
-    int protocol;
+    int protocol = 0;
     int status;
     int result;
 
