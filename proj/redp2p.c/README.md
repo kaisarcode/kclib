@@ -1,13 +1,14 @@
 # redp2p.c - Peer-to-Peer Connectivity
 
-`redp2p.c` provides peer-to-peer connectivity through three roles: an index, a
-publisher, and a consumer.
+`redp2p.c` is a library designed to provide peer-to-peer connectivity.
 
-The publisher registers an identifier in an index and exposes a service or data
-endpoint under that identifier. The consumer resolves that identifier through
-the same index and requests a connection. The index coordinates discovery and
-connection establishment; once the peers are connected, application traffic
-flows directly between publisher and consumer.
+It's based on three roles: an index, a publisher, and a consumer.
+
+- The publisher registers an identifier in an index and exposes a service or data
+endpoint under that identifier.
+- The consumer resolves that identifier through the same index and requests a connection.
+- The index coordinates discovery and connection establishment; once the
+peers are connected, application traffic flows directly between publisher and consumer.
 
 ```text
            index
