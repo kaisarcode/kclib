@@ -1,54 +1,92 @@
-# redp2p.c - Peer-to-Peer Transport
+# redp2p.c - Peer-to-Peer Connectivity
 
-`redp2p.c` creates direct peer-to-peer tunnels for TCP and UDP services.
+`redp2p.c` connects two peers directly.
 
-One machine publishes a local service under an ID, another machine connects to
-that ID and gets a local port that reaches the published service. An index helps
-the two peers find each other and establish the connection; application traffic
-then travels directly between the peers.
+The idea is simple: one peer publishes something under a name, another peer asks
+for that name, and an index helps them find each other. Once the connection is
+established, the index is no longer in the data path.
+
+REDP2P is built around three roles:
+
+```text
+           index
+          /     \
+   publisher   consumer
+          \     /
+       direct link
+```
+
+The **publisher** says: “I am `chat`, `device01`, `game`, etc.”
+
+The **consumer** says: “Connect me to `chat`.”
+
+The **index** knows which publishers are available and coordinates the meeting.
+It does not proxy the application traffic between them.
+
+That same model is used in two environments:
+
+- native programs, where REDP2P connects TCP or UDP services;
+- browsers, where REDP2P connects peers with WebRTC data channels.
+
+The project includes both a native C index and a PHP index. Both speak the same
+REDP2P index protocol and both can coordinate WebRTC signaling.
 
 ---
 
-## CLI
+## Native CLI
 
-REDP2P has three commands:
+The native command follows the three REDP2P roles:
 
-- `idx` runs an index used by peers to find each other.
-- `pub` publishes a local TCP or UDP service.
-- `con` connects to a published service and exposes it on localhost.
+```text
+redp2p idx ...
+redp2p pub ...
+redp2p con ...
+```
 
 ### Example
 
-Suppose a TCP service is already running on port `8080` of the machine that
-will publish it.
+Suppose machine A has a TCP service running on port `8080`.
 
-Run an index on a reachable machine:
+First run an index somewhere reachable by both peers:
 
 ```bash
 redp2p idx 9876
 ```
 
-Publish the service as `web`:
+On machine A, publish the local service under the name `web`:
 
 ```bash
 redp2p pub web@index.example.com:9876 --tcp 8080
 ```
 
-On another machine, connect to `web` and expose it locally on port `9000`:
+On machine B, connect to `web` and make it available locally on port `9000`:
 
 ```bash
 redp2p con web@index.example.com:9876 9000
 ```
 
-The remote service is now available through:
+Machine B can now use:
 
 ```text
 127.0.0.1:9000
 ```
 
-The same flow works for UDP by publishing with `--udp`.
+as if the service were local.
 
-The index address may omit the port; the default is `9876`.
+The index helped the two peers establish the connection, but the service traffic
+travels directly between them.
+
+The same works for UDP:
+
+```bash
+redp2p pub dns@index.example.com:9876 --udp 5353
+redp2p con dns@index.example.com:9876 9001
+```
+
+The consumer does not need to specify TCP or UDP. It learns that from the
+publisher registration.
+
+If the index port is omitted, REDP2P uses port `9876`.
 
 ### Index
 
@@ -58,39 +96,32 @@ Start an index:
 redp2p idx 9876
 ```
 
-Limit the number of publishers:
+An index can serve native peers and can also handle the WebRTC signaling used by
+browser peers.
 
-```bash
-redp2p idx 9876 --seats 100
-```
-
-Require proof of work when publishers register:
-
-```bash
-redp2p idx 9876 --pow 16
-```
-
-Limit simultaneous consumers per publisher:
-
-```bash
-redp2p idx 9876 --max-consumers 20
-```
-
-List the publishers currently announced on a local index:
+List the publishers currently known by a local index:
 
 ```bash
 redp2p idx 9876 --list
 ```
 
+Optional limits can be applied when running an index:
+
+```bash
+redp2p idx 9876 --seats 100
+redp2p idx 9876 --pow 16
+redp2p idx 9876 --max-consumers 20
+```
+
 ### Publish
 
-Publish a local TCP service:
+Publish a TCP service:
 
 ```bash
 redp2p pub myservice@index.example.com --tcp 8080
 ```
 
-Publish a local UDP service:
+Publish a UDP service:
 
 ```bash
 redp2p pub myservice@index.example.com --udp 5353
@@ -98,55 +129,232 @@ redp2p pub myservice@index.example.com --udp 5353
 
 ### Connect
 
-Connect to a publisher and expose the tunnel on a local port:
+Connect to a published service:
 
 ```bash
 redp2p con myservice@index.example.com 9000
 ```
 
-The protocol does not need to be specified by the consumer. It is learned from
-the publisher registration.
+The service becomes available on `127.0.0.1:9000`.
 
 ### Parameters
 
 | Command / option | Description |
 | :--- | :--- |
-| `idx <port>` | Run an index on the given port |
-| `idx <port> --list` | List publishers announced on the local index |
-| `--seats <N>` | Maximum number of publishers; unset means unlimited |
+| `idx <port>` | Run an index |
+| `idx <port> --list` | List publishers known by the local index |
+| `--seats <N>` | Maximum number of registered publishers |
 | `--pow <N>` | Registration proof-of-work bits, from 0 to 32 |
-| `--max-consumers <N>` | Maximum simultaneous consumers per publisher |
+| `--max-consumers <N>` | Maximum pending consumers per publisher |
 | `pub <id>@<index[:port]> --tcp <port>` | Publish a local TCP service |
 | `pub <id>@<index[:port]> --udp <port>` | Publish a local UDP service |
 | `con <id>@<index[:port]> <local-port>` | Connect to a publisher |
-| `--stun <url>` | Use a STUN server for peer discovery |
-| `-h`, `--help` | Show help and usage |
+| `--stun <url>` | STUN server used by native peers |
+| `-h`, `--help` | Show help |
 | `-v`, `--version` | Show version |
 
 ### Environment
 
 | Variable | Description |
 | :--- | :--- |
-| `REDP2P_SEATS` | Default publisher capacity for `idx` |
+| `REDP2P_SEATS` | Default publisher capacity for the index |
 | `REDP2P_POW` | Default registration proof-of-work bits |
-| `REDP2P_PASS` | Registration password used by the index and publisher |
+| `REDP2P_PASS` | Registration password |
 | `REDP2P_VIP` | Reserved IDs as `<id> <pass> ...` pairs |
-| `REDP2P_MAX_CONSUMERS_PER_PUBLISHER` | Default consumer limit per publisher |
-| `REDP2P_STUN` | Default STUN URL for `pub` and `con` |
+| `REDP2P_MAX_CONSUMERS_PER_PUBLISHER` | Default pending-consumer limit |
+| `REDP2P_STUN` | Default STUN URL for native peers |
 
-Command-line options override the corresponding environment values.
+CLI values override environment defaults.
 
 `idx`, `pub`, and `con` keep running until interrupted with SIGINT or
 SIGTERM.
 
 ---
 
-## Public API
+## Browser / WebRTC
 
-The library exposes the same three main capabilities as the CLI: start an index,
-publish a service, and connect to a publisher.
+The browser version keeps exactly the same idea:
 
-Publish an existing local TCP service:
+```text
+browser publisher
+       |
+       | registers "chat"
+       v
+     index
+       ^
+       | asks for "chat"
+       |
+browser consumer
+
+publisher <========== WebRTC ==========> consumer
+```
+
+The browser peers use the index only for discovery and WebRTC signaling. Once
+the WebRTC data channel is open, application data goes directly between the
+browsers.
+
+The browser implementation is under:
+
+```text
+imp/redp2p-pub.js
+imp/redp2p-con.js
+```
+
+### Publish from a browser
+
+```html
+<script src="redp2p-pub.js"></script>
+```
+
+```js
+const pub = await RedP2P.pub({
+    id: "chat",
+    index: "https://example.com/index",
+
+    receive(input) {
+        console.log(input.data);
+        input.client.respond("hello back");
+    }
+});
+```
+
+The publisher registers `chat` in the index and waits for consumers.
+
+When a consumer sends data, `receive()` gets both the data and the connected
+client. The publisher can answer that client with:
+
+```js
+input.client.respond(data);
+```
+
+Stop publishing with:
+
+```js
+await pub.close();
+```
+
+### Connect from a browser
+
+Load the browser files:
+
+```html
+<script src="redp2p-pub.js"></script>
+<script src="redp2p-con.js"></script>
+```
+
+Then connect to the published ID:
+
+```js
+const con = await RedP2P.con({
+    id: "chat",
+    index: "https://example.com/index",
+
+    receive(data) {
+        console.log(data);
+    }
+});
+
+con.send("hello");
+```
+
+Close the connection with:
+
+```js
+con.close();
+```
+
+Both publisher and consumer may receive WebRTC ICE server configuration through
+`iceServers`:
+
+```js
+iceServers: [
+    {urls: "stun:stun.example.com:3478"}
+]
+```
+
+For remote browser use, the index URL must use HTTPS. Plain HTTP is accepted for
+localhost development.
+
+---
+
+## The index
+
+The index is the meeting point.
+
+It keeps track of published IDs and coordinates connection attempts. For native
+peers it exchanges the information needed to establish the peer-to-peer path.
+For browser peers it also carries the WebRTC offer/answer signaling.
+
+It does **not** relay the application data after the peers connect.
+
+There are two index implementations in this project.
+
+### Native C index
+
+The CLI starts it with:
+
+```bash
+redp2p idx 9876
+```
+
+The same index handles native TCP/UDP coordination and browser WebRTC signaling.
+
+### PHP index
+
+`imp/redp2p-idx.php` implements the same REDP2P index protocol over HTTP/JSON.
+
+A minimal SQLite endpoint looks like this:
+
+```php
+<?php
+require 'redp2p-idx.php';
+
+\KaisarCode\Redp2pIndex::serve([
+    'dsn' => 'sqlite:/var/lib/redp2p/index.sqlite',
+]);
+```
+
+The PHP implementation uses PDO and supports SQLite or MySQL.
+
+It requires:
+
+- PHP;
+- PDO;
+- Sodium;
+- the PDO driver for the selected database.
+
+The same index limits and registration settings are available through
+`REDP2P_SEATS`, `REDP2P_POW`, `REDP2P_PASS`, `REDP2P_VIP`, and
+`REDP2P_MAX_CONSUMERS_PER_PUBLISHER`.
+
+---
+
+## Public C API
+
+The library exposes the same three concepts directly:
+
+```c
+kc_redp2p_idx(...)
+kc_redp2p_pub(...)
+kc_redp2p_con(...)
+```
+
+### Start an index
+
+```c
+#include "libredp2p.h"
+
+kc_redp2p_idx_options_t options = {0};
+kc_redp2p_idx_t *idx = NULL;
+
+options.port = 9876;
+
+if (kc_redp2p_idx(&idx, &options) == KC_REDP2P_OK) {
+    kc_redp2p_idx_close(idx);
+}
+```
+
+### Publish a local service
 
 ```c
 #include "libredp2p.h"
@@ -160,12 +368,13 @@ options.protocol = KC_REDP2P_TCP;
 options.port = 8080;
 
 if (kc_redp2p_pub(&pub, &options) == KC_REDP2P_OK) {
-    /* "web" is available while pub remains open. */
     kc_redp2p_pub_close(pub);
 }
 ```
 
-Connect to that publisher and expose it on local port `9000`:
+Use `KC_REDP2P_UDP` to publish UDP instead.
+
+### Connect to a publisher
 
 ```c
 #include "libredp2p.h"
@@ -178,67 +387,73 @@ options.index = "index.example.com:9876";
 options.port = 9000;
 
 if (kc_redp2p_con(&con, &options) == KC_REDP2P_OK) {
-    /* The service is available on 127.0.0.1:9000. */
+    /* The published service is available on 127.0.0.1:9000. */
     kc_redp2p_con_close(con);
 }
 ```
 
-The main public functions are:
+The C API can also exchange application data directly without exposing a local
+TCP or UDP port. In that form, consumers send with `kc_redp2p_con_send()` and
+publishers receive clients through their callback and answer with
+`kc_redp2p_client_respond()`.
 
-```c
-int kc_redp2p_idx(kc_redp2p_idx_t **out,
-    const kc_redp2p_idx_options_t *options);
-int kc_redp2p_pub(kc_redp2p_pub_t **out,
-    const kc_redp2p_pub_options_t *options);
-int kc_redp2p_con(kc_redp2p_con_t **out,
-    const kc_redp2p_con_options_t *options);
+The public header is `src/libredp2p.h`.
 
-int kc_redp2p_idx_list(kc_redp2p_idx_t *idx,
-    kc_redp2p_idx_entry_t **out_entries, size_t *out_count);
+---
 
-void kc_redp2p_idx_close(kc_redp2p_idx_t *idx);
-void kc_redp2p_pub_close(kc_redp2p_pub_t *pub);
-void kc_redp2p_con_close(kc_redp2p_con_t *con);
+## Protocol
 
-const char *kc_redp2p_strerror(int status);
-uint64_t kc_redp2p_version(void);
+The common REDP2P index protocol is documented in:
+
+```text
+doc/protocol.md
 ```
 
-The public API also supports direct application data without opening a local
-service port through `kc_redp2p_con_send()`, publisher receive callbacks, and
-`kc_redp2p_client_respond()`.
+The native C index, the PHP index, and the browser implementations use that same
+contract.
+
+Applications normally do not need to implement the protocol themselves.
 
 ---
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
+Build the native library and CLI:
 
 ```bash
 make
 ```
 
+Artifacts are generated under `bin/{arch}/{platform}/`.
+
 ### Tests
 
-Build project artifacts first, then run the test suite:
+Build first, then run the native tests:
 
 ```bash
 make
 make test
 ```
 
-To run the Windows build through Wine:
+Run the Windows build through Wine:
 
 ```bash
 make x86_64/windows
 make test wine
 ```
 
+The browser/PHP integration test is:
+
+```bash
+./tests/test.sh
+```
+
+It starts a local PHP index and prints the browser test URL to open.
+
 ### Multiarch Builds
 
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
+A plain `make` builds the current host target. `make all` builds all
+configured targets.
 
 ```bash
 make all
@@ -274,28 +489,26 @@ make loongarch64/linux
 - `make` (GNU Make)
 - `cmake` >= 3.14
 - `ninja`
-- `gcc` or `clang` (C11 compatible)
+- `gcc` or `clang` with C11 support
 
-The protocol dependencies used by the library are included in the project
-source tree.
+Protocol dependencies used by the C implementation are included in the project.
 
 ### Optional Cross-Compilation SDKs
 
-Required only for the corresponding targets:
+Required only for their respective targets:
 
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- `osxcross` with Apple SDKs for macOS and iOS.
-- Android NDK for Android targets.
+- MinGW for Windows;
+- `wine` for Windows tests on Linux;
+- `osxcross` with Apple SDKs for macOS and iOS;
+- Android NDK for Android.
 
 ---
 
 ## Beta Notice
 
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
+This is a beta project tested primarily on Debian x86_64. It was created out of
+a personal need for these libraries, but no guarantees are provided regarding
+its stability or future support. You are free to test it, use it, and modify it.
 
 If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
 Please note that I do not accept pull requests; the goal is to avoid long-term
