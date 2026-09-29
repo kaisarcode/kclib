@@ -607,10 +607,12 @@ REDP2P_CLI_THREAD(redp2p_cli_con_tcp_worker)
         kc_redp2p_con_close(session->con);
         session->con = NULL;
     }
+    redp2p_cli_mutex_lock(&session->owner->mutex);
     if (!REDP2P_ISERR(session->fd)) {
         REDP2P_FD_CLOSE(session->fd);
         session->fd = REDP2P_FD_INVALID;
     }
+    redp2p_cli_mutex_unlock(&session->owner->mutex);
     REDP2P_CLI_THREAD_RETURN();
 }
 
