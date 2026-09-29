@@ -1,6 +1,6 @@
 /**
  * test.c - libinit public API contract tests.
- * Summary: Tests persistent startup registration and the grouped CLI contract.
+ * Summary: Tests persistent startup registration.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -25,10 +25,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-#endif
-
-#ifndef INIT_TEST_CLI
-#define INIT_TEST_CLI ""
 #endif
 
 static int test_case_total;
@@ -464,136 +460,6 @@ static int case_kc_init_version(void) {
 }
 
 /**
- * Test the grouped CLI contract.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_init_cli(void) {
-    const char *name = "kc_init_cli";
-    const char *detail = "covers help, version, errors, and local listing";
-    char dir[1024] = {0};
-    char command[4096];
-    int fail;
-    int rc;
-
-    fail = 0;
-    if (INIT_TEST_CLI[0] == '\0') {
-        case_result(1, name, detail);
-        return 1;
-    }
-
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "\"%s\" --help > NUL 2>&1", INIT_TEST_CLI);
-#else
-    snprintf(command, sizeof(command), "\"%s\" --help > /dev/null 2>&1", INIT_TEST_CLI);
-#endif
-    fail += expect_true("help succeeds", system(command) == 0);
-
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "\"%s\" --version > NUL 2>&1", INIT_TEST_CLI);
-#else
-    snprintf(command, sizeof(command), "\"%s\" --version > /dev/null 2>&1", INIT_TEST_CLI);
-#endif
-    fail += expect_true("version succeeds", system(command) == 0);
-
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "\"%s\" --unknown > NUL 2>&1", INIT_TEST_CLI);
-#else
-    snprintf(command, sizeof(command), "\"%s\" --unknown > /dev/null 2>&1", INIT_TEST_CLI);
-#endif
-    fail += expect_true("unknown option fails", system(command) != 0);
-
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "\"%s\" --dir x > NUL 2>&1", INIT_TEST_CLI);
-#else
-    snprintf(
-        command,
-        sizeof(command),
-        "\"%s\" --dir x > /dev/null 2>&1",
-        INIT_TEST_CLI
-    );
-#endif
-    fail += expect_true("removed --dir fails", system(command) != 0);
-
-    fail += fixture_create(dir, sizeof(dir));
-    if (!fail) {
-#ifdef _WIN32
-        {
-            HANDLE null_handle;
-            STARTUPINFOA startup;
-            PROCESS_INFORMATION process;
-            char command_line[4096];
-            DWORD exit_code;
-
-            null_handle = CreateFileA(
-                "NUL",
-                GENERIC_WRITE,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                NULL,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                NULL
-            );
-            memset(&startup, 0, sizeof(startup));
-            memset(&process, 0, sizeof(process));
-            startup.cb = sizeof(startup);
-            startup.dwFlags = STARTF_USESTDHANDLES;
-            startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-            startup.hStdOutput = null_handle;
-            startup.hStdError = null_handle;
-
-            if (null_handle == INVALID_HANDLE_VALUE ||
-                    (size_t)snprintf(
-                        command_line,
-                        sizeof(command_line),
-                        "\"%s\" --list",
-                        INIT_TEST_CLI
-                    ) >= sizeof(command_line) ||
-                    !CreateProcessA(
-                        NULL,
-                        command_line,
-                        NULL,
-                        NULL,
-                        TRUE,
-                        0,
-                        NULL,
-                        NULL,
-                        &startup,
-                        &process
-                    )) {
-                rc = -1;
-            } else {
-                WaitForSingleObject(process.hProcess, INFINITE);
-                if (!GetExitCodeProcess(process.hProcess, &exit_code)) {
-                    rc = -1;
-                } else {
-                    rc = (int)exit_code;
-                }
-                CloseHandle(process.hThread);
-                CloseHandle(process.hProcess);
-            }
-
-            if (null_handle != INVALID_HANDLE_VALUE) {
-                CloseHandle(null_handle);
-            }
-        }
-#else
-        snprintf(
-            command,
-            sizeof(command),
-            "\"%s\" --list > /dev/null 2>&1",
-            INIT_TEST_CLI
-        );
-        rc = system(command);
-#endif
-        fail += expect_true("local list succeeds", rc == 0);
-    }
-
-    fixture_remove(dir);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
  * Run all contract cases.
  * @return Failure count.
  */
@@ -601,7 +467,7 @@ static int case_all(void) {
     int rc;
 
     rc = 0;
-    test_case_total = 7;
+    test_case_total = 6;
     test_case_current = 0;
     run_case(&rc, case_kc_init_create);
     run_case(&rc, case_kc_init_get);
@@ -609,7 +475,6 @@ static int case_all(void) {
     run_case(&rc, case_kc_init_delete);
     run_case(&rc, case_kc_init_free);
     run_case(&rc, case_kc_init_version);
-    run_case(&rc, case_kc_init_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -629,6 +494,5 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_init_delete") == 0) return case_kc_init_delete();
     if (strcmp(argv[1], "kc_init_free") == 0) return case_kc_init_free();
     if (strcmp(argv[1], "kc_init_version") == 0) return case_kc_init_version();
-    if (strcmp(argv[1], "kc_init_cli") == 0) return case_kc_init_cli();
     return 2;
 }

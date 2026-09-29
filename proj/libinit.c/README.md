@@ -1,31 +1,8 @@
-# init.c - Persistent Startup Registration
+# libinit.c - Persistent Startup Registration
 
 Persistent operating-system startup registration.
 
-`init.c` registers named commands so the operating system starts them during boot or user startup.
-
----
-
-## CLI
-
-```text
-Usage: init <name> [command...]
-
-Commands:
-  init <name> <cmd>    Register or replace a startup entry
-  init -l [name]       List registrations
-  init <name> -l       List one registration
-  init -d <name>       Remove a registration
-  init <name> -d       Remove a registration
-
-Options:
-  -l, --list           List registrations
-  -d, --delete         Remove a registration
-  -h, --help           Show this help
-  -v, --version        Show version
-```
-
-Registering or replacing an entry updates only the startup registration. init.c does not execute the registered command immediately.
+`libinit.c` registers named commands so the operating system starts them during boot or user startup.
 
 ---
 
@@ -99,8 +76,8 @@ On macOS, init.c stores metadata under:
 $HOME/Library/Application Support/kaisarcode/init.c
 ```
 
-Normal API and CLI callers do not select a storage directory. The user
-namespace is resolved automatically from the platform convention.
+Callers do not select a storage directory. The user namespace is resolved
+automatically from the platform convention.
 
 ### Platform Scope
 

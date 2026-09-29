@@ -95,12 +95,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libinit.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libinit.dll
 NATIVE_IMPORT_LIBRARY := -DINIT_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libinit.dll.a
 endif
@@ -254,7 +252,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libinit.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libinit.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/init.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libinit.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libinit.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -265,18 +263,16 @@ test:
 			-DINIT_BUILD_TESTS=ON \
 			-DINIT_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libinit.dll \
 			-DINIT_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libinit.dll.a \
-			-DINIT_TEST_CLI=init.exe \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target init_contract_test || exit 1; \
-		cp $(CURDIR)/$(BIN_DIR)/x86_64/windows/init.exe $(BUILD_DIR)/test-wine/init.exe; \
 		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) init_contract_test.exe all; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/init$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -284,7 +280,6 @@ test:
 			-DCMAKE_BUILD_TYPE=Release \
 			-DINIT_BUILD_TESTS=ON \
 			-DINIT_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-			-DINIT_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/init$(NATIVE_EXE_EXT) \
 			$(NATIVE_IMPORT_LIBRARY) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target init_contract_test || exit 1; \

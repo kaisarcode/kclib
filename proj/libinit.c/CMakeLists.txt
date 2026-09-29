@@ -14,8 +14,6 @@ endif()
 
 option(INIT_NATIVE "Enable native hardware optimizations" OFF)
 option(INIT_BUILD_TESTS "Build init tests" OFF)
-set(INIT_TEST_CLI "" CACHE STRING "Path to the init CLI used by contract tests")
-
 set(INIT_TEST_EXTERNAL_ARTIFACTS OFF)
 if(INIT_BUILD_TESTS AND INIT_TEST_SHARED_LIBRARY)
     set(INIT_TEST_EXTERNAL_ARTIFACTS ON)
@@ -38,13 +36,6 @@ set_source_files_properties(src/libinit.c PROPERTIES
 )
 
 if(NOT INIT_TEST_EXTERNAL_ARTIFACTS)
-    add_executable(init
-        src/init.c
-        src/libinit.c
-    )
-
-    target_include_directories(init PRIVATE src)
-
     add_library(init_static STATIC src/libinit.c)
     set_target_properties(init_static PROPERTIES OUTPUT_NAME "init")
     target_include_directories(init_static PRIVATE src)
@@ -55,7 +46,6 @@ if(NOT INIT_TEST_EXTERNAL_ARTIFACTS)
     target_include_directories(init_shared PRIVATE src)
 
     if(WIN32)
-        target_link_libraries(init PRIVATE advapi32)
         target_link_libraries(init_static PRIVATE advapi32)
         target_link_libraries(init_shared PRIVATE advapi32)
     endif()
@@ -85,12 +75,6 @@ if(INIT_BUILD_TESTS)
     add_executable(init_contract_test src/test.c)
     target_include_directories(init_contract_test PRIVATE src)
     target_link_libraries(init_contract_test PRIVATE ${INIT_TEST_SHARED_TARGET})
-
-    if(INIT_TEST_CLI)
-        target_compile_definitions(init_contract_test PRIVATE INIT_TEST_CLI="${INIT_TEST_CLI}")
-    elseif(TARGET init)
-        target_compile_definitions(init_contract_test PRIVATE INIT_TEST_CLI="$<TARGET_FILE:init>")
-    endif()
 
     if(WIN32)
         target_link_libraries(init_contract_test PRIVATE advapi32)
