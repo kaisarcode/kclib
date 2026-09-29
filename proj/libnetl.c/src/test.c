@@ -105,6 +105,30 @@ static int expect_bytes(
 }
 
 /**
+ * Result.
+ * @return None.
+ */
+static void case_result(int fail, const char *name, const char *description) {
+    test_case_current++;
+    printf(
+        "[%d/%d] %s: %s - %s\n",
+        test_case_current,
+        test_case_total,
+        fail == 0 ? "PASS" : "FAIL",
+        name,
+        description
+    );
+}
+
+/**
+ * Run case.
+ * @return None.
+ */
+static void run_case(int *total_fail, int (*fn)(void)) {
+    if (fn() != 0) (*total_fail)++;
+}
+
+/**
  * Sleep ms.
  * @return None.
  */
