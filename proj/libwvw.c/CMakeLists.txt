@@ -35,11 +35,6 @@ if(NOT WVW_TEST_EXTERNAL_ARTIFACTS)
             COMPILE_DEFINITIONS KC_WVW_BUILD_VERSION=${WVW_BUILD_VERSION}
         )
 
-        add_executable(wvw src/wvw.c ${WVW_SOURCES})
-        target_include_directories(wvw PRIVATE src lib/parson)
-        target_include_directories(wvw SYSTEM PRIVATE ${WVW_WEBVIEW2_INCLUDE_DIR})
-        target_link_libraries(wvw ole32 uuid user32 gdi32 shell32)
-
         add_library(wvw_static STATIC ${WVW_SOURCES})
         set_target_properties(wvw_static PROPERTIES OUTPUT_NAME "wvw")
         target_include_directories(wvw_static PRIVATE src lib/parson)
@@ -64,10 +59,6 @@ if(NOT WVW_TEST_EXTERNAL_ARTIFACTS)
             set_source_files_properties(src/libwvw.c PROPERTIES
                 COMPILE_OPTIONS "-x;objective-c"
             )
-            add_executable(wvw src/wvw.c ${WVW_SOURCES})
-            target_include_directories(wvw PRIVATE src lib/parson)
-            target_link_libraries(wvw "-framework WebKit" "-framework Cocoa" "-framework Foundation" pthread m)
-
             add_library(wvw_static STATIC ${WVW_SOURCES})
             set_target_properties(wvw_static PROPERTIES OUTPUT_NAME "wvw")
             target_include_directories(wvw_static PRIVATE src lib/parson)
@@ -82,12 +73,6 @@ if(NOT WVW_TEST_EXTERNAL_ARTIFACTS)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
         pkg_check_modules(WEBKIT REQUIRED webkit2gtk-4.1)
-
-        add_executable(wvw src/wvw.c ${WVW_SOURCES})
-        target_include_directories(wvw PRIVATE src lib/parson ${GTK3_INCLUDE_DIRS} ${WEBKIT_INCLUDE_DIRS})
-        target_compile_options(wvw PRIVATE ${GTK3_CFLAGS_OTHER} ${WEBKIT_CFLAGS_OTHER})
-        target_link_directories(wvw PRIVATE ${GTK3_LIBRARY_DIRS} ${WEBKIT_LIBRARY_DIRS})
-        target_link_libraries(wvw ${GTK3_LIBRARIES} ${WEBKIT_LIBRARIES} pthread m dl)
 
         add_library(wvw_static STATIC ${WVW_SOURCES})
         set_target_properties(wvw_static PROPERTIES OUTPUT_NAME "wvw")
@@ -129,10 +114,6 @@ if(WVW_BUILD_TESTS)
     add_executable(wvw_contract_test src/test.c)
     target_include_directories(wvw_contract_test PRIVATE src lib/parson)
     target_link_libraries(wvw_contract_test PRIVATE ${WVW_TEST_SHARED_TARGET})
-    if(WVW_TEST_CLI)
-        target_compile_definitions(wvw_contract_test PRIVATE WVW_TEST_CLI="${WVW_TEST_CLI}")
-    endif()
-
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(GTK3_TEST gtk+-3.0)
