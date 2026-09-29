@@ -18,9 +18,13 @@ application data travels directly between peers.
 Publisher implementations currently provide:
 
 ```text
-native C   TCP / UDP
-browser JS RTC
+native C       TCP / UDP
+JavaScript     WebRTC
 ```
+
+The protocol does not require a particular implementation language for the
+index. Any index implementation is valid if it preserves the wire contract and
+transport-independent behavior defined in this document.
 
 Consumer implementations select a publisher by `id`. They do not select the
 transport. The publisher record determines the connection path.
@@ -109,8 +113,8 @@ RTC publishers identify the registration with:
 }
 ```
 
-RTC uses the browser-compatible registration proof and sends the initial
-control secret only over the HTTPS-protected index request.
+RTC uses the JavaScript/WebRTC-compatible registration proof and sends the
+initial control secret only over the HTTPS-protected index request.
 
 Both registration forms apply the same PoW, admission, VIP, seat, active-ID,
 TTL, and control-session policies.
@@ -192,7 +196,7 @@ native session establishment
 
 ### RTC
 
-RTC implementations retain the browser signaling flow:
+RTC implementations retain the WebRTC signaling flow:
 
 ```text
 connect
@@ -233,7 +237,7 @@ STUN is optional connection infrastructure, not index semantics.
 
 Native implementations use it for native candidate discovery.
 
-Browser implementations map it to WebRTC ICE-server configuration.
+JavaScript/WebRTC implementations map it to WebRTC ICE-server configuration.
 
 The public REDP2P capability does not expose ICE or SDP as application concepts.
 
@@ -242,8 +246,8 @@ The public REDP2P capability does not expose ICE or SDP as application concepts.
 Native TCP/UDP protocol operations remain accepted while the unified protocol is
 introduced.
 
-Browser requests may continue to include `version: 0`; indexes ignore unknown
-fields unless a field is explicitly required by an operation.
+JavaScript/WebRTC requests may continue to include `version: 0`; indexes
+ignore unknown fields unless a field is explicitly required by an operation.
 
 ## Unsupported cross-family connections
 
