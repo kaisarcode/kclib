@@ -1,37 +1,10 @@
-# netl.c - Incoming Network Listener
+# libnetl.c - Incoming Network Listener
 
-`netl.c` is a small C library and CLI for listening for inbound TCP or UDP
-traffic.
+`libnetl.c` is a small C library for listening for inbound TCP or UDP traffic.
 
 The library receives incoming bytes together with the remote peer that sent
 them. The application may process the input directly or pass it to another
 protocol library, and may optionally respond to the same peer.
-
----
-
-## CLI
-
-Start a TCP listener and dispatch each accepted connection to a command:
-
-```bash
-netl 0.0.0.0:8080 'my-command'
-```
-
-Select UDP explicitly:
-
-```bash
-netl 0.0.0.0:9000 --udp 'my-command'
-```
-
-TCP launches one command per accepted connection. The connection is attached to
-the command's standard input and standard output. Independent connections use
-independent command processes.
-
-UDP launches one command per datagram and writes exactly that datagram to the
-command's standard input. UDP command output is not sent automatically to the
-peer.
-
-Common options are `-h` / `--help` and `-v` / `--version`.
 
 ---
 
@@ -105,7 +78,7 @@ ephemeral port selected by the operating system.
 
 ### Protocol composition
 
-`netl.c` does not interpret application protocols. For example, TCP bytes can
+`libnetl.c` does not interpret application protocols. For example, TCP bytes can
 be passed incrementally to an HTTP parser while keeping one parser per peer:
 
 ```text

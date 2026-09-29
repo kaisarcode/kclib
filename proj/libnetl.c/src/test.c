@@ -25,14 +25,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <process.h>
-#include <fcntl.h>
-#include <io.h>
-#include <sys/stat.h>
 #define TEST_FD SOCKET
 #define TEST_FD_INVALID INVALID_SOCKET
 #define TEST_CLOSE(fd) closesocket(fd)
-#define TEST_GETPID() _getpid()
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -44,16 +39,8 @@
 #define TEST_FD int
 #define TEST_FD_INVALID (-1)
 #define TEST_CLOSE(fd) close(fd)
-#define TEST_GETPID() getpid()
 #endif
 
-#ifdef _WIN32
-#define TEST_CLI_NAME "netl.exe"
-#else
-#define TEST_CLI_NAME "netl"
-#endif
-
-static const char *test_program_path = NULL;
 static int test_case_total = 0;
 static int test_case_current = 0;
 
@@ -115,53 +102,6 @@ static int expect_bytes(
     }
     fprintf(stderr, "FAIL: %s\n", label);
     return 1;
-}
-
-/**
- * Expect contains.
- * @return Function result.
- */
-static int expect_contains(
-    const char *label,
-    const unsigned char *data,
-    size_t size,
-    const char *needle
-) {
-    size_t needle_size = strlen(needle);
-    size_t i;
-
-    if (needle_size == 0U) return 0;
-    if (needle_size <= size) {
-        for (i = 0U; i + needle_size <= size; i++) {
-            if (memcmp(data + i, needle, needle_size) == 0) return 0;
-        }
-    }
-    fprintf(stderr, "FAIL: %s\n", label);
-    return 1;
-}
-
-/**
- * Result.
- * @return None.
- */
-static void case_result(int fail, const char *name, const char *description) {
-    test_case_current++;
-    printf(
-        "[%d/%d] %s: %s - %s\n",
-        test_case_current,
-        test_case_total,
-        fail == 0 ? "PASS" : "FAIL",
-        name,
-        description
-    );
-}
-
-/**
- * Run case.
- * @return None.
- */
-static void run_case(int *total_fail, int (*fn)(void)) {
-    if (fn() != 0) (*total_fail)++;
 }
 
 /**
@@ -668,274 +608,18 @@ static int case_kc_netl_status(void) {
 }
 
 /**
- * Cli path.
- * @return Function result.
- */
-static int test_cli_path(char *out, size_t cap) {
-    const char *slash;
-    const char *backslash;
-    const char *separator;
-    size_t dir_size;
-    int written;
-
-    if (test_program_path == NULL) return 1;
-    slash = strrchr(test_program_path, '/');
-    backslash = strrchr(test_program_path, '\\');
-    separator = slash;
-    if (
-        backslash != NULL &&
-        (separator == NULL || backslash > separator)
-    ) {
-        separator = backslash;
-    }
-
-    if (separator == NULL) {
-#ifdef _WIN32
-        written = snprintf(out, cap, ".\\%s", TEST_CLI_NAME);
-#else
-        written = snprintf(out, cap, "./%s", TEST_CLI_NAME);
-#endif
-        return written > 0 && (size_t)written < cap ? 0 : 1;
-    }
-
-    dir_size = (size_t)(separator - test_program_path + 1);
-    if (dir_size + strlen(TEST_CLI_NAME) + 1U > cap) return 1;
-    memcpy(out, test_program_path, dir_size);
-    memcpy(out + dir_size, TEST_CLI_NAME, strlen(TEST_CLI_NAME) + 1U);
-    return 0;
-}
-
-/**
- * Read file.
- * @return Function result.
- */
-static int test_read_file(
-    const char *path,
-    unsigned char **out,
-    size_t *out_size
-) {
-    FILE *file;
-    long end;
-    unsigned char *data;
-    size_t size;
-
-    *out = NULL;
-    *out_size = 0U;
-    file = fopen(path, "rb");
-    if (file == NULL) return 1;
-    if (fseek(file, 0, SEEK_END) != 0) {
-        fclose(file);
-        return 1;
-    }
-    end = ftell(file);
-    if (end < 0 || fseek(file, 0, SEEK_SET) != 0) {
-        fclose(file);
-        return 1;
-    }
-
-    size = (size_t)end;
-    data = (unsigned char *)malloc(size != 0U ? size : 1U);
-    if (data == NULL) {
-        fclose(file);
-        return 1;
-    }
-    if (size != 0U && fread(data, 1, size, file) != size) {
-        free(data);
-        fclose(file);
-        return 1;
-    }
-    fclose(file);
-    *out = data;
-    *out_size = size;
-    return 0;
-}
-
-/**
- * Cli run.
- * @return Function result.
- */
-static int test_cli_run(
-    const char *arg,
-    unsigned char **out,
-    size_t *out_size,
-    unsigned char **err,
-    size_t *err_size
-) {
-    char cli[1024];
-    char out_path[128];
-    char err_path[128];
-    long pid = (long)TEST_GETPID();
-    int rc;
-
-    *out = NULL;
-    *out_size = 0U;
-    *err = NULL;
-    *err_size = 0U;
-    if (test_cli_path(cli, sizeof(cli)) != 0) return -1;
-
-    snprintf(out_path, sizeof(out_path), "netl-cli-%ld-out.tmp", pid);
-    snprintf(err_path, sizeof(err_path), "netl-cli-%ld-err.tmp", pid);
-
-#ifdef _WIN32
-    {
-        const char *argv[3];
-        int out_fd;
-        int err_fd;
-        int save_out;
-        int save_err;
-
-        argv[0] = cli;
-        argv[1] = arg != NULL && arg[0] != '\0' ? arg : NULL;
-        argv[2] = NULL;
-
-        out_fd = _open(
-            out_path,
-            _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
-            _S_IREAD | _S_IWRITE
-        );
-        err_fd = _open(
-            err_path,
-            _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
-            _S_IREAD | _S_IWRITE
-        );
-        if (out_fd < 0 || err_fd < 0) {
-            if (out_fd >= 0) _close(out_fd);
-            if (err_fd >= 0) _close(err_fd);
-            return -1;
-        }
-
-        save_out = _dup(1);
-        save_err = _dup(2);
-        if (save_out < 0 || save_err < 0) {
-            if (save_out >= 0) _close(save_out);
-            if (save_err >= 0) _close(save_err);
-            _close(out_fd);
-            _close(err_fd);
-            return -1;
-        }
-
-        fflush(stdout);
-        fflush(stderr);
-        _dup2(out_fd, 1);
-        _dup2(err_fd, 2);
-        _close(out_fd);
-        _close(err_fd);
-
-        rc = (int)_spawnv(
-            _P_WAIT,
-            cli,
-            (const char * const *)argv
-        );
-
-        fflush(stdout);
-        fflush(stderr);
-        _dup2(save_out, 1);
-        _dup2(save_err, 2);
-        _close(save_out);
-        _close(save_err);
-    }
-#else
-    {
-        char command[4096];
-
-        if (arg != NULL && arg[0] != '\0') {
-            snprintf(
-                command,
-                sizeof(command),
-                "\"%s\" %s > \"%s\" 2> \"%s\"",
-                cli,
-                arg,
-                out_path,
-                err_path
-            );
-        } else {
-            snprintf(
-                command,
-                sizeof(command),
-                "\"%s\" > \"%s\" 2> \"%s\"",
-                cli,
-                out_path,
-                err_path
-            );
-        }
-        rc = system(command);
-    }
-#endif
-
-    if (
-        test_read_file(out_path, out, out_size) != 0 ||
-        test_read_file(err_path, err, err_size) != 0
-    ) {
-        free(*out);
-        free(*err);
-        *out = NULL;
-        *err = NULL;
-        *out_size = 0U;
-        *err_size = 0U;
-        rc = -1;
-    }
-
-    remove(out_path);
-    remove(err_path);
-    return rc;
-}
-
-/**
- * Kc netl cli.
- * @return Function result.
- */
-static int case_kc_netl_cli(void) {
-    unsigned char *out = NULL;
-    unsigned char *err = NULL;
-    size_t out_size = 0U;
-    size_t err_size = 0U;
-    int rc;
-    int fail = 0;
-
-    rc = test_cli_run("--version", &out, &out_size, &err, &err_size);
-    fail += expect_int("CLI version exit", 0, rc);
-    fail += expect_contains("CLI version", out, out_size, "netl build ");
-    free(out);
-    free(err);
-
-    out = NULL;
-    err = NULL;
-    rc = test_cli_run("--help", &out, &out_size, &err, &err_size);
-    fail += expect_int("CLI help exit", 0, rc);
-    fail += expect_contains("CLI help", out, out_size, "Usage:");
-    free(out);
-    free(err);
-
-    out = NULL;
-    err = NULL;
-    rc = test_cli_run("", &out, &out_size, &err, &err_size);
-    fail += expect_true("CLI missing args fails", rc != 0);
-    fail += expect_contains("CLI missing args usage", out, out_size, "Usage:");
-    free(out);
-    free(err);
-
-    case_result(
-        fail,
-        "kc_netl_cli",
-        "preserves help, version, and argument contract"
-    );
-    return fail != 0;
-}
-
-/**
  * All.
  * @return Function result.
  */
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 5;
+    test_case_total = 4;
     test_case_current = 0;
     run_case(&rc, case_kc_netl_open);
     run_case(&rc, case_kc_netl_tcp);
     run_case(&rc, case_kc_netl_udp);
     run_case(&rc, case_kc_netl_status);
-    run_case(&rc, case_kc_netl_cli);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -945,8 +629,6 @@ static int case_all(void) {
  * @return Function result.
  */
 int main(int argc, char **argv) {
-    test_program_path = argv[0];
-
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument\n");
         return 2;
@@ -956,7 +638,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_netl_tcp") == 0) return case_kc_netl_tcp();
     if (strcmp(argv[1], "kc_netl_udp") == 0) return case_kc_netl_udp();
     if (strcmp(argv[1], "kc_netl_status") == 0) return case_kc_netl_status();
-    if (strcmp(argv[1], "kc_netl_cli") == 0) return case_kc_netl_cli();
 
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;

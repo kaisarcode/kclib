@@ -13,7 +13,6 @@ endif()
 
 option(NETL_NATIVE "Enable native hardware optimizations" OFF)
 option(NETL_BUILD_TESTS "Build netl tests" OFF)
-set(NETL_TEST_CLI_EXECUTABLE "" CACHE FILEPATH "Prebuilt netl CLI for contract tests")
 
 set(NETL_TEST_EXTERNAL_ARTIFACTS OFF)
 if(NETL_BUILD_TESTS AND NETL_TEST_SHARED_LIBRARY)
@@ -44,20 +43,6 @@ set_source_files_properties(src/libnetl.c PROPERTIES
 set(NETL_SOURCES src/libnetl.c)
 
 if(NOT NETL_TEST_EXTERNAL_ARTIFACTS)
-    add_executable(netl
-        src/netl.c
-        ${NETL_SOURCES}
-    )
-
-    target_include_directories(netl PRIVATE src)
-    target_compile_definitions(netl PRIVATE KC_NETL_CLI=1)
-
-    if(WIN32)
-        target_link_libraries(netl ws2_32)
-    else()
-        target_link_libraries(netl Threads::Threads)
-    endif()
-
     add_library(netl_static STATIC ${NETL_SOURCES})
     set_target_properties(netl_static PROPERTIES OUTPUT_NAME "netl")
     target_include_directories(netl_static PRIVATE src)
@@ -112,17 +97,4 @@ if(NETL_BUILD_TESTS)
             $<TARGET_FILE_DIR:netl_contract_test>
     )
 
-    if(NETL_TEST_CLI_EXECUTABLE)
-        add_custom_command(TARGET netl_contract_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${NETL_TEST_CLI_EXECUTABLE}"
-                "$<TARGET_FILE_DIR:netl_contract_test>/netl${CMAKE_EXECUTABLE_SUFFIX}"
-        )
-    elseif(TARGET netl)
-        add_custom_command(TARGET netl_contract_test POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:netl>
-                "$<TARGET_FILE_DIR:netl_contract_test>/netl${CMAKE_EXECUTABLE_SUFFIX}"
-        )
-    endif()
 endif()
