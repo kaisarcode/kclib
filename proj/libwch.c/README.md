@@ -16,7 +16,6 @@ be observed temporarily by processes that open the watcher and subscribe with
 
 `KC_WCH_DIR` is an advanced process-level override for the runtime directory. Normal API callers do not need to select a directory.
 
-
 ```c
 typedef struct kc_wch kc_wch_t;
 
