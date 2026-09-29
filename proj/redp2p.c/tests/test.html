@@ -51,6 +51,7 @@
     let failed = 0;
     let pub = null;
     let con = null;
+    let publisherClient = null;
     let publisherInput = null;
     let consumerReplyResolve = null;
 
@@ -129,6 +130,9 @@
                 id,
                 index,
                 pollInterval: 100,
+                connect(client) {
+                    publisherClient = client;
+                },
                 receive(input) {
                     publisherInput = input;
                     if (input.data === "ping") {
@@ -202,8 +206,10 @@
             );
 
             assert(data === "ping", "publisher received unexpected data");
-            assert(publisherInput && publisherInput.client,
-                "publisher client unavailable");
+            assert(publisherClient !== null,
+                "publisher channel connect callback unavailable");
+            assert(publisherInput && publisherInput.client === publisherClient,
+                "publisher receive client differs from connected channel");
             assert(typeof publisherInput.client.respond === "function",
                 "publisher client respond unavailable");
             assert(typeof publisherInput.client.close === "function",
