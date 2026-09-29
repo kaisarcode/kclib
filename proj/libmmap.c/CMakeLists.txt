@@ -38,7 +38,7 @@ if(EMSCRIPTEN)
     add_executable(mmap_wasm ${MMAP_SOURCES})
     target_include_directories(mmap_wasm PRIVATE src)
     set_target_properties(mmap_wasm PROPERTIES
-        OUTPUT_NAME "mmap"
+        OUTPUT_NAME "libmmap"
         SUFFIX ".wasm"
     )
     target_link_options(mmap_wasm PRIVATE
@@ -50,17 +50,6 @@ if(EMSCRIPTEN)
 endif()
 
 if(NOT EMSCRIPTEN AND NOT MMAP_TEST_EXTERNAL_ARTIFACTS)
-    add_executable(mmap
-        src/mmap.c
-        ${MMAP_SOURCES}
-    )
-
-    target_include_directories(mmap PRIVATE src)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(mmap pthread m)
-    endif()
-
     add_library(mmap_static STATIC ${MMAP_SOURCES})
     set_target_properties(mmap_static PROPERTIES OUTPUT_NAME "mmap")
     target_include_directories(mmap_static PRIVATE src)
@@ -101,18 +90,9 @@ if(MMAP_BUILD_TESTS)
     endif()
 
     if(NOT EMSCRIPTEN)
-        if(MMAP_TEST_CLI)
-            set(MMAP_TEST_CLI_TARGET_PATH "${MMAP_TEST_CLI}")
-        else()
-            set(MMAP_TEST_CLI_TARGET_PATH "$<TARGET_FILE:mmap>")
-        endif()
-
         add_executable(mmap_contract_test src/test.c)
         target_include_directories(mmap_contract_test PRIVATE src)
         target_link_libraries(mmap_contract_test PRIVATE ${MMAP_TEST_SHARED_TARGET})
-        target_compile_definitions(mmap_contract_test PRIVATE
-            KC_MMAP_TEST_CLI="${MMAP_TEST_CLI_TARGET_PATH}"
-        )
 
         add_custom_command(TARGET mmap_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

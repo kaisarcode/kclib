@@ -144,12 +144,10 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_EXE_EXT :=
 NATIVE_SHARED_NAME := libmmap.so
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_EXE_EXT := .exe
 NATIVE_SHARED_NAME := libmmap.dll
 NATIVE_IMPORT_LIBRARY := -DMMAP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libmmap.dll.a
 endif
@@ -204,8 +202,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DMMAP_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/mmap $(BIN_DIR)/$(1)/linux/mmap.tmp
-	@mv -f $(BIN_DIR)/$(1)/linux/mmap.tmp $(BIN_DIR)/$(1)/linux/mmap
 	@echo "OK $(1)/linux"
 endef
 
@@ -265,8 +261,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DMMAP_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/mmap.exe $(BIN_DIR)/$(1)/windows/mmap.exe.tmp
-	@mv -f $(BIN_DIR)/$(1)/windows/mmap.exe.tmp $(BIN_DIR)/$(1)/windows/mmap.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libmmap.dll $(BIN_DIR)/$(1)/windows/libmmap.dll.tmp
 	@mv -f $(BIN_DIR)/$(1)/windows/libmmap.dll.tmp $(BIN_DIR)/$(1)/windows/libmmap.dll
 	@echo "OK $(1)/windows"
@@ -312,7 +306,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/mmap $(BIN_DIR)/$(1)/macos/mmap && \
 	echo "OK $(1)/macos"
 endef
 
@@ -364,14 +357,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
-	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/mmap ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/mmap $(BIN_DIR)/$(1)/$(2)/mmap; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/mmap.app/mmap ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/mmap.app/mmap $(BIN_DIR)/$(1)/$(2)/mmap; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi && \
 	echo "OK $(1)/$(2)"
 endef
 
@@ -409,8 +394,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DMMAP_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-android/out/mmap $(BIN_DIR)/$(1)/android/mmap.tmp
-	@mv -f $(BIN_DIR)/$(1)/android/mmap.tmp $(BIN_DIR)/$(1)/android/mmap
 	@echo "OK $(1)/android"
 endef
 
@@ -445,7 +428,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DMMAP_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/mmap.wasm $(BIN_DIR)/wasm32/wasm/mmap.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libmmap.wasm $(BIN_DIR)/wasm32/wasm/libmmap.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -464,7 +447,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libmmap.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmmap.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/mmap.exe ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libmmap.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmmap.dll.a ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -477,7 +460,6 @@ test:
 				-DMMAP_BUILD_VERSION=$(BUILD_VERSION) \
 				-DMMAP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmmap.dll \
 				-DMMAP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmmap.dll.a \
-				-DMMAP_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/mmap.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -489,8 +471,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/mmap.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/mmap.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libmmap.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libmmap.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -512,7 +494,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/mmap$(NATIVE_EXE_EXT) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -522,7 +504,6 @@ test:
 				-DMMAP_BUILD_TESTS=ON \
 				-DMMAP_BUILD_VERSION=$(BUILD_VERSION) \
 				-DMMAP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-				-DMMAP_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/mmap$(NATIVE_EXE_EXT) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \

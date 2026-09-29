@@ -1,60 +1,11 @@
-# mmap.c - Persistent Binary Value
+# libmmap.c - Persistent Binary Value
 
-`mmap.c` exposes one file-backed binary value per instance. Opening a missing
+`libmmap.c` exposes one file-backed binary value per instance. Opening a missing
 path is valid and starts with no value. The current value can be replaced in
 memory, persisted explicitly, or deleted together with its backing file.
 
 After `del()`, any operation other than final cleanup is an error. Reopening the
 same path creates a new valid instance whose `get()` returns `null`.
-
----
-## CLI
-
-The CLI is a one-shot adapter over the same file/value operations.
-
-### Examples
-
-Read a saved value:
-
-```bash
-mmap file.bin --get
-```
-
-Set and save a direct value:
-
-```bash
-mmap file.bin --set "value"
-```
-
-Set and save exact bytes from stdin:
-
-```bash
-cat input.bin | mmap file.bin --set
-```
-
-Delete the backing file:
-
-```bash
-mmap file.bin --del
-```
-
-Short operation flags are also accepted:
-
-```bash
-mmap file.bin -get
-mmap file.bin -set "value"
-mmap file.bin -del
-```
-
-### Parameters
-
-| Form | Description |
-| :--- | :--- |
-| `mmap <path> -get\|--get` | Write the saved value to stdout |
-| `mmap <path> -set\|--set [value]` | Set and save a direct value, or read exact bytes from stdin when value is omitted |
-| `mmap <path> -del\|--del` | Delete the backing file |
-| `mmap -h\|--help` | Show help and usage |
-| `mmap -v\|--version` | Show version |
 
 ---
 ## Public API
@@ -108,7 +59,7 @@ KC_MMAP_ERROR          -> binding error
 
 ### Storage
 
-mmap.c does not choose a storage directory. The backing file is exactly the
+libmmap.c does not choose a storage directory. The backing file is exactly the
 path passed to `kc_mmap_open()`. `kc_mmap_save()` writes that file and
 `kc_mmap_del()` removes it.
 
@@ -147,11 +98,8 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/mmap.wasm`
+- Artifact: `bin/wasm32/wasm/libmmap.wasm`
 - Exports: `kc_mmap_open`, `kc_mmap_set`, `kc_mmap_del`, `kc_mmap_close`, `kc_mmap_get`, `kc_mmap_save`, `kc_mmap_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
