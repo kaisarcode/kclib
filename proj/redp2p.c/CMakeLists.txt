@@ -62,11 +62,10 @@ if(NOT REDP2P_TEST_EXTERNAL_ARTIFACTS)
     set_target_properties(redp2p_shared PROPERTIES
         OUTPUT_NAME "redp2p"
         C_VISIBILITY_PRESET hidden
+        WINDOWS_EXPORT_ALL_SYMBOLS ON
     )
     target_include_directories(redp2p_shared PRIVATE src lib/monocypher lib/kcp lib/parson)
-    if(WIN32)
-        target_sources(redp2p_shared PRIVATE src/libredp2p.def)
-    elseif(NOT MSVC)
+    if(NOT WIN32 AND NOT MSVC)
         set_source_files_properties(src/libredp2p-api.c PROPERTIES
             COMPILE_OPTIONS "-fvisibility=default"
         )
