@@ -9,7 +9,6 @@ endif()
 
 option(DMN_NATIVE "Enable native hardware optimizations" OFF)
 option(DMN_BUILD_TESTS "Build dmn tests" OFF)
-set(DMN_TEST_CLI "" CACHE STRING "Path to the dmn CLI used by contract tests")
 
 set(DMN_TEST_EXTERNAL_ARTIFACTS OFF)
 if(DMN_BUILD_TESTS AND DMN_TEST_SHARED_LIBRARY)
@@ -38,12 +37,9 @@ set_source_files_properties(src/libdmn.c PROPERTIES
 set(DMN_SOURCES src/libdmn.c)
 
 if(NOT DMN_TEST_EXTERNAL_ARTIFACTS)
-    add_executable(dmn
-        src/dmn.c
-        ${DMN_SOURCES}
-    )
+    
 
-    target_include_directories(dmn PRIVATE src)
+    
 
     add_library(dmn_static STATIC ${DMN_SOURCES})
     set_target_properties(dmn_static PROPERTIES OUTPUT_NAME "dmn")
@@ -79,12 +75,6 @@ if(DMN_BUILD_TESTS)
     add_executable(dmn_contract_test src/test.c)
     target_include_directories(dmn_contract_test PRIVATE src)
     target_link_libraries(dmn_contract_test PRIVATE ${DMN_TEST_SHARED_TARGET})
-
-    if(DMN_TEST_CLI)
-        target_compile_definitions(dmn_contract_test PRIVATE DMN_TEST_CLI="${DMN_TEST_CLI}")
-    elseif(TARGET dmn)
-        target_compile_definitions(dmn_contract_test PRIVATE DMN_TEST_CLI="$<TARGET_FILE:dmn>")
-    endif()
 
     add_custom_command(TARGET dmn_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

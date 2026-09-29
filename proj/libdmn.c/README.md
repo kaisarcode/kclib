@@ -1,39 +1,8 @@
-# dmn.c - Local Daemon Manager
+# libdmn.c - Local Daemon Manager
 
-`dmn.c` creates persistent named local daemons, keeps their processes resident, exchanges EOT-delimited requests and responses, lists registrations, sends platform signals, and deletes daemons.
+`libdmn.c` creates persistent named local daemons, keeps their processes resident, exchanges EOT-delimited requests and responses, lists registrations, sends platform signals, and deletes daemons.
 
-`dmn.c` manages persistent named local daemons and their command exchanges.
-
----
-
-## CLI
-
-The CLI contract remains:
-
-```text
-dmn <name> <cmd>
-dmn -d <name>
-dmn <name> -d
-dmn -l [name]
-dmn <name> -l
-dmn <name> -s <sig>
-dmn <name>
-dmn -h
-dmn -v
-```
-
-Examples:
-
-```bash
-dmn worker /usr/bin/my_app -p 1
-printf 'hello\n\004' | dmn worker
-dmn --list
-dmn worker --list
-dmn worker -s 10
-dmn worker --delete
-```
-
-`KC_DMN_DIR` is an advanced process-level override for the runtime directory. Normal API and CLI callers do not need to select a directory; the platform runtime location is resolved automatically.
+`libdmn.c` manages persistent named local daemons and their command exchanges.
 
 ---
 

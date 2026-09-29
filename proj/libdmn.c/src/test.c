@@ -32,8 +32,6 @@
 #define mkdir_one(path) mkdir(path, 0700)
 #endif
 
-#ifndef DMN_TEST_CLI
-#define DMN_TEST_CLI ""
 #endif
 
 static int test_case_total;
@@ -851,55 +849,13 @@ static int case_kc_dmn_version(void) {
 }
 
 /**
- * Test the grouped CLI contract.
- * @return Zero on success, non-zero on failure.
- */
-static int case_kc_dmn_cli(void) {
-    char command[4096];
-    int fail = 0;
-    int rc;
-
-    if (DMN_TEST_CLI[0] == '\0') {
-        case_result(1, "kc_dmn_cli", "covers stable CLI parsing");
-        return 1;
-    }
-
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "\"%s\" --help > NUL 2>&1", DMN_TEST_CLI);
-#else
-    snprintf(command, sizeof(command), "\"%s\" --help > /dev/null 2>&1", DMN_TEST_CLI);
-#endif
-    rc = system(command);
-    fail += expect_true("CLI help succeeds", rc == 0);
-
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "\"%s\" --version > NUL 2>&1", DMN_TEST_CLI);
-#else
-    snprintf(command, sizeof(command), "\"%s\" --version > /dev/null 2>&1", DMN_TEST_CLI);
-#endif
-    rc = system(command);
-    fail += expect_true("CLI version succeeds", rc == 0);
-
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "\"%s\" --unknown > NUL 2>&1", DMN_TEST_CLI);
-#else
-    snprintf(command, sizeof(command), "\"%s\" --unknown > /dev/null 2>&1", DMN_TEST_CLI);
-#endif
-    rc = system(command);
-    fail += expect_true("CLI unknown option fails", rc != 0);
-
-    case_result(fail, "kc_dmn_cli", "covers stable CLI parsing");
-    return fail != 0;
-}
-
-/**
  * Run all contract test cases.
  * @return Failure count.
  */
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 14;
+    test_case_total = 13;
     test_case_current = 0;
     run_case(&rc, case_kc_dmn_create);
     run_case(&rc, case_kc_dmn_open);
@@ -914,7 +870,6 @@ static int case_all(void) {
     run_case(&rc, case_kc_dmn_free);
     run_case(&rc, case_kc_dmn_close);
     run_case(&rc, case_kc_dmn_version);
-    run_case(&rc, case_kc_dmn_cli);
 
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -955,7 +910,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_dmn_free") == 0) return case_kc_dmn_free();
     if (strcmp(argv[1], "kc_dmn_close") == 0) return case_kc_dmn_close();
     if (strcmp(argv[1], "kc_dmn_version") == 0) return case_kc_dmn_version();
-    if (strcmp(argv[1], "kc_dmn_cli") == 0) return case_kc_dmn_cli();
 
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
