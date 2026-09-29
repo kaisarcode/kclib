@@ -65,9 +65,9 @@ Browsers provide the Web APIs expected by this implementation directly. Other
 JavaScript runtimes can use the same files when their host environment exposes
 compatible Web APIs.
 
-For Node.js or QuickJS-ng, provide a small runtime adapter before loading the
-REDP2P JavaScript implementation. The adapter should supply any missing host
-capabilities, such as WebRTC peer connections, `fetch`, Web Crypto,
+For Node.js or QuickJS-ng, you'll need to provide a small runtime adapter before
+loading the REDP2P JavaScript implementation. The adapter should supply any
+missing host capabilities, such as WebRTC peer connections, `fetch`, Web Crypto,
 `TextEncoder`/`TextDecoder`, and timers. REDP2P itself does not depend on a
 specific external module; only a compatible host interface is required.
 
