@@ -1424,6 +1424,17 @@ const struct sockaddr_storage *peer_addr)
             crypto_wipe(&session, sizeof(session));
             return 0;
         }
+        if (ctx->direct_mode) {
+            struct sockaddr_in adapter_addr;
+
+            memset(&adapter_addr, 0, sizeof(adapter_addr));
+            adapter_addr.sin_family = AF_INET;
+            adapter_addr.sin_port = htons(ctx->bind_port);
+            adapter_addr.sin_addr.s_addr = htonl(0x7f000001u);
+            (void)sendto(session.backend_fd, "", 0, 0,
+                (const struct sockaddr *)&adapter_addr,
+                sizeof(adapter_addr));
+        }
     }
     session.active = 1;
     return redp2p_publisher_session_insert(runtime, &session) >= 0;
