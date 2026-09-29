@@ -458,13 +458,7 @@ static int case_kc_hnsw_concurrency(void) {
 #ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 /**
- * @param in Input UTF-8 text.
- * @param out Destination wide buffer.
- * @param cap Destination capacity in wide characters.
- * @return Zero on success, or one on failure.
- */
-
-/**
+ * Creates one temporary HNSW dataset on Windows.
  * @param path Destination path buffer.
  * @param size Destination path buffer size.
  * @return Zero on success, or one on failure.
@@ -486,17 +480,7 @@ static int make_dataset(char *path, size_t size) {
 }
 #else
 /**
- * @param argv Argument vector.
- * @param input Optional stdin text.
- * @param out Stdout buffer.
- * @param out_size Stdout buffer size.
- * @param err Stderr buffer.
- * @param err_size Stderr buffer size.
- * @param status Destination process status.
- * @return Zero on success, or one on launch failure.
- */
-
-/**
+ * Creates one temporary HNSW dataset on POSIX systems.
  * @param path Destination path buffer.
  * @param size Destination path buffer size.
  * @return Zero on success, or one on failure.
