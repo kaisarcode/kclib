@@ -94,27 +94,15 @@ if(NOT REDP2P_TEST_EXTERNAL_ARTIFACTS)
     set_target_properties(redp2p_static PROPERTIES OUTPUT_NAME "redp2p")
     target_include_directories(redp2p_static PRIVATE src lib/monocypher lib/kcp lib/parson)
 
-    # Binary: redp2p
-    if(APPLE)
-        add_executable(redp2p src/redp2p.c ${REDP2P_SOURCES})
-    else()
-        add_executable(redp2p src/redp2p.c)
-        target_link_libraries(redp2p PRIVATE redp2p_static)
-    endif()
-    target_include_directories(redp2p PRIVATE src lib/monocypher lib/kcp lib/parson)
-
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(redp2p_shared pthread m)
         target_link_libraries(redp2p_static pthread m)
-        target_link_libraries(redp2p PRIVATE pthread m)
     elseif(MINGW)
         target_link_libraries(redp2p_shared ws2_32 bcrypt)
         target_link_libraries(redp2p_static ws2_32 bcrypt)
-        target_link_libraries(redp2p PRIVATE ws2_32 bcrypt)
     elseif(MSVC)
         target_link_libraries(redp2p_shared ws2_32 bcrypt)
         target_link_libraries(redp2p_static ws2_32 bcrypt)
-        target_link_libraries(redp2p PRIVATE ws2_32 bcrypt)
     endif()
 endif()
 
@@ -139,14 +127,6 @@ if(REDP2P_BUILD_TESTS)
         set(REDP2P_TEST_SHARED_TARGET redp2p_test_shared)
     endif()
 
-    if(REDP2P_TEST_CLI)
-        set(REDP2P_TEST_CLI_TARGET_PATH "${REDP2P_TEST_CLI}")
-    elseif(TARGET redp2p)
-        set(REDP2P_TEST_CLI_TARGET_PATH "$<TARGET_FILE:redp2p>")
-    else()
-        set(REDP2P_TEST_CLI_TARGET_PATH "")
-    endif()
-
     add_executable(redp2p_contract_test
         tests/test.c
         ${REDP2P_SOURCES}
@@ -155,7 +135,6 @@ if(REDP2P_BUILD_TESTS)
         src lib/monocypher lib/kcp lib/parson
     )
     target_compile_definitions(redp2p_contract_test PRIVATE
-        REDP2P_TEST_CLI="${REDP2P_TEST_CLI_TARGET_PATH}"
         REDP2P_TESTING=1
     )
 

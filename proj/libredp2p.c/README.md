@@ -1,56 +1,12 @@
-# redp2p.c - Peer-to-Peer Transport
+# libredp2p.c - Peer-to-Peer Transport
 
-`redp2p.c` connects two machines directly so one can access a service running
-on the other.
-
----
-
-## CLI
-
-Start an index:
-
-```bash
-redp2p idx 9876
-redp2p idx 9876 --seats 128 --pow 16
-```
-
-List active publisher IDs from a local index:
-
-```bash
-redp2p idx 9876 --list
-```
-
-Publish a local TCP or UDP port:
-
-```bash
-redp2p pub web@idx.example.com:9876 --tcp 8080
-redp2p pub game@idx.example.com:9876 --udp 7777
-```
-
-Expose one announced publisher through a local port:
-
-```bash
-redp2p con web@idx.example.com:9876 9000
-```
-
-The consumer derives TCP or UDP from the publisher record. It therefore does
-not accept `--tcp` or `--udp`.
-
-The CLI accepts `REDP2P_SEATS`, `REDP2P_POW`, `REDP2P_PASS`,
-`REDP2P_VIP`, `REDP2P_MAX_CONSUMERS_PER_PUBLISHER`, and `REDP2P_STUN`
-as operator configuration and translates them into the public API.
-
-`idx`, `pub`, and `con` processes run until SIGINT or SIGTERM and then
-close their handle.
-
-Common options are `-h` / `--help` and `-v` / `--version`.
+`libredp2p.c` connects applications directly through peer-to-peer transport.
 
 ---
 
 ## Library
 
-Use the library when you want to connect two applications directly through
-REDP2P instead of driving the command-line program.
+The library connects two applications directly through REDP2P.
 
 A REDP2P setup has three parts:
 
@@ -61,40 +17,7 @@ A REDP2P setup has three parts:
 The index is only used to introduce the peers. It does not carry the
 application traffic.
 
-### Example
-
-Suppose a machine has a web server listening on port 8080 and you want to reach
-it from another machine.
-
-On a reachable host, start an index:
-
-```bash
-redp2p idx 9876
-```
-
-On the machine running the web server, publish it as `web`:
-
-```bash
-redp2p pub web@idx.example.com:9876 --tcp 8080
-```
-
-On the other machine, open that published service on local port 9000:
-
-```bash
-redp2p con web@idx.example.com:9876 9000
-```
-
-Now the remote web server is available locally:
-
-```bash
-curl http://127.0.0.1:9000/
-```
-
-REDP2P only carries the bytes between the two applications. It does not need to
-know whether those bytes are HTTP, a database protocol, a game protocol, or
-anything else.
-
-### Using the C library
+### Public API
 
 The C library exposes peer channels directly. It does not expose application
 service ports or perform local port forwarding. The index listener is the only
@@ -112,8 +35,7 @@ callback.
 
 What those bytes mean is an application decision. An application can process
 them directly, store them, feed another protocol, or bridge them to a local
-socket. The `redp2p` CLI implements that last option itself, which is why its
-`pub` and `con` commands still accept local ports.
+socket.
 
 The exact C declarations, option fields, return codes, and callback types are
 documented in `src/libredp2p.h`.
