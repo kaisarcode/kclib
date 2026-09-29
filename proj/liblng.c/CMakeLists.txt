@@ -38,7 +38,7 @@ if(EMSCRIPTEN)
     add_executable(lng_wasm ${LNG_SOURCES})
     target_include_directories(lng_wasm PRIVATE src)
     set_target_properties(lng_wasm PROPERTIES
-        OUTPUT_NAME "lng"
+        OUTPUT_NAME "liblng"
         SUFFIX ".wasm"
     )
     target_link_options(lng_wasm PRIVATE
@@ -65,25 +65,18 @@ set_target_properties(lng_static PROPERTIES
 )
 target_include_directories(lng_static PRIVATE src)
 
-add_executable(lng_exe src/lng.c ${LNG_SOURCES})
-set_target_properties(lng_exe PROPERTIES OUTPUT_NAME lng)
-target_include_directories(lng_exe PRIVATE src)
-
 if(UNIX AND NOT ANDROID AND NOT APPLE)
     target_link_libraries(lng_shared pthread m)
     target_link_libraries(lng_static pthread m)
-    target_link_libraries(lng_exe pthread m)
 elseif(ANDROID)
     target_link_libraries(lng_shared m)
     target_link_libraries(lng_static m)
-    target_link_libraries(lng_exe m)
 endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armv7)")
     if(NOT ANDROID)
         target_link_libraries(lng_shared atomic)
         target_link_libraries(lng_static atomic)
-        target_link_libraries(lng_exe atomic)
     endif()
 endif()
 endif()
@@ -127,13 +120,3 @@ if(LNG_BUILD_TESTS)
     endif()
 endif()
 
-if(LNG_BUILD_TESTS)
-    if(LNG_TEST_CLI)
-        set(LNG_TEST_CLI_TARGET_PATH "${LNG_TEST_CLI}")
-    else()
-        set(LNG_TEST_CLI_TARGET_PATH "")
-    endif()
-    target_compile_definitions(lng_contract_test PRIVATE
-        LNG_TEST_CLI="${LNG_TEST_CLI_TARGET_PATH}"
-    )
-endif()

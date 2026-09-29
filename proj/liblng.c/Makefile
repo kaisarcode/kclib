@@ -190,8 +190,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DLNG_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/lng $(BIN_DIR)/$(1)/linux/lng.tmp
-	@mv -f $(BIN_DIR)/$(1)/linux/lng.tmp $(BIN_DIR)/$(1)/linux/lng
 	@echo "OK $(1)/linux"
 endef
 
@@ -246,8 +244,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DLNG_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/lng.exe $(BIN_DIR)/$(1)/windows/lng.exe.tmp
-	@mv -f $(BIN_DIR)/$(1)/windows/lng.exe.tmp $(BIN_DIR)/$(1)/windows/lng.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/liblng.dll $(BIN_DIR)/$(1)/windows/liblng.dll.tmp
 	@mv -f $(BIN_DIR)/$(1)/windows/liblng.dll.tmp $(BIN_DIR)/$(1)/windows/liblng.dll
 	@echo "OK $(1)/windows"
@@ -293,7 +289,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/lng $(BIN_DIR)/$(1)/macos/lng && \
 	echo "OK $(1)/macos"
 endef
 
@@ -345,14 +340,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
-	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/lng ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/lng $(BIN_DIR)/$(1)/$(2)/lng; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/lng.app/lng ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/lng.app/lng $(BIN_DIR)/$(1)/$(2)/lng; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi && \
 	echo "OK $(1)/$(2)"
 endef
 
@@ -385,8 +372,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DLNG_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-android/out/lng $(BIN_DIR)/$(1)/android/lng.tmp
-	@mv -f $(BIN_DIR)/$(1)/android/lng.tmp $(BIN_DIR)/$(1)/android/lng
 	@echo "OK $(1)/android"
 endef
 
@@ -413,7 +398,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DLNG_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/lng.wasm $(BIN_DIR)/wasm32/wasm/lng.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/liblng.wasm $(BIN_DIR)/wasm32/wasm/liblng.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -439,11 +424,7 @@ test:
 			echo "missing Windows import library: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/lng.exe" ]; then \
-			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
-			exit 1; \
-		fi; \
-		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ] || ! grep -q '^LNG_TEST_CLI:' "$(BUILD_DIR)/test-wine/CMakeCache.txt"; then \
+		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
@@ -452,7 +433,6 @@ test:
 				-DLNG_BUILD_TESTS=ON \
 			-DLNG_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/liblng.dll \
 				-DLNG_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/liblng.dll.a \
-				-DLNG_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/lng.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -464,8 +444,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/lng.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/lng.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/liblng.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/liblng.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -491,16 +471,11 @@ test:
 			echo "missing native shared library: run make first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/lng" ]; then \
-			echo "missing native CLI: run make first" >&2; \
-			exit 1; \
-		fi; \
-		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ] || ! grep -q '^LNG_TEST_CLI:' "$(BUILD_DIR)/test/CMakeCache.txt"; then \
+		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DLNG_BUILD_TESTS=ON \
 				-DLNG_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/liblng.so \
-				-DLNG_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/lng \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target lng_contract_test; \

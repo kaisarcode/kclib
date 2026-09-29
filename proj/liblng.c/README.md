@@ -1,61 +1,6 @@
-# lng.c - Language Detection Library
+# liblng.c - Language Detection Library
 
 `lng.c` detects the language of text and returns ranked language matches.
-
----
-## CLI
-
-Detect the language of text provided as an argument or via standard input.
-
-### Examples
-
-Single language detection:
-
-```bash
-lng "Hello world"
-```
-
-Ranked detection with threshold and limit:
-
-```bash
-lng "Hello world" -l 3 -t 0.1
-```
-
-Standard input processing (one-shot):
-
-```bash
-printf 'hola mundo' | lng
-```
-
-EOF terminates the one-shot request and the process exits.
-
----
-
-### Parameters
-
-| Flag | Description |
-| :--- | :--- |
-| `-t`, `--threshold <n>` | Minimum score threshold (default `0.001`) |
-| `-l`, `--limit <n>` | Maximum number of results (default `1`) |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
-
----
-
-### Output
-
-Results are printed as the language code (for single match) or code and score (for ranked results):
-
-```
-en
-```
-
-```
-en: 0.9500
-es: 0.0400
-```
-
-Defaults are threshold `0.001` and limit `1`. Limit `1` prints only the code; larger limits print `code: score` with four decimal places. Empty input produces no output.
 
 ---
 ## Public API
@@ -156,11 +101,8 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/lng.wasm`
+- Artifact: `bin/wasm32/wasm/liblng.wasm`
 - Exports: `kc_lng_free`, `kc_lng_detect`, `kc_lng_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
