@@ -15,6 +15,11 @@ A REDP2P setup has three entities:
 The index is only used to introduce the peers. It does not carry the
 application traffic.
 
+REDP2P includes a PHP index implementation because PHP is readily available on
+many shared hosting environments. PHP is not required by the protocol. The
+index may be implemented in any language or runtime that implements the REDP2P
+Index Protocol documented in `doc/protocol.md`.
+
 ### Public API
 
 The C library exposes peer channels directly. It does not expose application
