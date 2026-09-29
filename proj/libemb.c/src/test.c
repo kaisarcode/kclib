@@ -1,4 +1,6 @@
 /**
+ * test.c - libemb public API tests.
+ * Summary: Contract tests for fixed-model embeddings.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -11,21 +13,10 @@
 
 #include "libemb.h"
 
-#ifndef __EMSCRIPTEN__
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
-#endif
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#endif
 
 #define EMB_EXPECTED_DIM 384
 
@@ -162,33 +153,6 @@ static int expect_vector_valid(const char *name, const float *vec, size_t count)
     return expect_true(name, nonzero);
 }
 
-#ifndef __EMSCRIPTEN__
-#ifdef _WIN32
-/**
- * Appends one argument to a Windows command line.
- * @param cmd Command-line buffer.
- * @param cap Buffer capacity in wide characters.
- * @param arg Argument to append.
- * @return 0 on success, 1 on failure.
- */
-
-#else
-/**
- * @param argv Null-terminated argument vector.
- * @param input Input bytes for stdin.
- * @param input_len Input byte count.
- * @param out Standard-output buffer.
- * @param out_size Standard-output buffer size.
- * @param err Standard-error buffer.
- * @param err_size Standard-error buffer size.
- * @param out_status Destination process status.
- * @return 0 on harness success, 1 on harness failure.
- */
-
-#endif
-
-#endif
-
 /**
  * Tests the public build version.
  * @return 0 when the case passes, 1 otherwise.
@@ -320,13 +284,6 @@ static int case_kc_emb_determinism(void) {
     return fail == 0 ? 0 : 1;
 }
 
-#ifndef __EMSCRIPTEN__
-/**
- * @return 0 when the case passes, 1 otherwise.
- */
-
-#endif
-
 /**
  * Runs all reusable and platform-applicable test cases.
  * @return 0 on success, nonzero on failure.
@@ -334,8 +291,8 @@ static int case_kc_emb_determinism(void) {
 static int case_all(void) {
     int rc = 0;
 
-test_case_total = 5;
-test_case_current = 0;
+    test_case_total = 5;
+    test_case_current = 0;
     run_case(&rc, case_kc_emb_version);
     run_case(&rc, case_kc_emb_dimension);
     run_case(&rc, case_kc_emb_embed);
@@ -382,12 +339,6 @@ int main(int argc, char **argv) {
         test_case_current = 1;
         return case_kc_emb_determinism();
     }
-#ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "kc_emb_cli") == 0) {
-        test_case_total = 1;
-        test_case_current = 1;
-    }
-#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
