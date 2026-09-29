@@ -1172,14 +1172,15 @@ static int redp2p_cli_con(int argc, char **argv)
         }
     }
 
+    if (redp2p_platform_init() != 0) {
+        fprintf(stderr, "redp2p: con failed: network failure\n");
+        return 1;
+    }
     status = redp2p_cli_lookup_protocol(index, id, &protocol);
     if (status != KC_REDP2P_OK) {
         fprintf(stderr, "redp2p: con failed: %s\n",
             kc_redp2p_strerror(status));
-        return 1;
-    }
-    if (redp2p_platform_init() != 0) {
-        fprintf(stderr, "redp2p: con failed: network failure\n");
+        redp2p_platform_cleanup();
         return 1;
     }
 
