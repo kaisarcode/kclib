@@ -1,5 +1,4 @@
 /**
- * test.c - libhnsw public API and CLI tests.
  * Summary: Contract tests for the in-memory approximate-neighbor index.
  *
  * Author:  KaisarCode
@@ -28,8 +27,6 @@
 #endif
 #endif
 
-#ifndef KC_HNSW_TEST_CLI
-#define KC_HNSW_TEST_CLI ""
 #endif
 
 typedef int (*case_fn)(void);
@@ -461,132 +458,13 @@ static int case_kc_hnsw_concurrency(void) {
 #ifndef __EMSCRIPTEN__
 #ifdef _WIN32
 /**
- * Convert one UTF-8 CLI string into a Windows wide string.
  * @param in Input UTF-8 text.
  * @param out Destination wide buffer.
  * @param cap Destination capacity in wide characters.
  * @return Zero on success, or one on failure.
  */
-static int cli_to_wide(const char *in, wchar_t *out, size_t cap) {
-    return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, (int)cap) > 0 ? 0 : 1;
-}
 
 /**
- * Append one quoted argument to a Windows command line.
- * @param cmd Command buffer.
- * @param cap Command buffer capacity.
- * @param arg Argument text.
- * @return Zero on success, or one on failure.
- */
-static int cli_append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
-    size_t used = wcslen(cmd);
-    size_t len = wcslen(arg);
-    size_t i;
-    int quote = len == 0 || wcschr(arg, L' ') != NULL ||
-        wcschr(arg, L'\t') != NULL || wcschr(arg, L'"') != NULL;
-
-    if (used != 0) cmd[used++] = L' ';
-    if (quote) cmd[used++] = L'"';
-    for (i = 0; i < len && used + 2 < cap; i++) {
-        if (arg[i] == L'"') cmd[used++] = L'\\';
-        cmd[used++] = arg[i];
-    }
-    if (quote) cmd[used++] = L'"';
-    if (used >= cap) return 1;
-    cmd[used] = L'\0';
-    return 0;
-}
-
-/**
- * Read one Windows pipe into a text buffer.
- * @param pipe Pipe handle.
- * @param buf Destination buffer.
- * @param size Destination buffer size.
- * @return None.
- */
-static void cli_read_pipe(HANDLE pipe, char *buf, size_t size) {
-    DWORD got;
-    size_t used = 0;
-
-    while (used + 1 < size &&
-            ReadFile(pipe, buf + used, (DWORD)(size - used - 1), &got, NULL) &&
-            got > 0) {
-        used += got;
-    }
-    buf[used] = '\0';
-}
-
-/**
- * Run the Windows CLI with captured standard streams.
- * @param argv Argument vector.
- * @param input Optional stdin text.
- * @param out Stdout buffer.
- * @param out_size Stdout buffer size.
- * @param err Stderr buffer.
- * @param err_size Stderr buffer size.
- * @param status Destination process status.
- * @return Zero on success, or one on launch failure.
- */
-static int cli_run(char *const argv[], const char *input,
-        char *out, size_t out_size, char *err, size_t err_size, int *status) {
-    SECURITY_ATTRIBUTES sa;
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    HANDLE in_pipe[2], out_pipe[2], err_pipe[2];
-    wchar_t exe[MAX_PATH], cmd[32768], wide[4096];
-    DWORD exit_code, written;
-    int i;
-
-    if (cli_to_wide(KC_HNSW_TEST_CLI, exe, MAX_PATH)) return 1;
-    sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
-    sa.lpSecurityDescriptor = NULL;
-    if (!CreatePipe(&in_pipe[0], &in_pipe[1], &sa, 0) ||
-            !CreatePipe(&out_pipe[0], &out_pipe[1], &sa, 0) ||
-            !CreatePipe(&err_pipe[0], &err_pipe[1], &sa, 0)) return 1;
-    SetHandleInformation(in_pipe[1], HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(out_pipe[0], HANDLE_FLAG_INHERIT, 0);
-    SetHandleInformation(err_pipe[0], HANDLE_FLAG_INHERIT, 0);
-
-    memset(&si, 0, sizeof(si));
-    memset(&pi, 0, sizeof(pi));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput = in_pipe[0];
-    si.hStdOutput = out_pipe[1];
-    si.hStdError = err_pipe[1];
-
-    cmd[0] = L'\0';
-    if (cli_append_arg(cmd, 32768, exe)) return 1;
-    for (i = 1; argv[i]; i++) {
-        if (cli_to_wide(argv[i], wide, 4096) ||
-                cli_append_arg(cmd, 32768, wide)) return 1;
-    }
-
-    if (!CreateProcessW(exe, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
-        return 1;
-    }
-    CloseHandle(in_pipe[0]);
-    CloseHandle(out_pipe[1]);
-    CloseHandle(err_pipe[1]);
-    if (input && input[0]) {
-        (void)WriteFile(in_pipe[1], input, (DWORD)strlen(input), &written, NULL);
-    }
-    CloseHandle(in_pipe[1]);
-    cli_read_pipe(out_pipe[0], out, out_size);
-    cli_read_pipe(err_pipe[0], err, err_size);
-    CloseHandle(out_pipe[0]);
-    CloseHandle(err_pipe[0]);
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    GetExitCodeProcess(pi.hProcess, &exit_code);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    *status = (int)exit_code;
-    return 0;
-}
-
-/**
- * Create one temporary CLI dataset.
  * @param path Destination path buffer.
  * @param size Destination path buffer size.
  * @return Zero on success, or one on failure.
@@ -608,7 +486,6 @@ static int make_dataset(char *path, size_t size) {
 }
 #else
 /**
- * Run the POSIX CLI with captured standard streams.
  * @param argv Argument vector.
  * @param input Optional stdin text.
  * @param out Stdout buffer.
@@ -618,67 +495,8 @@ static int make_dataset(char *path, size_t size) {
  * @param status Destination process status.
  * @return Zero on success, or one on launch failure.
  */
-static int cli_run(char *const argv[], const char *input,
-        char *out, size_t out_size, char *err, size_t err_size, int *status) {
-    int in_pipe[2], out_pipe[2], err_pipe[2];
-    pid_t pid;
-    ssize_t got;
-    size_t pos;
-    int wait_status;
-
-    if (pipe(in_pipe) || pipe(out_pipe) || pipe(err_pipe)) return 1;
-    pid = fork();
-    if (pid < 0) return 1;
-    if (pid == 0) {
-        dup2(in_pipe[0], STDIN_FILENO);
-        dup2(out_pipe[1], STDOUT_FILENO);
-        dup2(err_pipe[1], STDERR_FILENO);
-        close(in_pipe[0]);
-        close(in_pipe[1]);
-        close(out_pipe[0]);
-        close(out_pipe[1]);
-        close(err_pipe[0]);
-        close(err_pipe[1]);
-        execv(argv[0], argv);
-        _exit(127);
-    }
-
-    close(in_pipe[0]);
-    close(out_pipe[1]);
-    close(err_pipe[1]);
-    if (input && input[0]) {
-        size_t len = strlen(input);
-        size_t written = 0;
-        while (written < len &&
-                (got = write(in_pipe[1], input + written, len - written)) > 0) {
-            written += (size_t)got;
-        }
-    }
-    close(in_pipe[1]);
-
-    pos = 0;
-    while (pos + 1 < out_size &&
-            (got = read(out_pipe[0], out + pos, out_size - pos - 1)) > 0) {
-        pos += (size_t)got;
-    }
-    out[pos] = '\0';
-    close(out_pipe[0]);
-
-    pos = 0;
-    while (pos + 1 < err_size &&
-            (got = read(err_pipe[0], err + pos, err_size - pos - 1)) > 0) {
-        pos += (size_t)got;
-    }
-    err[pos] = '\0';
-    close(err_pipe[0]);
-
-    if (waitpid(pid, &wait_status, 0) < 0) return 1;
-    *status = WIFEXITED(wait_status) ? WEXITSTATUS(wait_status) : 1;
-    return 0;
-}
 
 /**
- * Create one temporary CLI dataset.
  * @param path Destination path buffer.
  * @param size Destination path buffer size.
  * @return Zero on success, or one on failure.
@@ -704,105 +522,6 @@ static int make_dataset(char *path, size_t size) {
 }
 #endif
 
-/**
- * Test the stable external CLI contract.
- * @return Test failure count.
- */
-static int case_kc_hnsw_cli(void) {
-    const char *name = "kc_hnsw_cli";
-    const char *detail = "preserves dataset, query, tuning, help, and version CLI behavior";
-    char dataset[4096];
-    char out[16384];
-    char err[8192];
-    int status = 0;
-    int fail = 0;
-
-    if (KC_HNSW_TEST_CLI[0] == '\0') {
-        case_result(0, name, detail);
-        return 0;
-    }
-    if (make_dataset(dataset, sizeof(dataset))) {
-        case_result(1, name, detail);
-        return 1;
-    }
-
-    {
-        char *args[] = {
-            (char *)KC_HNSW_TEST_CLI,
-            "--dim", "2",
-            "--input", dataset,
-            "--query", "1 0",
-            NULL
-        };
-        fail |= expect(cli_run(args, NULL, out, sizeof(out),
-            err, sizeof(err), &status) == 0);
-        fail |= expect(status == 0);
-        fail |= expect(strstr(out, "x: 1.000000") != NULL);
-        fail |= expect(err[0] == '\0');
-    }
-    {
-        char *args[] = {
-            (char *)KC_HNSW_TEST_CLI,
-            "-d", "2",
-            "-i", dataset,
-            "-m", "l2",
-            "-k", "1",
-            "--max-conn", "8",
-            "--build-effort", "32",
-            "--search-effort", "32",
-            NULL
-        };
-        fail |= expect(cli_run(args, "1 0\n", out, sizeof(out),
-            err, sizeof(err), &status) == 0);
-        fail |= expect(status == 0);
-        fail |= expect(strcmp(out, "x: 0.000000\n") == 0 ||
-            strcmp(out, "x: 0.000000\r\n") == 0);
-        fail |= expect(err[0] == '\0');
-    }
-    {
-        char *args[] = {(char *)KC_HNSW_TEST_CLI, "--help", NULL};
-        fail |= expect(cli_run(args, NULL, out, sizeof(out),
-            err, sizeof(err), &status) == 0);
-        fail |= expect(status == 0 && strstr(out, "Usage:") != NULL);
-    }
-    {
-        char *args[] = {(char *)KC_HNSW_TEST_CLI, "--version", NULL};
-        fail |= expect(cli_run(args, NULL, out, sizeof(out),
-            err, sizeof(err), &status) == 0);
-        fail |= expect(status == 0 && strstr(out, "hnsw build ") != NULL);
-    }
-    {
-        char *args[] = {
-            (char *)KC_HNSW_TEST_CLI,
-            "--dim", "3",
-            "--input", dataset,
-            "--query", "1 0 0",
-            NULL
-        };
-        fail |= expect(cli_run(args, NULL, out, sizeof(out),
-            err, sizeof(err), &status) == 0);
-        fail |= expect(status != 0);
-        fail |= expect(strstr(err, "invalid argument") != NULL);
-    }
-    {
-        char *args[] = {
-            (char *)KC_HNSW_TEST_CLI,
-            "--dim", "2",
-            "--input", dataset,
-            "--query", "1 0",
-            "--metric", "bad",
-            NULL
-        };
-        fail |= expect(cli_run(args, NULL, out, sizeof(out),
-            err, sizeof(err), &status) == 0);
-        fail |= expect(status != 0);
-        fail |= expect(strstr(err, "Unknown metric name") != NULL);
-    }
-
-    remove(dataset);
-    case_result(fail, name, detail);
-    return fail;
-}
 #endif
 
 /**
@@ -836,9 +555,6 @@ static int case_all(void) {
     rc += run_case(case_kc_hnsw_search);
     rc += run_case(case_kc_hnsw_contract);
     rc += run_case(case_kc_hnsw_concurrency);
-#ifndef __EMSCRIPTEN__
-    rc += run_case(case_kc_hnsw_cli);
-#endif
     rc += run_case(case_kc_hnsw_version);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -885,7 +601,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_hnsw_cli") == 0) {
         test_case_total = 1;
         test_case_current = 1;
-        return case_kc_hnsw_cli();
     }
 #endif
     if (strcmp(argv[1], "kc_hnsw_version") == 0) {

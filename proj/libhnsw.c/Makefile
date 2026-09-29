@@ -149,7 +149,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$(2) -DHNSW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(3) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/hnsw $(BIN_DIR)/$(1)/linux/hnsw
 	@echo "OK $(1)/linux"
 endef
 
@@ -207,7 +206,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=$(2) -DHNSW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(3) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/hnsw.exe $(BIN_DIR)/$(1)/windows/hnsw.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libhnsw.dll $(BIN_DIR)/$(1)/windows/libhnsw.dll
 	@echo "OK $(1)/windows"
 endef
@@ -248,7 +246,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/hnsw $(BIN_DIR)/$(1)/macos/hnsw && \
 	echo "OK $(1)/macos"
 endef
 
@@ -279,7 +276,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DHNSW_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-android/out/hnsw $(BIN_DIR)/$(1)/android/hnsw
 	@echo "OK $(1)/android"
 endef
 
@@ -306,7 +302,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DHNSW_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/hnsw.wasm $(BIN_DIR)/wasm32/wasm/hnsw.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libhnsw.wasm $(BIN_DIR)/wasm32/wasm/libhnsw.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -333,10 +329,6 @@ test:
 			echo "missing Windows import library: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/hnsw.exe" ]; then \
-			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
-			exit 1; \
-		fi; \
 		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -346,7 +338,6 @@ test:
 				-DHNSW_BUILD_TESTS=ON \
 				-DHNSW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhnsw.dll \
 				-DHNSW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhnsw.dll.a \
-				-DHNSW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/hnsw.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target hnsw_contract_test || exit 1; \
@@ -357,8 +348,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/hnsw.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/hnsw.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libhnsw.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libhnsw.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -385,7 +376,6 @@ test:
 			exit 1; \
 		fi; \
 		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/hnsw" ]; then \
-			echo "missing native CLI: run make first" >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
@@ -393,7 +383,6 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DHNSW_BUILD_TESTS=ON \
 				-DHNSW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libhnsw.so \
-				-DHNSW_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/hnsw \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target hnsw_contract_test || exit 1; \

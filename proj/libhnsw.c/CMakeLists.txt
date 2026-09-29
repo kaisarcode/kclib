@@ -41,7 +41,7 @@ if(EMSCRIPTEN)
     add_executable(hnsw_wasm ${LIB_SOURCES})
     target_include_directories(hnsw_wasm PRIVATE src)
     set_target_properties(hnsw_wasm PROPERTIES
-        OUTPUT_NAME "hnsw"
+        OUTPUT_NAME "libhnsw"
         SUFFIX ".wasm"
     )
     target_link_options(hnsw_wasm PRIVATE
@@ -78,19 +78,13 @@ elseif(ANDROID)
     target_link_libraries(hnsw_shared m)
 endif()
 
-## Executable
-
-add_executable(hnsw src/hnsw.c)
-target_include_directories(hnsw PRIVATE src)
-target_link_libraries(hnsw hnsw_static)
-
 if(UNIX AND NOT ANDROID)
-    target_link_libraries(hnsw pthread m)
+    
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "armv7|arm|mips")
-        target_link_libraries(hnsw atomic)
+        
     endif()
 elseif(ANDROID)
-    target_link_libraries(hnsw m)
+    
 endif()
 
 endif()
@@ -122,18 +116,10 @@ if(HNSW_BUILD_TESTS)
             set(HNSW_TEST_SHARED_TARGET hnsw_shared)
         endif()
 
-        if(HNSW_TEST_CLI)
-            set(HNSW_TEST_CLI_TARGET_PATH "${HNSW_TEST_CLI}")
-        else()
-            set(HNSW_TEST_CLI_TARGET_PATH "$<TARGET_FILE:hnsw>")
-        endif()
-
         add_executable(hnsw_contract_test src/test.c)
         target_include_directories(hnsw_contract_test PRIVATE src)
         target_link_libraries(hnsw_contract_test ${HNSW_TEST_SHARED_TARGET})
-        target_compile_definitions(hnsw_contract_test PRIVATE
-            KC_HNSW_TEST_CLI="${HNSW_TEST_CLI_TARGET_PATH}"
-        )
+        
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(hnsw_contract_test pthread m)
             if(CMAKE_SYSTEM_PROCESSOR MATCHES "armv7|arm|mips")
