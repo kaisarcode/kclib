@@ -192,7 +192,6 @@ define linux_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DTPL_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/tpl $(BIN_DIR)/$(1)/linux/tpl
 	@echo "OK $(1)/linux"
 endef
 
@@ -248,7 +247,6 @@ define windows_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DTPL_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/tpl.exe $(BIN_DIR)/$(1)/windows/tpl.exe
 	@cp $(BUILD_DIR)/$(1)-windows/out/libtpl.dll $(BIN_DIR)/$(1)/windows/libtpl.dll
 	@echo "OK $(1)/windows"
 endef
@@ -293,7 +291,6 @@ define macos_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	cp $(BUILD_DIR)/$(1)-macos/out/tpl $(BIN_DIR)/$(1)/macos/tpl && \
 	echo "OK $(1)/macos"
 endef
 
@@ -345,14 +342,6 @@ define ios_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
-	if [ -f $(BUILD_DIR)/$(1)-$(2)/out/tpl ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/tpl $(BIN_DIR)/$(1)/$(2)/tpl; \
-	elif [ -f $(BUILD_DIR)/$(1)-$(2)/out/tpl.app/tpl ]; then \
-		cp $(BUILD_DIR)/$(1)-$(2)/out/tpl.app/tpl $(BIN_DIR)/$(1)/$(2)/tpl; \
-	else \
-		echo "Missing built iOS executable for $(1)/$(2)" >&2; \
-		exit 1; \
-	fi && \
 	echo "OK $(1)/$(2)"
 endef
 
@@ -386,7 +375,6 @@ define android_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DTPL_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-android/out/tpl $(BIN_DIR)/$(1)/android/tpl
 	@echo "OK $(1)/android"
 endef
 
@@ -413,7 +401,7 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DTPL_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/wasm32-wasm/out/tpl.wasm $(BIN_DIR)/wasm32/wasm/tpl.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libtpl.wasm $(BIN_DIR)/wasm32/wasm/libtpl.wasm
 	@echo "OK wasm32/wasm"
 endef
 
@@ -440,10 +428,6 @@ test:
 			echo "missing Windows import library: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/tpl.exe" ]; then \
-			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
-			exit 1; \
-		fi; \
 		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -452,7 +436,6 @@ test:
 				-DTPL_BUILD_TESTS=ON \
 				-DTPL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtpl.dll \
 				-DTPL_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtpl.dll.a \
-				-DTPL_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/tpl.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target tpl_contract_test; \
@@ -463,8 +446,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/tpl.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/tpl.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm32/wasm/libtpl.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm32/wasm/libtpl.wasm. Run 'make wasm32/wasm' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -490,16 +473,11 @@ test:
 			echo "missing native shared library: run make first" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/tpl" ]; then \
-			echo "missing native CLI: run make first" >&2; \
-			exit 1; \
-		fi; \
 		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DTPL_BUILD_TESTS=ON \
 				-DTPL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libtpl.so \
-				-DTPL_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/tpl \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target tpl_contract_test; \

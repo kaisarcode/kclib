@@ -39,7 +39,7 @@ if(EMSCRIPTEN)
     add_executable(tpl_wasm ${TPL_SOURCES})
     target_include_directories(tpl_wasm PRIVATE src)
     set_target_properties(tpl_wasm PROPERTIES
-        OUTPUT_NAME "tpl"
+        OUTPUT_NAME "libtpl"
         SUFFIX ".wasm"
     )
     target_link_options(tpl_wasm PRIVATE
@@ -59,14 +59,6 @@ add_library(tpl_static STATIC ${TPL_SOURCES})
 set_target_properties(tpl_static PROPERTIES OUTPUT_NAME tpl PREFIX "lib" POSITION_INDEPENDENT_CODE ON)
 target_include_directories(tpl_static PRIVATE src)
 
-add_executable(tpl_exe src/tpl.c)
-set_target_properties(tpl_exe PROPERTIES OUTPUT_NAME tpl)
-target_include_directories(tpl_exe PRIVATE src)
-target_link_libraries(tpl_exe tpl_static)
-
-if(UNIX AND NOT ANDROID AND NOT APPLE)
-    target_link_libraries(tpl_exe pthread m)
-endif()
 endif()
 
 if(TPL_BUILD_TESTS)
@@ -92,18 +84,9 @@ if(TPL_BUILD_TESTS)
             set(TPL_TEST_SHARED_TARGET tpl_shared)
         endif()
 
-        if(TPL_TEST_CLI)
-            set(TPL_TEST_CLI_TARGET_PATH "${TPL_TEST_CLI}")
-        else()
-            set(TPL_TEST_CLI_TARGET_PATH "$<TARGET_FILE:tpl_exe>")
-        endif()
-
         add_executable(tpl_contract_test src/test.c)
         target_include_directories(tpl_contract_test PRIVATE src)
         target_link_libraries(tpl_contract_test ${TPL_TEST_SHARED_TARGET})
-        target_compile_definitions(tpl_contract_test PRIVATE
-            KC_TPL_TEST_CLI="${TPL_TEST_CLI_TARGET_PATH}"
-        )
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(tpl_contract_test pthread m)
         endif()

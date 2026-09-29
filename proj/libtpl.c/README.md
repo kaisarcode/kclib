@@ -1,50 +1,8 @@
-# tpl.c - Template Renderer
+# libtpl.c - Template Renderer
 
-`tpl.c` is a simple template renderer with includes, scoped variables, blocks, and basic control directives. It provides reusable template instances through `libtpl` and a one-shot `tpl` CLI.
-
----
-## CLI
-
-The CLI receives all render configuration in one invocation. The template
-source can be passed directly or read from stdin when omitted.
-
-### Examples
-
-Render a direct template value:
-
-```bash
-tpl --var title=Home '<h1>{{ title }}</h1>'
-```
-
-Arguments may appear before or after the source:
-
-```bash
-tpl '<h1>{{ title }}</h1>' -var title=Home
-```
-
-Render from stdin:
-
-```bash
-echo '<h1>{{ title }}</h1>' | tpl --var title=Home
-```
-
-Render with includes:
-
-```bash
-tpl --root ./views --var page=Home < views/page.html
-```
-
-### Parameters
-
-| Flag | Description |
-| :--- | :--- |
-| `-root <dir>`, `--root <dir>` | Base directory for include resolution (default: `.`) |
-| `-var <key=value>`, `--var <key=value>` | Render variable; repeatable |
-| `-h`, `--help` | Show help and usage |
-| `-v`, `--version` | Show version |
+`libtpl.c` is a simple template renderer with includes, scoped variables, blocks, and basic control directives. It provides reusable template instances through `libtpl`.
 
 ---
-
 ## Public API
 
 A `kc_tpl_t` represents one reusable template source. The source and root are
@@ -101,7 +59,7 @@ Each render creates a fresh root scope, so values from one render do not persist
 | `{{{ expr }}}` | Raw (unescaped) output |
 | `{{ object.field }}` | Dot notation over flat `object_field` keys and foreach aliases |
 | `{{/* comment */}}` | Template comment, stripped from output |
-| `{{@include "path"}}` | Include a file relative to `--root` |
+| `{{@include "path"}}` | Include a file relative to the configured root |
 | `{{@var name expr}}` | Set a variable in the current scope |
 | `{{@setblock name}} ... {{@endsetblock}}` | Define a named block |
 | `{{@block name}}` | Render a named block |
@@ -143,11 +101,8 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifact: `bin/wasm32/wasm/tpl.wasm`
+- Artifact: `bin/wasm32/wasm/libtpl.wasm`
 - Exports: `kc_tpl_open`, `kc_tpl_render`, `kc_tpl_error`, `kc_tpl_free`, `kc_tpl_close`, `kc_tpl_version`
-- The module contains the reusable library only; the CLI is not compiled into
-    it.
-
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
