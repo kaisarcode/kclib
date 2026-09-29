@@ -29,11 +29,18 @@ protocol, including WebRTC signaling.
 
 The library is the primary interface to REDP2P.
 
-A publisher receives data from connected consumers through a callback. A
-consumer sends data with `kc_redp2p_con_send()` and may receive replies through
-its own callback.
+The index listens on an explicit port because peers need a stable place to
+register and resolve publishers.
 
-No application-facing TCP or UDP port is required in this mode.
+Publishers and consumers work differently. In direct library use they do not
+expose fixed application ports: REDP2P opens the peer transport using ports
+assigned by the operating system, and application data is delivered through the
+public API.
+
+A publisher receives data from connected consumers through a callback. A
+consumer sends data with `kc_redp2p_con_send()` and receives replies through
+its callback. What happens to those bytes after the callback is entirely up to
+the application.
 
 ### Publisher
 
@@ -73,13 +80,14 @@ int main(void)
 }
 ```
 
-With `port = 0`, which is the default above, the publisher works directly
-through the library callback. REDP2P owns the transport-side adapter needed to
-carry application data.
+With `port = 0`, which is the default above, the publisher uses direct library
+I/O. Its network port is not selected by the application; the operating system
+assigns the transport port used by REDP2P.
 
 Each received `kc_redp2p_pub_input_t` identifies the consumer that sent the
-data. The publisher can answer that consumer with
-`kc_redp2p_client_respond()` or close it with
+data. The application may process those bytes directly, store them, transform
+them, forward them to another service, or answer that consumer with
+`kc_redp2p_client_respond()`. The client can also be closed explicitly with
 `kc_redp2p_client_close()`.
 
 ### Consumer
@@ -116,14 +124,18 @@ int main(void)
 ```
 
 The consumer does not choose TCP or UDP. It learns the publisher transport from
-the index.
+the index. In direct mode its REDP2P transport also uses ports assigned by the
+operating system rather than an application-selected local port.
 
-### Port adapters
+### Adapting to local ports
 
-The public API can also adapt an existing local TCP or UDP service instead of
-handling application data directly.
+The callback API is intentionally not tied to a local port. An application can
+do anything with the received data, including forwarding it to a specific local
+TCP or UDP service.
 
-For a publisher, setting `options.port` publishes an existing local service:
+For convenience, the C API also includes that common forwarding pattern
+directly. For a publisher, setting `options.port` adapts an existing local
+service:
 
 ```c
 kc_redp2p_pub_options_t options = {0};
@@ -147,8 +159,10 @@ options.port = 9000;
 
 The remote service is then available locally at `127.0.0.1:9000`.
 
-This port-backed form is an adapter for existing socket-based applications. It
-is also the mode exposed by the CLI.
+This port-backed form is a convenience for existing socket-based applications.
+Conceptually it is equivalent to receiving REDP2P data through the library and
+forwarding it to a chosen local port. The CLI is built around this convenience
+mode.
 
 ### Index
 
@@ -302,8 +316,10 @@ Index policy can be configured with `REDP2P_SEATS`, `REDP2P_POW`,
 
 ## CLI
 
-The CLI is a convenience interface for exposing existing local TCP or UDP
-services through REDP2P.
+The CLI is a convenience interface built on top of the library's local-port
+adapter. It is useful when the desired behavior is specifically to bridge an
+existing TCP or UDP service through REDP2P, but it is not the primary data model
+of the library.
 
 It maps the same three roles to commands:
 
