@@ -127,7 +127,8 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
  * Optional STUN/TURN fields affect only internal path establishment; the
  * established application channel and callbacks are unchanged.
  *
- * @param options Publisher identity, index, protocol, relay settings, and callbacks.
+ * @param options Publisher identity, index, protocol, relay settings, and
+ * callbacks.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
 int kc_redp2p_pub(kc_redp2p_pub_t **out,
