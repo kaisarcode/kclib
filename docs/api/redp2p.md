@@ -25,6 +25,9 @@ local publisher = redp2p.pub({
     protocol = redp2p.TCP,
     pass = nil,
     stun = nil,
+    turn = nil,
+    turn_user = nil,
+    turn_pass = nil,
 
     connect = function(client)
     end,
@@ -38,6 +41,9 @@ local consumer = redp2p.con({
     id = "service-a",
     index = "index.example.com:9876",
     stun = nil,
+    turn = nil,
+    turn_user = nil,
+    turn_pass = nil,
 
     receive = function(data)
     end
@@ -55,6 +61,11 @@ The three capability objects are index, publisher, and consumer.
 An index exposes `list()` and `close()`. A publisher exposes `close()`; clients received by publisher callbacks expose `respond(bytes)` and `close()`. A consumer exposes `send(bytes)` and `close()`.
 
 The consumer does not select TCP or UDP. It learns the publisher transport through the index. TCP preserves stream semantics; UDP preserves datagram boundaries.
+
+Optional STUN/TURN settings only affect peer path establishment. Direct
+connectivity remains preferred; TURN is used as a relay fallback. These
+options do not change the publisher, consumer, client, callback, or
+send/respond API.
 
 ## JavaScript
 
@@ -77,6 +88,9 @@ const publisher = await redp2p.pub({
   protocol: redp2p.TCP,
   pass: null,
   stun: null,
+  turn: null,
+  turn_user: null,
+  turn_pass: null,
 
   connect(client) {},
 
@@ -89,6 +103,9 @@ const consumer = await redp2p.con({
   id: "service-a",
   index: "index.example.com:9876",
   stun: null,
+  turn: null,
+  turn_user: null,
+  turn_pass: null,
   receive(data) {}
 });
 
