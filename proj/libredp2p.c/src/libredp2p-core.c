@@ -1367,7 +1367,6 @@ int redp2p_context_create(redp2p_t **out) {
     ctx->bind_port = 0;
     ctx->explicit_port = 0;
     ctx->proto = REDP2P_PROTO_TCP;
-    ctx->turn_fd = REDP2P_FD_INVALID;
     ctx->vips = NULL;
     ctx->n_vips = 0;
     ctx->vips_cap = 0;
