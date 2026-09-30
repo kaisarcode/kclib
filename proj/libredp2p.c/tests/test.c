@@ -112,6 +112,26 @@ typedef struct {
     test_thread_t thread;
 } test_control_stub_t;
 
+#define TEST_TURN_ALLOCATIONS 8
+typedef struct {
+    int used;
+    struct sockaddr_storage client;
+    test_socklen_t client_len;
+    struct sockaddr_storage relay;
+} test_turn_allocation_t;
+
+typedef struct {
+    test_socket_t fd;
+    unsigned short port;
+    char relay_host[INET_ADDRSTRLEN];
+    _Atomic int stop;
+    _Atomic int allocate_count;
+    _Atomic int permission_count;
+    _Atomic int relayed_count;
+    test_turn_allocation_t allocations[TEST_TURN_ALLOCATIONS];
+    test_thread_t thread;
+} test_turn_stub_t;
+
 typedef struct {
     test_socket_t fd;
     unsigned short port;
@@ -223,6 +243,9 @@ static int test_thread_start(test_thread_t *thread, void *(*run)(void *),
 static int test_index_start_configured(test_index_t *index,
     unsigned short port, size_t seats, const char *vip, const char *pass);
 static int test_index_stop(test_index_t *index);
+static int test_turn_start(test_turn_stub_t *turn, unsigned short port,
+    const char *relay_host);
+static int test_turn_stop(test_turn_stub_t *turn);
 
 typedef struct {
     uint32_t state[8];
@@ -7048,6 +7071,490 @@ static int case_kc_redp2p_turn_api(void)
         fail += test_turn_server_stop(&turn_server);
     case_result(fail, "kc_redp2p_turn_api",
         "simulated TURN preserves the public TCP/UDP data API and remains fallback-only");
+    return fail == 0 ? 0 : 1;
+}
+
+
+#define TEST_TURN_MAGIC 0x2112A442u
+#define TEST_TURN_ALLOCATE_REQ 0x0003
+#define TEST_TURN_ALLOCATE_OK 0x0103
+#define TEST_TURN_ALLOCATE_ERR 0x0113
+#define TEST_TURN_PERMISSION_REQ 0x0008
+#define TEST_TURN_PERMISSION_OK 0x0108
+#define TEST_TURN_SEND_IND 0x0016
+#define TEST_TURN_DATA_IND 0x0017
+#define TEST_TURN_ATTR_USERNAME 0x0006
+#define TEST_TURN_ATTR_ERROR_CODE 0x0009
+#define TEST_TURN_ATTR_LIFETIME 0x000d
+#define TEST_TURN_ATTR_XOR_PEER 0x0012
+#define TEST_TURN_ATTR_DATA 0x0013
+#define TEST_TURN_ATTR_REALM 0x0014
+#define TEST_TURN_ATTR_NONCE 0x0015
+#define TEST_TURN_ATTR_XOR_RELAYED 0x0016
+
+static void test_turn_put16(unsigned char *buf, size_t off, unsigned int value)
+{
+    buf[off] = (unsigned char)(value >> 8);
+    buf[off + 1] = (unsigned char)value;
+}
+
+static void test_turn_put32(unsigned char *buf, size_t off, uint32_t value)
+{
+    buf[off] = (unsigned char)(value >> 24);
+    buf[off + 1] = (unsigned char)(value >> 16);
+    buf[off + 2] = (unsigned char)(value >> 8);
+    buf[off + 3] = (unsigned char)value;
+}
+
+static int test_turn_header(unsigned char *buf, size_t cap, uint16_t type,
+    const unsigned char txid[12])
+{
+    if (!buf || cap < 20 || !txid) return 0;
+    memset(buf, 0, 20);
+    test_turn_put16(buf, 0, type);
+    test_turn_put32(buf, 4, TEST_TURN_MAGIC);
+    memcpy(buf + 8, txid, 12);
+    return 20;
+}
+
+static int test_turn_attr(unsigned char *buf, size_t cap, int *off,
+    uint16_t type, const void *data, size_t len)
+{
+    size_t padded;
+    if (!buf || !off || len > 65535U) return 0;
+    padded = (len + 3U) & ~3U;
+    if ((size_t)*off + 4U + padded > cap) return 0;
+    test_turn_put16(buf, (size_t)*off, type);
+    test_turn_put16(buf, (size_t)*off + 2U, (unsigned int)len);
+    if (len && data) memcpy(buf + *off + 4, data, len);
+    if (padded > len) memset(buf + *off + 4 + len, 0, padded - len);
+    *off += (int)(4U + padded);
+    return 1;
+}
+
+static int test_turn_find_attr(const unsigned char *buf, int len, uint16_t type,
+    int *attr_len)
+{
+    int off = 20;
+    while (off + 4 <= len) {
+        int current = ((int)buf[off] << 8) | buf[off + 1];
+        int n = ((int)buf[off + 2] << 8) | buf[off + 3];
+        int padded = (n + 3) & ~3;
+        if (n < 0 || off + 4 + padded > len) return -1;
+        if (current == type) {
+            if (attr_len) *attr_len = n;
+            return off + 4;
+        }
+        off += 4 + padded;
+    }
+    return -1;
+}
+
+static int test_turn_sockaddr_equal(const struct sockaddr_storage *a,
+    const struct sockaddr_storage *b)
+{
+    if (!a || !b || a->ss_family != b->ss_family) return 0;
+    if (a->ss_family == AF_INET) {
+        const struct sockaddr_in *aa = (const struct sockaddr_in *)a;
+        const struct sockaddr_in *bb = (const struct sockaddr_in *)b;
+        return aa->sin_port == bb->sin_port &&
+            aa->sin_addr.s_addr == bb->sin_addr.s_addr;
+    }
+    return 0;
+}
+
+static int test_turn_xor_addr(unsigned char out[8],
+    const struct sockaddr_storage *addr)
+{
+    const struct sockaddr_in *v4;
+    uint16_t port;
+    uint32_t host;
+    uint32_t xhost;
+
+    if (!addr || addr->ss_family != AF_INET) return 0;
+    v4 = (const struct sockaddr_in *)addr;
+    port = ntohs(v4->sin_port) ^ (uint16_t)(TEST_TURN_MAGIC >> 16);
+    host = ntohl(v4->sin_addr.s_addr);
+    xhost = host ^ TEST_TURN_MAGIC;
+    memset(out, 0, 8);
+    out[1] = 0x01;
+    out[2] = (unsigned char)(port >> 8);
+    out[3] = (unsigned char)port;
+    out[4] = (unsigned char)(xhost >> 24);
+    out[5] = (unsigned char)(xhost >> 16);
+    out[6] = (unsigned char)(xhost >> 8);
+    out[7] = (unsigned char)xhost;
+    return 1;
+}
+
+static int test_turn_decode_xor_addr(const unsigned char *data, int len,
+    struct sockaddr_storage *out)
+{
+    struct sockaddr_in *v4;
+    uint16_t xport;
+    uint32_t xhost;
+    uint32_t host;
+
+    if (!data || len < 8 || data[1] != 0x01 || !out) return 0;
+    memset(out, 0, sizeof(*out));
+    v4 = (struct sockaddr_in *)out;
+    v4->sin_family = AF_INET;
+    xport = (uint16_t)(((unsigned)data[2] << 8) | data[3]);
+    v4->sin_port = htons(xport ^ (uint16_t)(TEST_TURN_MAGIC >> 16));
+    xhost = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) |
+        ((uint32_t)data[6] << 8) | data[7];
+    host = xhost ^ TEST_TURN_MAGIC;
+    v4->sin_addr.s_addr = htonl(host);
+    return 1;
+}
+
+static test_turn_allocation_t *test_turn_client_allocation(test_turn_stub_t *turn,
+    const struct sockaddr_storage *client)
+{
+    int i;
+    for (i = 0; i < TEST_TURN_ALLOCATIONS; i++) {
+        if (turn->allocations[i].used &&
+            test_turn_sockaddr_equal(&turn->allocations[i].client, client))
+            return &turn->allocations[i];
+    }
+    return NULL;
+}
+
+static test_turn_allocation_t *test_turn_relay_allocation(test_turn_stub_t *turn,
+    const struct sockaddr_storage *relay)
+{
+    int i;
+    for (i = 0; i < TEST_TURN_ALLOCATIONS; i++) {
+        if (turn->allocations[i].used &&
+            test_turn_sockaddr_equal(&turn->allocations[i].relay, relay))
+            return &turn->allocations[i];
+    }
+    return NULL;
+}
+
+static test_turn_allocation_t *test_turn_allocate_client(test_turn_stub_t *turn,
+    const struct sockaddr_storage *client, test_socklen_t client_len)
+{
+    test_turn_allocation_t *allocation;
+    struct sockaddr_in *relay;
+    int i;
+
+    allocation = test_turn_client_allocation(turn, client);
+    if (allocation) return allocation;
+    for (i = 0; i < TEST_TURN_ALLOCATIONS; i++) {
+        if (turn->allocations[i].used) continue;
+        allocation = &turn->allocations[i];
+        memset(allocation, 0, sizeof(*allocation));
+        allocation->used = 1;
+        allocation->client = *client;
+        allocation->client_len = client_len;
+        relay = (struct sockaddr_in *)&allocation->relay;
+        relay->sin_family = AF_INET;
+        relay->sin_port = htons((unsigned short)(turn->port + 100U + (unsigned)i));
+        if (inet_pton(AF_INET, turn->relay_host, &relay->sin_addr) != 1) {
+            memset(allocation, 0, sizeof(*allocation));
+            return NULL;
+        }
+        return allocation;
+    }
+    return NULL;
+}
+
+static int test_turn_send(test_turn_stub_t *turn,
+    const struct sockaddr_storage *to, test_socklen_t to_len,
+    const unsigned char *data, size_t len)
+{
+    return sendto(turn->fd, (const char *)data, (int)len, 0,
+        (const struct sockaddr *)to, to_len) == (int)len ? 0 : 1;
+}
+
+static int test_turn_reply_challenge(test_turn_stub_t *turn,
+    const struct sockaddr_storage *to, test_socklen_t to_len,
+    const unsigned char txid[12])
+{
+    unsigned char buf[256];
+    const unsigned char error[4] = {0, 0, 4, 1};
+    const char realm[] = "redp2p-test";
+    const char nonce[] = "local-turn-nonce";
+    int off = test_turn_header(buf, sizeof(buf), TEST_TURN_ALLOCATE_ERR, txid);
+
+    if (!off ||
+        !test_turn_attr(buf, sizeof(buf), &off, TEST_TURN_ATTR_ERROR_CODE,
+            error, sizeof(error)) ||
+        !test_turn_attr(buf, sizeof(buf), &off, TEST_TURN_ATTR_REALM,
+            realm, sizeof(realm) - 1U) ||
+        !test_turn_attr(buf, sizeof(buf), &off, TEST_TURN_ATTR_NONCE,
+            nonce, sizeof(nonce) - 1U))
+        return 1;
+    test_turn_put16(buf, 2, (unsigned int)(off - 20));
+    return test_turn_send(turn, to, to_len, buf, (size_t)off);
+}
+
+static int test_turn_reply_allocate(test_turn_stub_t *turn,
+    const struct sockaddr_storage *to, test_socklen_t to_len,
+    const unsigned char txid[12])
+{
+    unsigned char buf[256];
+    unsigned char xrelay[8];
+    unsigned char lifetime[4] = {0, 0, 2, 88};
+    test_turn_allocation_t *allocation;
+    int off;
+
+    allocation = test_turn_allocate_client(turn, to, to_len);
+    if (!allocation || !test_turn_xor_addr(xrelay, &allocation->relay)) return 1;
+    off = test_turn_header(buf, sizeof(buf), TEST_TURN_ALLOCATE_OK, txid);
+    if (!off ||
+        !test_turn_attr(buf, sizeof(buf), &off, TEST_TURN_ATTR_XOR_RELAYED,
+            xrelay, sizeof(xrelay)) ||
+        !test_turn_attr(buf, sizeof(buf), &off, TEST_TURN_ATTR_LIFETIME,
+            lifetime, sizeof(lifetime)))
+        return 1;
+    test_turn_put16(buf, 2, (unsigned int)(off - 20));
+    atomic_fetch_add(&turn->allocate_count, 1);
+    return test_turn_send(turn, to, to_len, buf, (size_t)off);
+}
+
+static int test_turn_reply_permission(test_turn_stub_t *turn,
+    const struct sockaddr_storage *to, test_socklen_t to_len,
+    const unsigned char txid[12])
+{
+    unsigned char buf[64];
+    int off = test_turn_header(buf, sizeof(buf), TEST_TURN_PERMISSION_OK, txid);
+    if (!off) return 1;
+    test_turn_put16(buf, 2, 0);
+    atomic_fetch_add(&turn->permission_count, 1);
+    return test_turn_send(turn, to, to_len, buf, (size_t)off);
+}
+
+static int test_turn_forward_data(test_turn_stub_t *turn,
+    test_turn_allocation_t *source, const unsigned char *packet, int packet_len)
+{
+    unsigned char out[8192];
+    unsigned char xpeer[8];
+    struct sockaddr_storage target_relay;
+    test_turn_allocation_t *target;
+    int peer_len = 0, data_len = 0;
+    int peer_off, data_off, off;
+
+    peer_off = test_turn_find_attr(packet, packet_len, TEST_TURN_ATTR_XOR_PEER,
+        &peer_len);
+    data_off = test_turn_find_attr(packet, packet_len, TEST_TURN_ATTR_DATA,
+        &data_len);
+    if (peer_off < 0 || data_off < 0 || data_len < 0 ||
+        !test_turn_decode_xor_addr(packet + peer_off, peer_len, &target_relay))
+        return 1;
+    target = test_turn_relay_allocation(turn, &target_relay);
+    if (!target || !test_turn_xor_addr(xpeer, &source->relay)) return 1;
+    off = test_turn_header(out, sizeof(out), TEST_TURN_DATA_IND, packet + 8);
+    if (!off ||
+        !test_turn_attr(out, sizeof(out), &off, TEST_TURN_ATTR_XOR_PEER,
+            xpeer, sizeof(xpeer)) ||
+        !test_turn_attr(out, sizeof(out), &off, TEST_TURN_ATTR_DATA,
+            packet + data_off, (size_t)data_len))
+        return 1;
+    test_turn_put16(out, 2, (unsigned int)(off - 20));
+    atomic_fetch_add(&turn->relayed_count, 1);
+    return test_turn_send(turn, &target->client, target->client_len, out,
+        (size_t)off);
+}
+
+#ifdef _WIN32
+static DWORD WINAPI test_turn_main(void *arg)
+#else
+static void *test_turn_main(void *arg)
+#endif
+{
+    test_turn_stub_t *turn = (test_turn_stub_t *)arg;
+    unsigned char packet[8192];
+
+    while (!atomic_load(&turn->stop)) {
+        struct sockaddr_storage from;
+        test_socklen_t from_len = (test_socklen_t)sizeof(from);
+        test_turn_allocation_t *allocation;
+        int n;
+        int type;
+        int username_len = 0;
+
+        n = (int)recvfrom(turn->fd, (char *)packet, sizeof(packet), 0,
+            (struct sockaddr *)&from, &from_len);
+        if (n < 20) continue;
+        if ((((uint32_t)packet[4] << 24) | ((uint32_t)packet[5] << 16) |
+            ((uint32_t)packet[6] << 8) | packet[7]) != TEST_TURN_MAGIC)
+            continue;
+        type = ((int)packet[0] << 8) | packet[1];
+        if (type == TEST_TURN_ALLOCATE_REQ) {
+            if (test_turn_find_attr(packet, n, TEST_TURN_ATTR_USERNAME,
+                &username_len) < 0)
+                (void)test_turn_reply_challenge(turn, &from, from_len, packet + 8);
+            else
+                (void)test_turn_reply_allocate(turn, &from, from_len, packet + 8);
+        } else if (type == TEST_TURN_PERMISSION_REQ) {
+            (void)test_turn_reply_permission(turn, &from, from_len, packet + 8);
+        } else if (type == TEST_TURN_SEND_IND) {
+            allocation = test_turn_client_allocation(turn, &from);
+            if (allocation) (void)test_turn_forward_data(turn, allocation,
+                packet, n);
+        }
+    }
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+static int test_turn_start(test_turn_stub_t *turn, unsigned short port,
+    const char *relay_host)
+{
+    struct sockaddr_in addr;
+
+    if (!turn || !relay_host) return 1;
+    memset(turn, 0, sizeof(*turn));
+    turn->fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (turn->fd == TEST_SOCKET_INVALID) return 1;
+    turn->port = port;
+    snprintf(turn->relay_host, sizeof(turn->relay_host), "%s", relay_host);
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(turn->fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        test_socket_close(turn->fd);
+        turn->fd = TEST_SOCKET_INVALID;
+        return 1;
+    }
+    test_socket_timeout(turn->fd, 100U);
+    atomic_store(&turn->stop, 0);
+    if (test_thread_start(&turn->thread, test_turn_main, turn) != 0) {
+        test_socket_close(turn->fd);
+        turn->fd = TEST_SOCKET_INVALID;
+        return 1;
+    }
+    return 0;
+}
+
+static int test_turn_stop(test_turn_stub_t *turn)
+{
+    int fail = 0;
+    if (!turn || turn->fd == TEST_SOCKET_INVALID) return 0;
+    atomic_store(&turn->stop, 1);
+    fail += test_thread_join(turn->thread);
+    fail += test_socket_close(turn->fd);
+    turn->fd = TEST_SOCKET_INVALID;
+    return fail;
+}
+
+static int test_turn_api_roundtrip(int protocol, const char *id,
+    const char *index, const char *turn_url)
+{
+    kc_redp2p_pub_t *pub = NULL;
+    kc_redp2p_con_t *con = NULL;
+    kc_redp2p_pub_options_t pub_options;
+    kc_redp2p_con_options_t con_options;
+    test_direct_api_state_t state;
+    uint64_t deadline;
+    int fail = 0;
+
+    memset(&state, 0, sizeof(state));
+    atomic_store(&state.respond_status, KC_REDP2P_ERROR);
+    memset(&pub_options, 0, sizeof(pub_options));
+    pub_options.id = id;
+    pub_options.index = index;
+    pub_options.protocol = protocol;
+    pub_options.turn = turn_url;
+    pub_options.turn_user = "user";
+    pub_options.turn_pass = "pass";
+    pub_options.receive = test_direct_api_pub_receive;
+    pub_options.userdata = &state;
+    fail += expect_int("TURN pub create", KC_REDP2P_OK,
+        kc_redp2p_pub(&pub, &pub_options));
+
+    memset(&con_options, 0, sizeof(con_options));
+    con_options.id = id;
+    con_options.index = index;
+    con_options.turn = turn_url;
+    con_options.turn_user = "user";
+    con_options.turn_pass = "pass";
+    con_options.receive = test_direct_api_con_receive;
+    con_options.userdata = &state;
+    if (fail == 0)
+        fail += expect_int("TURN con create", KC_REDP2P_OK,
+            kc_redp2p_con(&con, &con_options));
+    if (fail == 0)
+        fail += expect_int("TURN public send", KC_REDP2P_OK,
+            kc_redp2p_con_send(con, "ping", 4));
+
+    deadline = redp2p_now_ms() + 10000U;
+    while (fail == 0 && atomic_load(&state.consumer_received) == 0 &&
+        redp2p_now_ms() < deadline)
+        test_sleep_ms(10U);
+
+    fail += expect_int("TURN publisher receive", 1,
+        atomic_load(&state.publisher_received));
+    fail += expect_int("TURN respond", KC_REDP2P_OK,
+        atomic_load(&state.respond_status));
+    fail += expect_int("TURN consumer receive", 1,
+        atomic_load(&state.consumer_received));
+
+    kc_redp2p_con_close(con);
+    kc_redp2p_pub_close(pub);
+    return fail == 0 ? 0 : 1;
+}
+
+static int case_kc_redp2p_turn_api(void)
+{
+    kc_redp2p_idx_t *idx = NULL;
+    kc_redp2p_idx_options_t idx_options;
+    test_turn_stub_t turn;
+    char index[320];
+    char turn_url[128];
+    char local_ip[INET_ADDRSTRLEN];
+    unsigned short index_port;
+    unsigned short turn_port;
+    int fail = 0;
+
+    memset(&turn, 0, sizeof(turn));
+    turn.fd = TEST_SOCKET_INVALID;
+    index_port = (unsigned short)(test_port_base() + 414U);
+    turn_port = (unsigned short)(test_port_base() + 415U);
+    fail += expect_int("TURN resolve local unicast", 0,
+        test_local_unicast_ipv4(local_ip));
+    if (fail == 0)
+        fail += expect_int("TURN stub start", 0,
+            test_turn_start(&turn, turn_port, local_ip));
+
+    memset(&idx_options, 0, sizeof(idx_options));
+    idx_options.host = local_ip;
+    idx_options.port = index_port;
+    idx_options.max_consumers = 32;
+    if (fail == 0)
+        fail += expect_int("TURN index", KC_REDP2P_OK,
+            kc_redp2p_idx(&idx, &idx_options));
+
+    snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)index_port);
+    snprintf(turn_url, sizeof(turn_url), "turn:127.0.0.1:%u",
+        (unsigned)turn_port);
+    if (fail == 0)
+        fail += expect_int("force TURN path", 0,
+            test_setenv("REDP2P_TEST_FORCE_TURN", "1"));
+    if (fail == 0)
+        fail += test_turn_api_roundtrip(KC_REDP2P_UDP, "turnudp", index,
+            turn_url);
+    if (fail == 0)
+        fail += test_turn_api_roundtrip(KC_REDP2P_TCP, "turntcp", index,
+            turn_url);
+    fail += expect_true("TURN allocations used",
+        atomic_load(&turn.allocate_count) >= 4);
+    fail += expect_true("TURN permissions used",
+        atomic_load(&turn.permission_count) > 0);
+    fail += expect_true("TURN relayed data used",
+        atomic_load(&turn.relayed_count) > 0);
+
+    test_setenv("REDP2P_TEST_FORCE_TURN", NULL);
+    kc_redp2p_idx_close(idx);
+    fail += test_turn_stop(&turn);
+    case_result(fail, "kc_redp2p_turn_api",
+        "public TCP/UDP API roundtrips through a deterministic local TURN relay");
     return fail == 0 ? 0 : 1;
 }
 
