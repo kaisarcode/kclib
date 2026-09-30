@@ -196,8 +196,8 @@ int redp2p_session_unpack(const unsigned char *buf, size_t len,
  * Sends one UDP session envelope with the reserved session field zeroed.
  * @return Sent byte count, or -1 on invalid payload or socket failure.
  */
-int redp2p_udp_send(redp2p_fd_t fd,
-const struct sockaddr_storage *peer, uint8_t role, uint8_t type,
+int redp2p_udp_send(redp2p_t *ctx, redp2p_fd_t fd,
+const struct sockaddr_storage *peer, int via_turn, uint8_t role, uint8_t type,
 const void *payload, size_t payload_len)
 {
     unsigned char frame[REDP2P_SESSION_ENVELOPE_SZ + REDP2P_UDP_PAYLOAD_MAX];
@@ -207,7 +207,7 @@ const void *payload, size_t payload_len)
     len = redp2p_session_pack(type, role, REDP2P_PROTO_UDP, session_id,
         payload, payload_len, frame);
     if (!len) return -1;
-    return redp2p_sendto_addr(fd, frame, len, peer);
+    return redp2p_transport_sendto(ctx, fd, frame, len, peer, via_turn);
 }
 
 /**
@@ -246,13 +246,9 @@ int redp2p_stream_envelope_valid(const redp2p_session_envelope_t *envelope)
 static int redp2p_stream_send_datagram(redp2p_stream_adapter_t *adapter,
     const unsigned char *frame, size_t frame_len)
 {
-    socklen_t peer_len;
-
-    peer_len = redp2p_sockaddr_len(&adapter->peer_addr);
-    if (peer_len == 0 || sendto(adapter->fd, (const char *)frame, frame_len, 0,
-        (const struct sockaddr *)&adapter->peer_addr, peer_len) < 0)
-        return -1;
-    return 0;
+    if (!adapter) return -1;
+    return redp2p_transport_sendto(adapter->ctx, adapter->fd, frame, frame_len,
+        &adapter->peer_addr, adapter->via_turn) < 0 ? -1 : 0;
 }
 
 /**
@@ -315,7 +311,7 @@ int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
     int initiator, redp2p_fd_t fd,
     const struct sockaddr_storage *peer_addr,
     const unsigned char session_id[REDP2P_SESSION_ID_SZ],
-    const char *session_hex, uint8_t transport_protocol)
+    const char *session_hex, uint8_t transport_protocol, int via_turn)
 {
     uint64_t now;
 
@@ -331,6 +327,7 @@ int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
     st->adapter->role = initiator ? REDP2P_SESSION_ROLE_INITIATOR :
         REDP2P_SESSION_ROLE_RESPONDER;
     st->adapter->protocol = transport_protocol;
+    st->adapter->via_turn = via_turn ? 1 : 0;
     memcpy(st->adapter->session_id, session_id, REDP2P_SESSION_ID_SZ);
     st->kcp = ikcp_create(redp2p_stream_conv(session_id), st->adapter);
     if (!st->kcp || ikcp_setmtu(st->kcp, REDP2P_STREAM_KCP_MTU) != 0 ||
