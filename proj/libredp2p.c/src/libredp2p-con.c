@@ -923,9 +923,16 @@ redp2p_consumer_runtime_t *runtime)
             buf, sizeof(buf), 0, &from, &fromlen, &via_turn);
         if (n == -2) continue;
         if (n < 0 || (size_t)n > sizeof(buf)) continue;
-        if (!redp2p_sockaddr_equal(&from, &runtime->sessions[i].peer_addr))
+        if (!redp2p_sockaddr_equal(&from, &runtime->sessions[i].peer_addr)) {
+            fprintf(stderr, "[REDP2P-DIAG] con peer: address mismatch\n");
             continue;
-        if (via_turn != runtime->sessions[i].via_turn) continue;
+        }
+        if (via_turn != runtime->sessions[i].via_turn) {
+            fprintf(stderr,
+                "[REDP2P-DIAG] con peer: route mismatch rx=%d session=%d\n",
+                via_turn, runtime->sessions[i].via_turn);
+            continue;
+        }
         if (!runtime->sessions[i].is_tcp) {
             if (!redp2p_session_unpack((const unsigned char *)buf, (size_t)n,
                 &envelope) || !redp2p_udp_envelope_valid(&envelope,
