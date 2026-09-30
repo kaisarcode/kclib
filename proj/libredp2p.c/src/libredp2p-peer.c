@@ -2708,8 +2708,12 @@ int redp2p_transport_recvfrom(redp2p_t *ctx, redp2p_fd_t fd,
     size_t copy_len;
 
     if (via_turn) *via_turn = 0;
-    redp2p_turn_refresh_if_due(ctx, fd);
     allocation = redp2p_turn_find_allocation(ctx, fd);
+    if (!allocation || !allocation->ready) {
+        return (int)recvfrom(fd, (char *)buf, cap, flags,
+            (struct sockaddr *)from, from_len);
+    }
+    redp2p_turn_refresh_if_due(ctx, fd);
     raw_len = sizeof(raw_from);
     n = (int)recvfrom(fd, (char *)packet, sizeof(packet), flags,
         (struct sockaddr *)&raw_from, &raw_len);
