@@ -1953,7 +1953,8 @@ int redp2p_parse_candidates(JSON_Object *obj, const char *field,
         addr = json_object_get_string(item, "addr");
         if (!type_text || !addr || strlen(addr) > REDP2P_ADDR_MAX) return 0;
         if (!redp2p_parse_candidate_type(type_text, &type)) return 0;
-        if (type != REDP2P_CAND_HOST && type != REDP2P_CAND_OBSERVED)
+        if (type != REDP2P_CAND_HOST && type != REDP2P_CAND_OBSERVED &&
+            type != REDP2P_CAND_RELAY)
             return 0;
         if (inet_pton(AF_INET, addr, &ipv4) != 1 &&
             inet_pton(AF_INET6, addr, &ipv6) != 1)
