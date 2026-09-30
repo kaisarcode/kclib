@@ -6923,7 +6923,7 @@ static int case_kc_redp2p_turn_api(void)
         test_local_unicast_ipv4(local_ip));
     if (fail == 0)
         fail += expect_int("TURN stub start", 0,
-            test_turn_start(&turn, turn_port, local_ip));
+            test_turn_start(&turn, turn_port, "192.0.2.10"));
 
     memset(&idx_options, 0, sizeof(idx_options));
     idx_options.host = local_ip;
