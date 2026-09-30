@@ -1475,6 +1475,7 @@ JSON_Object *out)
         char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1];
         unsigned char session_id[REDP2P_SESSION_ID_SZ];
         int candidate_count;
+        int peer_via_turn;
 
         memset(session_hex, 0, sizeof(session_hex));
         memset(session_id, 0, sizeof(session_id));
