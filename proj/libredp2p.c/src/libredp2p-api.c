@@ -107,6 +107,7 @@ struct kc_redp2p_con {
     _Atomic int adapter_stop;
     _Atomic int closing;
     _Atomic int draining;
+    _Atomic uint32_t drain_deadline_ms;
     _Atomic int deferred_close;
     kc_redp2p_io_mutex_t io_mutex;
     int io_mutex_initialized;
@@ -132,6 +133,9 @@ static void kc_redp2p_pub_destroy_deferred(kc_redp2p_pub_t *pub);
  */
 static void kc_redp2p_con_destroy_deferred(kc_redp2p_con_t *con);
 static void kc_redp2p_sleep_tick(void);
+static uint64_t kc_redp2p_now_ms(void);
+
+#define KC_REDP2P_CON_DRAIN_MS 5000U
 
 #ifdef REDP2P_TESTING
 static _Atomic int kc_redp2p_test_io_hold_flag;
@@ -583,6 +587,10 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
     {
         int ready;
         int n;
+
+        if (atomic_load(&con->draining) && (int32_t)((uint32_t)
+            kc_redp2p_now_ms() - atomic_load(&con->drain_deadline_ms)) >= 0)
+            break;
 
         memset(&fd, 0, sizeof(fd));
         fd.fd = con->adapter_fd;
@@ -1740,7 +1748,11 @@ void kc_redp2p_con_close(kc_redp2p_con_t *con)
         con->runtime.ctx &&
         con->runtime.ctx->proto == REDP2P_PROTO_TCP &&
         !REDP2P_ISERR(con->adapter_fd);
-    if (drain) atomic_store(&con->draining, 1);
+    if (drain) {
+        atomic_store(&con->draining, 1);
+        atomic_store(&con->drain_deadline_ms, (uint32_t)kc_redp2p_now_ms() +
+            KC_REDP2P_CON_DRAIN_MS);
+    }
     if (atomic_exchange(&con->closing, 1)) return;
 
     if (drain && kc_redp2p_con_adapter_shutdown_write(con) == 0) {
