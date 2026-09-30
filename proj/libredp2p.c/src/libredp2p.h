@@ -31,14 +31,6 @@ typedef struct {
 typedef void (*kc_redp2p_pub_connect_fn)(
     kc_redp2p_client_t *client, void *userdata);
 
-/**
- * Reports one received event to the publisher.
- * TCP receive callbacks report peer send EOF as NULL data with zero size.
- * UDP zero-length datagrams remain ordinary data events with non-NULL data.
- * @param input Event input describing the received bytes.
- * @param userdata Caller context.
- * @return void
- */
 typedef void (*kc_redp2p_pub_receive_fn)(
     const kc_redp2p_pub_input_t *input, void *userdata);
 typedef void (*kc_redp2p_con_receive_fn)(
