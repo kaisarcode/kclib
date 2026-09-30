@@ -333,7 +333,10 @@ int *skip_iteration)
         if (skip_iteration) *skip_iteration = 1;
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
         crypto_wipe(session_hex, REDP2P_SESSION_ID_SZ * 2 + 1);
-        if (!REDP2P_ISERR(peer_fd)) REDP2P_FD_CLOSE(peer_fd);
+        if (!REDP2P_ISERR(peer_fd)) {
+            redp2p_transport_forget(runtime->ctx, peer_fd);
+            REDP2P_FD_CLOSE(peer_fd);
+        }
         return REDP2P_ENET;
     }
     punch_port = 0;
@@ -346,6 +349,7 @@ int *skip_iteration)
         if (skip_iteration) *skip_iteration = 1;
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
         crypto_wipe(session_hex, REDP2P_SESSION_ID_SZ * 2 + 1);
+        redp2p_transport_forget(runtime->ctx, peer_fd);
         REDP2P_FD_CLOSE(peer_fd);
         return result;
     }
@@ -358,6 +362,7 @@ int *skip_iteration)
         runtime->peer_candidates, runtime->n_peer_candidates, &peer_addr,
         &peer_via_turn);
     if (result != REDP2P_OK) {
+        redp2p_transport_forget(runtime->ctx, peer_fd);
         REDP2P_FD_CLOSE((int)peer_fd);
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
         crypto_wipe(session_hex, REDP2P_SESSION_ID_SZ * 2 + 1);
