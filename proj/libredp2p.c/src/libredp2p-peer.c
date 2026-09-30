@@ -2356,50 +2356,79 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
     int len;
     int type;
     int attempt;
+    int status;
 
-    if (!ctx || !ctx->turn_url[0]) return 0;
+    if (!ctx || !ctx->turn_url[0]) return REDP2P_EINVAL;
     allocation = redp2p_turn_find_allocation(ctx, fd);
-    if (allocation && allocation->ready) return 1;
+    if (allocation && allocation->ready) return REDP2P_OK;
     allocation = redp2p_turn_reserve_allocation(ctx, fd);
-    if (!allocation) return 0;
-    if (!redp2p_turn_parse_url(ctx->turn_url, host, sizeof(host), &port) ||
-        redp2p_resolve(host, port, SOCK_DGRAM, &allocation->server_addr,
-            &allocation->server_addr_len) != 0)
+    if (!allocation) return REDP2P_ERROR;
+    status = REDP2P_ERROR;
+    if (!redp2p_turn_parse_url(ctx->turn_url, host, sizeof(host), &port)) {
+        status = REDP2P_EINVAL;
+        goto fail;
+    }
+    if (redp2p_resolve(host, port, SOCK_DGRAM, &allocation->server_addr,
+        &allocation->server_addr_len) != 0)
     {
-        memset(allocation, 0, sizeof(*allocation));
-        return 0;
+        status = REDP2P_ENET;
+        goto fail;
     }
     n = redp2p_turn_build_allocate(ctx, allocation, tx, sizeof(tx), txid, 0);
-    if (n <= 0 || redp2p_turn_send_raw(allocation, tx, (size_t)n) < 0 ||
+    if (n <= 0) goto fail;
+    if (redp2p_turn_send_raw(allocation, tx, (size_t)n) < 0 ||
         !redp2p_turn_wait_response(allocation, txid, rx, sizeof(rx), &len))
+    {
+        status = REDP2P_ENET;
         goto fail;
+    }
     type = redp2p_stun_hdr(rx, len, rxid);
     if (type == REDP2P_TURN_ALLOCATE_OK) {
-        if (redp2p_turn_parse_allocate(allocation, rx, len, txid)) return 1;
+        if (redp2p_turn_parse_allocate(allocation, rx, len, txid))
+            return REDP2P_OK;
+        status = REDP2P_EPROTO;
         goto fail;
     }
-    if (type != REDP2P_TURN_ALLOCATE_ERR ||
-        !redp2p_turn_auth_challenge(allocation, rx, len) ||
-        !ctx->turn_user[0])
+    if (type != REDP2P_TURN_ALLOCATE_ERR) {
+        status = REDP2P_EPROTO;
         goto fail;
+    }
+    if (!redp2p_turn_auth_challenge(allocation, rx, len) ||
+        !ctx->turn_user[0])
+    {
+        status = REDP2P_EAUTH;
+        goto fail;
+    }
     for (attempt = 0; attempt < 2; attempt++) {
         n = redp2p_turn_build_allocate(ctx, allocation, tx, sizeof(tx), txid, 1);
-        if (n <= 0 || redp2p_turn_send_raw(allocation, tx, (size_t)n) < 0 ||
+        if (n <= 0) goto fail;
+        if (redp2p_turn_send_raw(allocation, tx, (size_t)n) < 0 ||
             !redp2p_turn_wait_response(allocation, txid, rx, sizeof(rx), &len))
-            goto fail;
-        type = redp2p_stun_hdr(rx, len, rxid);
-        if (type == REDP2P_TURN_ALLOCATE_OK) {
-            if (redp2p_turn_parse_allocate(allocation, rx, len, txid)) return 1;
+        {
+            status = REDP2P_ENET;
             goto fail;
         }
-        if (type != REDP2P_TURN_ALLOCATE_ERR ||
-            !redp2p_turn_auth_challenge(allocation, rx, len))
+        type = redp2p_stun_hdr(rx, len, rxid);
+        if (type == REDP2P_TURN_ALLOCATE_OK) {
+            if (redp2p_turn_parse_allocate(allocation, rx, len, txid))
+                return REDP2P_OK;
+            status = REDP2P_EPROTO;
             goto fail;
+        }
+        if (type != REDP2P_TURN_ALLOCATE_ERR) {
+            status = REDP2P_EPROTO;
+            goto fail;
+        }
+        if (!redp2p_turn_auth_challenge(allocation, rx, len)) {
+            status = REDP2P_EAUTH;
+            goto fail;
+        }
     }
+    status = REDP2P_EAUTH;
 
 fail:
     memset(allocation, 0, sizeof(*allocation));
-    return 0;
+    return status;
 }
 
 /**
@@ -2592,30 +2621,35 @@ static int redp2p_turn_candidate(redp2p_t *ctx, redp2p_fd_t fd,
     redp2p_turn_allocation_t *allocation;
     char text[REDP2P_ADDR_MAX + 1];
     unsigned short port;
+    int status;
 
-    if (!candidate || !redp2p_turn_allocate(ctx, fd)) return 0;
+    if (!candidate) return REDP2P_EINVAL;
+    status = redp2p_turn_allocate(ctx, fd);
+    if (status != REDP2P_OK) return status;
     allocation = redp2p_turn_find_allocation(ctx, fd);
-    if (!allocation || !allocation->ready) return 0;
+    if (!allocation || !allocation->ready) return REDP2P_ENET;
     redp2p_turn_refresh_if_due(ctx, fd);
     if (allocation->relay_addr.ss_family == AF_INET) {
         const struct sockaddr_in *v4 =
             (const struct sockaddr_in *)&allocation->relay_addr;
-        if (!inet_ntop(AF_INET, &v4->sin_addr, text, sizeof(text))) return 0;
+        if (!inet_ntop(AF_INET, &v4->sin_addr, text, sizeof(text)))
+            return REDP2P_EPROTO;
         port = ntohs(v4->sin_port);
     } else if (allocation->relay_addr.ss_family == AF_INET6) {
         const struct sockaddr_in6 *v6 =
             (const struct sockaddr_in6 *)&allocation->relay_addr;
-        if (!inet_ntop(AF_INET6, &v6->sin6_addr, text, sizeof(text))) return 0;
+        if (!inet_ntop(AF_INET6, &v6->sin6_addr, text, sizeof(text)))
+            return REDP2P_EPROTO;
         port = ntohs(v6->sin6_port);
     } else {
-        return 0;
+        return REDP2P_EPROTO;
     }
     memset(candidate, 0, sizeof(*candidate));
     candidate->type = REDP2P_CAND_RELAY;
     snprintf(candidate->addr, sizeof(candidate->addr), "%s", text);
     candidate->port = port;
     candidate->priority = redp2p_candidate_priority(candidate);
-    return 1;
+    return REDP2P_OK;
 }
 
 /**
@@ -2828,6 +2862,7 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
     socklen_t udp_sa_len = sizeof(udp_sa);
     const char *force_turn = getenv("REDP2P_FORCE_TURN");
     int direct_enabled = !(force_turn && strcmp(force_turn, "1") == 0);
+    int turn_status = REDP2P_OK;
 
     stun_ip[0] = '\0';
     stun_port = 0;
@@ -2920,11 +2955,39 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
         if (ctx && ctx->turn_url[0] && *out_count < out_cap) {
             redp2p_candidate_t relay;
 
-            if (redp2p_turn_candidate(ctx, (redp2p_fd_t)udp_fd, &relay))
-                out[(*out_count)++] = relay;
+            turn_status = redp2p_turn_candidate(ctx, (redp2p_fd_t)udp_fd,
+                &relay);
+            if (turn_status == REDP2P_OK) out[(*out_count)++] = relay;
+        }
+    }
+    if (!direct_enabled) {
+        if (!ctx || !ctx->turn_url[0]) {
+            redp2p_set_error(ctx,
+                "candidate gather: forced TURN requires a TURN server");
+            return REDP2P_EINVAL;
+        }
+        if (turn_status != REDP2P_OK) {
+            if (turn_status == REDP2P_EAUTH)
+                redp2p_set_error(ctx,
+                    "candidate gather: TURN authentication failed");
+            else if (turn_status == REDP2P_EINVAL)
+                redp2p_set_error(ctx,
+                    "candidate gather: invalid TURN configuration");
+            else if (turn_status == REDP2P_EPROTO)
+                redp2p_set_error(ctx,
+                    "candidate gather: invalid TURN response");
+            else
+                redp2p_set_error(ctx,
+                    "candidate gather: TURN relay unavailable");
+            return turn_status;
         }
     }
     if (!redp2p_normalize_candidates(out, out_count)) return REDP2P_ERROR;
+    if (!direct_enabled && *out_count == 0) {
+        redp2p_set_error(ctx,
+            "candidate gather: forced TURN produced no relay candidate");
+        return REDP2P_ENET;
+    }
     return REDP2P_OK;
 }
 
