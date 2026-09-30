@@ -61,7 +61,8 @@ typedef struct redp2p redp2p_t;
 
 typedef enum {
     REDP2P_CAND_HOST = 1,
-    REDP2P_CAND_OBSERVED
+    REDP2P_CAND_OBSERVED,
+    REDP2P_CAND_RELAY
 } redp2p_candidate_type_t;
 
 typedef struct {
@@ -206,6 +207,18 @@ typedef struct {
 
 typedef struct redp2p_rate_source redp2p_rate_source_t;
 
+#define REDP2P_TURN_URL_MAX 511
+#define REDP2P_TURN_USER_MAX 255
+#define REDP2P_TURN_REALM_MAX 255
+#define REDP2P_TURN_NONCE_MAX 511
+#define REDP2P_TURN_PERMISSIONS_MAX 32
+
+typedef struct {
+    struct sockaddr_storage addr;
+    uint64_t expires_ms;
+    int used;
+} redp2p_turn_permission_t;
+
 struct redp2p {
     redp2p_index_peer_t *peers;
     size_t n_peers;
@@ -236,6 +249,20 @@ struct redp2p {
     pthread_mutex_t mutex;
 #endif
     char stun_url[512];
+    char turn_url[REDP2P_TURN_URL_MAX + 1];
+    char turn_user[REDP2P_TURN_USER_MAX + 1];
+    char turn_pass[REDP2P_PASS_MAX + 1];
+    char turn_realm[REDP2P_TURN_REALM_MAX + 1];
+    char turn_nonce[REDP2P_TURN_NONCE_MAX + 1];
+    redp2p_fd_t turn_fd;
+    struct sockaddr_storage turn_server_addr;
+    socklen_t turn_server_addr_len;
+    struct sockaddr_storage turn_relay_addr;
+    socklen_t turn_relay_addr_len;
+    uint64_t turn_refresh_at_ms;
+    unsigned int turn_lifetime_s;
+    int turn_ready;
+    redp2p_turn_permission_t turn_permissions[REDP2P_TURN_PERMISSIONS_MAX];
 #ifdef REDP2P_TESTING
     char state_dir[REDP2P_STATE_DIR_MAX + 1];
     int fault_drop_every;
