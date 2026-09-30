@@ -59,7 +59,7 @@ class Redp2pIndex
     public const MAX_SDP = 49152;
     public const DEFAULT_TTL_S = 120;
 
-    public const CANDIDATE_TYPES = ['host', 'observed'];
+    public const CANDIDATE_TYPES = ['host', 'observed', 'relay'];
 
     private const RATE_SOURCES_MAX = 4096;
     private const RATE_SOURCE_IDLE_MS = 120000;
@@ -2063,7 +2063,7 @@ class Redp2pIndex
             if (strlen($addr) > self::ADDR_MAX) {
                 return [false, []];
             }
-            if ($type !== 'host') {
+            if ($type !== 'host' && $type !== 'relay') {
                 return [false, []];
             }
             if (!filter_var($addr, FILTER_VALIDATE_IP)) {
