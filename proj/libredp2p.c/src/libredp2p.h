@@ -124,7 +124,10 @@ int kc_redp2p_idx(kc_redp2p_idx_t **out,
  * Success means the publisher is registered and ready to accept peer channels.
  *
  * @param out Destination publisher handle.
- * @param options Publisher identity, index, protocol, and callbacks.
+ * Optional STUN/TURN fields affect only internal path establishment; the
+ * established application channel and callbacks are unchanged.
+ *
+ * @param options Publisher identity, index, protocol, relay settings, and callbacks.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
 int kc_redp2p_pub(kc_redp2p_pub_t **out,
@@ -139,7 +142,10 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
  * delivers application bytes arriving from that peer.
  *
  * @param out Destination consumer handle.
- * @param options Target publisher, index, and receive callback.
+ * Optional STUN/TURN fields affect only internal path establishment; the
+ * returned application channel is unchanged.
+ *
+ * @param options Target publisher, index, relay settings, and receive callback.
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
 int kc_redp2p_con(kc_redp2p_con_t **out,
