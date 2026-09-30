@@ -1549,6 +1549,7 @@ int redp2p_set_stun_server(redp2p_t *ctx, const char *url) {
 #define REDP2P_TURN_REFRESH_OK          0x0104
 #define REDP2P_TURN_REFRESH_ERR         0x0114
 #define REDP2P_TURN_PERMISSION_REQ      0x0008
+#define REDP2P_TURN_PERMISSION_OK       0x0108
 #define REDP2P_TURN_PERMISSION_ERR      0x0118
 #define REDP2P_TURN_SEND_IND            0x0016
 #define REDP2P_TURN_DATA_IND            0x0017
@@ -2278,12 +2279,17 @@ static int redp2p_turn_permission(redp2p_t *ctx, redp2p_fd_t fd,
     const struct sockaddr_storage *peer)
 {
     unsigned char tx[2048];
+    unsigned char rx[2048];
     unsigned char txid[12];
+    unsigned char rxid[12];
     unsigned char xaddr[20];
     redp2p_turn_allocation_t *allocation;
     size_t xaddr_len;
     int off;
     int slot;
+    int len;
+    int type;
+    int attempt;
     uint64_t now;
 
     allocation = redp2p_turn_find_allocation(ctx, fd);
@@ -2294,19 +2300,33 @@ static int redp2p_turn_permission(redp2p_t *ctx, redp2p_fd_t fd,
     if (allocation->permissions[slot].used &&
         allocation->permissions[slot].expires_ms > now)
         return 1;
-    if (!redp2p_stun_gen_id(txid) ||
-        !redp2p_turn_xor_addr(xaddr, sizeof(xaddr), peer, txid, &xaddr_len))
-        return 0;
-    off = redp2p_stun_build(tx, REDP2P_TURN_PERMISSION_REQ, txid);
-    if (!redp2p_turn_attr(tx, sizeof(tx), &off, REDP2P_TURN_ATTR_XOR_PEER,
-        xaddr, xaddr_len) || !redp2p_turn_add_auth(ctx, tx, sizeof(tx), &off))
-        return 0;
-    if (redp2p_turn_send_raw(allocation, tx, (size_t)off) < 0) return 0;
-    allocation->permissions[slot].addr = *peer;
-    allocation->permissions[slot].expires_ms =
-        now + REDP2P_TURN_PERMISSION_MS;
-    allocation->permissions[slot].used = 1;
-    return 1;
+    for (attempt = 0; attempt < 2; attempt++) {
+        if (!redp2p_stun_gen_id(txid) ||
+            !redp2p_turn_xor_addr(xaddr, sizeof(xaddr), peer, txid,
+                &xaddr_len))
+            return 0;
+        off = redp2p_stun_build(tx, REDP2P_TURN_PERMISSION_REQ, txid);
+        if (!redp2p_turn_attr(tx, sizeof(tx), &off,
+            REDP2P_TURN_ATTR_XOR_PEER, xaddr, xaddr_len) ||
+            !redp2p_turn_add_auth(ctx, tx, sizeof(tx), &off))
+            return 0;
+        if (redp2p_turn_send_raw(allocation, tx, (size_t)off) < 0 ||
+            !redp2p_turn_wait_response(allocation, txid, rx, sizeof(rx),
+                &len))
+            return 0;
+        type = redp2p_stun_hdr(rx, len, rxid);
+        if (type == REDP2P_TURN_PERMISSION_OK) {
+            allocation->permissions[slot].addr = *peer;
+            allocation->permissions[slot].expires_ms =
+                redp2p_now_ms() + REDP2P_TURN_PERMISSION_MS;
+            allocation->permissions[slot].used = 1;
+            return 1;
+        }
+        if (type != REDP2P_TURN_PERMISSION_ERR ||
+            !redp2p_turn_auth_challenge(ctx, rx, len))
+            return 0;
+    }
+    return 0;
 }
 
 static int redp2p_turn_send_indication(redp2p_t *ctx, redp2p_fd_t fd,
