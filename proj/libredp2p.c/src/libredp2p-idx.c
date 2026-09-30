@@ -2245,6 +2245,13 @@ static int redp2p_punch_req_merge_observed(redp2p_candidate_t *candidates,
     int i;
 
     if (!candidates || !count) return 0;
+#ifdef REDP2P_TESTING
+    {
+        const char *force_turn = getenv("REDP2P_TEST_FORCE_TURN");
+        if (force_turn && strcmp(force_turn, "1") == 0)
+            return redp2p_normalize_candidates(candidates, count);
+    }
+#endif
     if (!peer || !redp2p_sockaddr_host(peer, host, sizeof(host)))
         return 1;
     matched = -1;
