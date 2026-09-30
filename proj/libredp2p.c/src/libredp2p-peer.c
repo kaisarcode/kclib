@@ -1820,16 +1820,18 @@ static int redp2p_turn_attr(unsigned char *buf, size_t cap, int *off,
     return 1;
 }
 
-static int redp2p_turn_long_term_key(redp2p_t *ctx, unsigned char key[16])
+static int redp2p_turn_long_term_key(redp2p_t *ctx,
+    redp2p_turn_allocation_t *allocation, unsigned char key[16])
 {
     char material[REDP2P_TURN_USER_MAX + REDP2P_TURN_REALM_MAX +
         REDP2P_PASS_MAX + 3];
     int n;
     redp2p_md5_t md5;
 
-    if (!ctx || !ctx->turn_user[0] || !ctx->turn_realm[0]) return 0;
+    if (!ctx || !allocation || !ctx->turn_user[0] ||
+        !allocation->realm[0]) return 0;
     n = snprintf(material, sizeof(material), "%s:%s:%s", ctx->turn_user,
-        ctx->turn_realm, ctx->turn_pass);
+        allocation->realm, ctx->turn_pass);
     if (n < 0 || (size_t)n >= sizeof(material)) return 0;
     redp2p_turn_md5_init(&md5);
     redp2p_turn_md5_update(&md5, (const unsigned char *)material, (size_t)n);
@@ -1838,12 +1840,13 @@ static int redp2p_turn_long_term_key(redp2p_t *ctx, unsigned char key[16])
     return 1;
 }
 
-static int redp2p_turn_integrity(redp2p_t *ctx, unsigned char *buf,
+static int redp2p_turn_integrity(redp2p_t *ctx,
+    redp2p_turn_allocation_t *allocation, unsigned char *buf,
     size_t cap, int *off)
 {
     unsigned char key[16], mac[20];
 
-    if (!redp2p_turn_long_term_key(ctx, key)) return 0;
+    if (!redp2p_turn_long_term_key(ctx, allocation, key)) return 0;
     if ((size_t)*off + 24u > cap) {
         crypto_wipe(key, sizeof(key));
         return 0;
@@ -1861,15 +1864,16 @@ static int redp2p_turn_integrity(redp2p_t *ctx, unsigned char *buf,
     return 1;
 }
 
-static int redp2p_turn_auth_attrs(redp2p_t *ctx, unsigned char *buf,
+static int redp2p_turn_auth_attrs(redp2p_t *ctx,
+    redp2p_turn_allocation_t *allocation, unsigned char *buf,
     size_t cap, int *off)
 {
     return redp2p_turn_attr(buf, cap, off, REDP2P_TURN_ATTR_USERNAME,
         ctx->turn_user, strlen(ctx->turn_user)) &&
         redp2p_turn_attr(buf, cap, off, REDP2P_TURN_ATTR_REALM,
-            ctx->turn_realm, strlen(ctx->turn_realm)) &&
+            allocation->realm, strlen(allocation->realm)) &&
         redp2p_turn_attr(buf, cap, off, REDP2P_TURN_ATTR_NONCE,
-            ctx->turn_nonce, strlen(ctx->turn_nonce));
+            allocation->nonce, strlen(allocation->nonce));
 }
 
 static int redp2p_turn_parse_url(const char *url, char *host, size_t host_cap,
@@ -2000,18 +2004,20 @@ static int redp2p_turn_error_code(const unsigned char *buf, int len)
     return (buf[offset + 2] & 0x07) * 100 + buf[offset + 3];
 }
 
-static int redp2p_turn_auth_challenge(redp2p_t *ctx,
+static int redp2p_turn_auth_challenge(redp2p_turn_allocation_t *allocation,
     const unsigned char *buf, int len)
 {
     int code;
 
     code = redp2p_turn_error_code(buf, len);
     if (code != 401 && code != 438) return 0;
+    if (!allocation) return 0;
     if (!redp2p_turn_copy_attr_string(buf, len, REDP2P_TURN_ATTR_REALM,
-        ctx->turn_realm, sizeof(ctx->turn_realm)) && !ctx->turn_realm[0])
+        allocation->realm, sizeof(allocation->realm)) &&
+        !allocation->realm[0])
         return 0;
     if (!redp2p_turn_copy_attr_string(buf, len, REDP2P_TURN_ATTR_NONCE,
-        ctx->turn_nonce, sizeof(ctx->turn_nonce)))
+        allocation->nonce, sizeof(allocation->nonce)))
         return 0;
     return 1;
 }
@@ -2096,14 +2102,16 @@ static int redp2p_turn_wait_response(redp2p_turn_allocation_t *allocation,
     return 0;
 }
 
-static int redp2p_turn_add_auth(redp2p_t *ctx, unsigned char *buf,
+static int redp2p_turn_add_auth(redp2p_t *ctx,
+    redp2p_turn_allocation_t *allocation, unsigned char *buf,
     size_t cap, int *off)
 {
-    if (!redp2p_turn_auth_attrs(ctx, buf, cap, off)) return 0;
-    return redp2p_turn_integrity(ctx, buf, cap, off);
+    if (!redp2p_turn_auth_attrs(ctx, allocation, buf, cap, off)) return 0;
+    return redp2p_turn_integrity(ctx, allocation, buf, cap, off);
 }
 
-static int redp2p_turn_build_allocate(redp2p_t *ctx, unsigned char *buf,
+static int redp2p_turn_build_allocate(redp2p_t *ctx,
+    redp2p_turn_allocation_t *allocation, unsigned char *buf,
     size_t cap, unsigned char txid[12], int authenticated)
 {
     unsigned char transport[4] = {17, 0, 0, 0};
@@ -2115,7 +2123,7 @@ static int redp2p_turn_build_allocate(redp2p_t *ctx, unsigned char *buf,
         transport, sizeof(transport)))
         return 0;
     if (authenticated) {
-        if (!redp2p_turn_add_auth(ctx, buf, cap, &off)) return 0;
+        if (!redp2p_turn_add_auth(ctx, allocation, buf, cap, &off)) return 0;
     } else {
         redp2p_stun_len(buf, off);
     }
@@ -2167,8 +2175,6 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
     if (allocation && allocation->ready) return 1;
     allocation = redp2p_turn_reserve_allocation(ctx, fd);
     if (!allocation) return 0;
-    ctx->turn_realm[0] = '\0';
-    ctx->turn_nonce[0] = '\0';
     if (!redp2p_turn_parse_url(ctx->turn_url, host, sizeof(host), &port) ||
         redp2p_resolve(host, port, SOCK_DGRAM, &allocation->server_addr,
             &allocation->server_addr_len) != 0)
@@ -2176,7 +2182,7 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
         memset(allocation, 0, sizeof(*allocation));
         return 0;
     }
-    n = redp2p_turn_build_allocate(ctx, tx, sizeof(tx), txid, 0);
+    n = redp2p_turn_build_allocate(ctx, allocation, tx, sizeof(tx), txid, 0);
     if (n <= 0 || redp2p_turn_send_raw(allocation, tx, (size_t)n) < 0 ||
         !redp2p_turn_wait_response(allocation, txid, rx, sizeof(rx), &len))
         goto fail;
@@ -2186,11 +2192,11 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
         goto fail;
     }
     if (type != REDP2P_TURN_ALLOCATE_ERR ||
-        !redp2p_turn_auth_challenge(ctx, rx, len) ||
+        !redp2p_turn_auth_challenge(allocation, rx, len) ||
         !ctx->turn_user[0])
         goto fail;
     for (attempt = 0; attempt < 2; attempt++) {
-        n = redp2p_turn_build_allocate(ctx, tx, sizeof(tx), txid, 1);
+        n = redp2p_turn_build_allocate(ctx, allocation, tx, sizeof(tx), txid, 1);
         if (n <= 0 || redp2p_turn_send_raw(allocation, tx, (size_t)n) < 0 ||
             !redp2p_turn_wait_response(allocation, txid, rx, sizeof(rx), &len))
             goto fail;
@@ -2200,7 +2206,7 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
             goto fail;
         }
         if (type != REDP2P_TURN_ALLOCATE_ERR ||
-            !redp2p_turn_auth_challenge(ctx, rx, len))
+            !redp2p_turn_auth_challenge(allocation, rx, len))
             goto fail;
     }
 
@@ -2222,7 +2228,7 @@ static int redp2p_turn_build_refresh(redp2p_t *ctx,
     off = redp2p_stun_build(buf, REDP2P_TURN_REFRESH_REQ, txid);
     if (!redp2p_turn_attr(buf, cap, &off, REDP2P_TURN_ATTR_LIFETIME,
         lifetime, sizeof(lifetime)) ||
-        !redp2p_turn_add_auth(ctx, buf, cap, &off))
+        !redp2p_turn_add_auth(ctx, allocation, buf, cap, &off))
         return 0;
     return off;
 }
@@ -2310,7 +2316,7 @@ static int redp2p_turn_permission(redp2p_t *ctx, redp2p_fd_t fd,
         off = redp2p_stun_build(tx, REDP2P_TURN_PERMISSION_REQ, txid);
         if (!redp2p_turn_attr(tx, sizeof(tx), &off,
             REDP2P_TURN_ATTR_XOR_PEER, xaddr, xaddr_len) ||
-            !redp2p_turn_add_auth(ctx, tx, sizeof(tx), &off))
+            !redp2p_turn_add_auth(ctx, allocation, tx, sizeof(tx), &off))
             return 0;
         if (redp2p_turn_send_raw(allocation, tx, (size_t)off) < 0 ||
             !redp2p_turn_wait_response(allocation, txid, rx, sizeof(rx),
@@ -2325,7 +2331,7 @@ static int redp2p_turn_permission(redp2p_t *ctx, redp2p_fd_t fd,
             return 1;
         }
         if (type != REDP2P_TURN_PERMISSION_ERR ||
-            !redp2p_turn_auth_challenge(ctx, rx, len))
+            !redp2p_turn_auth_challenge(allocation, rx, len))
             return 0;
     }
     return 0;
@@ -2398,8 +2404,6 @@ int redp2p_set_turn_server(redp2p_t *ctx, const char *url,
         ctx->turn_url[0] = '\0';
         ctx->turn_user[0] = '\0';
         ctx->turn_pass[0] = '\0';
-        ctx->turn_realm[0] = '\0';
-        ctx->turn_nonce[0] = '\0';
         memset(ctx->turn_allocations, 0, sizeof(ctx->turn_allocations));
         redp2p_set_error(ctx, NULL);
         return REDP2P_OK;
@@ -2417,8 +2421,6 @@ int redp2p_set_turn_server(redp2p_t *ctx, const char *url,
         username ? username : "");
     snprintf(ctx->turn_pass, sizeof(ctx->turn_pass), "%s",
         password ? password : "");
-    ctx->turn_realm[0] = '\0';
-    ctx->turn_nonce[0] = '\0';
     memset(ctx->turn_allocations, 0, sizeof(ctx->turn_allocations));
     redp2p_set_error(ctx, NULL);
     return REDP2P_OK;
@@ -2521,7 +2523,7 @@ int redp2p_transport_recvfrom(redp2p_t *ctx, redp2p_fd_t fd,
         type == REDP2P_TURN_PERMISSION_ERR ||
         type == REDP2P_TURN_ALLOCATE_ERR)
     {
-        if (redp2p_turn_auth_challenge(ctx, packet, n)) {
+        if (redp2p_turn_auth_challenge(allocation, packet, n)) {
             allocation->refresh_at_ms = redp2p_now_ms();
             memset(allocation->permissions, 0,
                 sizeof(allocation->permissions));
