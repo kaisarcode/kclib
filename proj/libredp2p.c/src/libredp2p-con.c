@@ -325,19 +325,22 @@ int *skip_iteration)
     }
 
     peer_fd = redp2p_create_socket(runtime->udp_any_host, 0);
-    candidate_count = 0;
-    if (REDP2P_ISERR(peer_fd) ||
-        redp2p_gather_candidates(runtime->ctx, peer_fd, candidates,
-            REDP2P_PEER_CANDIDATES_MAX, &candidate_count) != REDP2P_OK)
-    {
+    if (REDP2P_ISERR(peer_fd)) {
         if (skip_iteration) *skip_iteration = 1;
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
         crypto_wipe(session_hex, REDP2P_SESSION_ID_SZ * 2 + 1);
-        if (!REDP2P_ISERR(peer_fd)) {
-            redp2p_transport_forget(runtime->ctx, peer_fd);
-            REDP2P_FD_CLOSE(peer_fd);
-        }
         return REDP2P_ENET;
+    }
+    candidate_count = 0;
+    result = redp2p_gather_candidates(runtime->ctx, peer_fd, candidates,
+        REDP2P_PEER_CANDIDATES_MAX, &candidate_count);
+    if (result != REDP2P_OK) {
+        if (skip_iteration) *skip_iteration = 1;
+        crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
+        crypto_wipe(session_hex, REDP2P_SESSION_ID_SZ * 2 + 1);
+        redp2p_transport_forget(runtime->ctx, peer_fd);
+        REDP2P_FD_CLOSE(peer_fd);
+        return result;
     }
     punch_port = 0;
     punch_sa_len = sizeof(punch_sa);
