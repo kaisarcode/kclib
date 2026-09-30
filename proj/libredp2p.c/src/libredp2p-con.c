@@ -343,8 +343,13 @@ int *skip_iteration)
     punch_sa_len = sizeof(punch_sa);
     if (getsockname(peer_fd, (struct sockaddr *)&punch_sa, &punch_sa_len) == 0)
         punch_port = redp2p_sockaddr_port(&punch_sa);
+    fprintf(stderr,
+        "[REDP2P-DIAG] con punch_req start candidates=%d udp_port=%u\n",
+        candidate_count, (unsigned)punch_port);
     result = redp2p_send_punch_req_cands(runtime, session_hex, candidates,
         candidate_count, punch_port);
+    fprintf(stderr, "[REDP2P-DIAG] con punch_req result=%d err=%s\n",
+        result, runtime->ctx->err_buf[0] ? runtime->ctx->err_buf : "-");
     if (result != REDP2P_OK) {
         if (skip_iteration) *skip_iteration = 1;
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
@@ -356,6 +361,8 @@ int *skip_iteration)
 
     memset(&peer_addr, 0, sizeof(peer_addr));
     peer_via_turn = 0;
+    fprintf(stderr, "[REDP2P-DIAG] con punch_select start peers=%d\n",
+        runtime->n_peer_candidates);
     result = redp2p_punch_select(runtime->ctx, runtime->ctx->sweep,
         (int)peer_fd,
         session_hex, runtime->self_id, runtime->target_id,
