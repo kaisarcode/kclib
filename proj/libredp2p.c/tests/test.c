@@ -6785,11 +6785,6 @@ static void *test_turn_main(void *arg)
             continue;
         type = ((int)packet[0] << 8) | packet[1];
         if (type == TEST_TURN_ALLOCATE_REQ) {
-#ifdef REDP2P_TESTING
-            fprintf(stderr, "[TURN-STUB] allocate username=%d bytes=%d\n",
-                test_turn_find_attr(packet, n, TEST_TURN_ATTR_USERNAME,
-                    &username_len) >= 0, n);
-#endif
             if (test_turn_find_attr(packet, n, TEST_TURN_ATTR_USERNAME,
                 &username_len) < 0)
                 (void)test_turn_reply_challenge(turn, &from, from_len, packet + 8);
@@ -6918,6 +6913,7 @@ static int case_kc_redp2p_turn_api(void)
     char local_ip[INET_ADDRSTRLEN];
     unsigned short index_port;
     unsigned short turn_port;
+    int relayed_before;
     int fail = 0;
 
     memset(&turn, 0, sizeof(turn));
@@ -6941,6 +6937,16 @@ static int case_kc_redp2p_turn_api(void)
     snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)index_port);
     snprintf(turn_url, sizeof(turn_url), "turn:127.0.0.1:%u",
         (unsigned)turn_port);
+
+    fail += expect_int("clear forced TURN path", 0,
+        test_setenv("REDP2P_TEST_FORCE_TURN", NULL));
+    relayed_before = atomic_load(&turn.relayed_count);
+    if (fail == 0)
+        fail += test_turn_api_roundtrip(KC_REDP2P_UDP, "turndirect", index,
+            turn_url);
+    fail += expect_int("direct path preferred when TURN is configured",
+        relayed_before, atomic_load(&turn.relayed_count));
+
     if (fail == 0)
         fail += expect_int("force TURN path", 0,
             test_setenv("REDP2P_TEST_FORCE_TURN", "1"));
@@ -6961,7 +6967,7 @@ static int case_kc_redp2p_turn_api(void)
     kc_redp2p_idx_close(idx);
     fail += test_turn_stop(&turn);
     case_result(fail, "kc_redp2p_turn_api",
-        "public TCP/UDP API roundtrips through a deterministic local TURN relay");
+        "TURN is fallback-only and public TCP/UDP APIs roundtrip through a simulated relay");
     return fail == 0 ? 0 : 1;
 }
 
