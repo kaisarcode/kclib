@@ -1654,6 +1654,7 @@ static int redp2p_parse_candidate_type(const char *text,
     if (!text || !type) return 0;
     if (strcmp(text, "host") == 0) *type = REDP2P_CAND_HOST;
     else if (strcmp(text, "observed") == 0) *type = REDP2P_CAND_OBSERVED;
+    else if (strcmp(text, "relay") == 0) *type = REDP2P_CAND_RELAY;
     else return 0;
     return 1;
 }
@@ -1665,6 +1666,7 @@ static int redp2p_parse_candidate_type(const char *text,
  */
 static const char *redp2p_candidate_type_name(redp2p_candidate_type_t type) {
     if (type == REDP2P_CAND_OBSERVED) return "observed";
+    if (type == REDP2P_CAND_RELAY) return "relay";
     return "host";
 }
 
@@ -1701,6 +1703,7 @@ unsigned int redp2p_candidate_priority(
     else return 900u;
     if (candidate->type == REDP2P_CAND_HOST) return base;
     if (candidate->type == REDP2P_CAND_OBSERVED) return base + 10u;
+    if (candidate->type == REDP2P_CAND_RELAY) return base + 300u;
     return 900u;
 }
 
