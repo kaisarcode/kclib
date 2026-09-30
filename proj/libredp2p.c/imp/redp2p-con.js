@@ -675,13 +675,27 @@
     }
 
     /**
-     * Creates a WebRTC peer connection.
+     * Creates a WebRTC peer connection from REDP2P transport options.
      * @return Peer connection.
      */
-    function createPeer(iceServers = undefined) {
-        return new RTCPeerConnection({
-            iceServers: Array.isArray(iceServers) ? iceServers : []
-        });
+    function createPeer(options = {}) {
+        const iceServers = [];
+
+        if (options.stun) {
+            iceServers.push({urls: options.stun});
+        }
+        if (options.turn) {
+            const relay = {urls: options.turn};
+
+            if (options.turn_user !== undefined) {
+                relay.username = options.turn_user;
+            }
+            if (options.turn_pass !== undefined) {
+                relay.credential = options.turn_pass;
+            }
+            iceServers.push(relay);
+        }
+        return new RTCPeerConnection({iceServers});
     }
 
     global.RedP2PCore = Object.freeze({
@@ -740,7 +754,7 @@
             throw new core.Error("Invalid publisher id", "invalid_id");
         }
 
-        const peer = core.createPeer(options.iceServers);
+        const peer = core.createPeer(options);
         const dataChannel = peer.createDataChannel("redp2p", {
             ordered: options.ordered !== false
         });
