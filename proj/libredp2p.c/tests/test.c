@@ -3685,6 +3685,7 @@ static int case_kc_redp2p_candidate_type_values(void) {
     fail = 0;
     fail += expect_int("host candidate value", 1, REDP2P_CAND_HOST);
     fail += expect_int("observed candidate value", 2, REDP2P_CAND_OBSERVED);
+    fail += expect_int("relay candidate value", 3, REDP2P_CAND_RELAY);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
@@ -5634,6 +5635,37 @@ static int case_kc_redp2p_set_stun_url(void) {
 }
 
 /**
+ * Tests optional TURN configuration.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_redp2p_set_turn_url(void) {
+    redp2p_t *ctx;
+    const char *name = "kc_redp2p_set_turn_url";
+    const char *detail = "TURN remains optional and validates relay settings";
+    int fail;
+
+    fail = 0;
+    fail += expect_int("set turn NULL ctx", REDP2P_EINVAL,
+        redp2p_set_turn_server(NULL, "turn:example.com:3478", "user", "pass"));
+    fail += expect_int("open context", REDP2P_OK, redp2p_context_create(&ctx));
+    fail += expect_int("set anonymous turn", REDP2P_OK,
+        redp2p_set_turn_server(ctx, "turn:example.com:3478", NULL, NULL));
+    fail += expect_int("set authenticated turn", REDP2P_OK,
+        redp2p_set_turn_server(ctx, "turn:example.com:3478", "user", "pass"));
+    fail += expect_int("reject turn user without pass", REDP2P_EINVAL,
+        redp2p_set_turn_server(ctx, "turn:example.com:3478", "user", NULL));
+    fail += expect_int("reject unsupported turns scheme", REDP2P_EINVAL,
+        redp2p_set_turn_server(ctx, "turns:example.com:5349", "user", "pass"));
+    fail += expect_int("clear turn", REDP2P_OK,
+        redp2p_set_turn_server(ctx, NULL, NULL, NULL));
+    fail += expect_string("successful turn update clears detail", "",
+        redp2p_get_error(ctx));
+    redp2p_context_destroy(ctx);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Tests kc_redp2p_set_stream_faults.
  * @return 0 on success, 1 on failure.
  */
@@ -5800,6 +5832,7 @@ static int case_kc_redp2p_setters(void) {
     fail += case_kc_redp2p_set_pass();
     fail += case_kc_redp2p_set_vip();
     fail += case_kc_redp2p_set_stun_url();
+    fail += case_kc_redp2p_set_turn_url();
     fail += case_kc_redp2p_set_stream_faults();
     test_grouped = grouped;
     case_result(fail, "kc_redp2p_setters",
