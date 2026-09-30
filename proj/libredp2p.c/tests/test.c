@@ -7246,6 +7246,10 @@ static int test_direct_api_pub_half_close_response(const char *index)
     while (close_started && !atomic_load(&close_state.done) &&
         redp2p_now_ms() < deadline)
         test_sleep_ms(1U);
+    if (close_started && !atomic_load(&close_state.done) && pub) {
+        kc_redp2p_pub_close(pub);
+        pub = NULL;
+    }
     if (close_started) {
         fail += expect_int("half-close consumer close completes", 1,
             atomic_load(&close_state.done));
@@ -7254,7 +7258,7 @@ static int test_direct_api_pub_half_close_response(const char *index)
         kc_redp2p_con_close(con);
     }
 
-    kc_redp2p_pub_close(pub);
+    if (pub) kc_redp2p_pub_close(pub);
     return fail == 0 ? 0 : 1;
 #else
     (void)index;
