@@ -264,6 +264,30 @@ If it primarily describes the implementation, redesign the public surface at the
 capability level. The private implementation remains free to use whatever
 mechanisms are necessary.
 
+## Scripting projections
+
+The canonical rules for projecting public kclib APIs into scripting languages
+live in `docs/scripting-projection.md`.
+
+Per-library Lua and JavaScript reference shapes live under
+`docs/api/NAME.md`.
+
+When designing, reviewing, or consuming a kclib through Lua, JavaScript, or
+another scripting-language binding:
+
+* read `docs/scripting-projection.md` first;
+* read the matching `docs/api/NAME.md`;
+* preserve the capability semantics of the public C header;
+* keep ABI-only mechanics such as output pointers, buffer/count pairs,
+  allocation cleanup, and opaque pointer representation out of the scripting
+  surface when they can be translated mechanically;
+* do not make these references depend on a particular application framework,
+  host runtime, bridge implementation, or packaging system.
+
+The public C header remains the native compatibility contract. The scripting
+documents define the canonical language-facing projection of that contract and
+must be updated when a public API change alters that projection.
+
 ## Compatibility
 
 Treat the public header and library behavior as compatibility contracts.
