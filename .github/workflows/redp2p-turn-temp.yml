@@ -1,0 +1,20 @@
+name: redp2p-turn-temp
+
+on:
+  push:
+    branches:
+      - slave
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S proj/libredp2p.c -B /tmp/redp2p-build -G Ninja -DREDP2P_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build /tmp/redp2p-build
+      - name: TURN API test
+        run: /tmp/redp2p-build/redp2p_contract_test kc_redp2p_turn_api
+      - name: Full REDP2P suite
+        run: /tmp/redp2p-build/redp2p_contract_test all
