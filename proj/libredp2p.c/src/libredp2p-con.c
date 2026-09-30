@@ -351,8 +351,6 @@ int *skip_iteration)
         candidate_count, punch_port);
     fprintf(stderr, "[REDP2P-DIAG] con establish: punch request result=%d\n",
         result);
-    fprintf(stderr, "[REDP2P-DIAG] con establish: punch select result=%d\n",
-        result);
     if (result != REDP2P_OK) {
         if (skip_iteration) *skip_iteration = 1;
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
@@ -372,6 +370,9 @@ int *skip_iteration)
         session_hex, runtime->self_id, runtime->target_id,
         runtime->peer_candidates, runtime->n_peer_candidates, &peer_addr,
         &peer_via_turn);
+    fprintf(stderr,
+        "[REDP2P-DIAG] con establish: punch select returned=%d via_turn=%d\n",
+        result, peer_via_turn);
     if (result != REDP2P_OK) {
         redp2p_transport_forget(runtime->ctx, peer_fd);
         REDP2P_FD_CLOSE((int)peer_fd);
