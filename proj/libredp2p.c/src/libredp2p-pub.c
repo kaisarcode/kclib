@@ -1103,8 +1103,8 @@ redp2p_publisher_runtime_t *runtime)
     json_object_set_string(obj, "op", "challenge");
     json_object_set_string(obj, "id", runtime->borrowed_self_id);
     response = NULL;
-    result = redp2p_http_client(ctx, "wait", runtime->borrowed_index_host,
-        runtime->index_port, request, &response);
+    result = redp2p_http_client(ctx, "wait challenge",
+        runtime->borrowed_index_host, runtime->index_port, request, &response);
     json_value_free(request);
     if (result != REDP2P_OK) goto cleanup;
     out = json_value_get_object(response);
@@ -1189,8 +1189,8 @@ redp2p_publisher_runtime_t *runtime)
     redp2p_append_candidates(obj, "candidates", candidates,
         candidate_count);
     response = NULL;
-    result = redp2p_http_client(ctx, "wait", runtime->borrowed_index_host,
-        runtime->index_port, request, &response);
+    result = redp2p_http_client(ctx, "wait register",
+        runtime->borrowed_index_host, runtime->index_port, request, &response);
     json_value_free(request);
     if (result != REDP2P_OK) goto cleanup;
     out = json_value_get_object(response);
