@@ -1848,9 +1848,18 @@ redp2p_publisher_runtime_t *runtime)
     } else {
         found = redp2p_publisher_session_find(runtime, &from, NULL);
     }
-    if (found >= 0 && runtime->owned_sessions[found].via_turn != via_turn)
+    if (found >= 0 && runtime->owned_sessions[found].via_turn != via_turn) {
+        fprintf(stderr,
+            "[REDP2P-DIAG] pub peer: route mismatch rx=%d session=%d\n",
+            via_turn, runtime->owned_sessions[found].via_turn);
         found = -1;
+    }
     if (found < 0) {
+        if (runtime->borrowed_ctx->proto == REDP2P_PROTO_TCP &&
+            redp2p_session_unpack((const unsigned char *)buf, (size_t)n,
+                &envelope) && redp2p_stream_envelope_valid(&envelope))
+            fprintf(stderr,
+                "[REDP2P-DIAG] pub peer: valid TCP frame has no session match\n");
         if (strncmp(buf, REDP2P_CTRTOK_PUNCH_PING,
             strlen(REDP2P_CTRTOK_PUNCH_PING)) == 0 &&
             redp2p_parse_punch_packet(buf, REDP2P_CTRTOK_PUNCH_PING,
