@@ -362,6 +362,9 @@ int *skip_iteration)
         runtime->peer_candidates, runtime->n_peer_candidates, &peer_addr,
         &peer_via_turn);
     if (result != REDP2P_OK) {
+        fprintf(stderr, "[REDP2P-DIAG] con punch failed: %s\n",
+            runtime->ctx->err_buf[0] ? runtime->ctx->err_buf :
+            "unknown punch failure");
         redp2p_transport_forget(runtime->ctx, peer_fd);
         REDP2P_FD_CLOSE((int)peer_fd);
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
