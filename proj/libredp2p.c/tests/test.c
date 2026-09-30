@@ -6810,9 +6810,9 @@ static void test_turn_forward(test_turn_server_t *server,
     struct sockaddr_storage peer;
     unsigned char response[TEST_TURN_PACKET_MAX];
     unsigned char xaddr[8];
-    int peer_len;
+    int peer_len = 0;
     int peer_off;
-    int data_len;
+    int data_len = 0;
     int data_off;
     int offset;
 
