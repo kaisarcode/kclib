@@ -228,6 +228,8 @@ typedef struct {
     socklen_t relay_addr_len;
     uint64_t refresh_at_ms;
     unsigned int lifetime_s;
+    char realm[REDP2P_TURN_REALM_MAX + 1];
+    char nonce[REDP2P_TURN_NONCE_MAX + 1];
     int ready;
     int used;
     redp2p_turn_permission_t permissions[REDP2P_TURN_PERMISSIONS_MAX];
@@ -266,8 +268,6 @@ struct redp2p {
     char turn_url[REDP2P_TURN_URL_MAX + 1];
     char turn_user[REDP2P_TURN_USER_MAX + 1];
     char turn_pass[REDP2P_PASS_MAX + 1];
-    char turn_realm[REDP2P_TURN_REALM_MAX + 1];
-    char turn_nonce[REDP2P_TURN_NONCE_MAX + 1];
     redp2p_turn_allocation_t turn_allocations[REDP2P_TURN_ALLOCATIONS_MAX];
 #ifdef REDP2P_TESTING
     char state_dir[REDP2P_STATE_DIR_MAX + 1];
