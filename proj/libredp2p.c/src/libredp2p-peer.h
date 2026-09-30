@@ -57,17 +57,17 @@ typedef struct {
     int hello_sent;
     int reset_sent;
     int reset_received;
-    int local_eof;
+    int adapter_read_eof;
     int close_sent;
     int close_acked;
-    int remote_close;
-    int remote_shutdown;
-    unsigned char pending_tcp[REDP2P_BUF];
-    size_t pending_tcp_off;
-    size_t pending_tcp_len;
+    int peer_adapter_eof;
+    int adapter_write_shutdown;
+    unsigned char pending_adapter[REDP2P_BUF];
+    size_t pending_adapter_off;
+    size_t pending_adapter_len;
     unsigned char session_id[REDP2P_SESSION_ID_SZ];
     char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1];
-    uint8_t transport_protocol;
+    uint8_t service_protocol;
     struct IKCPCB *kcp;
     redp2p_stream_adapter_t *adapter;
     uint64_t last_tx_ms;
@@ -100,8 +100,8 @@ REDP2P_INTERNAL int redp2p_udp_envelope_valid(const redp2p_session_envelope_t *e
 uint8_t expected_role);
 
 /**
- * Validates TCP session types and payload bounds after common decoding.
- * @return 1 for eligible TCP envelopes, 0 otherwise.
+ * Validates reliable stream-mode session types after common decoding.
+ * @return 1 for eligible KCP stream envelopes, 0 otherwise.
  */
 REDP2P_INTERNAL int redp2p_stream_envelope_valid(const redp2p_session_envelope_t *envelope);
 
@@ -113,11 +113,11 @@ REDP2P_INTERNAL int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
     int initiator, redp2p_fd_t fd,
     const struct sockaddr_storage *peer_addr,
     const unsigned char session_id[REDP2P_SESSION_ID_SZ],
-    const char *session_hex, uint8_t transport_protocol, int via_turn);
+    const char *session_hex, uint8_t service_protocol, int via_turn);
 
 /**
- * Reports whether the local TCP side may queue more bytes in KCP.
- * @return 1 when local TCP reads may continue, 0 otherwise.
+ * Reports whether the local stream adapter may queue more bytes in KCP.
+ * @return 1 when adapter reads may continue, 0 otherwise.
  */
 REDP2P_INTERNAL int redp2p_stream_can_send_data(const redp2p_stream_state_t *st);
 
@@ -132,23 +132,24 @@ REDP2P_INTERNAL void redp2p_stream_fail(redp2p_t *ctx, redp2p_stream_state_t *st
  * @return 0 on success, -1 on protocol, transport, or local socket failure.
  */
 REDP2P_INTERNAL int redp2p_stream_process_packet(redp2p_t *ctx,
-    redp2p_stream_state_t *st, redp2p_fd_t tcp_fd,
+    redp2p_stream_state_t *st, redp2p_fd_t adapter_fd,
     const unsigned char *buf, size_t len);
 
 /**
- * Flushes at most one bounded KCP/TCP output chunk for one stream.
+ * Flushes at most one bounded KCP chunk into the local stream adapter.
  * Would-block is retained as per-session backpressure.
- * @return 0 on progress/would-block, -1 on terminal socket or KCP failure.
+ * @return 0 on progress/would-block, -1 on adapter or KCP failure.
  */
-REDP2P_INTERNAL int redp2p_stream_flush_tcp(redp2p_t *ctx,
-    redp2p_stream_state_t *st, redp2p_fd_t tcp_fd);
+REDP2P_INTERNAL int redp2p_stream_flush_adapter(redp2p_t *ctx,
+    redp2p_stream_state_t *st, redp2p_fd_t adapter_fd);
 
 /**
- * Reads one local TCP chunk and queues its bytes in KCP stream mode.
- * @return 0 on success, -1 on local socket or KCP failure.
+ * Reads one local stream-adapter chunk and queues its bytes in KCP.
+ * The peer transport remains datagram based.
+ * @return 0 on success, -1 on adapter or KCP failure.
  */
-REDP2P_INTERNAL int redp2p_stream_pump_tcp(redp2p_t *ctx,
-    redp2p_stream_state_t *st, redp2p_fd_t tcp_fd);
+REDP2P_INTERNAL int redp2p_stream_pump_adapter(redp2p_t *ctx,
+    redp2p_stream_state_t *st, redp2p_fd_t adapter_fd);
 
 /**
  * Advances one KCP session and REDP2P tunnel lifecycle when due.
@@ -164,8 +165,8 @@ REDP2P_INTERNAL uint32_t redp2p_stream_wait_ms(const redp2p_stream_state_t *st,
     uint64_t now);
 
 /**
- * Reports whether one TCP stream is fully closed on both sides.
- * @return 1 when the stream may be cleaned up, 0 otherwise.
+ * Reports whether one adapted reliable stream is fully closed.
+ * @return 1 when the stream adapter state may be cleaned up, 0 otherwise.
  */
 REDP2P_INTERNAL int redp2p_stream_is_done(const redp2p_stream_state_t *st);
 
