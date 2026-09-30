@@ -2688,23 +2688,17 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
  * @return 1 when a packet was sent, 0 otherwise.
  */
 static int redp2p_punch_send_candidate(redp2p_t *ctx, int udp_fd,
-    const redp2p_candidate_t *candidate, const char *ping_msg,
+    const redp2p_candidate_t *candidate, const char *ping_msg, int via_turn,
     int *unsupported)
 {
     struct sockaddr_storage cand_sa;
-    int sent;
 
     if (!redp2p_candidate_sockaddr(candidate, &cand_sa)) {
         if (unsupported) (*unsupported)++;
         return 0;
     }
-    sent = redp2p_transport_sendto(ctx, (redp2p_fd_t)udp_fd, ping_msg,
-        strlen(ping_msg), &cand_sa, 0) >= 0 ? 1 : 0;
-    if (redp2p_turn_find_allocation(ctx, (redp2p_fd_t)udp_fd) &&
-        redp2p_transport_sendto(ctx, (redp2p_fd_t)udp_fd, ping_msg,
-            strlen(ping_msg), &cand_sa, 1) >= 0)
-        sent++;
-    return sent;
+    return redp2p_transport_sendto(ctx, (redp2p_fd_t)udp_fd, ping_msg,
+        strlen(ping_msg), &cand_sa, via_turn) >= 0 ? 1 : 0;
 }
 
 /**
@@ -2810,6 +2804,7 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
     uint64_t deadline_ms;
     int direct_count;
     int relay_count;
+    int local_turn;
     int sent_count;
     int malformed_count;
     int mismatch_count;
@@ -2824,6 +2819,8 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
     deadline_ms = redp2p_now_ms() + REDP2P_PUNCH_TOTAL_MS;
     direct_count = 0;
     relay_count = 0;
+    local_turn = redp2p_turn_find_allocation(ctx,
+        (redp2p_fd_t)udp_fd) != NULL;
     sent_count = 0;
     malformed_count = 0;
     mismatch_count = 0;
@@ -2838,20 +2835,7 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
         for (int c = 0; c < remote_candidate_count; c++) {
             if (remote_candidates[c].priority >= 300u) continue;
             sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
-                &remote_candidates[c], ping_msg, &unsupported_count);
-        }
-        if (redp2p_punch_wait_response(ctx, udp_fd, session_id, from_id, to_id,
-            REDP2P_PUNCH_DIRECT_WAIT_MS, deadline_ms, selected_addr,
-            selected_via_turn, &malformed_count, &mismatch_count) == REDP2P_OK)
-            return REDP2P_OK;
-    }
-    for (int i = 0; relay_count > 0 && i < 2 &&
-        redp2p_now_ms() < deadline_ms; i++)
-    {
-        for (int c = 0; c < remote_candidate_count; c++) {
-            if (remote_candidates[c].type != REDP2P_CAND_RELAY) continue;
-            sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
-                &remote_candidates[c], ping_msg, &unsupported_count);
+                &remote_candidates[c], ping_msg, 0, &unsupported_count);
         }
         if (redp2p_punch_wait_response(ctx, udp_fd, session_id, from_id, to_id,
             REDP2P_PUNCH_DIRECT_WAIT_MS, deadline_ms, selected_addr,
@@ -2886,6 +2870,27 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
             if (redp2p_punch_wait_response(ctx, udp_fd, session_id, from_id, to_id,
                 REDP2P_PUNCH_SWEEP_WAIT_MS, deadline_ms, selected_addr,
                 selected_via_turn, &malformed_count, &mismatch_count) == REDP2P_OK)
+                return REDP2P_OK;
+        }
+    }
+    if ((relay_count > 0 || local_turn) && redp2p_now_ms() < deadline_ms) {
+        for (int i = 0; i < 2 && redp2p_now_ms() < deadline_ms; i++) {
+            for (int cidx = 0; cidx < remote_candidate_count; cidx++) {
+                if (remote_candidates[cidx].type == REDP2P_CAND_RELAY) {
+                    sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
+                        &remote_candidates[cidx], ping_msg, 0,
+                        &unsupported_count);
+                }
+                if (local_turn) {
+                    sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
+                        &remote_candidates[cidx], ping_msg, 1,
+                        &unsupported_count);
+                }
+            }
+            if (redp2p_punch_wait_response(ctx, udp_fd, session_id, from_id,
+                to_id, REDP2P_PUNCH_DIRECT_WAIT_MS, deadline_ms,
+                selected_addr, selected_via_turn, &malformed_count,
+                &mismatch_count) == REDP2P_OK)
                 return REDP2P_OK;
         }
     }
