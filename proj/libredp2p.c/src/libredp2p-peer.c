@@ -2676,7 +2676,7 @@ static int redp2p_punch_send_candidate(redp2p_t *ctx, int udp_fd,
     }
     sent = redp2p_transport_sendto(ctx, (redp2p_fd_t)udp_fd, ping_msg,
         strlen(ping_msg), &cand_sa, 0) >= 0 ? 1 : 0;
-    if (ctx && ctx->turn_ready && ctx->turn_fd == (redp2p_fd_t)udp_fd &&
+    if (redp2p_turn_find_allocation(ctx, (redp2p_fd_t)udp_fd) &&
         redp2p_transport_sendto(ctx, (redp2p_fd_t)udp_fd, ping_msg,
             strlen(ping_msg), &cand_sa, 1) >= 0)
         sent++;
