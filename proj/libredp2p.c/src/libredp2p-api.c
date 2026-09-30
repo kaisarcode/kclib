@@ -1420,10 +1420,6 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     if (status != REDP2P_OK) goto fail_adapter;
     status = kc_redp2p_runtime_wait_ready(&pub->runtime);
     if (status != REDP2P_OK) {
-        if (status == REDP2P_EPROTO && pub->runtime.ctx &&
-            pub->runtime.ctx->err_buf[0] != '\0')
-            fprintf(stderr, "[REDP2P-DIAG] pub startup: %s\n",
-                pub->runtime.ctx->err_buf);
         kc_redp2p_runtime_close(&pub->runtime);
         pub->runtime.ctx = NULL;
         goto fail_adapter_no_ctx;
@@ -1469,8 +1465,6 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
         !redp2p_is_valid_id(options->id))
         return KC_REDP2P_EINVAL;
     *out = NULL;
-    fprintf(stderr, "[REDP2P-DIAG] con api enter id=%s index=%s\n",
-        options->id, options->index);
     con = (kc_redp2p_con_t *)calloc(1, sizeof(*con));
     if (!con) return KC_REDP2P_ERROR;
     con->adapter_fd = REDP2P_FD_INVALID;
@@ -1535,9 +1529,6 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
             status = kc_redp2p_thread_start_con(con);
             if (status != REDP2P_OK) goto fail;
             status = kc_redp2p_runtime_wait_ready(&con->runtime);
-            fprintf(stderr, "[REDP2P-DIAG] con runtime ready status=%d err=%s\n",
-                status, con->runtime.ctx->err_buf[0] ?
-                con->runtime.ctx->err_buf : "-");
             if (status == REDP2P_OK) break;
 
             retry_bind = status == REDP2P_ENET &&
@@ -1553,21 +1544,13 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
         }
     }
     status = kc_redp2p_con_adapter_open(con);
-    fprintf(stderr, "[REDP2P-DIAG] con adapter open status=%d\n", status);
     if (status != KC_REDP2P_OK) {
         kc_redp2p_runtime_close(&con->runtime);
         con->runtime.ctx = NULL;
         goto fail_no_ctx;
     }
     status = kc_redp2p_con_start_channel(con);
-    fprintf(stderr, "[REDP2P-DIAG] con channel trigger status=%d\n", status);
-    if (status == KC_REDP2P_OK) {
-        fprintf(stderr, "[REDP2P-DIAG] con waiting channel\n");
-        status = kc_redp2p_con_wait_channel(con);
-        fprintf(stderr, "[REDP2P-DIAG] con channel result status=%d err=%s\n",
-            status, con->runtime.ctx && con->runtime.ctx->err_buf[0] ?
-            con->runtime.ctx->err_buf : "-");
-    }
+    if (status == KC_REDP2P_OK) status = kc_redp2p_con_wait_channel(con);
     if (status != KC_REDP2P_OK) {
         kc_redp2p_con_adapter_close(con);
         kc_redp2p_runtime_close(&con->runtime);
