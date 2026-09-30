@@ -498,13 +498,16 @@ int redp2p_stream_process_packet(redp2p_t *ctx,
             REDP2P_SESSION_ID_SZ) != 0)
         return 0;
     if (envelope.type == REDP2P_SESSION_TYPE_HELLO && !st->initiator) {
+        fprintf(stderr, "[REDP2P-DIAG] stream: responder received HELLO\n");
         if (redp2p_stream_send_control(ctx, st,
             REDP2P_SESSION_TYPE_HELLO_ACK) != 0)
             return -1;
+        fprintf(stderr, "[REDP2P-DIAG] stream: responder sent HELLO_ACK\n");
         st->ready = 1;
         return 0;
     }
     if (envelope.type == REDP2P_SESSION_TYPE_HELLO_ACK && st->initiator) {
+        fprintf(stderr, "[REDP2P-DIAG] stream: initiator received HELLO_ACK\n");
         st->ready = 1;
         return 0;
     }
@@ -583,6 +586,7 @@ int redp2p_stream_tick(redp2p_t *ctx, redp2p_stream_state_t *st)
     if (st->initiator && !st->ready &&
         (!st->hello_sent || now - st->last_hello_ms >= REDP2P_STREAM_HELLO_MS))
     {
+        fprintf(stderr, "[REDP2P-DIAG] stream: initiator send HELLO\n");
         if (redp2p_stream_send_control(ctx, st,
             REDP2P_SESSION_TYPE_HELLO) != 0)
             return -1;
