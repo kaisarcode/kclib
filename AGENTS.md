@@ -320,7 +320,6 @@ failures.
 Use the simplest interface appropriate to the capability. No transport or
 protocol is mandatory across kclibs.
 
-
 ## Structure and dependencies
 
 Keep public headers, library source, tests, vendored code, and platform-specific
