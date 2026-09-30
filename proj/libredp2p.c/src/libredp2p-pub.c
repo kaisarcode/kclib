@@ -1501,30 +1501,15 @@ JSON_Object *out)
             snprintf(session_hex, sizeof(session_hex), "%s", remote_token);
         }
         peer_via_turn = 0;
-        fprintf(stderr,
-            "[REDP2P-DIAG] pub call: peer=%s candidates=%d select start\n",
-            connection_id, candidate_count);
         if (!redp2p_publisher_select_peer(runtime, connection_id,
             session_hex, remote_candidates, candidate_count, &peer_addr,
             &peer_via_turn)) {
-            fprintf(stderr,
-                "[REDP2P-DIAG] pub call: peer=%s select failed\n",
-                connection_id);
             continue;
         }
-        fprintf(stderr,
-            "[REDP2P-DIAG] pub call: peer=%s selected via_turn=%d\n",
-            connection_id, peer_via_turn);
         if (!redp2p_publisher_open_session(runtime, session_hex,
             session_id, &peer_addr, peer_via_turn)) {
-            fprintf(stderr,
-                "[REDP2P-DIAG] pub call: peer=%s session open failed\n",
-                connection_id);
             continue;
         }
-        fprintf(stderr,
-            "[REDP2P-DIAG] pub call: peer=%s session open ok\n",
-            connection_id);
         redp2p_transport_sendto(runtime->borrowed_ctx, runtime->owned_udp_fd,
             REDP2P_CTRTOK_PUNCH_SERVER, strlen(REDP2P_CTRTOK_PUNCH_SERVER),
             &peer_addr, peer_via_turn);
@@ -1849,17 +1834,9 @@ redp2p_publisher_runtime_t *runtime)
         found = redp2p_publisher_session_find(runtime, &from, NULL);
     }
     if (found >= 0 && runtime->owned_sessions[found].via_turn != via_turn) {
-        fprintf(stderr,
-            "[REDP2P-DIAG] pub peer: route mismatch rx=%d session=%d\n",
-            via_turn, runtime->owned_sessions[found].via_turn);
         found = -1;
     }
     if (found < 0) {
-        if (runtime->borrowed_ctx->proto == REDP2P_PROTO_TCP &&
-            redp2p_session_unpack((const unsigned char *)buf, (size_t)n,
-                &envelope) && redp2p_stream_envelope_valid(&envelope))
-            fprintf(stderr,
-                "[REDP2P-DIAG] pub peer: valid TCP frame has no session match\n");
         if (strncmp(buf, REDP2P_CTRTOK_PUNCH_PING,
             strlen(REDP2P_CTRTOK_PUNCH_PING)) == 0 &&
             redp2p_parse_punch_packet(buf, REDP2P_CTRTOK_PUNCH_PING,

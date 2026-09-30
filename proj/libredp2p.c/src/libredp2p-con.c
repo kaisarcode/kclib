@@ -324,7 +324,6 @@ int *skip_iteration)
         }
     }
 
-    fprintf(stderr, "[REDP2P-DIAG] con establish: create peer socket\n");
     peer_fd = redp2p_create_socket(runtime->udp_any_host, 0);
     candidate_count = 0;
     if (REDP2P_ISERR(peer_fd) ||
@@ -340,17 +339,12 @@ int *skip_iteration)
         }
         return REDP2P_ENET;
     }
-    fprintf(stderr, "[REDP2P-DIAG] con establish: gathered %d candidates\n",
-        candidate_count);
     punch_port = 0;
     punch_sa_len = sizeof(punch_sa);
     if (getsockname(peer_fd, (struct sockaddr *)&punch_sa, &punch_sa_len) == 0)
         punch_port = redp2p_sockaddr_port(&punch_sa);
-    fprintf(stderr, "[REDP2P-DIAG] con establish: send punch request\n");
     result = redp2p_send_punch_req_cands(runtime, session_hex, candidates,
         candidate_count, punch_port);
-    fprintf(stderr, "[REDP2P-DIAG] con establish: punch request result=%d\n",
-        result);
     if (result != REDP2P_OK) {
         if (skip_iteration) *skip_iteration = 1;
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
@@ -362,17 +356,11 @@ int *skip_iteration)
 
     memset(&peer_addr, 0, sizeof(peer_addr));
     peer_via_turn = 0;
-    fprintf(stderr,
-        "[REDP2P-DIAG] con establish: punch select remote=%d sweep=%d\n",
-        runtime->n_peer_candidates, runtime->ctx->sweep);
     result = redp2p_punch_select(runtime->ctx, runtime->ctx->sweep,
         (int)peer_fd,
         session_hex, runtime->self_id, runtime->target_id,
         runtime->peer_candidates, runtime->n_peer_candidates, &peer_addr,
         &peer_via_turn);
-    fprintf(stderr,
-        "[REDP2P-DIAG] con establish: punch select returned=%d via_turn=%d\n",
-        result, peer_via_turn);
     if (result != REDP2P_OK) {
         redp2p_transport_forget(runtime->ctx, peer_fd);
         REDP2P_FD_CLOSE((int)peer_fd);
@@ -924,13 +912,9 @@ redp2p_consumer_runtime_t *runtime)
         if (n == -2) continue;
         if (n < 0 || (size_t)n > sizeof(buf)) continue;
         if (!redp2p_sockaddr_equal(&from, &runtime->sessions[i].peer_addr)) {
-            fprintf(stderr, "[REDP2P-DIAG] con peer: address mismatch\n");
             continue;
         }
         if (via_turn != runtime->sessions[i].via_turn) {
-            fprintf(stderr,
-                "[REDP2P-DIAG] con peer: route mismatch rx=%d session=%d\n",
-                via_turn, runtime->sessions[i].via_turn);
             continue;
         }
         if (!runtime->sessions[i].is_tcp) {

@@ -571,9 +571,6 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
         if (ready <= 0 || !redp2p_poll_readable(&fd)) continue;
         n = redp2p_sock_read(con->adapter_fd, (char *)buffer,
             (int)sizeof(buffer));
-        fprintf(stderr,
-            "[REDP2P-DIAG] api con adapter: read=%d closing=%d callback=%d\n",
-            n, atomic_load(&con->closing), con->receive ? 1 : 0);
         if (n < 0) break;
         if (n == 0 && con->runtime.ctx &&
             con->runtime.ctx->proto == REDP2P_PROTO_TCP)
@@ -581,9 +578,6 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
         if (con->receive &&
             (!atomic_load(&con->closing) || atomic_load(&con->draining)))
         {
-            fprintf(stderr,
-                "[REDP2P-DIAG] api con adapter: dispatch callback size=%d\n",
-                n);
             con->receive(buffer, (size_t)n, con->userdata);
         }
     }
