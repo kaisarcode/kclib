@@ -2369,7 +2369,9 @@ class Redp2pIndex
             pack('nC', $port, count($candidates));
         foreach ($candidates as $candidate) {
             $address = inet_pton($candidate['addr']);
-            $message .= chr($candidate['type'] === 'host' ? 1 : 2) .
+            $candidateType = $candidate['type'] === 'host' ? 1 :
+                ($candidate['type'] === 'observed' ? 2 : 3);
+            $message .= chr($candidateType) .
                 chr(strlen($address) === 4 ? 4 : 6) . $address .
                 pack('n', $candidate['port']);
         }
