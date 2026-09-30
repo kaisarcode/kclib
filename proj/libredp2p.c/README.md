@@ -66,7 +66,9 @@ only as a fallback.
 
 Setting `REDP2P_FORCE_TURN=1` in the environment of a publisher or a consumer
 discards its direct and STUN candidates, so the peer path uses the TURN relay
-even when direct connectivity would have worked. The index is unaffected.
+even when direct connectivity would have worked. A TURN server must be
+configured, and publisher or consumer setup fails if a relay candidate cannot
+be established. The index is unaffected.
 
 ### WebRTC use
 
