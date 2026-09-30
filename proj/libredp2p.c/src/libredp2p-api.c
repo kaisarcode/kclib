@@ -105,6 +105,7 @@ struct kc_redp2p_con {
     int adapter_thread_started;
     _Atomic int adapter_stop;
     _Atomic int closing;
+    _Atomic int draining;
     _Atomic int deferred_close;
     kc_redp2p_io_mutex_t io_mutex;
     int io_mutex_initialized;
@@ -577,7 +578,9 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
         if (n == 0 && con->runtime.ctx &&
             con->runtime.ctx->proto == REDP2P_PROTO_TCP)
             break;
-        if (con->receive && !atomic_load(&con->closing)) {
+        if (con->receive &&
+            (!atomic_load(&con->closing) || atomic_load(&con->draining)))
+        {
             fprintf(stderr,
                 "[REDP2P-DIAG] api con adapter: dispatch callback size=%d\n",
                 n);
@@ -729,6 +732,32 @@ static int kc_redp2p_con_adapter_open(kc_redp2p_con_t *con)
         return KC_REDP2P_ENET;
     }
     return KC_REDP2P_OK;
+}
+
+/**
+ * Half-closes the direct consumer adapter write side.
+ * Summary: Lets the native stream propagate local EOF while receive draining
+ *          remains active.
+ * @param con Consumer capability.
+ * @return 0 on success, -1 on failure.
+ */
+static int kc_redp2p_con_adapter_shutdown_write(kc_redp2p_con_t *con)
+{
+    int result;
+
+    if (!con) return -1;
+    kc_redp2p_io_mutex_lock(&con->io_mutex, con->io_mutex_initialized);
+    if (REDP2P_ISERR(con->adapter_fd)) {
+        result = -1;
+    } else {
+#ifdef _WIN32
+        result = shutdown(con->adapter_fd, SD_SEND);
+#else
+        result = shutdown(con->adapter_fd, SHUT_WR);
+#endif
+    }
+    kc_redp2p_io_mutex_unlock(&con->io_mutex, con->io_mutex_initialized);
+    return result;
 }
 
 /**
@@ -1686,7 +1715,31 @@ void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
  */
 void kc_redp2p_con_close(kc_redp2p_con_t *con)
 {
-    if (!con || atomic_exchange(&con->closing, 1)) return;
+    int drain;
+
+    if (!con) return;
+    drain = con->receive && con->adapter_thread_started &&
+        con->runtime.ctx &&
+        con->runtime.ctx->proto == REDP2P_PROTO_TCP &&
+        !REDP2P_ISERR(con->adapter_fd);
+    if (drain) atomic_store(&con->draining, 1);
+    if (atomic_exchange(&con->closing, 1)) return;
+
+    if (drain && kc_redp2p_con_adapter_shutdown_write(con) == 0) {
+        if (kc_redp2p_con_adapter_is_current(con)) {
+            atomic_store(&con->deferred_close, 1);
+            return;
+        }
+        kc_redp2p_con_adapter_join(con);
+        kc_redp2p_con_adapter_close(con);
+        kc_redp2p_runtime_close(&con->runtime);
+        kc_redp2p_io_mutex_destroy(&con->io_mutex,
+            &con->io_mutex_initialized);
+        free(con);
+        return;
+    }
+
+    atomic_store(&con->draining, 0);
     if (kc_redp2p_con_adapter_is_current(con)) {
         atomic_store(&con->adapter_stop, 1);
         if (con->runtime.ctx) redp2p_context_request_stop(con->runtime.ctx);

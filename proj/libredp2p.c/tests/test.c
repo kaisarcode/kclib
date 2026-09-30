@@ -7121,6 +7121,10 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
         status = kc_redp2p_con_send(con, "ping", 4);
         fail += expect_int("direct send", KC_REDP2P_OK, status);
     }
+    if (fail == 0 && protocol == KC_REDP2P_TCP) {
+        kc_redp2p_con_close(con);
+        con = NULL;
+    }
 
     deadline = redp2p_now_ms() + 10000U;
     while (fail == 0 && atomic_load(&state.consumer_received) == 0 &&
@@ -7134,7 +7138,7 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
     fail += expect_int("direct consumer receive", 1,
         atomic_load(&state.consumer_received));
 
-    kc_redp2p_con_close(con);
+    if (con) kc_redp2p_con_close(con);
     kc_redp2p_pub_close(pub);
     return fail == 0 ? 0 : 1;
 }
