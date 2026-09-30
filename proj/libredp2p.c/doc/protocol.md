@@ -231,15 +231,31 @@ A successful deregistration removes the publisher and all temporary connection
 state addressed to it, including both native punch state and RTC signaling
 state.
 
-## STUN
+## STUN and TURN
 
-STUN is optional connection infrastructure, not index semantics.
+STUN and TURN are optional connection infrastructure, not index semantics.
 
-Native implementations use it for native candidate discovery.
+Native implementations use STUN for candidate discovery and may advertise a
+TURN `relay` candidate. Direct native UDP connectivity remains preferred;
+TURN is a transparent fallback when the native peer path cannot be established.
+The native TCP capability keeps the same application stream semantics because
+its peer transport is UDP/KCP internally.
 
-JavaScript/WebRTC implementations map it to WebRTC ICE-server configuration.
+Native candidate objects use:
 
-The public REDP2P capability does not expose ICE or SDP as application concepts.
+```text
+host
+observed
+relay
+```
+
+The index exchanges relay candidates but never carries application payloads.
+TURN relays the same REDP2P session datagrams that would otherwise travel
+directly between peers.
+
+JavaScript/WebRTC implementations pass STUN/TURN infrastructure to WebRTC ICE
+configuration. ICE, SDP, direct-vs-relay selection, and native TURN state remain
+internal details; applications continue to use the same REDP2P capability API.
 
 ## Compatibility
 
