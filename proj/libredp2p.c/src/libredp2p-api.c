@@ -549,6 +549,7 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
                 }
                 if (n == 0) {
                     atomic_store(&client->read_eof, 1);
+                    kc_redp2p_pub_emit(pub, client, NULL, 0);
                     continue;
                 }
                 kc_redp2p_pub_emit(pub, client, buffer, (size_t)n);
@@ -593,7 +594,12 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
         if (n < 0) break;
         if (n == 0 && con->runtime.ctx &&
             con->runtime.ctx->proto == REDP2P_PROTO_TCP)
+        {
+            if (con->receive &&
+                (!atomic_load(&con->closing) || atomic_load(&con->draining)))
+                con->receive(NULL, 0, con->userdata);
             break;
+        }
         if (con->receive &&
             (!atomic_load(&con->closing) || atomic_load(&con->draining)))
         {
