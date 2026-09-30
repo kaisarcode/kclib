@@ -52,6 +52,18 @@ The public data model is the same for both transports: established peer
 channels, send, receive, and publisher responses. TCP behaves as a stream. UDP
 keeps datagram boundaries.
 
+### TURN fallback
+
+Native TCP and UDP modes use UDP internally for peer transport. Optional TURN
+configuration can provide a relay path when direct hole punching cannot
+establish that UDP path. TURN is transparent to the application: publishers,
+consumers, callbacks, send/receive calls, TCP stream semantics, and UDP datagram
+semantics are unchanged.
+
+When TURN is not configured, REDP2P behaves exactly as before. When it is
+configured, direct connectivity remains preferred and relay candidates are used
+only as a fallback.
+
 ### WebRTC use
 
 Native applications use the C library and native TCP/UDP networking.
