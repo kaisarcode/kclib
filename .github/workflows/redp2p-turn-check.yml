@@ -1,0 +1,17 @@
+name: redp2p-turn-check
+on:
+  push:
+    branches:
+      - slave
+
+jobs:
+  redp2p:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: proj/libredp2p.c
+        run: make
+      - name: Test
+        working-directory: proj/libredp2p.c
+        run: make test
