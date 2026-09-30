@@ -260,6 +260,7 @@ REDP2P_INTERNAL int redp2p_transport_sendto(redp2p_t *ctx, redp2p_fd_t fd,
 REDP2P_INTERNAL int redp2p_transport_recvfrom(redp2p_t *ctx, redp2p_fd_t fd,
     void *buf, size_t cap, int flags, struct sockaddr_storage *from,
     socklen_t *from_len, int *via_turn);
+REDP2P_INTERNAL void redp2p_transport_forget(redp2p_t *ctx, redp2p_fd_t fd);
 
 /**
  * Punch select.
