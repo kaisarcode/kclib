@@ -1000,7 +1000,7 @@ static int redp2p_index_require_sequence(JSON_Object *obj,
 /**
  * Parses a server request candidate list under the index destination policy.
  *
- * Requests may only submit host candidates naming reachable unicast
+ * Requests may only submit host or relay candidates naming reachable unicast
  * endpoints; the list is canonicalized, de-duplicated, and sorted using the
  * same ordering the client already applies, so authenticated proofs computed
  * over the normalized list match between both sides.
@@ -1020,7 +1020,8 @@ static int redp2p_index_parse_request_candidates(JSON_Object *obj,
 
     if (!redp2p_parse_candidates(obj, field, out, out_count)) return 0;
     for (i = 0; i < *out_count; i++) {
-        if (out[i].type != REDP2P_CAND_HOST) return 0;
+        if (out[i].type != REDP2P_CAND_HOST &&
+            out[i].type != REDP2P_CAND_RELAY) return 0;
         if (inet_pton(AF_INET, out[i].addr, &ipv4) == 1) {
             if (!redp2p_candidate_dest_allowed(AF_INET, &ipv4, out[i].port))
                 return 0;
