@@ -6449,10 +6449,13 @@ static void test_direct_api_pub_receive(const kc_redp2p_pub_input_t *input,
 {
     test_direct_api_state_t *state = (test_direct_api_state_t *)userdata;
 
-    if (!input || !state || input->size != 4 ||
-        memcmp(input->data, "ping", 4) != 0)
-    {
-        if (state) atomic_store(&state->publisher_received, -1);
+    if (!input || !state) return;
+    if (!input->data && input->size == 0) {
+        kc_redp2p_client_close(input->client);
+        return;
+    }
+    if (input->size != 4 || memcmp(input->data, "ping", 4) != 0) {
+        atomic_store(&state->publisher_received, -1);
         return;
     }
     atomic_store(&state->publisher_received, 1);
@@ -6473,6 +6476,7 @@ static void test_direct_api_con_receive(const void *data, size_t size,
     test_direct_api_state_t *state = (test_direct_api_state_t *)userdata;
 
     if (!state) return;
+    if (!data && size == 0) return;
     atomic_store(&state->consumer_received,
         data && size == 4 && memcmp(data, "pong", 4) == 0 ? 1 : -1);
 }
