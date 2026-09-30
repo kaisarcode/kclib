@@ -76,13 +76,16 @@ static int redp2p_stream_make_session_id(unsigned char out[REDP2P_SESSION_ID_SZ]
  * Closes one consumer-side UDP session and wipes TCP stream state.
  * @return None.
  */
-static void redp2p_consumer_session_close(redp2p_udp_consumer_session_t *sess) {
+static void redp2p_consumer_session_close(redp2p_t *ctx,
+    redp2p_udp_consumer_session_t *sess)
+{
     if (!sess) return;
     if (sess->tcp_fd != REDP2P_FD_INVALID) {
         REDP2P_FD_CLOSE(sess->tcp_fd);
         sess->tcp_fd = REDP2P_FD_INVALID;
     }
     if (!REDP2P_ISERR(sess->fd)) {
+        redp2p_transport_forget(ctx, sess->fd);
         REDP2P_FD_CLOSE(sess->fd);
         sess->fd = REDP2P_FD_INVALID;
     }
@@ -227,7 +230,7 @@ redp2p_udp_consumer_session_t *session)
         new_sessions = (redp2p_udp_consumer_session_t *)realloc(
             runtime->sessions, (size_t)new_cap * sizeof(*runtime->sessions));
         if (!new_sessions) {
-            redp2p_consumer_session_close(session);
+            redp2p_consumer_session_close(runtime->ctx, session);
             crypto_wipe(session, sizeof(*session));
             return -1;
         }
@@ -257,7 +260,7 @@ redp2p_consumer_runtime_t *runtime)
         {
             redp2p_stream_fail(runtime->ctx, &runtime->sessions[i].stream);
         }
-        redp2p_consumer_session_close(&runtime->sessions[i]);
+        redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
     }
 }
 
@@ -870,7 +873,7 @@ redp2p_consumer_runtime_t *runtime)
             &runtime->sessions[i].stream, runtime->sessions[i].tcp_fd) != 0)
         {
             redp2p_stream_fail(runtime->ctx, &runtime->sessions[i].stream);
-            redp2p_consumer_session_close(&runtime->sessions[i]);
+            redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
         }
     }
 }
@@ -925,7 +928,7 @@ redp2p_consumer_runtime_t *runtime)
             {
                 redp2p_stream_fail(runtime->ctx,
                     &runtime->sessions[i].stream);
-                redp2p_consumer_session_close(&runtime->sessions[i]);
+                redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
             }
         } else {
             redp2p_sendto_addr(runtime->local_fd, envelope.payload,
@@ -956,11 +959,11 @@ redp2p_consumer_runtime_t *runtime)
             {
                 redp2p_stream_fail(runtime->ctx,
                     &runtime->sessions[i].stream);
-                redp2p_consumer_session_close(&runtime->sessions[i]);
+                redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
                 continue;
             }
             if (redp2p_stream_is_done(&runtime->sessions[i].stream)) {
-                redp2p_consumer_session_close(&runtime->sessions[i]);
+                redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
                 continue;
             }
         }
@@ -979,7 +982,7 @@ redp2p_consumer_runtime_t *runtime)
         if (redp2p_now_s() - runtime->sessions[i].last_rx >
             REDP2P_DISCONNECT_S)
         {
-            redp2p_consumer_session_close(&runtime->sessions[i]);
+            redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
         }
     }
 }
