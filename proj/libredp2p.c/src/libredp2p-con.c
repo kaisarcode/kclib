@@ -33,7 +33,7 @@ typedef struct redp2p_udp_consumer_session {
     uint64_t last_rx;
     uint64_t last_ka;
     int active;
-    int is_tcp;
+    int stream_mode;
     int via_turn;
     redp2p_stream_state_t stream;
 } redp2p_udp_consumer_session_t;
@@ -73,7 +73,7 @@ static int redp2p_stream_make_session_id(unsigned char out[REDP2P_SESSION_ID_SZ]
 }
 
 /**
- * Closes one consumer-side UDP session and wipes TCP stream state.
+ * Closes one consumer peer session and wipes stream-adapter state.
  * @return None.
  */
 static void redp2p_consumer_session_close(redp2p_t *ctx,
@@ -89,7 +89,7 @@ static void redp2p_consumer_session_close(redp2p_t *ctx,
         REDP2P_FD_CLOSE(sess->fd);
         sess->fd = REDP2P_FD_INVALID;
     }
-    if (sess->is_tcp) redp2p_stream_wipe(&sess->stream);
+    if (sess->stream_mode) redp2p_stream_wipe(&sess->stream);
     sess->active = 0;
 }
 
@@ -255,7 +255,7 @@ redp2p_consumer_runtime_t *runtime)
 
     for (i = 0; i < runtime->n_sessions; i++) {
         if (!runtime->sessions[i].active) continue;
-        if (runtime->sessions[i].is_tcp &&
+        if (runtime->sessions[i].stream_mode &&
             !redp2p_stream_is_done(&runtime->sessions[i].stream))
         {
             redp2p_stream_fail(runtime->ctx, &runtime->sessions[i].stream);
@@ -267,7 +267,7 @@ redp2p_consumer_runtime_t *runtime)
 /**
  * Establishes one peer path and transfers its descriptor only on success.
  * @param runtime Consumer runtime containing control and peer settings.
- * @param is_tcp Non-zero selects the TCP stream session identifier format.
+ * @param stream_mode Non-zero selects the TCP stream session identifier format.
  * @param out_fd Output peer descriptor.
  * @param out_peer Output selected peer address.
  * @param session_bin Output binary session identifier.
@@ -277,7 +277,7 @@ redp2p_consumer_runtime_t *runtime)
  */
 static int redp2p_consumer_establish_peer(
 redp2p_consumer_runtime_t *runtime,
-int is_tcp,
+int stream_mode,
 redp2p_fd_t *out_fd,
 struct sockaddr_storage *out_peer,
 unsigned char session_bin[REDP2P_SESSION_ID_SZ],
@@ -304,7 +304,7 @@ int *skip_iteration)
     memset(session_hex, 0, REDP2P_SESSION_ID_SZ * 2 + 1);
     if (skip_iteration) *skip_iteration = 0;
 
-    if (is_tcp) {
+    if (stream_mode) {
         if (!redp2p_stream_make_session_id(session_bin, session_hex)) {
             if (skip_iteration) *skip_iteration = 1;
             crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
@@ -409,7 +409,7 @@ const char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1])
         session->via_turn) != 0)
         return -1;
     session->active = 1;
-    session->is_tcp = 1;
+    session->stream_mode = 1;
     session->last_rx = redp2p_now_s();
     session->last_ka = session->last_rx;
     memset(&session->client_addr, 0, sizeof(session->client_addr));
@@ -440,7 +440,7 @@ const struct sockaddr_storage *client_addr)
     session->last_rx = redp2p_now_s();
     session->last_ka = session->last_rx;
     session->active = 1;
-    session->is_tcp = 0;
+    session->stream_mode = 0;
 }
 
 /**
@@ -645,7 +645,7 @@ redp2p_consumer_runtime_t *runtime)
     for (i = 0; i < runtime->n_sessions; i++) {
         if (!runtime->sessions[i].active) continue;
         needed++;
-        if (runtime->sessions[i].is_tcp &&
+        if (runtime->sessions[i].stream_mode &&
             runtime->sessions[i].tcp_fd != REDP2P_FD_INVALID &&
             redp2p_stream_can_send_data(&runtime->sessions[i].stream))
             needed++;
@@ -683,7 +683,7 @@ redp2p_consumer_runtime_t *runtime)
         runtime->pollfds[runtime->poll_count].events = REDP2P_POLLIN;
         runtime->pollfds[runtime->poll_count].revents = 0;
         runtime->poll_count++;
-        if (!runtime->sessions[i].is_tcp ||
+        if (!runtime->sessions[i].stream_mode ||
             runtime->sessions[i].tcp_fd == REDP2P_FD_INVALID ||
             !redp2p_stream_can_send_data(&runtime->sessions[i].stream))
             continue;
@@ -877,7 +877,7 @@ redp2p_consumer_runtime_t *runtime)
         if (!runtime->sessions[i].active) continue;
         if (!redp2p_consumer_poll_ready(runtime,
             runtime->sessions[i].tcp_fd)) continue;
-        if (redp2p_stream_pump_tcp(runtime->ctx,
+        if (redp2p_stream_pump_adapter(runtime->ctx,
             &runtime->sessions[i].stream, runtime->sessions[i].tcp_fd) != 0)
         {
             redp2p_stream_fail(runtime->ctx, &runtime->sessions[i].stream);
@@ -920,7 +920,7 @@ redp2p_consumer_runtime_t *runtime)
         if (via_turn != runtime->sessions[i].via_turn) {
             continue;
         }
-        if (!runtime->sessions[i].is_tcp) {
+        if (!runtime->sessions[i].stream_mode) {
             if (!redp2p_session_unpack((const unsigned char *)buf, (size_t)n,
                 &envelope) || !redp2p_udp_envelope_valid(&envelope,
                 REDP2P_SESSION_ROLE_RESPONDER))
@@ -930,7 +930,7 @@ redp2p_consumer_runtime_t *runtime)
                 continue;
             }
         }
-        if (runtime->sessions[i].is_tcp) {
+        if (runtime->sessions[i].stream_mode) {
             if (runtime->sessions[i].tcp_fd != REDP2P_FD_INVALID &&
                 redp2p_stream_process_packet(runtime->ctx,
                     &runtime->sessions[i].stream,
@@ -961,8 +961,8 @@ redp2p_consumer_runtime_t *runtime)
 
     for (i = 0; i < runtime->n_sessions; i++) {
         if (!runtime->sessions[i].active) continue;
-        if (runtime->sessions[i].is_tcp) {
-            if (redp2p_stream_flush_tcp(runtime->ctx,
+        if (runtime->sessions[i].stream_mode) {
+            if (redp2p_stream_flush_adapter(runtime->ctx,
                 &runtime->sessions[i].stream,
                 runtime->sessions[i].tcp_fd) != 0 ||
                 redp2p_stream_tick(runtime->ctx,
@@ -981,7 +981,7 @@ redp2p_consumer_runtime_t *runtime)
         if (redp2p_now_s() - runtime->sessions[i].last_ka >
             REDP2P_KEEPALIVE_S)
         {
-            if (!runtime->sessions[i].is_tcp) {
+            if (!runtime->sessions[i].stream_mode) {
                 redp2p_udp_send(runtime->ctx, runtime->sessions[i].fd,
                     &runtime->sessions[i].peer_addr,
                     runtime->sessions[i].via_turn,
@@ -1013,7 +1013,7 @@ static uint32_t redp2p_consumer_wait_ms(
     wait_ms = 1000;
     now = redp2p_now_ms();
     for (i = 0; i < runtime->n_sessions; i++) {
-        if (!runtime->sessions[i].active || !runtime->sessions[i].is_tcp)
+        if (!runtime->sessions[i].active || !runtime->sessions[i].stream_mode)
             continue;
         session_wait = redp2p_stream_wait_ms(&runtime->sessions[i].stream, now);
         if (session_wait < wait_ms) wait_ms = session_wait;
