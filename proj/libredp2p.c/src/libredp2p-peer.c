@@ -1879,41 +1879,69 @@ static int redp2p_turn_auth_attrs(redp2p_t *ctx,
 static int redp2p_turn_parse_url(const char *url, char *host, size_t host_cap,
     unsigned short *port)
 {
-    const char *p, *end, *port_text;
+    const char *p;
+    const char *target_end;
+    const char *end;
+    const char *port_text;
+    const char *query;
     char port_buf[16];
-    size_t host_len, port_len;
+    size_t host_len;
+    size_t port_len;
     long parsed;
 
     if (!url || strncmp(url, "turn:", 5) != 0 || !host || !port) return 0;
     p = url + 5;
-    if (!*p || strchr(p, '?')) return 0;
+    if (!*p) return 0;
+    query = strchr(p, '?');
+    if (query) {
+        if (strcmp(query, "?transport=udp") != 0) return 0;
+        target_end = query;
+    } else {
+        target_end = p + strlen(p);
+    }
+    if (target_end == p) return 0;
     port_text = NULL;
     if (*p == '[') {
-        end = strchr(p + 1, ']');
+        end = memchr(p + 1, ']', (size_t)(target_end - (p + 1)));
         if (!end) return 0;
+        host_len = (size_t)(end - (p + 1));
         p++;
-        host_len = (size_t)(end - p);
-        if (end[1] == ':') port_text = end + 2;
-        else if (end[1] != '\0') return 0;
+        if (end + 1 < target_end) {
+            if (end[1] != ':') return 0;
+            port_text = end + 2;
+        } else if (end + 1 != target_end) {
+            return 0;
+        }
     } else {
-        const char *first_colon = strchr(p, ':');
-        const char *last_colon = strrchr(p, ':');
+        const char *scan;
+        const char *first_colon;
+        const char *last_colon;
 
+        first_colon = NULL;
+        last_colon = NULL;
+        for (scan = p; scan < target_end; scan++) {
+            if (*scan == ':') {
+                if (!first_colon) first_colon = scan;
+                last_colon = scan;
+            }
+        }
         if (first_colon && first_colon == last_colon) {
             host_len = (size_t)(first_colon - p);
             port_text = first_colon + 1;
         } else {
-            host_len = strlen(p);
+            host_len = (size_t)(target_end - p);
         }
     }
     if (host_len == 0 || host_len >= host_cap) return 0;
-    memcpy(host, p, host_len); host[host_len] = '\0';
+    memcpy(host, p, host_len);
+    host[host_len] = '\0';
     *port = REDP2P_TURN_DEFAULT_PORT;
     if (!port_text) return 1;
-    if (!*port_text) return 0;
-    port_len = strlen(port_text);
-    if (port_len >= sizeof(port_buf)) return 0;
-    memcpy(port_buf, port_text, port_len + 1);
+    if (port_text >= target_end) return 0;
+    port_len = (size_t)(target_end - port_text);
+    if (port_len == 0 || port_len >= sizeof(port_buf)) return 0;
+    memcpy(port_buf, port_text, port_len);
+    port_buf[port_len] = '\0';
     if (!redp2p_parse_u(port_buf, 1, 65535, &parsed)) return 0;
     *port = (unsigned short)parsed;
     return 1;
