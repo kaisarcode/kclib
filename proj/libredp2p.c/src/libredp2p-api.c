@@ -1365,6 +1365,10 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     if (status != REDP2P_OK) goto fail_adapter;
     status = kc_redp2p_runtime_wait_ready(&pub->runtime);
     if (status != REDP2P_OK) {
+#ifdef REDP2P_TESTING
+        fprintf(stderr, "[REDP2P-PUB-ERROR] status=%d err=%s\n", status,
+            pub->runtime.ctx ? pub->runtime.ctx->err_buf : "");
+#endif
         kc_redp2p_runtime_close(&pub->runtime);
         pub->runtime.ctx = NULL;
         goto fail_adapter_no_ctx;
