@@ -212,7 +212,7 @@ typedef struct redp2p_rate_source redp2p_rate_source_t;
 #define REDP2P_TURN_REALM_MAX 255
 #define REDP2P_TURN_NONCE_MAX 511
 #define REDP2P_TURN_PERMISSIONS_MAX 32
-#define REDP2P_TURN_ALLOCATIONS_MAX 32
+#define REDP2P_TURN_ALLOCATIONS_MAX 64
 
 typedef struct {
     struct sockaddr_storage addr;
