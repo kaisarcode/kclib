@@ -48,9 +48,11 @@ documented in `src/libredp2p.h`.
 The native publisher selects TCP or UDP when it registers. The consumer selects
 only the publisher ID and learns the transport from the index.
 
-The public data model is the same for both transports: established peer
-channels, send, receive, and publisher responses. TCP behaves as a stream. UDP
-keeps datagram boundaries.
+The public data model is the same for both modes: established peer channels,
+send, receive, and publisher responses. TCP mode exposes a stream adapter at
+the endpoints, while UDP mode keeps datagram boundaries. The peer path itself
+remains UDP in both cases; TCP mode uses KCP over REDP2P datagrams to reconstruct
+the endpoint byte stream.
 
 ### TURN fallback
 
