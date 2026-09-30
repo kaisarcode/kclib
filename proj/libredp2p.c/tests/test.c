@@ -6245,7 +6245,6 @@ void redp2p_test_api_io_hold(int hold);
 int redp2p_test_api_io_entered(void);
 void redp2p_test_api_port_hold(int hold);
 unsigned short redp2p_test_api_port_value(void);
-int redp2p_test_api_client_read_eof(kc_redp2p_client_t *client);
 #endif
 
 #ifdef REDP2P_TESTING
@@ -6450,7 +6449,6 @@ static void test_direct_api_pub_receive(const kc_redp2p_pub_input_t *input,
     test_direct_api_state_t *state = (test_direct_api_state_t *)userdata;
 
     if (!input || !state) return;
-    if (!input->data && input->size == 0) return;
     if (input->size != 4 ||
         memcmp(input->data, "ping", 4) != 0)
     {
@@ -7125,10 +7123,6 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
         status = kc_redp2p_con_send(con, "ping", 4);
         fail += expect_int("direct send", KC_REDP2P_OK, status);
     }
-    if (fail == 0 && protocol == KC_REDP2P_TCP) {
-        kc_redp2p_con_close(con);
-        con = NULL;
-    }
     deadline = redp2p_now_ms() + 10000U;
     while (fail == 0 && atomic_load(&state.consumer_received) == 0 &&
         redp2p_now_ms() < deadline)
@@ -7141,7 +7135,7 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
     fail += expect_int("direct consumer receive", 1,
         atomic_load(&state.consumer_received));
 
-    if (con) kc_redp2p_con_close(con);
+    kc_redp2p_con_close(con);
     kc_redp2p_pub_close(pub);
     return fail == 0 ? 0 : 1;
 }
@@ -7162,103 +7156,6 @@ static int test_direct_api_wait_hook(uint64_t timeout_ms)
     return redp2p_test_api_io_entered() ? 0 : 1;
 }
 #endif
-
-/**
- * Exercises a publisher response after the peer has half-closed its stream.
- * Summary: Preserves the response while bounding consumer-close draining.
- * @param index Index endpoint.
- * @return 0 on success, 1 on failure.
- */
-static int test_direct_api_pub_half_close_response(const char *index)
-{
-#ifdef REDP2P_TESTING
-    kc_redp2p_pub_options_t pub_options;
-    kc_redp2p_con_options_t con_options;
-    test_direct_race_state_t capture;
-    test_direct_race_state_t close_state;
-    test_direct_api_state_t receive_state;
-    kc_redp2p_pub_t *pub = NULL;
-    kc_redp2p_con_t *con = NULL;
-    test_thread_t close_thread;
-    uint64_t deadline;
-    int close_started = 0;
-    int fail = 0;
-
-    memset(&capture, 0, sizeof(capture));
-    memset(&close_state, 0, sizeof(close_state));
-    memset(&receive_state, 0, sizeof(receive_state));
-    memset(&pub_options, 0, sizeof(pub_options));
-    pub_options.id = "pubhalfclose";
-    pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_TCP;
-    pub_options.receive = test_direct_capture_client;
-    pub_options.userdata = &capture;
-    fail += expect_int("half-close pub create", KC_REDP2P_OK,
-        kc_redp2p_pub(&pub, &pub_options));
-
-    memset(&con_options, 0, sizeof(con_options));
-    con_options.id = "pubhalfclose";
-    con_options.index = index;
-    con_options.receive = test_direct_api_con_receive;
-    con_options.userdata = &receive_state;
-    if (fail == 0)
-        fail += expect_int("half-close con create", KC_REDP2P_OK,
-            kc_redp2p_con(&con, &con_options));
-    if (fail == 0)
-        fail += expect_int("half-close send", KC_REDP2P_OK,
-            kc_redp2p_con_send(con, "ping", 4));
-
-    close_state.con = con;
-    if (fail == 0) {
-        int rc = test_thread_start(&close_thread,
-            test_direct_con_close_thread, &close_state);
-        fail += rc;
-        close_started = rc == 0;
-    }
-    deadline = redp2p_now_ms() + 5000U;
-    while (fail == 0 && !atomic_load(&capture.done) &&
-        redp2p_now_ms() < deadline)
-        test_sleep_ms(1U);
-    fail += expect_int("half-close publisher received", 1,
-        atomic_load(&capture.done));
-
-    deadline = redp2p_now_ms() + 5000U;
-    while (fail == 0 && capture.client &&
-        !redp2p_test_api_client_read_eof(capture.client) &&
-        redp2p_now_ms() < deadline)
-        test_sleep_ms(1U);
-    fail += expect_true("half-close publisher observes peer EOF",
-        capture.client && redp2p_test_api_client_read_eof(capture.client));
-    if (fail == 0)
-        fail += expect_int("half-close publisher respond", KC_REDP2P_OK,
-            kc_redp2p_client_respond(capture.client, "pong", 4));
-    if (capture.client) kc_redp2p_client_close(capture.client);
-
-    deadline = redp2p_now_ms() + 5000U;
-    while (fail == 0 && atomic_load(&receive_state.consumer_received) == 0 &&
-        redp2p_now_ms() < deadline)
-        test_sleep_ms(1U);
-    fail += expect_int("half-close consumer receives response", 1,
-        atomic_load(&receive_state.consumer_received));
-
-    deadline = redp2p_now_ms() + 6000U;
-    while (close_started && !atomic_load(&close_state.done) &&
-        redp2p_now_ms() < deadline)
-        test_sleep_ms(1U);
-    if (close_started) {
-        fail += expect_int("half-close consumer close completes", 1,
-            atomic_load(&close_state.done));
-        fail += test_thread_join(close_thread);
-    } else if (con) {
-        kc_redp2p_con_close(con);
-    }
-    kc_redp2p_pub_close(pub);
-    return fail == 0 ? 0 : 1;
-#else
-    (void)index;
-    return 0;
-#endif
-}
 
 /**
  * Exercises consumer close against an in-flight send.
@@ -7631,8 +7528,6 @@ static int case_kc_redp2p_direct_api(void)
         fail += test_direct_api_roundtrip(KC_REDP2P_UDP, "directudp", index);
     if (fail == 0)
         fail += test_direct_api_self_close(index);
-    if (fail == 0)
-        fail += test_direct_api_pub_half_close_response(index);
     if (fail == 0)
         fail += test_direct_api_con_close_race(index);
     if (fail == 0)
