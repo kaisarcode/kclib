@@ -2608,6 +2608,14 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
     char stun_ip[REDP2P_ADDR_MAX + 1];
     unsigned short stun_port;
     socklen_t udp_sa_len = sizeof(udp_sa);
+    int direct_enabled = 1;
+
+#ifdef REDP2P_TESTING
+    {
+        const char *force_turn = getenv("REDP2P_TEST_FORCE_TURN");
+        if (force_turn && strcmp(force_turn, "1") == 0) direct_enabled = 0;
+    }
+#endif
 
     stun_ip[0] = '\0';
     stun_port = 0;
@@ -2615,7 +2623,7 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
     if (getsockname(udp_fd, (struct sockaddr *)&udp_sa, &udp_sa_len) == 0) {
         unsigned short udp_port = redp2p_sockaddr_port(&udp_sa);
 
-        if (udp_sa.ss_family == AF_INET &&
+        if (direct_enabled && udp_sa.ss_family == AF_INET &&
             redp2p_candidate_dest_allowed(AF_INET,
                 &((struct sockaddr_in *)&udp_sa)->sin_addr, udp_port) &&
             *out_count < out_cap)
@@ -2629,7 +2637,7 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
             out[*out_count].priority = redp2p_candidate_priority(&out[*out_count]);
             (*out_count)++;
         }
-        if (udp_sa.ss_family == AF_INET6 &&
+        if (direct_enabled && udp_sa.ss_family == AF_INET6 &&
             redp2p_candidate_dest_allowed(AF_INET6,
                 &((struct sockaddr_in6 *)&udp_sa)->sin6_addr, udp_port) &&
             *out_count < out_cap)
@@ -2644,7 +2652,8 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
             (*out_count)++;
         }
 
-        redp2p_fd_t test_fd = socket(AF_INET, SOCK_DGRAM, 0);
+        redp2p_fd_t test_fd = direct_enabled ? socket(AF_INET, SOCK_DGRAM, 0) :
+            REDP2P_FD_INVALID;
         if (!REDP2P_ISERR(test_fd)) {
             struct sockaddr_in target;
             memset(&target, 0, sizeof(target));
@@ -2672,11 +2681,11 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
             REDP2P_FD_CLOSE(test_fd);
         }
 
-        if (ctx && ctx->stun_url[0]) {
+        if (direct_enabled && ctx && ctx->stun_url[0]) {
             redp2p_stun_binding(ctx, udp_fd, stun_ip, (int)sizeof(stun_ip),
                 &stun_port);
         }
-        if (stun_ip[0] != '\0' && *out_count < out_cap) {
+        if (direct_enabled && stun_ip[0] != '\0' && *out_count < out_cap) {
             struct in_addr stun_v4;
             struct in6_addr stun_v6;
             unsigned short srflx_port = stun_port ? stun_port : udp_port;
