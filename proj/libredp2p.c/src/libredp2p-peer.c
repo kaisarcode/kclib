@@ -81,10 +81,10 @@ typedef pthread_t redp2p_thread_t;
 static socklen_t redp2p_sockaddr_len(const struct sockaddr_storage *addr);
 
 /**
- * Shuts down the local write side of one TCP socket.
+ * Shuts down the write side of one local stream-adapter socket.
  * @return None.
  */
-static void redp2p_shutdown_write(redp2p_fd_t fd);
+static void redp2p_adapter_shutdown_write(redp2p_fd_t fd);
 
 #ifdef REDP2P_TESTING
 /**
@@ -311,7 +311,7 @@ int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
     int initiator, redp2p_fd_t fd,
     const struct sockaddr_storage *peer_addr,
     const unsigned char session_id[REDP2P_SESSION_ID_SZ],
-    const char *session_hex, uint8_t transport_protocol, int via_turn)
+    const char *session_hex, uint8_t service_protocol, int via_turn)
 {
     uint64_t now;
 
@@ -326,7 +326,7 @@ int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
     st->adapter->peer_addr = *peer_addr;
     st->adapter->role = initiator ? REDP2P_SESSION_ROLE_INITIATOR :
         REDP2P_SESSION_ROLE_RESPONDER;
-    st->adapter->protocol = transport_protocol;
+    st->adapter->protocol = service_protocol;
     st->adapter->via_turn = via_turn ? 1 : 0;
     memcpy(st->adapter->session_id, session_id, REDP2P_SESSION_ID_SZ);
     st->kcp = ikcp_create(redp2p_stream_conv(session_id), st->adapter);
@@ -346,7 +346,7 @@ int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
     ikcp_setoutput(st->kcp, redp2p_stream_kcp_output);
     st->enabled = 1;
     st->initiator = initiator;
-    st->transport_protocol = transport_protocol;
+    st->service_protocol = service_protocol;
     memcpy(st->session_id, session_id, REDP2P_SESSION_ID_SZ);
     if (session_hex) memcpy(st->session_hex, session_hex,
         REDP2P_SESSION_ID_SZ * 2 + 1);
@@ -358,11 +358,11 @@ int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
 }
 
 /**
- * Reports whether the local TCP side may queue more bytes in KCP.
+ * Reports whether the local stream adapter may queue more bytes in KCP.
  * @return 1 when local TCP reads may continue, 0 otherwise.
  */
 int redp2p_stream_can_send_data(const redp2p_stream_state_t *st) {
-    return st->ready && !st->local_eof && st->kcp &&
+    return st->ready && !st->adapter_read_eof && st->kcp &&
         ikcp_waitsnd(st->kcp) < REDP2P_STREAM_MAX_WAIT_SEND;
 }
 
@@ -377,7 +377,7 @@ static int redp2p_stream_send_control(redp2p_t *ctx, redp2p_stream_state_t *st,
     size_t frame_len;
 
     frame_len = redp2p_session_pack(type, st->adapter->role,
-        st->transport_protocol, st->session_id, NULL, 0, frame);
+        st->service_protocol, st->session_id, NULL, 0, frame);
     if (frame_len == 0 ||
         redp2p_stream_send_datagram(st->adapter, frame, frame_len) != 0)
     {
@@ -399,78 +399,78 @@ void redp2p_stream_fail(redp2p_t *ctx, redp2p_stream_state_t *st) {
 }
 
 /**
- * Flushes at most one reconstructed KCP chunk into the local TCP socket.
+ * Flushes at most one reconstructed KCP chunk into the local stream adapter.
  *
  * Partial and would-block writes stay in the stream state. This bounds work
- * per session and prevents one slow local socket from blocking the event loop.
+ * per session and prevents one slow adapter from blocking the event loop.
  * @return 0 on success, -1 on stream or socket failure.
  */
-int redp2p_stream_flush_tcp(redp2p_t *ctx, redp2p_stream_state_t *st,
-    redp2p_fd_t tcp_fd)
+int redp2p_stream_flush_adapter(redp2p_t *ctx, redp2p_stream_state_t *st,
+    redp2p_fd_t adapter_fd)
 {
     int available;
     int received;
     int written;
 
-    if (!st || !st->kcp || tcp_fd == REDP2P_FD_INVALID) return -1;
+    if (!st || !st->kcp || adapter_fd == REDP2P_FD_INVALID) return -1;
 
-    if (st->pending_tcp_off < st->pending_tcp_len) {
-        written = redp2p_sock_write(tcp_fd,
-            (const char *)st->pending_tcp + st->pending_tcp_off,
-            (int)(st->pending_tcp_len - st->pending_tcp_off));
+    if (st->pending_adapter_off < st->pending_adapter_len) {
+        written = redp2p_sock_write(adapter_fd,
+            (const char *)st->pending_adapter + st->pending_adapter_off,
+            (int)(st->pending_adapter_len - st->pending_adapter_off));
         if (written < 0) {
             if (REDP2P_LASTERR() == REDP2P_EWOULD) return 0;
-            redp2p_set_error(ctx, "stream: local TCP write failed");
+            redp2p_set_error(ctx, "stream: local adapter write failed");
             return -1;
         }
         if (written == 0) {
-            redp2p_set_error(ctx, "stream: local TCP write closed");
+            redp2p_set_error(ctx, "stream: local adapter write closed");
             return -1;
         }
-        st->pending_tcp_off += (size_t)written;
-        if (st->pending_tcp_off < st->pending_tcp_len) return 0;
-        st->pending_tcp_off = 0;
-        st->pending_tcp_len = 0;
+        st->pending_adapter_off += (size_t)written;
+        if (st->pending_adapter_off < st->pending_adapter_len) return 0;
+        st->pending_adapter_off = 0;
+        st->pending_adapter_len = 0;
         return 0;
     }
 
     available = ikcp_peeksize(st->kcp);
     if (available < 0) {
-        if (st->remote_close && !st->remote_shutdown) {
-            redp2p_shutdown_write(tcp_fd);
-            st->remote_shutdown = 1;
+        if (st->peer_adapter_eof && !st->adapter_write_shutdown) {
+            redp2p_adapter_shutdown_write(adapter_fd);
+            st->adapter_write_shutdown = 1;
         }
         return 0;
     }
-    if (available > (int)sizeof(st->pending_tcp)) {
+    if (available > (int)sizeof(st->pending_adapter)) {
         redp2p_set_error(ctx, "stream: KCP receive chunk exceeds buffer");
         return -1;
     }
-    received = ikcp_recv(st->kcp, (char *)st->pending_tcp,
-        (int)sizeof(st->pending_tcp));
+    received = ikcp_recv(st->kcp, (char *)st->pending_adapter,
+        (int)sizeof(st->pending_adapter));
     if (received < 0) {
         redp2p_set_error(ctx, "stream: KCP receive failed");
         return -1;
     }
-    st->pending_tcp_off = 0;
-    st->pending_tcp_len = (size_t)received;
+    st->pending_adapter_off = 0;
+    st->pending_adapter_len = (size_t)received;
     if (received == 0) return 0;
 
-    written = redp2p_sock_write(tcp_fd,
-        (const char *)st->pending_tcp, received);
+    written = redp2p_sock_write(adapter_fd,
+        (const char *)st->pending_adapter, received);
     if (written < 0) {
         if (REDP2P_LASTERR() == REDP2P_EWOULD) return 0;
-        redp2p_set_error(ctx, "stream: local TCP write failed");
+        redp2p_set_error(ctx, "stream: local adapter write failed");
         return -1;
     }
     if (written == 0) {
-        redp2p_set_error(ctx, "stream: local TCP write closed");
+        redp2p_set_error(ctx, "stream: local adapter write closed");
         return -1;
     }
-    st->pending_tcp_off = (size_t)written;
-    if (st->pending_tcp_off == st->pending_tcp_len) {
-        st->pending_tcp_off = 0;
-        st->pending_tcp_len = 0;
+    st->pending_adapter_off = (size_t)written;
+    if (st->pending_adapter_off == st->pending_adapter_len) {
+        st->pending_adapter_off = 0;
+        st->pending_adapter_len = 0;
     }
     return 0;
 }
@@ -480,7 +480,7 @@ int redp2p_stream_flush_tcp(redp2p_t *ctx, redp2p_stream_state_t *st,
  * @return 0 on success, -1 on protocol, transport, or local socket failure.
  */
 int redp2p_stream_process_packet(redp2p_t *ctx,
-    redp2p_stream_state_t *st, redp2p_fd_t tcp_fd,
+    redp2p_stream_state_t *st, redp2p_fd_t adapter_fd,
     const unsigned char *buf, size_t len)
 {
     redp2p_session_envelope_t envelope;
@@ -493,7 +493,7 @@ int redp2p_stream_process_packet(redp2p_t *ctx,
     expected_role = st->initiator ? REDP2P_SESSION_ROLE_RESPONDER :
         REDP2P_SESSION_ROLE_INITIATOR;
     if (envelope.role != expected_role ||
-        envelope.protocol != st->transport_protocol ||
+        envelope.protocol != st->service_protocol ||
         memcmp(envelope.session_id, st->session_id,
             REDP2P_SESSION_ID_SZ) != 0)
         return 0;
@@ -517,11 +517,11 @@ int redp2p_stream_process_packet(redp2p_t *ctx,
             return -1;
         }
         st->next_update_ms = (uint32_t)redp2p_now_ms();
-        return redp2p_stream_flush_tcp(ctx, st, tcp_fd);
+        return redp2p_stream_flush_adapter(ctx, st, adapter_fd);
     }
     if (envelope.type == REDP2P_SESSION_TYPE_CLOSE) {
-        st->remote_close = 1;
-        if (redp2p_stream_flush_tcp(ctx, st, tcp_fd) != 0) return -1;
+        st->peer_adapter_eof = 1;
+        if (redp2p_stream_flush_adapter(ctx, st, adapter_fd) != 0) return -1;
         return redp2p_stream_send_control(ctx, st,
             REDP2P_SESSION_TYPE_CLOSE_ACK);
     }
@@ -538,25 +538,26 @@ int redp2p_stream_process_packet(redp2p_t *ctx,
 }
 
 /**
- * Reads one local TCP chunk and queues its bytes in KCP stream mode.
- * @return 0 on success, -1 on local socket or KCP failure.
+ * Reads one local stream-adapter chunk and queues its bytes in KCP.
+ * Peer delivery remains UDP datagrams, optionally relayed through TURN.
+ * @return 0 on success, -1 on adapter or KCP failure.
  */
-int redp2p_stream_pump_tcp(redp2p_t *ctx,
-    redp2p_stream_state_t *st, redp2p_fd_t tcp_fd)
+int redp2p_stream_pump_adapter(redp2p_t *ctx,
+    redp2p_stream_state_t *st, redp2p_fd_t adapter_fd)
 {
     unsigned char buf[REDP2P_BUF];
     int n;
     int sent;
 
     if (!redp2p_stream_can_send_data(st)) return 0;
-    n = redp2p_sock_read(tcp_fd, (char *)buf, (int)sizeof(buf));
+    n = redp2p_sock_read(adapter_fd, (char *)buf, (int)sizeof(buf));
     if (n < 0) {
         if (REDP2P_LASTERR() == REDP2P_EWOULD) return 0;
-        redp2p_set_error(ctx, "stream: local TCP read failed");
+        redp2p_set_error(ctx, "stream: local adapter read failed");
         return -1;
     }
     if (n == 0) {
-        st->local_eof = 1;
+        st->adapter_read_eof = 1;
         return 0;
     }
     sent = ikcp_send(st->kcp, (const char *)buf, n);
@@ -597,7 +598,7 @@ int redp2p_stream_tick(redp2p_t *ctx, redp2p_stream_state_t *st)
         redp2p_set_error(ctx, "stream: KCP UDP output failed");
         return -1;
     }
-    if (st->ready && st->local_eof && !st->close_acked &&
+    if (st->ready && st->adapter_read_eof && !st->close_acked &&
         ikcp_waitsnd(st->kcp) == 0 &&
         (!st->close_sent || now - st->last_close_ms >= REDP2P_STREAM_CLOSE_MS))
     {
@@ -628,8 +629,8 @@ uint32_t redp2p_stream_wait_ms(const redp2p_stream_state_t *st,
     int32_t difference;
 
     if (!st || !st->enabled) return 1000;
-    if (st->pending_tcp_off < st->pending_tcp_len) return 10;
-    if (st->remote_close && !st->remote_shutdown) return 10;
+    if (st->pending_adapter_off < st->pending_adapter_len) return 10;
+    if (st->peer_adapter_eof && !st->adapter_write_shutdown) return 10;
     if (!st->ready) {
         if (!st->initiator) return 1000;
         if (!st->hello_sent ||
@@ -646,12 +647,12 @@ uint32_t redp2p_stream_wait_ms(const redp2p_stream_state_t *st,
 }
 
 /**
- * Reports whether one TCP stream is fully closed on both sides.
+ * Reports whether one adapted reliable stream is fully closed on both sides.
  * @return 1 when the stream may be cleaned up, 0 otherwise.
  */
 int redp2p_stream_is_done(const redp2p_stream_state_t *st) {
-    return st->local_eof && st->close_acked && st->remote_close &&
-        st->remote_shutdown && st->pending_tcp_len == 0 && st->kcp &&
+    return st->adapter_read_eof && st->close_acked && st->peer_adapter_eof &&
+        st->adapter_write_shutdown && st->pending_adapter_len == 0 && st->kcp &&
         ikcp_waitsnd(st->kcp) == 0;
 }
 
@@ -820,7 +821,7 @@ redp2p_fd_t redp2p_create_socket(
  * Shuts down the local write side of one TCP socket.
  * @return None.
  */
-static void redp2p_shutdown_write(redp2p_fd_t fd) {
+static void redp2p_adapter_shutdown_write(redp2p_fd_t fd) {
 #ifdef _WIN32
     shutdown(fd, SD_SEND);
 #else
