@@ -6785,6 +6785,11 @@ static void *test_turn_main(void *arg)
             continue;
         type = ((int)packet[0] << 8) | packet[1];
         if (type == TEST_TURN_ALLOCATE_REQ) {
+#ifdef REDP2P_TESTING
+            fprintf(stderr, "[TURN-STUB] allocate username=%d bytes=%d\n",
+                test_turn_find_attr(packet, n, TEST_TURN_ATTR_USERNAME,
+                    &username_len) >= 0, n);
+#endif
             if (test_turn_find_attr(packet, n, TEST_TURN_ATTR_USERNAME,
                 &username_len) < 0)
                 (void)test_turn_reply_challenge(turn, &from, from_len, packet + 8);
