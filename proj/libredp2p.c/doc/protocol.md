@@ -238,8 +238,15 @@ STUN and TURN are optional connection infrastructure, not index semantics.
 Native implementations use STUN for candidate discovery and may advertise a
 TURN `relay` candidate. Direct native UDP connectivity remains preferred;
 TURN is a transparent fallback when the native peer path cannot be established.
-The native TCP capability keeps the same application stream semantics because
-its peer transport is UDP/KCP internally.
+The native TCP capability keeps application stream semantics only at the
+endpoints. Peer transport is always datagram based: REDP2P uses UDP directly
+or through TURN, and KCP reconstructs an ordered byte stream for the local
+stream adapters. TCP sockets, TCP FIN, half-close, and EOF are not peer
+transport semantics.
+
+Stream CLOSE/CLOSE_ACK frames are REDP2P session-lifecycle control messages.
+They do not represent TCP packets and are not exposed as application data or
+receive-callback EOF events.
 
 Native candidate objects use:
 
