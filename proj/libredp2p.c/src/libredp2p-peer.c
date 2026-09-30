@@ -207,6 +207,11 @@ const void *payload, size_t payload_len)
     len = redp2p_session_pack(type, role, REDP2P_PROTO_UDP, session_id,
         payload, payload_len, frame);
     if (!len) return -1;
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
     return redp2p_transport_sendto(ctx, fd, frame, len, peer, via_turn);
 }
 
@@ -1541,7 +1546,6 @@ int redp2p_set_stun_server(redp2p_t *ctx, const char *url) {
     return REDP2P_OK;
 }
 
-
 #define REDP2P_TURN_ALLOCATE_REQ        0x0003
 #define REDP2P_TURN_ALLOCATE_OK         0x0103
 #define REDP2P_TURN_ALLOCATE_ERR        0x0113
@@ -1582,17 +1586,32 @@ typedef struct {
     size_t used;
 } redp2p_sha1_t;
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static uint32_t redp2p_turn_rotl32(uint32_t value, unsigned int bits)
 {
     return (value << bits) | (value >> (32u - bits));
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static uint32_t redp2p_turn_load_le32(const unsigned char *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
         ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_store_le32(unsigned char *p, uint32_t value)
 {
     p[0] = (unsigned char)value;
@@ -1601,6 +1620,11 @@ static void redp2p_turn_store_le32(unsigned char *p, uint32_t value)
     p[3] = (unsigned char)(value >> 24);
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_md5_block(redp2p_md5_t *ctx,
     const unsigned char block[64])
 {
@@ -1652,6 +1676,11 @@ static void redp2p_turn_md5_block(redp2p_md5_t *ctx,
     ctx->state[2] += cc; ctx->state[3] += d;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_md5_init(redp2p_md5_t *ctx)
 {
     memset(ctx, 0, sizeof(*ctx));
@@ -1659,6 +1688,11 @@ static void redp2p_turn_md5_init(redp2p_md5_t *ctx)
     ctx->state[2] = 0x98badcfeu; ctx->state[3] = 0x10325476u;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_md5_update(redp2p_md5_t *ctx,
     const unsigned char *data, size_t len)
 {
@@ -1677,6 +1711,11 @@ static void redp2p_turn_md5_update(redp2p_md5_t *ctx,
     }
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_md5_final(redp2p_md5_t *ctx, unsigned char out[16])
 {
     unsigned char pad[72];
@@ -1694,18 +1733,33 @@ static void redp2p_turn_md5_final(redp2p_md5_t *ctx, unsigned char out[16])
     for (i = 0; i < 4; i++) redp2p_turn_store_le32(out + i * 4, ctx->state[i]);
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static uint32_t redp2p_turn_load_be32(const unsigned char *p)
 {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
         ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_store_be32(unsigned char *p, uint32_t value)
 {
     p[0] = (unsigned char)(value >> 24); p[1] = (unsigned char)(value >> 16);
     p[2] = (unsigned char)(value >> 8); p[3] = (unsigned char)value;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_sha1_block(redp2p_sha1_t *ctx,
     const unsigned char block[64])
 {
@@ -1732,6 +1786,11 @@ static void redp2p_turn_sha1_block(redp2p_sha1_t *ctx,
     ctx->state[3] += d; ctx->state[4] += e;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_sha1_init(redp2p_sha1_t *ctx)
 {
     memset(ctx, 0, sizeof(*ctx));
@@ -1740,6 +1799,11 @@ static void redp2p_turn_sha1_init(redp2p_sha1_t *ctx)
     ctx->state[4] = 0xc3d2e1f0u;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_sha1_update(redp2p_sha1_t *ctx,
     const unsigned char *data, size_t len)
 {
@@ -1758,6 +1822,11 @@ static void redp2p_turn_sha1_update(redp2p_sha1_t *ctx,
     }
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_sha1_final(redp2p_sha1_t *ctx, unsigned char out[20])
 {
     unsigned char pad[72];
@@ -1775,6 +1844,11 @@ static void redp2p_turn_sha1_final(redp2p_sha1_t *ctx, unsigned char out[20])
     for (i = 0; i < 5; i++) redp2p_turn_store_be32(out + i * 4, ctx->state[i]);
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_hmac_sha1(const unsigned char *key, size_t key_len,
     const unsigned char *data, size_t len, unsigned char out[20])
 {
@@ -1804,6 +1878,11 @@ static void redp2p_turn_hmac_sha1(const unsigned char *key, size_t key_len,
     crypto_wipe(pad, sizeof(pad)); crypto_wipe(&sha, sizeof(sha));
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_attr(unsigned char *buf, size_t cap, int *off,
     uint16_t type, const void *data, size_t len)
 {
@@ -1820,6 +1899,11 @@ static int redp2p_turn_attr(unsigned char *buf, size_t cap, int *off,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_long_term_key(redp2p_t *ctx,
     redp2p_turn_allocation_t *allocation, unsigned char key[16])
 {
@@ -1840,6 +1924,11 @@ static int redp2p_turn_long_term_key(redp2p_t *ctx,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_integrity(redp2p_t *ctx,
     redp2p_turn_allocation_t *allocation, unsigned char *buf,
     size_t cap, int *off)
@@ -1864,6 +1953,11 @@ static int redp2p_turn_integrity(redp2p_t *ctx,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_auth_attrs(redp2p_t *ctx,
     redp2p_turn_allocation_t *allocation, unsigned char *buf,
     size_t cap, int *off)
@@ -1876,6 +1970,11 @@ static int redp2p_turn_auth_attrs(redp2p_t *ctx,
             allocation->nonce, strlen(allocation->nonce));
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_parse_url(const char *url, char *host, size_t host_cap,
     unsigned short *port)
 {
@@ -1947,6 +2046,11 @@ static int redp2p_turn_parse_url(const char *url, char *host, size_t host_cap,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_xor_addr(unsigned char *out, size_t cap,
     const struct sockaddr_storage *addr, const unsigned char txid[12],
     size_t *out_len)
@@ -1977,6 +2081,11 @@ static int redp2p_turn_xor_addr(unsigned char *out, size_t cap,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_decode_xor_addr(const unsigned char *buf, int offset,
     int attr_len, const unsigned char txid[12], struct sockaddr_storage *addr,
     socklen_t *addr_len)
@@ -2011,6 +2120,11 @@ static int redp2p_turn_decode_xor_addr(const unsigned char *buf, int offset,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_copy_attr_string(const unsigned char *buf, int len,
     int type, char *out, size_t out_cap)
 {
@@ -2023,6 +2137,11 @@ static int redp2p_turn_copy_attr_string(const unsigned char *buf, int len,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_error_code(const unsigned char *buf, int len)
 {
     int attr_len, offset;
@@ -2032,6 +2151,11 @@ static int redp2p_turn_error_code(const unsigned char *buf, int len)
     return (buf[offset + 2] & 0x07) * 100 + buf[offset + 3];
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_auth_challenge(redp2p_turn_allocation_t *allocation,
     const unsigned char *buf, int len)
 {
@@ -2050,6 +2174,11 @@ static int redp2p_turn_auth_challenge(redp2p_turn_allocation_t *allocation,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static redp2p_turn_allocation_t *redp2p_turn_find_allocation(
     redp2p_t *ctx, redp2p_fd_t fd)
 {
@@ -2064,6 +2193,11 @@ static redp2p_turn_allocation_t *redp2p_turn_find_allocation(
     return NULL;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static redp2p_turn_allocation_t *redp2p_turn_reserve_allocation(
     redp2p_t *ctx, redp2p_fd_t fd)
 {
@@ -2089,6 +2223,11 @@ static redp2p_turn_allocation_t *redp2p_turn_reserve_allocation(
     return NULL;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_send_raw(redp2p_turn_allocation_t *allocation,
     const unsigned char *buf, size_t len)
 {
@@ -2099,6 +2238,11 @@ static int redp2p_turn_send_raw(redp2p_turn_allocation_t *allocation,
         allocation->server_addr_len);
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_wait_response(redp2p_turn_allocation_t *allocation,
     const unsigned char txid[12], unsigned char *out, size_t cap, int *out_len)
 {
@@ -2130,6 +2274,11 @@ static int redp2p_turn_wait_response(redp2p_turn_allocation_t *allocation,
     return 0;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_add_auth(redp2p_t *ctx,
     redp2p_turn_allocation_t *allocation, unsigned char *buf,
     size_t cap, int *off)
@@ -2138,6 +2287,11 @@ static int redp2p_turn_add_auth(redp2p_t *ctx,
     return redp2p_turn_integrity(ctx, allocation, buf, cap, off);
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_build_allocate(redp2p_t *ctx,
     redp2p_turn_allocation_t *allocation, unsigned char *buf,
     size_t cap, unsigned char txid[12], int authenticated)
@@ -2158,6 +2312,11 @@ static int redp2p_turn_build_allocate(redp2p_t *ctx,
     return off;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_parse_allocate(redp2p_turn_allocation_t *allocation,
     const unsigned char *buf, int len, const unsigned char txid[12])
 {
@@ -2184,6 +2343,11 @@ static int redp2p_turn_parse_allocate(redp2p_turn_allocation_t *allocation,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
 {
     unsigned char tx[4096];
@@ -2243,6 +2407,11 @@ fail:
     return 0;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_build_refresh(redp2p_t *ctx,
     redp2p_turn_allocation_t *allocation, unsigned char *buf, size_t cap,
     unsigned char txid[12])
@@ -2261,6 +2430,11 @@ static int redp2p_turn_build_refresh(redp2p_t *ctx,
     return off;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 static void redp2p_turn_refresh_if_due(redp2p_t *ctx, redp2p_fd_t fd)
 {
     unsigned char tx[2048];
@@ -2279,6 +2453,11 @@ static void redp2p_turn_refresh_if_due(redp2p_t *ctx, redp2p_fd_t fd)
             allocation->lifetime_s : REDP2P_TURN_DEFAULT_LIFETIME) * 500u;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_same_host(const struct sockaddr_storage *a,
     const struct sockaddr_storage *b)
 {
@@ -2294,6 +2473,11 @@ static int redp2p_turn_same_host(const struct sockaddr_storage *a,
     return 0;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_permission_slot(redp2p_turn_allocation_t *allocation,
     const struct sockaddr_storage *peer)
 {
@@ -2311,6 +2495,11 @@ static int redp2p_turn_permission_slot(redp2p_turn_allocation_t *allocation,
     return free_slot >= 0 ? free_slot : 0;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_permission(redp2p_t *ctx, redp2p_fd_t fd,
     const struct sockaddr_storage *peer)
 {
@@ -2365,6 +2554,11 @@ static int redp2p_turn_permission(redp2p_t *ctx, redp2p_fd_t fd,
     return 0;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_send_indication(redp2p_t *ctx, redp2p_fd_t fd,
     const void *data, size_t len, const struct sockaddr_storage *peer)
 {
@@ -2392,6 +2586,11 @@ static int redp2p_turn_send_indication(redp2p_t *ctx, redp2p_fd_t fd,
         -1 : (int)len;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 static int redp2p_turn_candidate(redp2p_t *ctx, redp2p_fd_t fd,
     redp2p_candidate_t *candidate)
 {
@@ -2424,6 +2623,11 @@ static int redp2p_turn_candidate(redp2p_t *ctx, redp2p_fd_t fd,
     return 1;
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 int redp2p_set_turn_server(redp2p_t *ctx, const char *url,
     const char *username, const char *password)
 {
@@ -2465,6 +2669,11 @@ int redp2p_transport_sendto(redp2p_t *ctx, redp2p_fd_t fd,
     return redp2p_sendto_addr(fd, buf, len, addr);
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return None.
+ */
 void redp2p_transport_forget(redp2p_t *ctx, redp2p_fd_t fd)
 {
     redp2p_turn_allocation_t *allocation;
@@ -2476,6 +2685,11 @@ void redp2p_transport_forget(redp2p_t *ctx, redp2p_fd_t fd)
     }
 }
 
+/**
+ * Handles one internal TURN transport operation.
+ * Summary: Supports TURN framing, state, authentication, or relay I/O.
+ * @return Operation result or decoded value.
+ */
 int redp2p_transport_recvfrom(redp2p_t *ctx, redp2p_fd_t fd,
     void *buf, size_t cap, int flags, struct sockaddr_storage *from,
     socklen_t *from_len, int *via_turn)
