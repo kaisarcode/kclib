@@ -212,12 +212,26 @@ typedef struct redp2p_rate_source redp2p_rate_source_t;
 #define REDP2P_TURN_REALM_MAX 255
 #define REDP2P_TURN_NONCE_MAX 511
 #define REDP2P_TURN_PERMISSIONS_MAX 32
+#define REDP2P_TURN_ALLOCATIONS_MAX 32
 
 typedef struct {
     struct sockaddr_storage addr;
     uint64_t expires_ms;
     int used;
 } redp2p_turn_permission_t;
+
+typedef struct {
+    redp2p_fd_t fd;
+    struct sockaddr_storage server_addr;
+    socklen_t server_addr_len;
+    struct sockaddr_storage relay_addr;
+    socklen_t relay_addr_len;
+    uint64_t refresh_at_ms;
+    unsigned int lifetime_s;
+    int ready;
+    int used;
+    redp2p_turn_permission_t permissions[REDP2P_TURN_PERMISSIONS_MAX];
+} redp2p_turn_allocation_t;
 
 struct redp2p {
     redp2p_index_peer_t *peers;
@@ -254,15 +268,7 @@ struct redp2p {
     char turn_pass[REDP2P_PASS_MAX + 1];
     char turn_realm[REDP2P_TURN_REALM_MAX + 1];
     char turn_nonce[REDP2P_TURN_NONCE_MAX + 1];
-    redp2p_fd_t turn_fd;
-    struct sockaddr_storage turn_server_addr;
-    socklen_t turn_server_addr_len;
-    struct sockaddr_storage turn_relay_addr;
-    socklen_t turn_relay_addr_len;
-    uint64_t turn_refresh_at_ms;
-    unsigned int turn_lifetime_s;
-    int turn_ready;
-    redp2p_turn_permission_t turn_permissions[REDP2P_TURN_PERMISSIONS_MAX];
+    redp2p_turn_allocation_t turn_allocations[REDP2P_TURN_ALLOCATIONS_MAX];
 #ifdef REDP2P_TESTING
     char state_dir[REDP2P_STATE_DIR_MAX + 1];
     int fault_drop_every;
