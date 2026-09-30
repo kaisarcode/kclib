@@ -2853,8 +2853,9 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
                 struct sockaddr_storage exact_sa;
                 int test_port;
 
+                if (remote_candidates[c].type == REDP2P_CAND_RELAY) continue;
                 sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
-                    &remote_candidates[c], ping_msg, &unsupported_count);
+                    &remote_candidates[c], ping_msg, 0, &unsupported_count);
                 if (!redp2p_candidate_sockaddr(&remote_candidates[c], &exact_sa))
                     continue;
                 if (exact_sa.ss_family != AF_INET) continue;
@@ -2903,9 +2904,9 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
     } else if (unsupported_count > 0) {
         redp2p_set_error(ctx, "punch: peer address family unsupported");
     } else if (redp2p_now_ms() >= deadline_ms) {
-        redp2p_set_error(ctx, "punch: direct connectivity timed out");
+        redp2p_set_error(ctx, "punch: peer connectivity timed out");
     } else {
-        redp2p_set_error(ctx, "punch: direct connectivity attempts exhausted");
+        redp2p_set_error(ctx, "punch: peer connectivity attempts exhausted");
     }
     return REDP2P_EPUNCH;
 }
