@@ -34,6 +34,7 @@ typedef struct redp2p_udp_consumer_session {
     uint64_t last_ka;
     int active;
     int is_tcp;
+    int via_turn;
     redp2p_stream_state_t stream;
 } redp2p_udp_consumer_session_t;
 
@@ -278,6 +279,7 @@ redp2p_fd_t *out_fd,
 struct sockaddr_storage *out_peer,
 unsigned char session_bin[REDP2P_SESSION_ID_SZ],
 char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1],
+int *out_via_turn,
 int *skip_iteration)
 {
     redp2p_candidate_t candidates[REDP2P_PEER_CANDIDATES_MAX];
@@ -288,10 +290,12 @@ int *skip_iteration)
     unsigned short punch_port;
     int candidate_count;
     int result;
+    int peer_via_turn;
     size_t random_size;
     size_t hex_size;
 
     *out_fd = REDP2P_FD_INVALID;
+    if (out_via_turn) *out_via_turn = 0;
     memset(out_peer, 0, sizeof(*out_peer));
     memset(session_bin, 0, REDP2P_SESSION_ID_SZ);
     memset(session_hex, 0, REDP2P_SESSION_ID_SZ * 2 + 1);
@@ -344,10 +348,12 @@ int *skip_iteration)
     }
 
     memset(&peer_addr, 0, sizeof(peer_addr));
+    peer_via_turn = 0;
     result = redp2p_punch_select(runtime->ctx, runtime->ctx->sweep,
         (int)peer_fd,
         session_hex, runtime->self_id, runtime->target_id,
-        runtime->peer_candidates, runtime->n_peer_candidates, &peer_addr);
+        runtime->peer_candidates, runtime->n_peer_candidates, &peer_addr,
+        &peer_via_turn);
     if (result != REDP2P_OK) {
         REDP2P_FD_CLOSE((int)peer_fd);
         crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
@@ -357,6 +363,7 @@ int *skip_iteration)
 
     *out_fd = (int)peer_fd;
     *out_peer = peer_addr;
+    if (out_via_turn) *out_via_turn = peer_via_turn;
     return REDP2P_OK;
 }
 
@@ -376,6 +383,7 @@ redp2p_consumer_runtime_t *runtime,
 redp2p_udp_consumer_session_t *session,
 redp2p_fd_t peer_fd,
 const struct sockaddr_storage *peer_addr,
+int via_turn,
 redp2p_fd_t client_fd,
 const unsigned char session_bin[REDP2P_SESSION_ID_SZ],
 const char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1])
@@ -384,8 +392,10 @@ const char session_hex[REDP2P_SESSION_ID_SZ * 2 + 1])
     session->fd = peer_fd;
     session->tcp_fd = client_fd;
     session->peer_addr = *peer_addr;
+    session->via_turn = via_turn ? 1 : 0;
     if (redp2p_stream_init(runtime->ctx, &session->stream, 1, peer_fd,
-        peer_addr, session_bin, session_hex, REDP2P_PROTO_TCP) != 0)
+        peer_addr, session_bin, session_hex, REDP2P_PROTO_TCP,
+        session->via_turn) != 0)
         return -1;
     session->active = 1;
     session->is_tcp = 1;
@@ -407,12 +417,14 @@ static void redp2p_consumer_udp_session_init(
 redp2p_udp_consumer_session_t *session,
 redp2p_fd_t peer_fd,
 const struct sockaddr_storage *peer_addr,
+int via_turn,
 const struct sockaddr_storage *client_addr)
 {
     memset(session, 0, sizeof(*session));
     session->fd = peer_fd;
     session->tcp_fd = REDP2P_FD_INVALID;
     session->peer_addr = *peer_addr;
+    session->via_turn = via_turn ? 1 : 0;
     session->client_addr = *client_addr;
     session->last_rx = redp2p_now_s();
     session->last_ka = session->last_rx;
@@ -708,6 +720,7 @@ static int redp2p_consumer_tcp_accept(
     int skip_iteration;
     int establish_result;
     int inserted;
+    int peer_via_turn;
 
     if (REDP2P_ISERR(runtime->tcp_listen_fd) ||
         !redp2p_consumer_poll_ready(runtime, runtime->tcp_listen_fd))
@@ -718,8 +731,10 @@ static int redp2p_consumer_tcp_accept(
         REDP2P_FD_CLOSE(client_fd);
         return 0;
     }
+    peer_via_turn = 0;
     establish_result = redp2p_consumer_establish_peer(runtime, 1, &peer_fd,
-        &peer_addr, session_bin, session_hex, &skip_iteration);
+        &peer_addr, session_bin, session_hex, &peer_via_turn,
+        &skip_iteration);
     if (establish_result != REDP2P_OK)
     {
         if (runtime->ctx->direct_mode) {
@@ -730,7 +745,7 @@ static int redp2p_consumer_tcp_accept(
         return skip_iteration;
     }
     if (redp2p_consumer_tcp_session_init(runtime, &session, peer_fd, &peer_addr,
-        client_fd, session_bin, session_hex) != 0)
+        peer_via_turn, client_fd, session_bin, session_hex) != 0)
     {
         if (runtime->ctx->direct_mode) {
             atomic_store(&runtime->ctx->channel_status, REDP2P_ERROR);
@@ -797,11 +812,12 @@ redp2p_consumer_runtime_t *runtime)
     created = 0;
     found = redp2p_consumer_session_find(runtime, &from);
     if (found < 0) {
+        peer_via_turn = 0;
         establish_result = redp2p_consumer_establish_peer(runtime, 0, &peer_fd,
-            &peer_addr, session_bin, session_hex, NULL);
+            &peer_addr, session_bin, session_hex, &peer_via_turn, NULL);
         if (establish_result == REDP2P_OK) {
             redp2p_consumer_udp_session_init(&session, peer_fd, &peer_addr,
-                &from);
+                peer_via_turn, &from);
             crypto_wipe(session_bin, sizeof(session_bin));
             crypto_wipe(session_hex, sizeof(session_hex));
             found = redp2p_consumer_session_insert(runtime, &session);
@@ -822,8 +838,9 @@ redp2p_consumer_runtime_t *runtime)
     }
     if (found >= 0) {
         if (!(runtime->ctx->direct_mode && created && n == 0)) {
-            redp2p_udp_send(runtime->sessions[found].fd,
+            redp2p_udp_send(runtime->ctx, runtime->sessions[found].fd,
                 &runtime->sessions[found].peer_addr,
+                runtime->sessions[found].via_turn,
                 REDP2P_SESSION_ROLE_INITIATOR, REDP2P_SESSION_TYPE_DATA,
                 buf, (size_t)n);
         }
@@ -873,17 +890,21 @@ redp2p_consumer_runtime_t *runtime)
         struct sockaddr_storage from;
         socklen_t fromlen;
         int n;
+        int via_turn;
         redp2p_session_envelope_t envelope;
 
         if (!runtime->sessions[i].active) continue;
         if (!redp2p_consumer_poll_ready(runtime,
             runtime->sessions[i].fd)) continue;
         fromlen = sizeof(from);
-        n = (int)recvfrom(runtime->sessions[i].fd, buf, sizeof(buf), 0,
-            (struct sockaddr *)&from, &fromlen);
-        if (n < 0) continue;
+        via_turn = 0;
+        n = redp2p_transport_recvfrom(runtime->ctx, runtime->sessions[i].fd,
+            buf, sizeof(buf), 0, &from, &fromlen, &via_turn);
+        if (n == -2) continue;
+        if (n < 0 || (size_t)n > sizeof(buf)) continue;
         if (!redp2p_sockaddr_equal(&from, &runtime->sessions[i].peer_addr))
             continue;
+        if (via_turn != runtime->sessions[i].via_turn) continue;
         if (!runtime->sessions[i].is_tcp) {
             if (!redp2p_session_unpack((const unsigned char *)buf, (size_t)n,
                 &envelope) || !redp2p_udp_envelope_valid(&envelope,
@@ -946,8 +967,9 @@ redp2p_consumer_runtime_t *runtime)
             REDP2P_KEEPALIVE_S)
         {
             if (!runtime->sessions[i].is_tcp) {
-                redp2p_udp_send(runtime->sessions[i].fd,
+                redp2p_udp_send(runtime->ctx, runtime->sessions[i].fd,
                     &runtime->sessions[i].peer_addr,
+                    runtime->sessions[i].via_turn,
                     REDP2P_SESSION_ROLE_INITIATOR,
                     REDP2P_SESSION_TYPE_KEEPALIVE, NULL, 0);
             }
