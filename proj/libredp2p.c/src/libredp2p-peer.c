@@ -2487,9 +2487,9 @@ int redp2p_transport_recvfrom(redp2p_t *ctx, redp2p_fd_t fd,
     unsigned char txid[12];
     int n;
     int type;
-    int peer_len;
+    int peer_len = 0;
     int peer_off;
-    int data_len;
+    int data_len = 0;
     int data_off;
     size_t copy_len;
 
