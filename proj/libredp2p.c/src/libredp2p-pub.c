@@ -44,7 +44,7 @@ typedef struct redp2p_udp_server_session {
     uint64_t last_rx;
     uint64_t last_ka;
     int active;
-    int is_tcp;
+    int stream_mode;
     int via_turn;
     redp2p_stream_state_t stream;
 } redp2p_udp_server_session_t;
@@ -111,7 +111,7 @@ static int redp2p_solve_register_pow(redp2p_t *ctx,
 }
 
 /**
- * Closes one publisher-side UDP session and wipes TCP stream state.
+ * Closes one publisher peer session and wipes stream-adapter state.
  * @return None.
  */
 static void redp2p_server_session_close(redp2p_udp_server_session_t *sess) {
@@ -124,7 +124,7 @@ static void redp2p_server_session_close(redp2p_udp_server_session_t *sess) {
         REDP2P_FD_CLOSE(sess->tcp_fd);
         sess->tcp_fd = REDP2P_FD_INVALID;
     }
-    if (sess->is_tcp) redp2p_stream_wipe(&sess->stream);
+    if (sess->stream_mode) redp2p_stream_wipe(&sess->stream);
     sess->active = 0;
 }
 
@@ -1276,8 +1276,8 @@ const unsigned char *session_id)
         if (!redp2p_sockaddr_equal(&runtime->owned_sessions[i].peer_addr,
             peer_addr))
             continue;
-        if (!runtime->owned_sessions[i].is_tcp && !session_id) return i;
-        if (runtime->owned_sessions[i].is_tcp && session_id &&
+        if (!runtime->owned_sessions[i].stream_mode && !session_id) return i;
+        if (runtime->owned_sessions[i].stream_mode && session_id &&
             memcmp(runtime->owned_sessions[i].stream.session_id, session_id,
                 REDP2P_SESSION_ID_SZ) == 0)
             return i;
@@ -1339,7 +1339,7 @@ redp2p_publisher_runtime_t *runtime)
 
     for (i = 0; i < runtime->session_count; i++) {
         if (!runtime->owned_sessions[i].active) continue;
-        if (runtime->owned_sessions[i].is_tcp &&
+        if (runtime->owned_sessions[i].stream_mode &&
             !redp2p_stream_is_done(&runtime->owned_sessions[i].stream))
         {
             redp2p_stream_fail(runtime->borrowed_ctx,
@@ -1405,8 +1405,8 @@ int via_turn)
     session.via_turn = via_turn ? 1 : 0;
     session.last_rx = redp2p_now_s();
     session.last_ka = session.last_rx;
-    session.is_tcp = ctx->proto == REDP2P_PROTO_TCP ? 1 : 0;
-    if (session.is_tcp) {
+    session.stream_mode = ctx->proto == REDP2P_PROTO_TCP ? 1 : 0;
+    if (session.stream_mode) {
         session.backend_fd = redp2p_connect_local_tcp(ctx->bind_port);
         if (REDP2P_ISERR(session.backend_fd)) {
             redp2p_set_error(ctx, "local backend connect failed on port %u",
@@ -1536,7 +1536,7 @@ redp2p_publisher_runtime_t *runtime)
         if (!runtime->owned_sessions[i].active) continue;
         if (runtime->owned_sessions[i].backend_fd == REDP2P_FD_INVALID)
             continue;
-        if (runtime->owned_sessions[i].is_tcp &&
+        if (runtime->owned_sessions[i].stream_mode &&
             !redp2p_stream_can_send_data(&runtime->owned_sessions[i].stream))
             continue;
         needed++;
@@ -1565,7 +1565,7 @@ redp2p_publisher_runtime_t *runtime)
         if (!runtime->owned_sessions[i].active) continue;
         if (runtime->owned_sessions[i].backend_fd == REDP2P_FD_INVALID)
             continue;
-        if (runtime->owned_sessions[i].is_tcp &&
+        if (runtime->owned_sessions[i].stream_mode &&
             !redp2p_stream_can_send_data(&runtime->owned_sessions[i].stream))
             continue;
         runtime->pollfds[runtime->poll_count].fd =
@@ -1851,7 +1851,7 @@ redp2p_publisher_runtime_t *runtime)
         return 0;
     }
     session = &runtime->owned_sessions[found];
-    if (!session->is_tcp) {
+    if (!session->stream_mode) {
         if (!redp2p_session_unpack((const unsigned char *)buf, (size_t)n,
             &envelope) || !redp2p_udp_envelope_valid(&envelope,
             REDP2P_SESSION_ROLE_INITIATOR))
@@ -1861,7 +1861,7 @@ redp2p_publisher_runtime_t *runtime)
             return 0;
         }
     }
-    if (session->is_tcp) {
+    if (session->stream_mode) {
         if (session->backend_fd != REDP2P_FD_INVALID &&
             redp2p_stream_process_packet(runtime->borrowed_ctx, &session->stream,
                 session->backend_fd, (const unsigned char *)buf,
@@ -1904,8 +1904,8 @@ redp2p_publisher_runtime_t *runtime)
         if (!redp2p_publisher_poll_ready(runtime,
             runtime->owned_sessions[i].backend_fd))
             continue;
-        if (runtime->owned_sessions[i].is_tcp) {
-            if (redp2p_stream_pump_tcp(runtime->borrowed_ctx,
+        if (runtime->owned_sessions[i].stream_mode) {
+            if (redp2p_stream_pump_adapter(runtime->borrowed_ctx,
                 &runtime->owned_sessions[i].stream,
                 runtime->owned_sessions[i].backend_fd) != 0)
             {
@@ -1945,8 +1945,8 @@ redp2p_publisher_runtime_t *runtime)
 
     for (i = 0; i < runtime->session_count; i++) {
         if (!runtime->owned_sessions[i].active) continue;
-        if (runtime->owned_sessions[i].is_tcp) {
-            if (redp2p_stream_flush_tcp(runtime->borrowed_ctx,
+        if (runtime->owned_sessions[i].stream_mode) {
+            if (redp2p_stream_flush_adapter(runtime->borrowed_ctx,
                 &runtime->owned_sessions[i].stream,
                 runtime->owned_sessions[i].backend_fd) != 0 ||
                 redp2p_stream_tick(runtime->borrowed_ctx,
@@ -1965,7 +1965,7 @@ redp2p_publisher_runtime_t *runtime)
         if (redp2p_now_s() - runtime->owned_sessions[i].last_ka >
             REDP2P_KEEPALIVE_S)
         {
-            if (!runtime->owned_sessions[i].is_tcp)
+            if (!runtime->owned_sessions[i].stream_mode)
                 redp2p_udp_send(runtime->borrowed_ctx, runtime->owned_udp_fd,
                     &runtime->owned_sessions[i].peer_addr,
                     runtime->owned_sessions[i].via_turn,
@@ -2002,7 +2002,7 @@ static uint32_t redp2p_publisher_wait_ms(
     }
     for (i = 0; i < runtime->session_count; i++) {
         if (!runtime->owned_sessions[i].active ||
-            !runtime->owned_sessions[i].is_tcp)
+            !runtime->owned_sessions[i].stream_mode)
             continue;
         session_wait = redp2p_stream_wait_ms(
             &runtime->owned_sessions[i].stream, now);
