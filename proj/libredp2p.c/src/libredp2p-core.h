@@ -809,6 +809,8 @@ REDP2P_INTERNAL int redp2p_set_registration_pass(redp2p_t *ctx, const char *pass
 REDP2P_INTERNAL int redp2p_idx_set_vips(redp2p_t *ctx, const char *vip,
     char *err, size_t err_cap);
 REDP2P_INTERNAL int redp2p_set_stun_server(redp2p_t *ctx, const char *url);
+REDP2P_INTERNAL int redp2p_set_turn_server(redp2p_t *ctx, const char *url,
+    const char *username, const char *password);
 #ifdef REDP2P_TESTING
 REDP2P_INTERNAL int redp2p_test_deregister_persisted_publisher(
     redp2p_t *ctx, const char *index_host, unsigned short index_port,
