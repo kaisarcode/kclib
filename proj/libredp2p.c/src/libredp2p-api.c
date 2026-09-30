@@ -1349,6 +1349,15 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
         status = redp2p_set_stun_server(pub->runtime.ctx, options->stun);
         if (status != REDP2P_OK) goto fail_adapter;
     }
+    if (options->turn || options->turn_user || options->turn_pass) {
+        if (!options->turn) {
+            status = KC_REDP2P_EINVAL;
+            goto fail_adapter;
+        }
+        status = redp2p_set_turn_server(pub->runtime.ctx, options->turn,
+            options->turn_user, options->turn_pass);
+        if (status != REDP2P_OK) goto fail_adapter;
+    }
 
     atomic_store(&pub->runtime.ctx->ready_state, 0);
     atomic_store(&pub->runtime.ctx->ready_status, REDP2P_ERROR);
@@ -1446,6 +1455,15 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
             if (options->stun) {
                 status = redp2p_set_stun_server(con->runtime.ctx,
                     options->stun);
+                if (status != REDP2P_OK) goto fail;
+            }
+            if (options->turn || options->turn_user || options->turn_pass) {
+                if (!options->turn) {
+                    status = KC_REDP2P_EINVAL;
+                    goto fail;
+                }
+                status = redp2p_set_turn_server(con->runtime.ctx,
+                    options->turn, options->turn_user, options->turn_pass);
                 if (status != REDP2P_OK) goto fail;
             }
 
