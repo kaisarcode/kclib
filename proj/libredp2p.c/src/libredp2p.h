@@ -80,6 +80,9 @@ typedef struct {
     kc_redp2p_pub_connect_fn connect;
     kc_redp2p_pub_receive_fn receive;
     void *userdata;
+    const char *turn;
+    const char *turn_user;
+    const char *turn_pass;
 } kc_redp2p_pub_options_t;
 
 typedef struct {
@@ -88,6 +91,9 @@ typedef struct {
     const char *stun;
     kc_redp2p_con_receive_fn receive;
     void *userdata;
+    const char *turn;
+    const char *turn_user;
+    const char *turn_pass;
 } kc_redp2p_con_options_t;
 
 typedef struct {
