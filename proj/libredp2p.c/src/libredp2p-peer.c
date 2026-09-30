@@ -2163,6 +2163,8 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
     int attempt;
 
     if (!ctx || !ctx->turn_url[0]) return 0;
+    allocation = redp2p_turn_find_allocation(ctx, fd);
+    if (allocation && allocation->ready) return 1;
     allocation = redp2p_turn_reserve_allocation(ctx, fd);
     if (!allocation) return 0;
     ctx->turn_realm[0] = '\0';
