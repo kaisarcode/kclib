@@ -279,6 +279,9 @@ static int redp2p_stream_kcp_output(const char *buf, int len, ikcpcb *kcp,
         adapter->fault_pending_used = 1;
         return 0;
     }
+    fprintf(stderr,
+        "[REDP2P-DIAG] stream: KCP output payload=%d frame=%zu role=%u via_turn=%d\n",
+        len, frame_len, (unsigned)adapter->role, adapter->via_turn);
     if (redp2p_stream_send_datagram(adapter, frame, frame_len) != 0 ||
         (adapter->fault_pending_used &&
         redp2p_stream_send_datagram(adapter, adapter->fault_pending,
@@ -448,6 +451,9 @@ int redp2p_stream_flush_tcp(redp2p_t *ctx, redp2p_stream_state_t *st,
     }
     received = ikcp_recv(st->kcp, (char *)st->pending_tcp,
         (int)sizeof(st->pending_tcp));
+    fprintf(stderr,
+        "[REDP2P-DIAG] stream: KCP recv=%d initiator=%d\n",
+        received, st->initiator);
     if (received < 0) {
         redp2p_set_error(ctx, "stream: KCP receive failed");
         return -1;
@@ -513,6 +519,9 @@ int redp2p_stream_process_packet(redp2p_t *ctx,
     }
     if (!st->ready) return 0;
     if (envelope.type == REDP2P_SESSION_TYPE_DATA) {
+        fprintf(stderr,
+            "[REDP2P-DIAG] stream: received DATA payload=%zu initiator=%d\n",
+            envelope.payload_len, st->initiator);
         input_result = ikcp_input(st->kcp, (const char *)envelope.payload,
             (long)envelope.payload_len);
         if (input_result != 0) {
@@ -562,7 +571,13 @@ int redp2p_stream_pump_tcp(redp2p_t *ctx,
         st->local_eof = 1;
         return 0;
     }
+    fprintf(stderr,
+        "[REDP2P-DIAG] stream: local TCP read=%d initiator=%d\n",
+        n, st->initiator);
     sent = ikcp_send(st->kcp, (const char *)buf, n);
+    fprintf(stderr,
+        "[REDP2P-DIAG] stream: KCP queued=%d requested=%d initiator=%d\n",
+        sent, n, st->initiator);
     if (sent != n) {
         redp2p_set_error(ctx, "stream: KCP send failed");
         return -1;
