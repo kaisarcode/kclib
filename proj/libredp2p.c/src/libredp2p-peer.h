@@ -43,6 +43,7 @@ typedef struct {
     unsigned char session_id[REDP2P_SESSION_ID_SZ];
     uint8_t role;
     uint8_t protocol;
+    int via_turn;
     int send_error;
     int fault_pending_used;
     size_t fault_pending_len;
@@ -87,8 +88,8 @@ REDP2P_INTERNAL int redp2p_session_unpack(const unsigned char *buf, size_t len,
  * Sends one UDP session envelope with the reserved session field zeroed.
  * @return Sent byte count, or -1 on invalid payload or socket failure.
  */
-REDP2P_INTERNAL int redp2p_udp_send(redp2p_fd_t fd,
-const struct sockaddr_storage *peer, uint8_t role, uint8_t type,
+REDP2P_INTERNAL int redp2p_udp_send(redp2p_t *ctx, redp2p_fd_t fd,
+const struct sockaddr_storage *peer, int via_turn, uint8_t role, uint8_t type,
 const void *payload, size_t payload_len);
 
 /**
@@ -112,7 +113,7 @@ REDP2P_INTERNAL int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
     int initiator, redp2p_fd_t fd,
     const struct sockaddr_storage *peer_addr,
     const unsigned char session_id[REDP2P_SESSION_ID_SZ],
-    const char *session_hex, uint8_t transport_protocol);
+    const char *session_hex, uint8_t transport_protocol, int via_turn);
 
 /**
  * Reports whether the local TCP side may queue more bytes in KCP.
@@ -253,6 +254,13 @@ REDP2P_INTERNAL int redp2p_parse_punch_packet(const char *text, const char *pref
 REDP2P_INTERNAL int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
     redp2p_candidate_t *out, int out_cap, int *out_count);
 
+REDP2P_INTERNAL int redp2p_transport_sendto(redp2p_t *ctx, redp2p_fd_t fd,
+    const void *buf, size_t len, const struct sockaddr_storage *addr,
+    int via_turn);
+REDP2P_INTERNAL int redp2p_transport_recvfrom(redp2p_t *ctx, redp2p_fd_t fd,
+    void *buf, size_t cap, int flags, struct sockaddr_storage *from,
+    socklen_t *from_len, int *via_turn);
+
 /**
  * Punch select.
  * Summary: Selects a candidate and performs hole punching.
@@ -266,6 +274,9 @@ REDP2P_INTERNAL int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
  * @param selected_addr          Selected output address.
  * @return 0 on success, -1 on error.
  */
-REDP2P_INTERNAL int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd, const char *session_id, const char *from_id, const char *to_id, const redp2p_candidate_t *remote_candidates, int remote_candidate_count, struct sockaddr_storage *selected_addr);
+REDP2P_INTERNAL int redp2p_punch_select(redp2p_t *ctx, int sweep_limit,
+    int udp_fd, const char *session_id, const char *from_id, const char *to_id,
+    const redp2p_candidate_t *remote_candidates, int remote_candidate_count,
+    struct sockaddr_storage *selected_addr, int *selected_via_turn);
 
 #endif
