@@ -795,6 +795,7 @@ redp2p_consumer_runtime_t *runtime)
     int n;
     int created;
     int establish_result;
+    int peer_via_turn;
 
     if (!REDP2P_ISERR(runtime->tcp_listen_fd) ||
         !redp2p_consumer_poll_ready(runtime, runtime->local_fd))
