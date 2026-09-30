@@ -5652,6 +5652,9 @@ static int case_kc_redp2p_set_turn_url(void) {
         redp2p_set_turn_server(ctx, "turn:example.com:3478", NULL, NULL));
     fail += expect_int("set authenticated turn", REDP2P_OK,
         redp2p_set_turn_server(ctx, "turn:example.com:3478", "user", "pass"));
+    fail += expect_int("accept UDP TURN URI", REDP2P_OK,
+        redp2p_set_turn_server(ctx,
+            "turn:example.com:3478?transport=udp", "user", "pass"));
     fail += expect_int("reject turn user without pass", REDP2P_EINVAL,
         redp2p_set_turn_server(ctx, "turn:example.com:3478", "user", NULL));
     fail += expect_int("reject unsupported turns scheme", REDP2P_EINVAL,
