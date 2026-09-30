@@ -57,6 +57,7 @@ struct kc_redp2p_client {
     socklen_t address_len;
     int udp;
     _Atomic int closed;
+    _Atomic int read_eof;
 };
 
 struct kc_redp2p_pub {
@@ -180,6 +181,17 @@ void redp2p_test_api_port_hold(int hold)
 unsigned short redp2p_test_api_port_value(void)
 {
     return (unsigned short)atomic_load(&kc_redp2p_test_port_value);
+}
+
+/**
+ * Reports whether one TCP publisher client has received peer EOF.
+ * Summary: Exposes private half-close state only to the regression harness.
+ * @param client Publisher client capability.
+ * @return Nonzero after the peer read direction has closed.
+ */
+int redp2p_test_api_client_read_eof(kc_redp2p_client_t *client)
+{
+    return client ? atomic_load(&client->read_eof) : 0;
 }
 
 /**
@@ -468,6 +480,7 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
             for (i = 0; i < pub->client_count; i++) {
                 kc_redp2p_client_t *client = pub->clients[i];
                 if (client && !client->udp && !atomic_load(&client->closed) &&
+                    !atomic_load(&client->read_eof) &&
                     !REDP2P_ISERR(client->fd))
                     count++;
             }
@@ -482,6 +495,7 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
             for (i = 0; i < pub->client_count; i++) {
                 kc_redp2p_client_t *client = pub->clients[i];
                 if (!client || client->udp || atomic_load(&client->closed) ||
+                    atomic_load(&client->read_eof) ||
                     REDP2P_ISERR(client->fd))
                     continue;
                 fds[count].fd = client->fd;
@@ -523,13 +537,18 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
                 kc_redp2p_client_t *client = pub->clients[i];
                 int n;
                 if (!client || client->udp || atomic_load(&client->closed) ||
+                    atomic_load(&client->read_eof) ||
                     REDP2P_ISERR(client->fd))
                     continue;
                 if (!redp2p_poll_readable(&fds[p++])) continue;
                 n = redp2p_sock_read(client->fd, (char *)buffer,
                     (int)sizeof(buffer));
-                if (n <= 0) {
+                if (n < 0) {
                     kc_redp2p_client_close(client);
+                    continue;
+                }
+                if (n == 0) {
+                    atomic_store(&client->read_eof, 1);
                     continue;
                 }
                 kc_redp2p_pub_emit(pub, client, buffer, (size_t)n);
