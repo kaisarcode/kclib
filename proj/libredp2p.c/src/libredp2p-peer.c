@@ -207,11 +207,6 @@ const void *payload, size_t payload_len)
     len = redp2p_session_pack(type, role, REDP2P_PROTO_UDP, session_id,
         payload, payload_len, frame);
     if (!len) return -1;
-/**
- * Handles one internal TURN transport operation.
- * Summary: Supports TURN framing, state, authentication, or relay I/O.
- * @return Operation result or decoded value.
- */
     return redp2p_transport_sendto(ctx, fd, frame, len, peer, via_turn);
 }
 
@@ -2658,6 +2653,11 @@ int redp2p_set_turn_server(redp2p_t *ctx, const char *url,
     return REDP2P_OK;
 }
 
+/**
+ * Sends one datagram through the selected peer transport path.
+ * Summary: Uses direct UDP or the active TURN allocation transparently.
+ * @return Sent byte count, or a negative value on transport failure.
+ */
 int redp2p_transport_sendto(redp2p_t *ctx, redp2p_fd_t fd,
     const void *buf, size_t len, const struct sockaddr_storage *addr,
     int via_turn)
