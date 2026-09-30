@@ -64,6 +64,10 @@ When TURN is not configured, REDP2P behaves exactly as before. When it is
 configured, direct connectivity remains preferred and relay candidates are used
 only as a fallback.
 
+Setting `REDP2P_FORCE_TURN=1` in the environment of a publisher or a consumer
+discards its direct and STUN candidates, so the peer path uses the TURN relay
+even when direct connectivity would have worked. The index is unaffected.
+
 ### WebRTC use
 
 Native applications use the C library and native TCP/UDP networking.

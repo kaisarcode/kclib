@@ -7047,7 +7047,7 @@ static int case_kc_redp2p_turn_api(void)
         (unsigned)turn_port);
 
     fail += expect_int("clear forced TURN path", 0,
-        test_setenv("REDP2P_TEST_FORCE_TURN", NULL));
+        test_setenv("REDP2P_FORCE_TURN", NULL));
     relayed_before = atomic_load(&turn.relayed_count);
     if (fail == 0)
         fail += test_turn_api_roundtrip(KC_REDP2P_UDP, "turndirect", index,
@@ -7057,7 +7057,7 @@ static int case_kc_redp2p_turn_api(void)
 
     if (fail == 0)
         fail += expect_int("force TURN path", 0,
-            test_setenv("REDP2P_TEST_FORCE_TURN", "1"));
+            test_setenv("REDP2P_FORCE_TURN", "1"));
     if (fail == 0)
         fail += test_turn_api_roundtrip(KC_REDP2P_UDP, "turnudp", index,
             turn_url);
@@ -7071,7 +7071,7 @@ static int case_kc_redp2p_turn_api(void)
     fail += expect_true("TURN relayed data used",
         atomic_load(&turn.relayed_count) > 0);
 
-    test_setenv("REDP2P_TEST_FORCE_TURN", NULL);
+    test_setenv("REDP2P_FORCE_TURN", NULL);
     kc_redp2p_idx_close(idx);
     fail += test_turn_stop(&turn);
     case_result(fail, "kc_redp2p_turn_api",

@@ -2826,14 +2826,8 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
     char stun_ip[REDP2P_ADDR_MAX + 1];
     unsigned short stun_port;
     socklen_t udp_sa_len = sizeof(udp_sa);
-    int direct_enabled = 1;
-
-#ifdef REDP2P_TESTING
-    {
-        const char *force_turn = getenv("REDP2P_TEST_FORCE_TURN");
-        if (force_turn && strcmp(force_turn, "1") == 0) direct_enabled = 0;
-    }
-#endif
+    const char *force_turn = getenv("REDP2P_FORCE_TURN");
+    int direct_enabled = !(force_turn && strcmp(force_turn, "1") == 0);
 
     stun_ip[0] = '\0';
     stun_port = 0;
