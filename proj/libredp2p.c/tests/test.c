@@ -6476,7 +6476,6 @@ static void test_direct_api_con_receive(const void *data, size_t size,
         data && size == 4 && memcmp(data, "pong", 4) == 0 ? 1 : -1);
 }
 
-
 #define TEST_TURN_MAGIC 0x2112A442u
 #define TEST_TURN_ALLOCATE_REQ 0x0003
 #define TEST_TURN_ALLOCATE_OK 0x0103
@@ -6494,12 +6493,22 @@ static void test_direct_api_con_receive(const void *data, size_t size,
 #define TEST_TURN_ATTR_NONCE 0x0015
 #define TEST_TURN_ATTR_XOR_RELAYED 0x0016
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return None.
+ */
 static void test_turn_put16(unsigned char *buf, size_t off, unsigned int value)
 {
     buf[off] = (unsigned char)(value >> 8);
     buf[off + 1] = (unsigned char)value;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return None.
+ */
 static void test_turn_put32(unsigned char *buf, size_t off, uint32_t value)
 {
     buf[off] = (unsigned char)(value >> 24);
@@ -6508,6 +6517,11 @@ static void test_turn_put32(unsigned char *buf, size_t off, uint32_t value)
     buf[off + 3] = (unsigned char)value;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_header(unsigned char *buf, size_t cap, uint16_t type,
     const unsigned char txid[12])
 {
@@ -6519,6 +6533,11 @@ static int test_turn_header(unsigned char *buf, size_t cap, uint16_t type,
     return 20;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_attr(unsigned char *buf, size_t cap, int *off,
     uint16_t type, const void *data, size_t len)
 {
@@ -6534,6 +6553,11 @@ static int test_turn_attr(unsigned char *buf, size_t cap, int *off,
     return 1;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_find_attr(const unsigned char *buf, int len, uint16_t type,
     int *attr_len)
 {
@@ -6552,6 +6576,11 @@ static int test_turn_find_attr(const unsigned char *buf, int len, uint16_t type,
     return -1;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_sockaddr_equal(const struct sockaddr_storage *a,
     const struct sockaddr_storage *b)
 {
@@ -6565,6 +6594,11 @@ static int test_turn_sockaddr_equal(const struct sockaddr_storage *a,
     return 0;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_xor_addr(unsigned char out[8],
     const struct sockaddr_storage *addr)
 {
@@ -6589,6 +6623,11 @@ static int test_turn_xor_addr(unsigned char out[8],
     return 1;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_decode_xor_addr(const unsigned char *data, int len,
     struct sockaddr_storage *out)
 {
@@ -6610,6 +6649,11 @@ static int test_turn_decode_xor_addr(const unsigned char *data, int len,
     return 1;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static test_turn_allocation_t *test_turn_client_allocation(test_turn_stub_t *turn,
     const struct sockaddr_storage *client)
 {
@@ -6622,6 +6666,11 @@ static test_turn_allocation_t *test_turn_client_allocation(test_turn_stub_t *tur
     return NULL;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static test_turn_allocation_t *test_turn_relay_allocation(test_turn_stub_t *turn,
     const struct sockaddr_storage *relay)
 {
@@ -6634,6 +6683,11 @@ static test_turn_allocation_t *test_turn_relay_allocation(test_turn_stub_t *turn
     return NULL;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static test_turn_allocation_t *test_turn_allocate_client(test_turn_stub_t *turn,
     const struct sockaddr_storage *client, test_socklen_t client_len)
 {
@@ -6662,6 +6716,11 @@ static test_turn_allocation_t *test_turn_allocate_client(test_turn_stub_t *turn,
     return NULL;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_send(test_turn_stub_t *turn,
     const struct sockaddr_storage *to, test_socklen_t to_len,
     const unsigned char *data, size_t len)
@@ -6670,6 +6729,11 @@ static int test_turn_send(test_turn_stub_t *turn,
         (const struct sockaddr *)to, to_len) == (int)len ? 0 : 1;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_reply_challenge(test_turn_stub_t *turn,
     const struct sockaddr_storage *to, test_socklen_t to_len,
     const unsigned char txid[12])
@@ -6692,6 +6756,11 @@ static int test_turn_reply_challenge(test_turn_stub_t *turn,
     return test_turn_send(turn, to, to_len, buf, (size_t)off);
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_reply_allocate(test_turn_stub_t *turn,
     const struct sockaddr_storage *to, test_socklen_t to_len,
     const unsigned char txid[12])
@@ -6716,6 +6785,11 @@ static int test_turn_reply_allocate(test_turn_stub_t *turn,
     return test_turn_send(turn, to, to_len, buf, (size_t)off);
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_reply_permission(test_turn_stub_t *turn,
     const struct sockaddr_storage *to, test_socklen_t to_len,
     const unsigned char txid[12])
@@ -6728,6 +6802,11 @@ static int test_turn_reply_permission(test_turn_stub_t *turn,
     return test_turn_send(turn, to, to_len, buf, (size_t)off);
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_forward_data(test_turn_stub_t *turn,
     test_turn_allocation_t *source, const unsigned char *packet, int packet_len)
 {
@@ -6760,6 +6839,11 @@ static int test_turn_forward_data(test_turn_stub_t *turn,
         (size_t)off);
 }
 
+/**
+ * Runs the deterministic local TURN stub loop.
+ * Summary: Services allocation, permission, and relay test packets.
+ * @return Platform thread result.
+ */
 #ifdef _WIN32
 static DWORD WINAPI test_turn_main(void *arg)
 #else
@@ -6805,6 +6889,11 @@ static void *test_turn_main(void *arg)
 #endif
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_start(test_turn_stub_t *turn, unsigned short port,
     const char *relay_host)
 {
@@ -6835,6 +6924,11 @@ static int test_turn_start(test_turn_stub_t *turn, unsigned short port,
     return 0;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_stop(test_turn_stub_t *turn)
 {
     int fail = 0;
@@ -6846,6 +6940,11 @@ static int test_turn_stop(test_turn_stub_t *turn)
     return fail;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int test_turn_api_roundtrip(int protocol, const char *id,
     const char *index, const char *turn_url)
 {
@@ -6903,6 +7002,11 @@ static int test_turn_api_roundtrip(int protocol, const char *id,
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Implements one deterministic TURN test helper.
+ * Summary: Supports the local relay stub or its API roundtrip checks.
+ * @return Test helper result or matching state.
+ */
 static int case_kc_redp2p_turn_api(void)
 {
     kc_redp2p_idx_t *idx = NULL;
