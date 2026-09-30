@@ -3134,10 +3134,12 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
             for (int cidx = 0; cidx < remote_candidate_count; cidx++) {
                 if (remote_candidates[cidx].type == REDP2P_CAND_RELAY) {
                     sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
-                        &remote_candidates[cidx], ping_msg, 0,
+                        &remote_candidates[cidx], ping_msg, local_turn,
                         &unsupported_count);
                 }
-                if (local_turn) {
+                if (local_turn &&
+                    remote_candidates[cidx].type != REDP2P_CAND_RELAY)
+                {
                     sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
                         &remote_candidates[cidx], ping_msg, 1,
                         &unsupported_count);
