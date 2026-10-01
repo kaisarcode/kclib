@@ -779,6 +779,46 @@ static int redp2p_resolve(
 }
 
 /**
+ * Resolves one IPv4 endpoint.
+ * Summary: STUN discovery is IPv4-only today, so resolver ordering must not
+ *          select an IPv6 answer that the STUN path then rejects.
+ * @param host Hostname to resolve.
+ * @param port Port to resolve.
+ * @param socktype Socket type.
+ * @param out Output socket address.
+ * @param out_len Output socket address length.
+ * @return 0 on success, -1 on resolution failure.
+ */
+static int redp2p_resolve_ipv4(
+    const char *host,
+    unsigned short port,
+    int socktype,
+    struct sockaddr_storage *out,
+    socklen_t *out_len)
+{
+    struct addrinfo hints;
+    struct addrinfo *ai;
+    char port_str[16];
+
+    if (!host || !out || !out_len) return -1;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = socktype;
+
+    snprintf(port_str, sizeof(port_str), "%u", (unsigned)port);
+    if (getaddrinfo(host, port_str, &hints, &ai) != 0) return -1;
+    if ((size_t)ai->ai_addrlen > sizeof(*out)) {
+        freeaddrinfo(ai);
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+    memcpy(out, ai->ai_addr, ai->ai_addrlen);
+    *out_len = (socklen_t)ai->ai_addrlen;
+    freeaddrinfo(ai);
+    return 0;
+}
+
+/**
  * Returns the socket address length for a stored address family.
  * @param addr Stored socket address.
  * @return Socket address length, or 0 for unsupported families.
@@ -1571,8 +1611,8 @@ static int redp2p_stun_binding(redp2p_t *ctx, int udp_fd,
     if (!redp2p_parse_u(co + 1, 1, 65535, &lport)) return -1;
     port = (unsigned short)lport;
 
-    if (redp2p_resolve(host, port, SOCK_DGRAM, &srv, &srv_len) != 0) return -1;
-    if (srv.ss_family != AF_INET) return -1;
+    if (redp2p_resolve_ipv4(host, port, SOCK_DGRAM, &srv, &srv_len) != 0)
+        return -1;
 
     if (!redp2p_stun_gen_id(tx_id)) return -1;
     off = redp2p_stun_build(tx, REDP2P_STUN_BINDING, tx_id);
@@ -1633,8 +1673,8 @@ static int redp2p_stun_keepalive(redp2p_t *ctx, int udp_fd)
     host[sl] = '\0';
     if (!redp2p_parse_u(co + 1, 1, 65535, &lport)) return -1;
     port = (unsigned short)lport;
-    if (redp2p_resolve(host, port, SOCK_DGRAM, &srv, &srv_len) != 0 ||
-        srv.ss_family != AF_INET || !redp2p_stun_gen_id(tx_id))
+    if (redp2p_resolve_ipv4(host, port, SOCK_DGRAM, &srv, &srv_len) != 0 ||
+        !redp2p_stun_gen_id(tx_id))
         return -1;
     off = redp2p_stun_build(tx, REDP2P_STUN_BINDING, tx_id);
     redp2p_stun_len(tx, off);
