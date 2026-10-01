@@ -264,6 +264,108 @@ redp2p_consumer_runtime_t *runtime)
     }
 }
 
+#define REDP2P_PUNCH_READY_WAIT_MS 5000
+#define REDP2P_PUNCH_READY_PROBE_MS 100
+
+/**
+ * Waits until the publisher has opened its selected peer session.
+ * Summary: Keeps the punch path active while the publisher finishes its side,
+ * and accepts application traffic only after the explicit server-ready token.
+ * @param runtime Consumer runtime containing peer identities.
+ * @param peer_fd Selected peer UDP socket.
+ * @param session_hex Punch session token.
+ * @param peer_addr Selected publisher endpoint.
+ * @param via_turn Non-zero when the selected path uses TURN.
+ * @return REDP2P_OK when the publisher is ready, REDP2P_ETIMEOUT otherwise.
+ */
+static int redp2p_consumer_wait_server_ready(
+    redp2p_consumer_runtime_t *runtime,
+    redp2p_fd_t peer_fd,
+    const char *session_hex,
+    const struct sockaddr_storage *peer_addr,
+    int via_turn)
+{
+    uint64_t deadline_ms;
+    uint64_t next_probe_ms;
+    char ping_msg[256];
+
+    if (!runtime || REDP2P_ISERR(peer_fd) || !session_hex || !peer_addr)
+        return REDP2P_EINVAL;
+    snprintf(ping_msg, sizeof(ping_msg), "%s%s:%s:%s\n",
+        REDP2P_CTRTOK_PUNCH_PING, session_hex,
+        runtime->self_id, runtime->target_id);
+    deadline_ms = redp2p_now_ms() + REDP2P_PUNCH_READY_WAIT_MS;
+    next_probe_ms = 0;
+
+    while (redp2p_now_ms() < deadline_ms) {
+        redp2p_pollfd_t pollfd;
+        uint64_t now_ms;
+        int wait_ms;
+        int selected;
+
+        now_ms = redp2p_now_ms();
+        if (now_ms >= next_probe_ms) {
+            redp2p_transport_sendto(runtime->ctx, peer_fd,
+                ping_msg, strlen(ping_msg), peer_addr, via_turn);
+            next_probe_ms = now_ms + REDP2P_PUNCH_READY_PROBE_MS;
+        }
+        wait_ms = (int)(next_probe_ms > now_ms ?
+            next_probe_ms - now_ms : 1);
+        if (now_ms + (uint64_t)wait_ms > deadline_ms)
+            wait_ms = (int)(deadline_ms - now_ms);
+        if (wait_ms < 1) wait_ms = 1;
+
+        pollfd.fd = peer_fd;
+        pollfd.events = REDP2P_POLLIN;
+        pollfd.revents = 0;
+        selected = redp2p_poll_wait(&pollfd, 1, wait_ms);
+        if (selected <= 0 || !redp2p_poll_readable(&pollfd))
+            continue;
+
+        {
+            char buf[1024];
+            char rx_session[REDP2P_CTRL_SESSION_MAX + 1] = {0};
+            char rx_from[REDP2P_ID_MAX + 1] = {0};
+            char rx_to[REDP2P_ID_MAX + 1] = {0};
+            struct sockaddr_storage from;
+            socklen_t from_len;
+            int n;
+            int rx_via_turn;
+
+            from_len = sizeof(from);
+            rx_via_turn = 0;
+            n = redp2p_transport_recvfrom(runtime->ctx, peer_fd,
+                buf, sizeof(buf) - 1, 0, &from, &from_len, &rx_via_turn);
+            if (n == -2) continue;
+            if (n <= 0 || (size_t)n >= sizeof(buf)) continue;
+            if (!redp2p_sockaddr_equal(&from, peer_addr) ||
+                rx_via_turn != via_turn)
+                continue;
+            if ((size_t)n == strlen(REDP2P_CTRTOK_PUNCH_SERVER) &&
+                memcmp(buf, REDP2P_CTRTOK_PUNCH_SERVER, (size_t)n) == 0)
+                return REDP2P_OK;
+
+            buf[n] = '\0';
+            if (redp2p_parse_punch_packet(buf, REDP2P_CTRTOK_PUNCH_PING,
+                rx_session, rx_from, rx_to) &&
+                strcmp(rx_session, session_hex) == 0 &&
+                strcmp(rx_from, runtime->target_id) == 0 &&
+                strcmp(rx_to, runtime->self_id) == 0)
+            {
+                char pong_msg[256];
+
+                snprintf(pong_msg, sizeof(pong_msg), "%s%s:%s:%s\n",
+                    REDP2P_CTRTOK_PUNCH_PONG, session_hex,
+                    rx_from, rx_to);
+                redp2p_transport_sendto(runtime->ctx, peer_fd,
+                    pong_msg, strlen(pong_msg), &from, rx_via_turn);
+            }
+        }
+    }
+    redp2p_set_error(runtime->ctx, "punch: publisher readiness timed out");
+    return REDP2P_ETIMEOUT;
+}
+
 /**
  * Establishes one peer path and transfers its descriptor only on success.
  * @param runtime Consumer runtime containing control and peer settings.
@@ -364,6 +466,15 @@ int *skip_iteration)
         session_hex, runtime->self_id, runtime->target_id,
         runtime->peer_candidates, runtime->n_peer_candidates, &peer_addr,
         &peer_via_turn);
+    if (result != REDP2P_OK) {
+        redp2p_transport_forget(runtime->ctx, peer_fd);
+        REDP2P_FD_CLOSE((int)peer_fd);
+        crypto_wipe(session_bin, REDP2P_SESSION_ID_SZ);
+        crypto_wipe(session_hex, REDP2P_SESSION_ID_SZ * 2 + 1);
+        return result;
+    }
+    result = redp2p_consumer_wait_server_ready(runtime, peer_fd, session_hex,
+        &peer_addr, peer_via_turn);
     if (result != REDP2P_OK) {
         redp2p_transport_forget(runtime->ctx, peer_fd);
         REDP2P_FD_CLOSE((int)peer_fd);

@@ -29,7 +29,6 @@
 #endif
 
 #define REDP2P_IPV4_LOOPBACK             0x7f000001u
-#define REDP2P_CTRTOK_PUNCH_SERVER "REDP2P_CTRTOK_PUNCH:server"
 
 #ifdef _WIN32
 static SRWLOCK g_key_mutex = SRWLOCK_INIT;
@@ -1510,9 +1509,12 @@ JSON_Object *out)
             session_id, &peer_addr, peer_via_turn)) {
             continue;
         }
-        redp2p_transport_sendto(runtime->borrowed_ctx, runtime->owned_udp_fd,
-            REDP2P_CTRTOK_PUNCH_SERVER, strlen(REDP2P_CTRTOK_PUNCH_SERVER),
-            &peer_addr, peer_via_turn);
+        for (int ready_burst = 0; ready_burst < 3; ready_burst++) {
+            redp2p_transport_sendto(runtime->borrowed_ctx,
+                runtime->owned_udp_fd, REDP2P_CTRTOK_PUNCH_SERVER,
+                strlen(REDP2P_CTRTOK_PUNCH_SERVER), &peer_addr,
+                peer_via_turn);
+        }
     }
     return REDP2P_OK;
 }
