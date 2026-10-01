@@ -57,6 +57,8 @@ struct kc_redp2p_client {
     socklen_t address_len;
     int udp;
     _Atomic int closed;
+    _Atomic int send_shutdown;
+    _Atomic int peer_eof;
 };
 
 struct kc_redp2p_pub {
@@ -81,6 +83,7 @@ struct kc_redp2p_pub {
     int io_mutex_initialized;
     kc_redp2p_pub_connect_fn connect;
     kc_redp2p_pub_receive_fn receive;
+    kc_redp2p_pub_peer_shutdown_fn peer_shutdown;
     void *userdata;
     kc_redp2p_client_t **clients;
     size_t client_count;
@@ -106,9 +109,12 @@ struct kc_redp2p_con {
     _Atomic int adapter_stop;
     _Atomic int closing;
     _Atomic int deferred_close;
+    _Atomic int send_shutdown;
+    _Atomic int peer_eof;
     kc_redp2p_io_mutex_t io_mutex;
     int io_mutex_initialized;
     kc_redp2p_con_receive_fn receive;
+    kc_redp2p_con_peer_shutdown_fn peer_shutdown;
     void *userdata;
 };
 
@@ -131,6 +137,20 @@ static void kc_redp2p_pub_destroy_deferred(kc_redp2p_pub_t *pub);
 static void kc_redp2p_con_destroy_deferred(kc_redp2p_con_t *con);
 static void kc_redp2p_sleep_tick(void);
 static uint64_t kc_redp2p_now_ms(void);
+
+/**
+ * Half-closes the write direction of one private TCP adapter socket.
+ * @return 0 on success, -1 on socket failure.
+ */
+static int kc_redp2p_socket_shutdown_write(redp2p_fd_t fd)
+{
+    if (REDP2P_ISERR(fd)) return -1;
+#ifdef _WIN32
+    return shutdown(fd, SD_SEND) == 0 ? 0 : -1;
+#else
+    return shutdown(fd, SHUT_WR) == 0 ? 0 : -1;
+#endif
+}
 
 #ifdef REDP2P_TESTING
 static _Atomic int kc_redp2p_test_io_hold_flag;
@@ -468,6 +488,7 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
             for (i = 0; i < pub->client_count; i++) {
                 kc_redp2p_client_t *client = pub->clients[i];
                 if (client && !client->udp && !atomic_load(&client->closed) &&
+                    !atomic_load(&client->peer_eof) &&
                     !REDP2P_ISERR(client->fd))
                     count++;
             }
@@ -482,6 +503,7 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
             for (i = 0; i < pub->client_count; i++) {
                 kc_redp2p_client_t *client = pub->clients[i];
                 if (!client || client->udp || atomic_load(&client->closed) ||
+                    atomic_load(&client->peer_eof) ||
                     REDP2P_ISERR(client->fd))
                     continue;
                 fds[count].fd = client->fd;
@@ -523,13 +545,20 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
                 kc_redp2p_client_t *client = pub->clients[i];
                 int n;
                 if (!client || client->udp || atomic_load(&client->closed) ||
+                    atomic_load(&client->peer_eof) ||
                     REDP2P_ISERR(client->fd))
                     continue;
                 if (!redp2p_poll_readable(&fds[p++])) continue;
                 n = redp2p_sock_read(client->fd, (char *)buffer,
                     (int)sizeof(buffer));
-                if (n <= 0) {
+                if (n < 0) {
                     kc_redp2p_client_close(client);
+                    continue;
+                }
+                if (n == 0) {
+                    if (!atomic_exchange(&client->peer_eof, 1) &&
+                        pub->peer_shutdown && !atomic_load(&pub->closing))
+                        pub->peer_shutdown(client, pub->userdata);
                     continue;
                 }
                 kc_redp2p_pub_emit(pub, client, buffer, (size_t)n);
@@ -574,7 +603,12 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
         if (n < 0) break;
         if (n == 0 && con->runtime.ctx &&
             con->runtime.ctx->proto == REDP2P_PROTO_TCP)
+        {
+            if (!atomic_exchange(&con->peer_eof, 1) &&
+                con->peer_shutdown && !atomic_load(&con->closing))
+                con->peer_shutdown(con->userdata);
             break;
+        }
         if (con->receive && !atomic_load(&con->closing)) {
             con->receive(buffer, (size_t)n, con->userdata);
         }
@@ -1303,6 +1337,7 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
     pub->adapter_fd = REDP2P_FD_INVALID;
     pub->connect = options->connect;
     pub->receive = options->receive;
+    pub->peer_shutdown = options->peer_shutdown;
     pub->userdata = options->userdata;
     if (!kc_redp2p_parse_index(options->index, pub->index_host,
         &pub->index_port)) {
@@ -1416,6 +1451,7 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     if (!con) return KC_REDP2P_ERROR;
     con->adapter_fd = REDP2P_FD_INVALID;
     con->receive = options->receive;
+    con->peer_shutdown = options->peer_shutdown;
     con->userdata = options->userdata;
     if (!kc_redp2p_parse_index(options->index, con->index_host,
         &con->index_port) || !kc_redp2p_make_self_id(con->self_id)) {
@@ -1724,7 +1760,8 @@ int kc_redp2p_con_send(kc_redp2p_con_t *con, const void *data, size_t size)
     int result;
     int sent;
 
-    if (!con || (!data && size > 0) || atomic_load(&con->closing))
+    if (!con || (!data && size > 0) || atomic_load(&con->closing) ||
+        atomic_load(&con->send_shutdown))
         return KC_REDP2P_EINVAL;
     kc_redp2p_io_mutex_lock(&con->io_mutex, con->io_mutex_initialized);
     kc_redp2p_test_io_point();
@@ -1758,6 +1795,36 @@ int kc_redp2p_con_send(kc_redp2p_con_t *con, const void *data, size_t size)
 }
 
 /**
+ * Ends the local send direction of one consumer TCP stream.
+ * @param con Consumer capability.
+ * @return KC_REDP2P_OK on success or a negative status.
+ */
+int kc_redp2p_con_shutdown(kc_redp2p_con_t *con)
+{
+    int result;
+
+    if (!con || atomic_load(&con->closing)) return KC_REDP2P_EINVAL;
+    if (!con->runtime.ctx ||
+        con->runtime.ctx->proto != REDP2P_PROTO_TCP)
+        return KC_REDP2P_EUNSUPPORTED;
+    kc_redp2p_io_mutex_lock(&con->io_mutex, con->io_mutex_initialized);
+    if (atomic_load(&con->closing) || REDP2P_ISERR(con->adapter_fd)) {
+        kc_redp2p_io_mutex_unlock(&con->io_mutex,
+            con->io_mutex_initialized);
+        return KC_REDP2P_EINVAL;
+    }
+    if (atomic_load(&con->send_shutdown)) {
+        kc_redp2p_io_mutex_unlock(&con->io_mutex,
+            con->io_mutex_initialized);
+        return KC_REDP2P_OK;
+    }
+    result = kc_redp2p_socket_shutdown_write(con->adapter_fd);
+    if (result == 0) atomic_store(&con->send_shutdown, 1);
+    kc_redp2p_io_mutex_unlock(&con->io_mutex, con->io_mutex_initialized);
+    return result == 0 ? KC_REDP2P_OK : KC_REDP2P_ENET;
+}
+
+/**
  * Responds to one publisher client.
  * @param client Stable publisher-side client identity.
  * @param data Application bytes.
@@ -1774,10 +1841,12 @@ int kc_redp2p_client_respond(kc_redp2p_client_t *client,
     if (!client || !client->pub || (!data && size > 0))
         return KC_REDP2P_EINVAL;
     pub = client->pub;
-    if (atomic_load(&pub->closing)) return KC_REDP2P_EINVAL;
+    if (atomic_load(&pub->closing) || atomic_load(&client->send_shutdown))
+        return KC_REDP2P_EINVAL;
     kc_redp2p_io_mutex_lock(&pub->io_mutex, pub->io_mutex_initialized);
     kc_redp2p_test_io_point();
-    if (atomic_load(&pub->closing) || atomic_load(&client->closed)) {
+    if (atomic_load(&pub->closing) || atomic_load(&client->closed) ||
+        atomic_load(&client->send_shutdown)) {
         kc_redp2p_io_mutex_unlock(&pub->io_mutex,
             pub->io_mutex_initialized);
         return KC_REDP2P_EINVAL;
@@ -1803,6 +1872,40 @@ int kc_redp2p_client_respond(kc_redp2p_client_t *client,
         client->address_len);
     kc_redp2p_io_mutex_unlock(&pub->io_mutex, pub->io_mutex_initialized);
     return sent == (int)size ? KC_REDP2P_OK : KC_REDP2P_ENET;
+}
+
+/**
+ * Ends the local send direction of one publisher TCP client.
+ * @param client Publisher client capability.
+ * @return KC_REDP2P_OK on success or a negative status.
+ */
+int kc_redp2p_client_shutdown(kc_redp2p_client_t *client)
+{
+    kc_redp2p_pub_t *pub;
+    int result;
+
+    if (!client || !client->pub) return KC_REDP2P_EINVAL;
+    pub = client->pub;
+    if (client->udp) return KC_REDP2P_EUNSUPPORTED;
+    if (atomic_load(&pub->closing) || atomic_load(&client->closed))
+        return KC_REDP2P_EINVAL;
+    kc_redp2p_io_mutex_lock(&pub->io_mutex, pub->io_mutex_initialized);
+    if (atomic_load(&pub->closing) || atomic_load(&client->closed) ||
+        REDP2P_ISERR(client->fd))
+    {
+        kc_redp2p_io_mutex_unlock(&pub->io_mutex,
+            pub->io_mutex_initialized);
+        return KC_REDP2P_EINVAL;
+    }
+    if (atomic_load(&client->send_shutdown)) {
+        kc_redp2p_io_mutex_unlock(&pub->io_mutex,
+            pub->io_mutex_initialized);
+        return KC_REDP2P_OK;
+    }
+    result = kc_redp2p_socket_shutdown_write(client->fd);
+    if (result == 0) atomic_store(&client->send_shutdown, 1);
+    kc_redp2p_io_mutex_unlock(&pub->io_mutex, pub->io_mutex_initialized);
+    return result == 0 ? KC_REDP2P_OK : KC_REDP2P_ENET;
 }
 
 /**
