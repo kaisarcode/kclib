@@ -75,6 +75,7 @@ struct kc_redp2p_pub {
 #endif
     int adapter_thread_started;
     _Atomic int adapter_stop;
+    _Atomic int peer_closed;
     _Atomic int closing;
     _Atomic int deferred_close;
     kc_redp2p_io_mutex_t io_mutex;
@@ -574,7 +575,10 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
         if (n < 0) break;
         if (n == 0 && con->runtime.ctx &&
             con->runtime.ctx->proto == REDP2P_PROTO_TCP)
+        {
+            atomic_store(&con->peer_closed, 1);
             break;
+        }
         if (con->receive && !atomic_load(&con->closing)) {
             con->receive(buffer, (size_t)n, con->userdata);
         }
@@ -1755,6 +1759,19 @@ int kc_redp2p_con_send(kc_redp2p_con_t *con, const void *data, size_t size)
     sent = (int)send(con->adapter_fd, (const char *)data, (int)size, 0);
     kc_redp2p_io_mutex_unlock(&con->io_mutex, con->io_mutex_initialized);
     return sent == (int)size ? KC_REDP2P_OK : KC_REDP2P_ENET;
+}
+
+/**
+ * Reports remote stream-session closure without encoding it as receive data.
+ * @param con Consumer capability.
+ * @return Nonzero after the remote stream data direction has closed.
+ */
+int kc_redp2p_con_peer_closed(const kc_redp2p_con_t *con)
+{
+    if (!con || atomic_load(&con->closing)) return 1;
+    if (!con->runtime.ctx || con->runtime.ctx->proto != REDP2P_PROTO_TCP)
+        return 0;
+    return atomic_load(&con->peer_closed) != 0;
 }
 
 /**
