@@ -1147,8 +1147,8 @@ redp2p_publisher_runtime_t *runtime)
     memset(message, 0, sizeof(message));
     memset(proof_hash, 0, sizeof(proof_hash));
     candidate_count = 0;
-    result = redp2p_publisher_heartbeat_candidates(runtime, candidates,
-        &candidate_count);
+    result = redp2p_gather_candidates(ctx, runtime->owned_udp_fd, candidates,
+        REDP2P_PEER_CANDIDATES_MAX, &candidate_count);
     if (result != REDP2P_OK) {
         if (!redp2p_get_error(ctx)[0])
             redp2p_set_error(ctx, "wait: local candidate gather failed");
@@ -1716,8 +1716,8 @@ redp2p_publisher_runtime_t *runtime)
         return REDP2P_EPROTO;
     }
     candidate_count = 0;
-    result = redp2p_gather_candidates(ctx, runtime->owned_udp_fd, candidates,
-        REDP2P_PEER_CANDIDATES_MAX, &candidate_count);
+    result = redp2p_publisher_heartbeat_candidates(runtime, candidates,
+        &candidate_count);
     if (result != REDP2P_OK) {
         if (!redp2p_get_error(ctx)[0])
             redp2p_set_error(ctx, "wait: local candidate gather failed");
