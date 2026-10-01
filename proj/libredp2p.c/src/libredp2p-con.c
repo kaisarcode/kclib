@@ -778,10 +778,6 @@ static int redp2p_consumer_tcp_accept(
         }
         return 1;
     }
-    if (runtime->ctx->direct_mode) {
-        atomic_store(&runtime->ctx->channel_status, REDP2P_OK);
-        atomic_store(&runtime->ctx->channel_state, 1);
-    }
     return 0;
 }
 
@@ -937,6 +933,13 @@ redp2p_consumer_runtime_t *runtime)
                     runtime->sessions[i].tcp_fd,
                     (const unsigned char *)buf, (size_t)n) != 0)
             {
+                if (runtime->ctx->direct_mode &&
+                    !runtime->sessions[i].stream.ready &&
+                    atomic_load(&runtime->ctx->channel_state) == 0)
+                {
+                    atomic_store(&runtime->ctx->channel_status, REDP2P_ENET);
+                    atomic_store(&runtime->ctx->channel_state, -1);
+                }
                 redp2p_stream_fail(runtime->ctx,
                     &runtime->sessions[i].stream);
                 redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
@@ -968,6 +971,13 @@ redp2p_consumer_runtime_t *runtime)
                 redp2p_stream_tick(runtime->ctx,
                 &runtime->sessions[i].stream) != 0)
             {
+                if (runtime->ctx->direct_mode &&
+                    !runtime->sessions[i].stream.ready &&
+                    atomic_load(&runtime->ctx->channel_state) == 0)
+                {
+                    atomic_store(&runtime->ctx->channel_status, REDP2P_ENET);
+                    atomic_store(&runtime->ctx->channel_state, -1);
+                }
                 redp2p_stream_fail(runtime->ctx,
                     &runtime->sessions[i].stream);
                 redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
@@ -993,6 +1003,14 @@ redp2p_consumer_runtime_t *runtime)
         if (redp2p_now_s() - runtime->sessions[i].last_rx >
             REDP2P_DISCONNECT_S)
         {
+            if (runtime->ctx->direct_mode &&
+                runtime->sessions[i].stream_mode &&
+                !runtime->sessions[i].stream.ready &&
+                atomic_load(&runtime->ctx->channel_state) == 0)
+            {
+                atomic_store(&runtime->ctx->channel_status, REDP2P_ETIMEOUT);
+                atomic_store(&runtime->ctx->channel_state, -1);
+            }
             redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
         }
     }
