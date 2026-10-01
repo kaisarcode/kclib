@@ -35,7 +35,6 @@ typedef void (*kc_redp2p_pub_receive_fn)(
     const kc_redp2p_pub_input_t *input, void *userdata);
 typedef void (*kc_redp2p_con_receive_fn)(
     const void *data, size_t size, void *userdata);
-typedef void (*kc_redp2p_con_stream_end_fn)(void *userdata);
 
 #define KC_REDP2P_OK          0
 #define KC_REDP2P_ERROR      -1
@@ -92,7 +91,6 @@ typedef struct {
     const char *index;
     const char *stun;
     kc_redp2p_con_receive_fn receive;
-    kc_redp2p_con_stream_end_fn stream_end;
     void *userdata;
     const char *turn;
     const char *turn_user;
