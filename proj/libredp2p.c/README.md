@@ -111,6 +111,16 @@ make
 make test
 ```
 
+These native tests exercise the library API, protocol state, sockets, KCP,
+candidate handling, and simulated relay behavior inside the test harness. They
+are not a substitute for a black-box deployment test with separate index,
+publisher, and consumer processes.
+
+The native black-box REDP2P process integration lives in `kccli`, where the
+real CLI is statically linked against this library. Its test starts independent
+`redp2p idx`, `redp2p pub`, and `redp2p con` processes and verifies real
+TCP/HTTP and UDP traffic through the consumer-facing port.
+
 The browser RTC integration test is independent from the native build:
 
 ```bash
