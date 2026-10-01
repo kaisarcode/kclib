@@ -1648,7 +1648,7 @@ static int redp2p_stun_binding(redp2p_t *ctx, int udp_fd,
  * @param udp_fd Bound UDP socket used for peer traffic.
  * @return 0 when sent, -1 when STUN is unavailable or the send fails.
  */
-static int redp2p_stun_keepalive(redp2p_t *ctx, int udp_fd)
+int redp2p_stun_keepalive(redp2p_t *ctx, int udp_fd)
 {
     unsigned char tx[20], tx_id[12];
     struct sockaddr_storage srv;

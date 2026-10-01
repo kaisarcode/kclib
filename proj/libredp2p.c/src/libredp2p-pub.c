@@ -65,6 +65,8 @@ typedef struct {
     size_t poll_capacity;
     uint64_t last_heartbeat;
     uint64_t last_punch_poll;
+    redp2p_candidate_t published_candidates[REDP2P_PEER_CANDIDATES_MAX];
+    int published_candidate_count;
 } redp2p_publisher_runtime_t;
 
 typedef struct {
@@ -1027,6 +1029,66 @@ unsigned short bind_port)
 }
 
 /**
+ * Caches the candidate set tied to the publisher's long-lived UDP socket.
+ * @param runtime Publisher runtime owning the socket.
+ * @param candidates Candidate array to cache.
+ * @param candidate_count Candidate count.
+ * @return None.
+ */
+static void redp2p_publisher_cache_candidates(
+    redp2p_publisher_runtime_t *runtime,
+    const redp2p_candidate_t *candidates,
+    int candidate_count)
+{
+    if (!runtime || !candidates || candidate_count < 0 ||
+        candidate_count > REDP2P_PEER_CANDIDATES_MAX)
+        return;
+    if (candidate_count > 0) {
+        memcpy(runtime->published_candidates, candidates,
+            (size_t)candidate_count * sizeof(*candidates));
+    }
+    runtime->published_candidate_count = candidate_count;
+}
+
+/**
+ * Loads heartbeat candidates without reading from an active peer socket.
+ * Summary: The initial registration gathers STUN on the actual UDP socket.
+ *          Later heartbeats reuse that socket-bound candidate set and send a
+ *          STUN refresh without recvfrom(), so peer datagrams cannot be
+ *          consumed by candidate maintenance.
+ * @param runtime Publisher runtime owning the socket and candidate cache.
+ * @param candidates Output candidate array.
+ * @param candidate_count Output candidate count.
+ * @return REDP2P_OK on success or a candidate gather error.
+ */
+static int redp2p_publisher_heartbeat_candidates(
+    redp2p_publisher_runtime_t *runtime,
+    redp2p_candidate_t *candidates,
+    int *candidate_count)
+{
+    redp2p_t *ctx;
+    int result;
+
+    if (!runtime || !candidates || !candidate_count) return REDP2P_EINVAL;
+    ctx = runtime->borrowed_ctx;
+    if (runtime->published_candidate_count <= 0) {
+        *candidate_count = 0;
+        result = redp2p_gather_candidates(ctx, runtime->owned_udp_fd,
+            candidates, REDP2P_PEER_CANDIDATES_MAX, candidate_count);
+        if (result != REDP2P_OK) return result;
+        redp2p_publisher_cache_candidates(runtime, candidates,
+            *candidate_count);
+        return REDP2P_OK;
+    }
+    *candidate_count = runtime->published_candidate_count;
+    memcpy(candidates, runtime->published_candidates,
+        (size_t)*candidate_count * sizeof(*candidates));
+    if (ctx && ctx->stun_url[0])
+        (void)redp2p_stun_keepalive(ctx, runtime->owned_udp_fd);
+    return REDP2P_OK;
+}
+
+/**
  * Completes the registration challenge, proof, and response exchange.
  * @param runtime Initialized publisher runtime.
  * @return REDP2P_OK on success, or a negative error code on failure.
@@ -1085,8 +1147,8 @@ redp2p_publisher_runtime_t *runtime)
     memset(message, 0, sizeof(message));
     memset(proof_hash, 0, sizeof(proof_hash));
     candidate_count = 0;
-    result = redp2p_gather_candidates(ctx, runtime->owned_udp_fd, candidates,
-        REDP2P_PEER_CANDIDATES_MAX, &candidate_count);
+    result = redp2p_publisher_heartbeat_candidates(runtime, candidates,
+        &candidate_count);
     if (result != REDP2P_OK) {
         if (!redp2p_get_error(ctx)[0])
             redp2p_set_error(ctx, "wait: local candidate gather failed");
@@ -1202,6 +1264,7 @@ redp2p_publisher_runtime_t *runtime)
         goto cleanup;
     }
     json_value_free(response);
+    redp2p_publisher_cache_candidates(runtime, candidates, candidate_count);
     result = REDP2P_OK;
 
 cleanup:

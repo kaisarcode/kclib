@@ -256,6 +256,14 @@ REDP2P_INTERNAL int redp2p_parse_punch_packet(const char *text, const char *pref
 REDP2P_INTERNAL int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
     redp2p_candidate_t *out, int out_cap, int *out_count);
 
+/**
+ * Refreshes a configured STUN mapping without reading from the peer socket.
+ * @param ctx REDP2P context.
+ * @param udp_fd Bound UDP peer socket.
+ * @return 0 when sent, -1 when unavailable or send fails.
+ */
+REDP2P_INTERNAL int redp2p_stun_keepalive(redp2p_t *ctx, int udp_fd);
+
 REDP2P_INTERNAL int redp2p_transport_sendto(redp2p_t *ctx, redp2p_fd_t fd,
     const void *buf, size_t len, const struct sockaddr_storage *addr,
     int via_turn);
