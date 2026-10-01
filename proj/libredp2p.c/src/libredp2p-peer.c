@@ -50,6 +50,7 @@
 #define REDP2P_PUNCH_CONFIRM_BURST 3
 #define REDP2P_PUNCH_SWEEP_WAIT_MS 20
 #define REDP2P_PUNCH_TOTAL_MS 20000
+#define REDP2P_STUN_KEEPALIVE_MS 10000
 #define REDP2P_SESSION_TYPE_HELLO      1u
 #define REDP2P_SESSION_TYPE_HELLO_ACK  2u
 #define REDP2P_SESSION_TYPE_CLOSE      4u
@@ -1529,6 +1530,48 @@ static int redp2p_stun_binding(redp2p_t *ctx, int udp_fd,
     if (redp2p_stun_rd_xaddr(rx, ao, al, tx_id, out_ip, out_cap, out_port) != 0)
         return -1;
     return 0;
+}
+
+/**
+ * Refreshes the STUN mapping without waiting for the response.
+ * Summary: Mirrors the raw punch helper by keeping the mapping active on the
+ *          same UDP socket while peer probes are in flight.
+ * @param ctx REDP2P context containing the STUN URL.
+ * @param udp_fd Bound UDP socket used for peer traffic.
+ * @return 0 when sent, -1 when STUN is unavailable or the send fails.
+ */
+static int redp2p_stun_keepalive(redp2p_t *ctx, int udp_fd)
+{
+    unsigned char tx[20], tx_id[12];
+    struct sockaddr_storage srv;
+    socklen_t srv_len;
+    char host[256];
+    const char *p;
+    const char *co;
+    unsigned short port;
+    long lport;
+    size_t sl;
+    int off;
+
+    if (!ctx || !ctx->stun_url[0]) return -1;
+    p = ctx->stun_url;
+    if (strncmp(p, "stun:", 5) != 0) return -1;
+    p += 5;
+    co = strchr(p, ':');
+    if (!co || co == p || *(co + 1) == '\0') return -1;
+    sl = (size_t)(co - p);
+    if (sl >= sizeof(host)) return -1;
+    memcpy(host, p, sl);
+    host[sl] = '\0';
+    if (!redp2p_parse_u(co + 1, 1, 65535, &lport)) return -1;
+    port = (unsigned short)lport;
+    if (redp2p_resolve(host, port, SOCK_DGRAM, &srv, &srv_len) != 0 ||
+        srv.ss_family != AF_INET || !redp2p_stun_gen_id(tx_id))
+        return -1;
+    off = redp2p_stun_build(tx, REDP2P_STUN_BINDING, tx_id);
+    redp2p_stun_len(tx, off);
+    return sendto(udp_fd, (const char *)tx, (size_t)off, 0,
+        (const struct sockaddr *)&srv, srv_len) < 0 ? -1 : 0;
 }
 
 /**
@@ -3035,9 +3078,7 @@ static int redp2p_punch_send_candidate(redp2p_t *ctx, int udp_fd,
 static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
     const char *session_id, const char *from_id, const char *to_id, int wait_ms,
     uint64_t deadline_ms, struct sockaddr_storage *selected_addr,
-    int *selected_via_turn, int *saw_ping, int *saw_pong,
-    struct sockaddr_storage *confirm_addr, int *confirm_via_turn,
-    int *malformed, int *mismatched)
+    int *selected_via_turn, int *malformed, int *mismatched)
 {
     uint64_t wait_deadline_ms;
 
@@ -3077,6 +3118,11 @@ static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
                     REDP2P_CTRTOK_PUNCH_PING, rx_sess, rx_from, rx_to);
             }
             if (!is_ping && !is_pong) {
+                unsigned char stun_id[12];
+
+                if (redp2p_stun_hdr((const unsigned char *)recv_buf, n,
+                    stun_id) >= 0)
+                    continue;
                 if (malformed) (*malformed)++;
                 continue;
             }
@@ -3086,21 +3132,6 @@ static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
                 strcmp(rx_to, to_id) == 0)) &&
                 strcmp(rx_sess, session_id) == 0)
             {
-                int matches_confirm;
-
-                matches_confirm = 1;
-                if (confirm_addr && saw_ping && saw_pong &&
-                    (*saw_ping || *saw_pong))
-                {
-                    matches_confirm =
-                        redp2p_sockaddr_equal(&src_addr, confirm_addr) &&
-                        (!confirm_via_turn ||
-                            via_turn == *confirm_via_turn);
-                } else if (confirm_addr && saw_ping && saw_pong) {
-                    *confirm_addr = src_addr;
-                    if (confirm_via_turn) *confirm_via_turn = via_turn;
-                }
-
                 if (is_ping) {
                     char pong_msg[256];
                     int burst;
@@ -3114,34 +3145,6 @@ static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
                             pong_msg, strlen(pong_msg), &src_addr, via_turn);
                     }
                 }
-                if (saw_ping && saw_pong) {
-                    if (matches_confirm) {
-                        if (is_ping) *saw_ping = 1;
-                        if (is_pong) *saw_pong = 1;
-                    }
-                    if (*saw_ping && *saw_pong) {
-                        char ping_msg[256];
-                        int burst;
-
-                        snprintf(ping_msg, sizeof(ping_msg), "%s%s:%s:%s\n",
-                            REDP2P_CTRTOK_PUNCH_PING, session_id,
-                            from_id, to_id);
-                        for (burst = 0;
-                            burst < REDP2P_PUNCH_CONFIRM_BURST; burst++)
-                        {
-                            redp2p_transport_sendto(ctx,
-                                (redp2p_fd_t)udp_fd, ping_msg,
-                                strlen(ping_msg), &src_addr, via_turn);
-                        }
-                        *selected_addr = *confirm_addr;
-                        if (selected_via_turn)
-                            *selected_via_turn = confirm_via_turn ?
-                                *confirm_via_turn : via_turn;
-                        return REDP2P_OK;
-                    }
-                    continue;
-                }
-
                 *selected_addr = src_addr;
                 if (selected_via_turn) *selected_via_turn = via_turn;
                 return REDP2P_OK;
@@ -3174,10 +3177,7 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
     int relay_count;
     int local_turn;
     int sent_count;
-    struct sockaddr_storage confirm_addr;
-    int confirm_via_turn;
-    int saw_ping;
-    int saw_pong;
+    uint64_t next_stun_keepalive_ms;
     int malformed_count;
     int mismatch_count;
     int unsupported_count;
@@ -3194,10 +3194,7 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
     local_turn = redp2p_turn_find_allocation(ctx,
         (redp2p_fd_t)udp_fd) != NULL;
     sent_count = 0;
-    memset(&confirm_addr, 0, sizeof(confirm_addr));
-    confirm_via_turn = 0;
-    saw_ping = 0;
-    saw_pong = 0;
+    next_stun_keepalive_ms = 0;
     malformed_count = 0;
     mismatch_count = 0;
     unsupported_count = 0;
@@ -3207,7 +3204,18 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
     }
     snprintf(ping_msg, sizeof(ping_msg), "%s%s:%s:%s\n",
         REDP2P_CTRTOK_PUNCH_PING, session_id, from_id, to_id);
+    if (ctx && ctx->stun_url[0]) {
+        (void)redp2p_stun_keepalive(ctx, udp_fd);
+        next_stun_keepalive_ms = redp2p_now_ms() + REDP2P_STUN_KEEPALIVE_MS;
+    }
     for (int i = 0; direct_count > 0 && i < REDP2P_PUNCH_DIRECT_ROUNDS; i++) {
+        if (next_stun_keepalive_ms > 0 &&
+            redp2p_now_ms() >= next_stun_keepalive_ms)
+        {
+            (void)redp2p_stun_keepalive(ctx, udp_fd);
+            next_stun_keepalive_ms =
+                redp2p_now_ms() + REDP2P_STUN_KEEPALIVE_MS;
+        }
         for (int c = 0; c < remote_candidate_count; c++) {
             if (remote_candidates[c].type != REDP2P_CAND_SRFLX) continue;
             sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
@@ -3222,8 +3230,7 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
         }
         if (redp2p_punch_wait_response(ctx, udp_fd, session_id, from_id,
             to_id, REDP2P_PUNCH_DIRECT_WAIT_MS, deadline_ms, selected_addr,
-            selected_via_turn, &saw_ping, &saw_pong, &confirm_addr,
-            &confirm_via_turn, &malformed_count, &mismatch_count) == REDP2P_OK)
+            selected_via_turn, &malformed_count, &mismatch_count) == REDP2P_OK)
             return REDP2P_OK;
     }
     for (int sweep = 1; sweep <= sweep_limit && redp2p_now_ms() < deadline_ms;
@@ -3254,8 +3261,7 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
             }
             if (redp2p_punch_wait_response(ctx, udp_fd, session_id,
                 from_id, to_id, REDP2P_PUNCH_SWEEP_WAIT_MS, deadline_ms,
-                selected_addr, selected_via_turn, &saw_ping, &saw_pong,
-                &confirm_addr, &confirm_via_turn, &malformed_count,
+                selected_addr, selected_via_turn, &malformed_count,
                 &mismatch_count) == REDP2P_OK)
                 return REDP2P_OK;
         }
@@ -3278,8 +3284,8 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
             }
             if (redp2p_punch_wait_response(ctx, udp_fd, session_id,
                 from_id, to_id, REDP2P_PUNCH_DIRECT_WAIT_MS, deadline_ms,
-                selected_addr, selected_via_turn, NULL, NULL, NULL, NULL,
-                &malformed_count, &mismatch_count) == REDP2P_OK)
+                selected_addr, selected_via_turn, &malformed_count,
+                &mismatch_count) == REDP2P_OK)
                 return REDP2P_OK;
         }
     }
