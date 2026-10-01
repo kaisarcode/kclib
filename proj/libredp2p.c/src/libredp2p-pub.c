@@ -1843,8 +1843,15 @@ redp2p_publisher_runtime_t *runtime)
             redp2p_parse_punch_packet(buf, REDP2P_CTRTOK_PUNCH_PING,
                 ping_session, ping_from, ping_to))
         {
-            snprintf(pong, sizeof(pong), "%s%s:%s:%s",
-                REDP2P_CTRTOK_PUNCH_PONG, ping_session, ping_from, ping_to);
+            if (via_turn) {
+                snprintf(pong, sizeof(pong), "%s%s:%s:%s",
+                    REDP2P_CTRTOK_PUNCH_PONG, ping_session,
+                    ping_to, ping_from);
+            } else {
+                snprintf(pong, sizeof(pong), "%s%s:%s:%s",
+                    REDP2P_CTRTOK_PUNCH_PONG, ping_session,
+                    ping_from, ping_to);
+            }
             redp2p_transport_sendto(runtime->borrowed_ctx,
                 runtime->owned_udp_fd, pong, strlen(pong), &from, via_turn);
         }
