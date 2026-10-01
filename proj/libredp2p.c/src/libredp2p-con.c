@@ -934,8 +934,7 @@ redp2p_consumer_runtime_t *runtime)
                     (const unsigned char *)buf, (size_t)n) != 0)
             {
                 if (runtime->ctx->direct_mode &&
-                    !runtime->sessions[i].stream.ready &&
-                    atomic_load(&runtime->ctx->channel_state) == 0)
+                    atomic_load(&runtime->ctx->channel_state) >= 0)
                 {
                     atomic_store(&runtime->ctx->channel_status, REDP2P_ENET);
                     atomic_store(&runtime->ctx->channel_state, -1);
@@ -972,8 +971,7 @@ redp2p_consumer_runtime_t *runtime)
                 &runtime->sessions[i].stream) != 0)
             {
                 if (runtime->ctx->direct_mode &&
-                    !runtime->sessions[i].stream.ready &&
-                    atomic_load(&runtime->ctx->channel_state) == 0)
+                    atomic_load(&runtime->ctx->channel_state) >= 0)
                 {
                     atomic_store(&runtime->ctx->channel_status, REDP2P_ENET);
                     atomic_store(&runtime->ctx->channel_state, -1);
@@ -984,6 +982,10 @@ redp2p_consumer_runtime_t *runtime)
                 continue;
             }
             if (redp2p_stream_is_done(&runtime->sessions[i].stream)) {
+                if (runtime->ctx->direct_mode) {
+                    atomic_store(&runtime->ctx->channel_status, REDP2P_OK);
+                    atomic_store(&runtime->ctx->channel_state, 2);
+                }
                 redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
                 continue;
             }
@@ -1005,8 +1007,7 @@ redp2p_consumer_runtime_t *runtime)
         {
             if (runtime->ctx->direct_mode &&
                 runtime->sessions[i].stream_mode &&
-                !runtime->sessions[i].stream.ready &&
-                atomic_load(&runtime->ctx->channel_state) == 0)
+                atomic_load(&runtime->ctx->channel_state) >= 0)
             {
                 atomic_store(&runtime->ctx->channel_status, REDP2P_ETIMEOUT);
                 atomic_store(&runtime->ctx->channel_state, -1);
