@@ -1655,6 +1655,7 @@ static int redp2p_parse_candidate_type(const char *text,
     if (strcmp(text, "host") == 0) *type = REDP2P_CAND_HOST;
     else if (strcmp(text, "observed") == 0) *type = REDP2P_CAND_OBSERVED;
     else if (strcmp(text, "relay") == 0) *type = REDP2P_CAND_RELAY;
+    else if (strcmp(text, "srflx") == 0) *type = REDP2P_CAND_SRFLX;
     else return 0;
     return 1;
 }
@@ -1667,6 +1668,7 @@ static int redp2p_parse_candidate_type(const char *text,
 static const char *redp2p_candidate_type_name(redp2p_candidate_type_t type) {
     if (type == REDP2P_CAND_OBSERVED) return "observed";
     if (type == REDP2P_CAND_RELAY) return "relay";
+    if (type == REDP2P_CAND_SRFLX) return "srflx";
     return "host";
 }
 
@@ -1701,6 +1703,7 @@ unsigned int redp2p_candidate_priority(
     if (family == AF_INET6) base = 100u;
     else if (family == AF_INET) base = 200u;
     else return 900u;
+    if (candidate->type == REDP2P_CAND_SRFLX) return base - 20u;
     if (candidate->type == REDP2P_CAND_HOST) return base;
     if (candidate->type == REDP2P_CAND_OBSERVED) return base + 10u;
     if (candidate->type == REDP2P_CAND_RELAY) return base + 300u;
@@ -1954,7 +1957,7 @@ int redp2p_parse_candidates(JSON_Object *obj, const char *field,
         if (!type_text || !addr || strlen(addr) > REDP2P_ADDR_MAX) return 0;
         if (!redp2p_parse_candidate_type(type_text, &type)) return 0;
         if (type != REDP2P_CAND_HOST && type != REDP2P_CAND_OBSERVED &&
-            type != REDP2P_CAND_RELAY)
+            type != REDP2P_CAND_RELAY && type != REDP2P_CAND_SRFLX)
             return 0;
         if (inet_pton(AF_INET, addr, &ipv4) != 1 &&
             inet_pton(AF_INET6, addr, &ipv6) != 1)

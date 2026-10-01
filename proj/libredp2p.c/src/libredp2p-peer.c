@@ -2950,7 +2950,7 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
                 redp2p_candidate_dest_allowed(AF_INET6, &stun_v6,
                     srflx_port)))
             {
-                out[*out_count].type = REDP2P_CAND_HOST;
+                out[*out_count].type = REDP2P_CAND_SRFLX;
                 snprintf(out[*out_count].addr, sizeof(out[*out_count].addr),
                     "%.47s", stun_ip);
                 out[*out_count].port = srflx_port;
@@ -3209,7 +3209,14 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
         REDP2P_CTRTOK_PUNCH_PING, session_id, from_id, to_id);
     for (int i = 0; direct_count > 0 && i < REDP2P_PUNCH_DIRECT_ROUNDS; i++) {
         for (int c = 0; c < remote_candidate_count; c++) {
-            if (remote_candidates[c].priority >= 300u) continue;
+            if (remote_candidates[c].type != REDP2P_CAND_SRFLX) continue;
+            sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
+                &remote_candidates[c], ping_msg, 0, &unsupported_count);
+        }
+        for (int c = 0; c < remote_candidate_count; c++) {
+            if (remote_candidates[c].type == REDP2P_CAND_SRFLX ||
+                remote_candidates[c].priority >= 300u)
+                continue;
             sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
                 &remote_candidates[c], ping_msg, 0, &unsupported_count);
         }

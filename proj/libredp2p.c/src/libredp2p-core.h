@@ -62,7 +62,8 @@ typedef struct redp2p redp2p_t;
 typedef enum {
     REDP2P_CAND_HOST = 1,
     REDP2P_CAND_OBSERVED,
-    REDP2P_CAND_RELAY
+    REDP2P_CAND_RELAY,
+    REDP2P_CAND_SRFLX
 } redp2p_candidate_type_t;
 
 typedef struct {

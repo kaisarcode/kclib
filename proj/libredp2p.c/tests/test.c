@@ -3712,6 +3712,7 @@ static int case_kc_redp2p_candidate_type_values(void) {
     fail += expect_int("host candidate value", 1, REDP2P_CAND_HOST);
     fail += expect_int("observed candidate value", 2, REDP2P_CAND_OBSERVED);
     fail += expect_int("relay candidate value", 3, REDP2P_CAND_RELAY);
+    fail += expect_int("srflx candidate value", 4, REDP2P_CAND_SRFLX);
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
