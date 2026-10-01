@@ -1370,6 +1370,64 @@ static int test_http_response(unsigned short port, const char *body,
 }
 
 /**
+ * Issues one HTTP JSON request to a specific IPv4 index host and captures
+ * its complete response.
+ * @param host Index IPv4 address.
+ * @param port Index port.
+ * @param body Request JSON body.
+ * @param body_len Request body byte count.
+ * @param response Output response buffer.
+ * @param response_cap Output response capacity.
+ * @return 0 on success, 1 on transport or framing failure.
+ */
+static int test_http_response_host(const char *host, unsigned short port,
+    const char *body, size_t body_len, char *response, size_t response_cap)
+{
+    test_socket_t fd;
+    struct sockaddr_in remote;
+    char head[512];
+    size_t total;
+    int n;
+
+    if (!host || !host[0] || !response || response_cap < 2) return 1;
+    memset(&remote, 0, sizeof(remote));
+    remote.sin_family = AF_INET;
+    remote.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &remote.sin_addr) != 1) return 1;
+
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == TEST_SOCKET_INVALID) return 1;
+    test_socket_timeout(fd, 2000U);
+    if (connect(fd, (const struct sockaddr *)&remote, sizeof(remote)) != 0) {
+        test_socket_close(fd);
+        return 1;
+    }
+
+    n = snprintf(head, sizeof(head),
+        "POST /redp2p/ HTTP/1.1\r\nHost: %s\r\nContent-Length: %u\r\n"
+        "Content-Type: application/json\r\nConnection: close\r\n\r\n",
+        host, (unsigned)body_len);
+    if (n < 0 || (size_t)n >= sizeof(head) ||
+        test_socket_send_all(fd, (const unsigned char *)head, (size_t)n) != 0 ||
+        test_socket_send_all(fd, (const unsigned char *)body, body_len) != 0)
+    {
+        test_socket_close(fd);
+        return 1;
+    }
+
+    total = 0;
+    while (total < response_cap - 1) {
+        int got = (int)recv(fd, response + total, response_cap - 1 - total, 0);
+
+        if (got <= 0) break;
+        total += (size_t)got;
+    }
+    response[total] = '\0';
+    test_socket_close(fd);
+    return total > 0 && strncmp(response, "HTTP/", 5) == 0 ? 0 : 1;
+}
+
+/**
  * Reports whether one required loopback port can be bound.
  * @param base First port in the candidate block.
  * @param offset Port offset from the candidate base.
@@ -7158,6 +7216,90 @@ static int test_direct_api_wait_hook(uint64_t timeout_ms)
 #endif
 
 /**
+ * Verifies the publisher's asynchronous punch responder preserves peer IDs.
+ * Summary: A PING from caller to publisher must return a PONG with the same
+ *          from/to identity ordering expected by the punch selector.
+ * @param index Public index endpoint used by the publisher.
+ * @param index_host Index IPv4 address used for lookup.
+ * @param index_port Index port used for lookup.
+ * @return 0 on success, 1 on failure.
+ */
+static int test_direct_api_punch_pong(const char *index,
+    const char *index_host, unsigned short index_port)
+{
+    static const char lookup[] =
+        "{\"op\":\"lookup\",\"id\":\"punchpong\"}";
+    static const char ping[] =
+        "REDP2P_CTRTOK_PUNCH_PING:sess123:caller:punchpong";
+    static const char expected[] =
+        "REDP2P_CTRTOK_PUNCH_PONG:sess123:caller:punchpong";
+    kc_redp2p_pub_options_t options;
+    kc_redp2p_pub_t *pub;
+    struct sockaddr_in peer;
+    test_socket_t fd;
+    char response[8192];
+    char candidate_ip[INET_ADDRSTRLEN];
+    char pong[256];
+    uint64_t candidate_port;
+    int fail;
+    int n;
+
+    pub = NULL;
+    fd = TEST_SOCKET_INVALID;
+    candidate_port = 0;
+    fail = 0;
+    memset(&options, 0, sizeof(options));
+    options.id = "punchpong";
+    options.index = index;
+    options.protocol = KC_REDP2P_TCP;
+    fail += expect_int("punch pong publisher", KC_REDP2P_OK,
+        kc_redp2p_pub(&pub, &options));
+
+    if (fail == 0)
+        fail += expect_int("punch pong lookup", 0,
+            test_http_response_host(index_host, index_port, lookup,
+                sizeof(lookup) - 1, response, sizeof(response)));
+    if (fail == 0)
+        fail += expect_true("punch pong candidate address",
+            test_json_string(response, "addr", candidate_ip,
+                sizeof(candidate_ip)));
+    if (fail == 0)
+        fail += expect_true("punch pong candidate port",
+            test_json_u64(response, "port", &candidate_port) &&
+            candidate_port > 0 && candidate_port <= 65535U);
+
+    if (fail == 0) {
+        memset(&peer, 0, sizeof(peer));
+        peer.sin_family = AF_INET;
+        peer.sin_port = htons((unsigned short)candidate_port);
+        fail += expect_true("punch pong candidate IPv4",
+            inet_pton(AF_INET, candidate_ip, &peer.sin_addr) == 1);
+    }
+    if (fail == 0) {
+        fd = socket(AF_INET, SOCK_DGRAM, 0);
+        fail += expect_true("punch pong socket", fd != TEST_SOCKET_INVALID);
+    }
+    if (fail == 0) {
+        test_socket_timeout(fd, 3000U);
+        fail += expect_true("punch pong send",
+            sendto(fd, ping, sizeof(ping) - 1, 0,
+                (const struct sockaddr *)&peer, sizeof(peer)) >= 0);
+    }
+    if (fail == 0) {
+        n = (int)recvfrom(fd, pong, sizeof(pong) - 1, 0, NULL, NULL);
+        fail += expect_true("punch pong receive", n > 0);
+        if (n > 0) {
+            pong[n] = '\0';
+            fail += expect_string("punch pong preserves ids", expected, pong);
+        }
+    }
+
+    if (fd != TEST_SOCKET_INVALID) test_socket_close(fd);
+    kc_redp2p_pub_close(pub);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Exercises consumer close against an in-flight send.
  * Summary: Verifies teardown waits for the protected consumer I/O section.
  * @param index Index endpoint.
@@ -7522,6 +7664,8 @@ static int case_kc_redp2p_direct_api(void)
             kc_redp2p_idx(&idx, &idx_options));
 
     snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)port);
+    if (fail == 0)
+        fail += test_direct_api_punch_pong(index, local_ip, port);
     if (fail == 0)
         fail += test_direct_api_roundtrip(KC_REDP2P_TCP, "directtcp", index);
     if (fail == 0)
