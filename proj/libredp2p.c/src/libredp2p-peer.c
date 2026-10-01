@@ -2981,6 +2981,7 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
     int direct_enabled = !(force_turn && strcmp(force_turn, "1") == 0);
     int turn_status = REDP2P_OK;
 
+    memset(&udp_sa, 0, sizeof(udp_sa));
     stun_ip[0] = '\0';
     stun_port = 0;
     *out_count = 0;
@@ -3136,15 +3137,6 @@ static int redp2p_punch_send_candidate(redp2p_t *ctx, int udp_fd,
     if (!redp2p_candidate_sockaddr(candidate, &cand_sa)) {
         if (unsupported) (*unsupported)++;
         return 0;
-    }
-    if (redp2p_punch_trace_enabled() &&
-        candidate->type == REDP2P_CAND_SRFLX)
-    {
-        char endpoint[96];
-
-        redp2p_punch_trace_addr(&cand_sa, endpoint, sizeof(endpoint));
-        fprintf(stderr, "[PUNCH] probe srflx=%s via_turn=%d\n",
-            endpoint, via_turn);
     }
     return redp2p_transport_sendto(ctx, (redp2p_fd_t)udp_fd, ping_msg,
         strlen(ping_msg), &cand_sa, via_turn) >= 0 ? 1 : 0;
