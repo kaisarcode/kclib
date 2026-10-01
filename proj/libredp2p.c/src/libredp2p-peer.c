@@ -506,6 +506,10 @@ int redp2p_stream_process_packet(redp2p_t *ctx,
     }
     if (envelope.type == REDP2P_SESSION_TYPE_HELLO_ACK && st->initiator) {
         st->ready = 1;
+        if (ctx && ctx->direct_mode) {
+            atomic_store(&ctx->channel_status, REDP2P_OK);
+            atomic_store(&ctx->channel_state, 1);
+        }
         return 0;
     }
     if (!st->ready) return 0;
