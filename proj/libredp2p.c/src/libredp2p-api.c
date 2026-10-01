@@ -109,7 +109,6 @@ struct kc_redp2p_con {
     kc_redp2p_io_mutex_t io_mutex;
     int io_mutex_initialized;
     kc_redp2p_con_receive_fn receive;
-    kc_redp2p_con_stream_end_fn stream_end;
     void *userdata;
 };
 
@@ -575,11 +574,7 @@ static void *kc_redp2p_con_adapter_worker(void *arg)
         if (n < 0) break;
         if (n == 0 && con->runtime.ctx &&
             con->runtime.ctx->proto == REDP2P_PROTO_TCP)
-        {
-            if (con->stream_end && !atomic_load(&con->closing))
-                con->stream_end(con->userdata);
             break;
-        }
         if (con->receive && !atomic_load(&con->closing)) {
             con->receive(buffer, (size_t)n, con->userdata);
         }
@@ -1421,7 +1416,6 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
     if (!con) return KC_REDP2P_ERROR;
     con->adapter_fd = REDP2P_FD_INVALID;
     con->receive = options->receive;
-    con->stream_end = options->stream_end;
     con->userdata = options->userdata;
     if (!kc_redp2p_parse_index(options->index, con->index_host,
         &con->index_port) || !kc_redp2p_make_self_id(con->self_id)) {
