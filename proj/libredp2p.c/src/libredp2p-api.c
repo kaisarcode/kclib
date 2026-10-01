@@ -1716,7 +1716,18 @@ void kc_redp2p_pub_close(kc_redp2p_pub_t *pub)
  */
 void kc_redp2p_con_close(kc_redp2p_con_t *con)
 {
-    if (!con || atomic_exchange(&con->closing, 1)) return;
+    if (!con) return;
+    if (!kc_redp2p_con_adapter_is_current(con) &&
+        atomic_load(&con->send_shutdown) &&
+        atomic_load(&con->peer_eof) && con->runtime.ctx)
+    {
+        uint64_t deadline = kc_redp2p_now_ms() + 5000U;
+        while (atomic_load(&con->runtime.ctx->channel_state) == 1 &&
+            !atomic_load(&con->runtime.done) &&
+            kc_redp2p_now_ms() < deadline)
+            kc_redp2p_sleep_tick();
+    }
+    if (atomic_exchange(&con->closing, 1)) return;
     if (kc_redp2p_con_adapter_is_current(con)) {
         atomic_store(&con->adapter_stop, 1);
         if (con->runtime.ctx) redp2p_context_request_stop(con->runtime.ctx);
