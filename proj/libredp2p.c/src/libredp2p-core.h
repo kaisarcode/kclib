@@ -788,6 +788,15 @@ REDP2P_INTERNAL int redp2p_parse_candidates(JSON_Object *obj, const char *field,
 REDP2P_INTERNAL void redp2p_append_candidates(JSON_Object *obj,
     const char *field, const redp2p_candidate_t *cands, int n);
 
+#ifdef REDP2P_TESTING
+/**
+ * Parses one candidate request through the index destination policy.
+ * @return 1 when accepted, 0 when rejected.
+ */
+REDP2P_INTERNAL int redp2p_test_index_parse_request_candidates(
+    const char *json, redp2p_candidate_t *out, int *out_count);
+#endif
+
 REDP2P_INTERNAL int redp2p_context_create(redp2p_t **out);
 REDP2P_INTERNAL int redp2p_context_destroy(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_context_request_stop(redp2p_t *ctx);

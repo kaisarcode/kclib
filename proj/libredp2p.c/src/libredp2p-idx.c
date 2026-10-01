@@ -1000,10 +1000,11 @@ static int redp2p_index_require_sequence(JSON_Object *obj,
 /**
  * Parses a server request candidate list under the index destination policy.
  *
- * Requests may only submit host or relay candidates naming reachable unicast
- * endpoints; the list is canonicalized, de-duplicated, and sorted using the
- * same ordering the client already applies, so authenticated proofs computed
- * over the normalized list match between both sides.
+ * Requests may submit host, server-reflexive, or relay candidates naming
+ * reachable unicast endpoints. Observed candidates remain index-derived only.
+ * The list is canonicalized, de-duplicated, and sorted using the same ordering
+ * the client already applies, so authenticated proofs computed over the
+ * normalized list match between both sides.
  *
  * @param obj       Request JSON object.
  * @param field     Candidate array field name.
@@ -1021,6 +1022,7 @@ static int redp2p_index_parse_request_candidates(JSON_Object *obj,
     if (!redp2p_parse_candidates(obj, field, out, out_count)) return 0;
     for (i = 0; i < *out_count; i++) {
         if (out[i].type != REDP2P_CAND_HOST &&
+            out[i].type != REDP2P_CAND_SRFLX &&
             out[i].type != REDP2P_CAND_RELAY) return 0;
         if (inet_pton(AF_INET, out[i].addr, &ipv4) == 1) {
             if (!redp2p_candidate_dest_allowed(AF_INET, &ipv4, out[i].port))
@@ -1038,6 +1040,35 @@ static int redp2p_index_parse_request_candidates(JSON_Object *obj,
     if (*out_count > REDP2P_PEER_CANDIDATES_MAX) return 0;
     return 1;
 }
+
+#ifdef REDP2P_TESTING
+/**
+ * Parses one synthetic index candidate request through the production policy.
+ * @param json Candidate-bearing JSON object.
+ * @param out Parsed candidates.
+ * @param out_count Parsed candidate count.
+ * @return 1 when accepted, 0 when rejected.
+ */
+int redp2p_test_index_parse_request_candidates(const char *json,
+    redp2p_candidate_t *out, int *out_count)
+{
+    JSON_Value *value;
+    JSON_Object *obj;
+    int result;
+
+    if (!json || !out || !out_count) return 0;
+    value = json_parse_string(json);
+    if (!value || json_value_get_type(value) != JSONObject) {
+        json_value_free(value);
+        return 0;
+    }
+    obj = json_value_get_object(value);
+    result = redp2p_index_parse_request_candidates(obj, "candidates", out,
+        out_count);
+    json_value_free(value);
+    return result;
+}
+#endif
 
 /**
  * Handles one challenge request, issuing a stateless proof challenge.

@@ -3718,6 +3718,41 @@ static int case_kc_redp2p_candidate_type_values(void) {
 }
 
 /**
+ * Tests that index request policy accepts STUN reflexive candidates while
+ * keeping observed candidates server-derived.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_redp2p_index_srflx_candidates(void) {
+    const char *name = "kc_redp2p_index_srflx_candidates";
+    const char *detail =
+        "index accepts srflx candidates and rejects client-observed entries";
+    redp2p_candidate_t candidates[REDP2P_PEER_CANDIDATES_MAX];
+    int count;
+    int fail;
+
+    fail = 0;
+    count = 0;
+    fail += expect_int("accept srflx candidate", 1,
+        redp2p_test_index_parse_request_candidates(
+            "{\"candidates\":[{\"type\":\"srflx\","
+            "\"addr\":\"8.8.8.8\",\"port\":40000}]}",
+            candidates, &count));
+    fail += expect_int("srflx candidate count", 1, count);
+    if (count == 1) {
+        fail += expect_int("srflx candidate type", REDP2P_CAND_SRFLX,
+            candidates[0].type);
+    }
+    count = 0;
+    fail += expect_int("reject client observed candidate", 0,
+        redp2p_test_index_parse_request_candidates(
+            "{\"candidates\":[{\"type\":\"observed\","
+            "\"addr\":\"8.8.8.8\",\"port\":40000}]}",
+            candidates, &count));
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Tests kc_redp2p_open.
  * @return 0 on success, 1 on failure.
  */
@@ -5816,6 +5851,7 @@ static int case_kc_redp2p_validation(void) {
 
     test_grouped = 1;
     fail += case_kc_redp2p_candidate_type_values();
+    fail += case_kc_redp2p_index_srflx_candidates();
     fail += case_kc_redp2p_version();
     fail += case_kc_redp2p_strerror();
     fail += case_kc_redp2p_is_valid_id();
