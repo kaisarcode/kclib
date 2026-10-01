@@ -36,6 +36,14 @@ typedef void (*kc_redp2p_pub_receive_fn)(
 typedef void (*kc_redp2p_con_receive_fn)(
     const void *data, size_t size, void *userdata);
 
+/**
+ * Reports that the peer will send no more bytes on one TCP stream direction.
+ * The local side may continue sending until it shuts down its own direction.
+ */
+typedef void (*kc_redp2p_pub_peer_shutdown_fn)(
+    kc_redp2p_client_t *client, void *userdata);
+typedef void (*kc_redp2p_con_peer_shutdown_fn)(void *userdata);
+
 #define KC_REDP2P_OK          0
 #define KC_REDP2P_ERROR      -1
 #define KC_REDP2P_ENET       -2
@@ -84,6 +92,7 @@ typedef struct {
     const char *turn;
     const char *turn_user;
     const char *turn_pass;
+    kc_redp2p_pub_peer_shutdown_fn peer_shutdown;
 } kc_redp2p_pub_options_t;
 
 typedef struct {
@@ -95,6 +104,7 @@ typedef struct {
     const char *turn;
     const char *turn_user;
     const char *turn_pass;
+    kc_redp2p_con_peer_shutdown_fn peer_shutdown;
 } kc_redp2p_con_options_t;
 
 typedef struct {
@@ -204,6 +214,18 @@ int kc_redp2p_con_send(kc_redp2p_con_t *con,
     const void *data, size_t size);
 
 /**
+ * Ends the local send direction of one TCP consumer stream.
+ *
+ * Already-sent bytes are preserved. The peer may continue sending data until
+ * it independently shuts down its direction. This does not destroy the
+ * consumer handle.
+ *
+ * @param con Consumer capability returned by kc_redp2p_con().
+ * @return KC_REDP2P_OK on success, otherwise a negative status.
+ */
+int kc_redp2p_con_shutdown(kc_redp2p_con_t *con);
+
+/**
  * Responds to one publisher client.
  *
  * TCP writes bytes to the client stream. UDP sends one datagram per call.
@@ -215,6 +237,17 @@ int kc_redp2p_con_send(kc_redp2p_con_t *con,
  */
 int kc_redp2p_client_respond(kc_redp2p_client_t *client,
     const void *data, size_t size);
+
+/**
+ * Ends the local send direction of one TCP publisher client.
+ *
+ * Already-sent bytes are preserved. The peer may continue sending data until
+ * it independently shuts down its direction. This does not close the client.
+ *
+ * @param client Publisher client received with kc_redp2p_pub_input_t.
+ * @return KC_REDP2P_OK on success, otherwise a negative status.
+ */
+int kc_redp2p_client_shutdown(kc_redp2p_client_t *client);
 
 /**
  * Closes one publisher client. NULL is a safe no-op.
