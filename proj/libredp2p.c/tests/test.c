@@ -1486,7 +1486,13 @@ static unsigned short test_port_base(void) {
     for (attempt = 0; attempt < 64U; attempt++) {
         unsigned short candidate;
 
-        candidate = (unsigned short)(25000U + (seed + attempt) % 20000U);
+        /*
+         * Keep the reserved test block below common OS ephemeral ranges.
+         * Otherwise earlier loopback client connections in this same test
+         * process can consume a later server port as their source port and
+         * leave it in TIME_WAIT before that server subtest binds it.
+         */
+        candidate = (unsigned short)(12000U + (seed + attempt) % 8000U);
         if (!test_port_base_reserve(candidate)) continue;
         if (test_port_base_available(candidate)) {
             selected = candidate;
