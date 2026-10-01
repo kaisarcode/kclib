@@ -245,8 +245,11 @@ stream adapters. TCP sockets, TCP FIN, half-close, and EOF are not peer
 transport semantics.
 
 Stream CLOSE/CLOSE_ACK frames are REDP2P session-lifecycle control messages.
-They do not represent TCP packets and are not exposed as application data or
-receive-callback EOF events.
+They do not represent TCP packets and are never encoded into application data.
+A CLOSE ends only the sender's stream direction after queued KCP data has been
+acknowledged; the opposite direction may remain active. Native endpoint adapters
+translate that control state to local socket shutdown and expose it separately
+from data callbacks.
 
 Native candidate objects use:
 
