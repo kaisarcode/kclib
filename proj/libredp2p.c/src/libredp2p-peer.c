@@ -45,13 +45,10 @@
 #define REDP2P_IPV6_UDP_OVERHEAD        (40 + 8)
 #define REDP2P_MAX_DATAGRAM_V4          (REDP2P_LINK_MTU - REDP2P_IPV4_UDP_OVERHEAD)
 #define REDP2P_MAX_DATAGRAM_V6          (REDP2P_LINK_MTU - REDP2P_IPV6_UDP_OVERHEAD)
-#define REDP2P_PUNCH_DIRECT_ROUNDS 16
-#define REDP2P_PUNCH_DIRECT_BURST 2
-#define REDP2P_PUNCH_DIRECT_WAIT_MS 250
-#define REDP2P_PUNCH_CONFIRM_BURST 3
-#define REDP2P_PUNCH_CONFIRM_MS 500
+#define REDP2P_PUNCH_DIRECT_ROUNDS 3
+#define REDP2P_PUNCH_DIRECT_WAIT_MS 500
 #define REDP2P_PUNCH_SWEEP_WAIT_MS 20
-#define REDP2P_PUNCH_TOTAL_MS 8000
+#define REDP2P_PUNCH_TOTAL_MS 4000
 #define REDP2P_SESSION_TYPE_HELLO      1u
 #define REDP2P_SESSION_TYPE_HELLO_ACK  2u
 #define REDP2P_SESSION_TYPE_CLOSE      4u
@@ -3039,39 +3036,23 @@ static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
     uint64_t deadline_ms, struct sockaddr_storage *selected_addr,
     int *selected_via_turn, int *malformed, int *mismatched)
 {
-    struct sockaddr_storage confirmed_addr;
     uint64_t wait_deadline_ms;
-    uint64_t confirm_deadline_ms;
-    int confirmed;
-    int confirmed_via_turn;
-    int saw_ping;
-    int saw_pong;
 
-    memset(&confirmed_addr, 0, sizeof(confirmed_addr));
-    confirmed = 0;
-    confirmed_via_turn = 0;
-    saw_ping = 0;
-    saw_pong = 0;
-    confirm_deadline_ms = 0;
     wait_deadline_ms = redp2p_now_ms() + (uint64_t)wait_ms;
     if (wait_deadline_ms > deadline_ms) wait_deadline_ms = deadline_ms;
-    for (;;) {
+    while (redp2p_now_ms() < wait_deadline_ms) {
         char recv_buf[1024];
         struct sockaddr_storage src_addr;
         socklen_t src_len = sizeof(src_addr);
-        uint64_t active_deadline_ms;
         uint64_t now;
         int remaining_ms;
         int n;
         int via_turn;
 
         now = redp2p_now_ms();
-        active_deadline_ms = confirmed ? confirm_deadline_ms :
-            wait_deadline_ms;
-        if (now >= active_deadline_ms) break;
-        remaining_ms = (int)(active_deadline_ms - now);
+        remaining_ms = (int)(wait_deadline_ms - now);
         if (redp2p_wait_readable((redp2p_fd_t)udp_fd, remaining_ms) <= 0)
-            break;
+            return REDP2P_ETIMEOUT;
         via_turn = 0;
         n = redp2p_transport_recvfrom(ctx, (redp2p_fd_t)udp_fd, recv_buf,
             sizeof(recv_buf) - 1, 0, &src_addr, &src_len, &via_turn);
@@ -3102,54 +3083,21 @@ static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
                 strcmp(rx_to, to_id) == 0)) &&
                 strcmp(rx_sess, session_id) == 0)
             {
-                char probe_msg[256];
-
-                if (!confirmed) {
-                    confirmed_addr = src_addr;
-                    confirmed_via_turn = via_turn;
-                    confirmed = 1;
-                    confirm_deadline_ms = redp2p_now_ms() +
-                        REDP2P_PUNCH_CONFIRM_MS;
-                    if (confirm_deadline_ms > deadline_ms)
-                        confirm_deadline_ms = deadline_ms;
-                }
-                if (redp2p_sockaddr_equal(&src_addr, &confirmed_addr) &&
-                    via_turn == confirmed_via_turn)
-                {
-                    if (is_ping) saw_ping = 1;
-                    if (is_pong) saw_pong = 1;
-                }
+                *selected_addr = src_addr;
+                if (selected_via_turn) *selected_via_turn = via_turn;
                 if (is_ping) {
                     char pong_msg[256];
-                    int burst;
-
                     snprintf(pong_msg, sizeof(pong_msg), "%s%s:%s:%s\n",
                         REDP2P_CTRTOK_PUNCH_PONG, session_id, to_id, from_id);
-                    for (burst = 0; burst < REDP2P_PUNCH_CONFIRM_BURST;
-                        burst++)
-                    {
-                        redp2p_transport_sendto(ctx, (redp2p_fd_t)udp_fd,
-                            pong_msg, strlen(pong_msg), &src_addr, via_turn);
-                    }
-                }
-                snprintf(probe_msg, sizeof(probe_msg), "%s%s:%s:%s\n",
-                    REDP2P_CTRTOK_PUNCH_PING, session_id, from_id, to_id);
-                for (int burst = 0; burst < REDP2P_PUNCH_CONFIRM_BURST;
-                    burst++)
-                {
                     redp2p_transport_sendto(ctx, (redp2p_fd_t)udp_fd,
-                        probe_msg, strlen(probe_msg), &src_addr, via_turn);
+                        pong_msg, strlen(pong_msg), &src_addr, via_turn);
                 }
-                if (saw_ping && saw_pong) break;
-                continue;
+                return REDP2P_OK;
             }
             if (mismatched) (*mismatched)++;
         }
     }
-    if (!confirmed) return REDP2P_ETIMEOUT;
-    *selected_addr = confirmed_addr;
-    if (selected_via_turn) *selected_via_turn = confirmed_via_turn;
-    return REDP2P_OK;
+    return REDP2P_ETIMEOUT;
 }
 
 /**
@@ -3202,14 +3150,9 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
         REDP2P_CTRTOK_PUNCH_PING, session_id, from_id, to_id);
     for (int i = 0; direct_count > 0 && i < REDP2P_PUNCH_DIRECT_ROUNDS; i++) {
         for (int c = 0; c < remote_candidate_count; c++) {
-            int burst;
-
             if (remote_candidates[c].priority >= 300u) continue;
-            for (burst = 0; burst < REDP2P_PUNCH_DIRECT_BURST; burst++) {
-                sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
-                    &remote_candidates[c], ping_msg, 0,
-                    &unsupported_count);
-            }
+            sent_count += redp2p_punch_send_candidate(ctx, udp_fd,
+                &remote_candidates[c], ping_msg, 0, &unsupported_count);
         }
         if (redp2p_punch_wait_response(ctx, udp_fd, session_id, from_id, to_id,
             REDP2P_PUNCH_DIRECT_WAIT_MS, deadline_ms, selected_addr,
