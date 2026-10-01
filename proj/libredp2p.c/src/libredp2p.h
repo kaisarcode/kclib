@@ -204,6 +204,15 @@ int kc_redp2p_con_send(kc_redp2p_con_t *con,
     const void *data, size_t size);
 
 /**
+ * Reports whether the remote stream session has closed its data direction.
+ * Summary: Exposes stream lifecycle separately from receive data callbacks.
+ *          For UDP consumers this remains false while the handle is active.
+ * @param con Consumer capability returned by kc_redp2p_con().
+ * @return Nonzero after remote stream closure, zero otherwise.
+ */
+int kc_redp2p_con_peer_closed(const kc_redp2p_con_t *con);
+
+/**
  * Responds to one publisher client.
  *
  * TCP writes bytes to the client stream. UDP sends one datagram per call.
