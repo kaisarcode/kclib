@@ -81,6 +81,7 @@ typedef pthread_t redp2p_thread_t;
  * @return Socket address length, or 0 for unsupported families.
  */
 static socklen_t redp2p_sockaddr_len(const struct sockaddr_storage *addr);
+
 /**
  * Reports whether direct-punch tracing is enabled.
  * @return 1 when REDP2P_PUNCH_TRACE=1, otherwise 0.
@@ -3292,6 +3293,7 @@ static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
     }
     return REDP2P_ETIMEOUT;
 }
+
 /**
  * Punch select.
  * Summary: Selects a candidate and performs hole punching.
