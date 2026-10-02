@@ -1412,6 +1412,91 @@ redp2p_publisher_runtime_t *runtime)
 }
 
 /**
+ * Dispatches one datagram that belongs to an already established session.
+ * @param runtime Publisher runtime containing active sessions.
+ * @param data Peer datagram bytes.
+ * @param size Peer datagram byte count.
+ * @param from Peer source address.
+ * @param via_turn Nonzero when the datagram arrived through TURN.
+ * @return 1 when consumed by an active session, 0 otherwise.
+ */
+static int redp2p_publisher_dispatch_session(
+redp2p_publisher_runtime_t *runtime,
+const unsigned char *data,
+size_t size,
+const struct sockaddr_storage *from,
+int via_turn)
+{
+    redp2p_udp_server_session_t *session;
+    struct sockaddr_in backend_addr;
+    redp2p_session_envelope_t envelope;
+    int found;
+
+    if (!runtime || !data || !from) return 0;
+    found = -1;
+    if (runtime->borrowed_ctx->proto == REDP2P_PROTO_TCP) {
+        if (redp2p_session_unpack(data, size, &envelope) &&
+            redp2p_stream_envelope_valid(&envelope))
+        {
+            found = redp2p_publisher_session_find(runtime, from,
+                envelope.session_id);
+        }
+    } else {
+        if (!redp2p_session_unpack(data, size, &envelope) ||
+            !redp2p_udp_envelope_valid(&envelope,
+                REDP2P_SESSION_ROLE_INITIATOR))
+            return 0;
+        found = redp2p_publisher_session_find(runtime, from, NULL);
+    }
+    if (found < 0 || runtime->owned_sessions[found].via_turn != via_turn)
+        return 0;
+
+    session = &runtime->owned_sessions[found];
+    if (!session->stream_mode &&
+        envelope.type == REDP2P_SESSION_TYPE_KEEPALIVE)
+    {
+        session->last_rx = redp2p_now_s();
+        return 1;
+    }
+    if (session->stream_mode) {
+        if (session->backend_fd != REDP2P_FD_INVALID &&
+            redp2p_stream_process_packet(runtime->borrowed_ctx,
+                &session->stream, session->backend_fd, data, size) != 0)
+        {
+            redp2p_stream_fail(runtime->borrowed_ctx, &session->stream);
+            redp2p_server_session_close(session);
+        }
+    } else {
+        memset(&backend_addr, 0, sizeof(backend_addr));
+        backend_addr.sin_family = AF_INET;
+        backend_addr.sin_port = htons(runtime->borrowed_ctx->bind_port);
+        inet_pton(AF_INET, "127.0.0.1", &backend_addr.sin_addr);
+        sendto(session->backend_fd, (const char *)envelope.payload,
+            envelope.payload_len, 0,
+            (const struct sockaddr *)&backend_addr, sizeof(backend_addr));
+    }
+    session->last_rx = redp2p_now_s();
+    return 1;
+}
+
+/**
+ * Keeps established publisher traffic moving while a new peer is punching.
+ * @param userdata Publisher runtime.
+ * @param data Peer datagram bytes.
+ * @param size Peer datagram byte count.
+ * @param from Peer source address.
+ * @param via_turn Nonzero when the datagram arrived through TURN.
+ * @return 1 when the datagram belonged to an active session.
+ */
+static int redp2p_publisher_punch_packet(void *userdata,
+    const unsigned char *data, size_t size,
+    const struct sockaddr_storage *from, int via_turn)
+{
+    return redp2p_publisher_dispatch_session(
+        (redp2p_publisher_runtime_t *)userdata, data, size, from, via_turn);
+}
+
+/**
  * Selects a direct peer endpoint while preserving nonfatal punch failures.
  * @param runtime Publisher runtime owning the UDP descriptor.
  * @param connection_id Consumer identifier.
@@ -1435,7 +1520,8 @@ int *peer_via_turn)
     return redp2p_punch_select(runtime->borrowed_ctx,
         runtime->borrowed_ctx->sweep, runtime->owned_udp_fd, session_token,
         runtime->borrowed_self_id, connection_id, candidates, candidate_count,
-        peer_addr, peer_via_turn) == REDP2P_OK;
+        peer_addr, peer_via_turn, redp2p_publisher_punch_packet,
+        runtime) == REDP2P_OK;
 }
 
 /**
@@ -1856,9 +1942,7 @@ redp2p_publisher_runtime_t *runtime)
 static int redp2p_publisher_receive_peer(
 redp2p_publisher_runtime_t *runtime)
 {
-    redp2p_udp_server_session_t *session;
     struct sockaddr_storage from;
-    struct sockaddr_in backend_addr;
     char buf[REDP2P_BUF + 1];
     char pong[256];
     char ping_session[64] = {0};
@@ -1866,10 +1950,8 @@ redp2p_publisher_runtime_t *runtime)
     char ping_to[64] = {0};
     socklen_t from_length;
     int receive_flags;
-    int found;
     int n;
     int via_turn;
-    redp2p_session_envelope_t envelope;
 
     if (!redp2p_publisher_poll_ready(runtime, runtime->owned_udp_fd)) return 0;
     from_length = sizeof(from);
@@ -1888,70 +1970,26 @@ redp2p_publisher_runtime_t *runtime)
 #endif
     if ((size_t)n >= sizeof(buf)) n = (int)(sizeof(buf) - 1);
     buf[n] = '\0';
-    found = -1;
-    if (runtime->borrowed_ctx->proto == REDP2P_PROTO_TCP) {
-        if (redp2p_session_unpack((const unsigned char *)buf, (size_t)n,
-            &envelope) && redp2p_stream_envelope_valid(&envelope))
-        {
-            found = redp2p_publisher_session_find(runtime, &from,
-                envelope.session_id);
-        }
-    } else {
-        found = redp2p_publisher_session_find(runtime, &from, NULL);
-    }
-    if (found >= 0 && runtime->owned_sessions[found].via_turn != via_turn) {
-        found = -1;
-    }
-    if (found < 0) {
-        if (strncmp(buf, REDP2P_CTRTOK_PUNCH_PING,
-            strlen(REDP2P_CTRTOK_PUNCH_PING)) == 0 &&
-            redp2p_parse_punch_packet(buf, REDP2P_CTRTOK_PUNCH_PING,
-                ping_session, ping_from, ping_to))
-        {
-            if (via_turn) {
-                snprintf(pong, sizeof(pong), "%s%s:%s:%s",
-                    REDP2P_CTRTOK_PUNCH_PONG, ping_session,
-                    ping_to, ping_from);
-            } else {
-                snprintf(pong, sizeof(pong), "%s%s:%s:%s",
-                    REDP2P_CTRTOK_PUNCH_PONG, ping_session,
-                    ping_from, ping_to);
-            }
-            redp2p_transport_sendto(runtime->borrowed_ctx,
-                runtime->owned_udp_fd, pong, strlen(pong), &from, via_turn);
-        }
+    if (redp2p_publisher_dispatch_session(runtime,
+        (const unsigned char *)buf, (size_t)n, &from, via_turn))
         return 0;
-    }
-    session = &runtime->owned_sessions[found];
-    if (!session->stream_mode) {
-        if (!redp2p_session_unpack((const unsigned char *)buf, (size_t)n,
-            &envelope) || !redp2p_udp_envelope_valid(&envelope,
-            REDP2P_SESSION_ROLE_INITIATOR))
-            return 0;
-        if (envelope.type == REDP2P_SESSION_TYPE_KEEPALIVE) {
-            session->last_rx = redp2p_now_s();
-            return 0;
+    if (strncmp(buf, REDP2P_CTRTOK_PUNCH_PING,
+        strlen(REDP2P_CTRTOK_PUNCH_PING)) == 0 &&
+        redp2p_parse_punch_packet(buf, REDP2P_CTRTOK_PUNCH_PING,
+            ping_session, ping_from, ping_to))
+    {
+        if (via_turn) {
+            snprintf(pong, sizeof(pong), "%s%s:%s:%s",
+                REDP2P_CTRTOK_PUNCH_PONG, ping_session,
+                ping_to, ping_from);
+        } else {
+            snprintf(pong, sizeof(pong), "%s%s:%s:%s",
+                REDP2P_CTRTOK_PUNCH_PONG, ping_session,
+                ping_from, ping_to);
         }
+        redp2p_transport_sendto(runtime->borrowed_ctx,
+            runtime->owned_udp_fd, pong, strlen(pong), &from, via_turn);
     }
-    if (session->stream_mode) {
-        if (session->backend_fd != REDP2P_FD_INVALID &&
-            redp2p_stream_process_packet(runtime->borrowed_ctx, &session->stream,
-                session->backend_fd, (const unsigned char *)buf,
-                (size_t)n) != 0)
-        {
-            redp2p_stream_fail(runtime->borrowed_ctx, &session->stream);
-            redp2p_server_session_close(session);
-        }
-    } else {
-        memset(&backend_addr, 0, sizeof(backend_addr));
-        backend_addr.sin_family = AF_INET;
-        backend_addr.sin_port = htons(runtime->borrowed_ctx->bind_port);
-        inet_pton(AF_INET, "127.0.0.1", &backend_addr.sin_addr);
-        sendto(session->backend_fd, (const char *)envelope.payload,
-            envelope.payload_len, 0,
-            (const struct sockaddr *)&backend_addr, sizeof(backend_addr));
-    }
-    session->last_rx = redp2p_now_s();
     return 0;
 }
 

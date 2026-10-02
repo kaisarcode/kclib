@@ -465,7 +465,7 @@ int *skip_iteration)
         (int)peer_fd,
         session_hex, runtime->self_id, runtime->target_id,
         runtime->peer_candidates, runtime->n_peer_candidates, &peer_addr,
-        &peer_via_turn);
+        &peer_via_turn, NULL, NULL);
     if (result != REDP2P_OK) {
         redp2p_transport_forget(runtime->ctx, peer_fd);
         REDP2P_FD_CLOSE((int)peer_fd);

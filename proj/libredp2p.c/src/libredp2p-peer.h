@@ -272,6 +272,10 @@ REDP2P_INTERNAL int redp2p_transport_recvfrom(redp2p_t *ctx, redp2p_fd_t fd,
     socklen_t *from_len, int *via_turn);
 REDP2P_INTERNAL void redp2p_transport_forget(redp2p_t *ctx, redp2p_fd_t fd);
 
+typedef int (*redp2p_punch_packet_handler_t)(void *userdata,
+    const unsigned char *data, size_t size,
+    const struct sockaddr_storage *from, int via_turn);
+
 /**
  * Punch select.
  * Summary: Selects a candidate and performs hole punching.
@@ -288,6 +292,7 @@ REDP2P_INTERNAL void redp2p_transport_forget(redp2p_t *ctx, redp2p_fd_t fd);
 REDP2P_INTERNAL int redp2p_punch_select(redp2p_t *ctx, int sweep_limit,
     int udp_fd, const char *session_id, const char *from_id, const char *to_id,
     const redp2p_candidate_t *remote_candidates, int remote_candidate_count,
-    struct sockaddr_storage *selected_addr, int *selected_via_turn);
+    struct sockaddr_storage *selected_addr, int *selected_via_turn,
+    redp2p_punch_packet_handler_t packet_handler, void *packet_userdata);
 
 #endif

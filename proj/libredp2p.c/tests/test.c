@@ -112,7 +112,7 @@ typedef struct {
     test_thread_t thread;
 } test_control_stub_t;
 
-#define TEST_TURN_ALLOCATIONS 8
+#define TEST_TURN_ALLOCATIONS 16
 typedef struct {
     int used;
     struct sockaddr_storage client;
@@ -7042,6 +7042,58 @@ static int test_turn_api_roundtrip(int protocol, const char *id,
 }
 
 /**
+ * Verifies a second forced-TURN TCP consumer can connect while traffic from
+ * an established relay session is still in flight.
+ * @param index Index endpoint.
+ * @param turn_url TURN endpoint.
+ * @return 0 on success, 1 on failure.
+ */
+static int test_turn_api_overlapping_tcp(const char *index,
+    const char *turn_url)
+{
+    kc_redp2p_pub_t *pub = NULL;
+    kc_redp2p_con_t *con1 = NULL;
+    kc_redp2p_con_t *con2 = NULL;
+    kc_redp2p_pub_options_t pub_options;
+    kc_redp2p_con_options_t con_options;
+    unsigned char payload[REDP2P_BUF * 8];
+    int fail;
+
+    fail = 0;
+    memset(payload, 'x', sizeof(payload));
+    memset(&pub_options, 0, sizeof(pub_options));
+    pub_options.id = "turnoverlap";
+    pub_options.index = index;
+    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.turn = turn_url;
+    pub_options.turn_user = "user";
+    pub_options.turn_pass = "pass";
+    fail += expect_int("TURN overlap pub create", KC_REDP2P_OK,
+        kc_redp2p_pub(&pub, &pub_options));
+
+    memset(&con_options, 0, sizeof(con_options));
+    con_options.id = "turnoverlap";
+    con_options.index = index;
+    con_options.turn = turn_url;
+    con_options.turn_user = "user";
+    con_options.turn_pass = "pass";
+    if (fail == 0)
+        fail += expect_int("TURN overlap con1 create", KC_REDP2P_OK,
+            kc_redp2p_con(&con1, &con_options));
+    if (fail == 0)
+        fail += expect_int("TURN overlap con1 traffic", KC_REDP2P_OK,
+            kc_redp2p_con_send(con1, payload, sizeof(payload)));
+    if (fail == 0)
+        fail += expect_int("TURN overlap con2 create", KC_REDP2P_OK,
+            kc_redp2p_con(&con2, &con_options));
+
+    kc_redp2p_con_close(con2);
+    kc_redp2p_con_close(con1);
+    kc_redp2p_pub_close(pub);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
  * Implements one deterministic TURN test helper.
  * Summary: Supports the local relay stub or its API roundtrip checks.
  * @return Test helper result or matching state.
@@ -7099,6 +7151,8 @@ static int case_kc_redp2p_turn_api(void)
     if (fail == 0)
         fail += test_turn_api_roundtrip(KC_REDP2P_TCP, "turntcp", index,
             turn_url);
+    if (fail == 0)
+        fail += test_turn_api_overlapping_tcp(index, turn_url);
     fail += expect_true("TURN allocations used",
         atomic_load(&turn.allocate_count) >= 4);
     fail += expect_true("TURN permissions used",
