@@ -59,7 +59,7 @@ class Redp2pIndex
     public const MAX_SDP = 49152;
     public const DEFAULT_TTL_S = 120;
 
-    public const CANDIDATE_TYPES = ['host', 'observed', 'relay'];
+    public const CANDIDATE_TYPES = ['host', 'observed', 'relay', 'srflx'];
 
     private const RATE_SOURCES_MAX = 4096;
     private const RATE_SOURCE_IDLE_MS = 120000;
@@ -2063,7 +2063,7 @@ class Redp2pIndex
             if (strlen($addr) > self::ADDR_MAX) {
                 return [false, []];
             }
-            if ($type !== 'host' && $type !== 'relay') {
+            if ($type !== 'host' && $type !== 'srflx' && $type !== 'relay') {
                 return [false, []];
             }
             if (!filter_var($addr, FILTER_VALIDATE_IP)) {
@@ -2370,7 +2370,8 @@ class Redp2pIndex
         foreach ($candidates as $candidate) {
             $address = inet_pton($candidate['addr']);
             $candidateType = $candidate['type'] === 'host' ? 1 :
-                ($candidate['type'] === 'observed' ? 2 : 3);
+                ($candidate['type'] === 'observed' ? 2 :
+                ($candidate['type'] === 'relay' ? 3 : 4));
             $message .= chr($candidateType) .
                 chr(strlen($address) === 4 ? 4 : 6) . $address .
                 pack('n', $candidate['port']);
