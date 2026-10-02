@@ -45,6 +45,7 @@ typedef struct redp2p_udp_server_session {
     int active;
     int stream_mode;
     int via_turn;
+    char punch_session[REDP2P_CTRL_SESSION_MAX + 1];
     redp2p_stream_state_t stream;
 } redp2p_udp_server_session_t;
 
@@ -1420,6 +1421,56 @@ redp2p_publisher_runtime_t *runtime)
  * @param via_turn Nonzero when the datagram arrived through TURN.
  * @return 1 when consumed by an active session, 0 otherwise.
  */
+static int redp2p_publisher_ready_probe(
+redp2p_publisher_runtime_t *runtime,
+const unsigned char *data,
+size_t size,
+const struct sockaddr_storage *from,
+int via_turn)
+{
+    char text[256];
+    char ping_session[REDP2P_CTRL_SESSION_MAX + 1] = {0};
+    char ping_from[REDP2P_ID_MAX + 1] = {0};
+    char ping_to[REDP2P_ID_MAX + 1] = {0};
+    int i;
+
+    if (!runtime || !data || !from || size == 0 || size >= sizeof(text))
+        return 0;
+    memcpy(text, data, size);
+    text[size] = '\0';
+    if (!redp2p_parse_punch_packet(text, REDP2P_CTRTOK_PUNCH_PING,
+        ping_session, ping_from, ping_to) ||
+        strcmp(ping_to, runtime->borrowed_self_id) != 0)
+        return 0;
+
+    for (i = 0; i < runtime->session_count; i++) {
+        redp2p_udp_server_session_t *session = &runtime->owned_sessions[i];
+        int burst;
+
+        if (!session->active || session->via_turn != via_turn ||
+            strcmp(session->punch_session, ping_session) != 0 ||
+            !redp2p_sockaddr_equal(&session->peer_addr, from))
+            continue;
+        for (burst = 0; burst < 3; burst++) {
+            redp2p_transport_sendto(runtime->borrowed_ctx,
+                runtime->owned_udp_fd, REDP2P_CTRTOK_PUNCH_SERVER,
+                strlen(REDP2P_CTRTOK_PUNCH_SERVER), from, via_turn);
+        }
+        session->last_rx = redp2p_now_s();
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Dispatches one datagram that belongs to an already established session.
+ * @param runtime Publisher runtime containing active sessions.
+ * @param data Peer datagram bytes.
+ * @param size Peer datagram byte count.
+ * @param from Peer source address.
+ * @param via_turn Nonzero when the datagram arrived through TURN.
+ * @return 1 when consumed by an active session, 0 otherwise.
+ */
 static int redp2p_publisher_dispatch_session(
 redp2p_publisher_runtime_t *runtime,
 const unsigned char *data,
@@ -1492,8 +1543,13 @@ static int redp2p_publisher_punch_packet(void *userdata,
     const unsigned char *data, size_t size,
     const struct sockaddr_storage *from, int via_turn)
 {
+    redp2p_publisher_runtime_t *runtime =
+        (redp2p_publisher_runtime_t *)userdata;
+
+    if (redp2p_publisher_ready_probe(runtime, data, size, from, via_turn))
+        return 1;
     return redp2p_publisher_dispatch_session(
-        (redp2p_publisher_runtime_t *)userdata, data, size, from, via_turn);
+        runtime, data, size, from, via_turn);
 }
 
 /**
@@ -1553,6 +1609,8 @@ int via_turn)
     session.via_turn = via_turn ? 1 : 0;
     session.last_rx = redp2p_now_s();
     session.last_ka = session.last_rx;
+    snprintf(session.punch_session, sizeof(session.punch_session), "%s",
+        session_hex);
     session.stream_mode = ctx->proto == REDP2P_PROTO_TCP ? 1 : 0;
     if (session.stream_mode) {
         session.backend_fd = redp2p_connect_local_tcp(ctx->bind_port);
@@ -1970,6 +2028,9 @@ redp2p_publisher_runtime_t *runtime)
 #endif
     if ((size_t)n >= sizeof(buf)) n = (int)(sizeof(buf) - 1);
     buf[n] = '\0';
+    if (redp2p_publisher_ready_probe(runtime,
+        (const unsigned char *)buf, (size_t)n, &from, via_turn))
+        return 0;
     if (redp2p_publisher_dispatch_session(runtime,
         (const unsigned char *)buf, (size_t)n, &from, via_turn))
         return 0;
