@@ -2306,6 +2306,18 @@ static int redp2p_turn_error_code(const unsigned char *buf, int len)
 }
 
 /**
+ * Maps one TURN Allocate error to the closest REDP2P status.
+ * @param code TURN error code.
+ * @return REDP2P status.
+ */
+static int redp2p_turn_allocate_error_status(int code)
+{
+    if (code == 403) return REDP2P_EAUTH;
+    if (code == 486 || code == 508) return REDP2P_EFULL;
+    return REDP2P_ENET;
+}
+
+/**
  * Handles one internal TURN transport operation.
  * Summary: Supports TURN framing, state, authentication, or relay I/O.
  * @return Operation result or decoded value.
@@ -2552,11 +2564,19 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
         status = REDP2P_EPROTO;
         goto fail;
     }
-    if (!redp2p_turn_auth_challenge(allocation, rx, len) ||
-        !ctx->turn_user[0])
     {
-        status = REDP2P_EAUTH;
-        goto fail;
+        int error_code = redp2p_turn_error_code(rx, len);
+
+        if (redp2p_punch_trace_enabled())
+            fprintf(stderr,
+                "[PUNCH] turn-allocate-error code=%d authenticated=0\n",
+                error_code);
+        if (!redp2p_turn_auth_challenge(allocation, rx, len) ||
+            !ctx->turn_user[0])
+        {
+            status = redp2p_turn_allocate_error_status(error_code);
+            goto fail;
+        }
     }
     for (attempt = 0; attempt < 2; attempt++) {
         n = redp2p_turn_build_allocate(ctx, allocation, tx, sizeof(tx), txid, 1);
@@ -2578,9 +2598,18 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
             status = REDP2P_EPROTO;
             goto fail;
         }
-        if (!redp2p_turn_auth_challenge(allocation, rx, len)) {
-            status = REDP2P_EAUTH;
-            goto fail;
+        {
+            int error_code = redp2p_turn_error_code(rx, len);
+
+            if (redp2p_punch_trace_enabled())
+                fprintf(stderr,
+                    "[PUNCH] turn-allocate-error code=%d authenticated=1 "
+                    "attempt=%d\n",
+                    error_code, attempt + 1);
+            if (!redp2p_turn_auth_challenge(allocation, rx, len)) {
+                status = redp2p_turn_allocate_error_status(error_code);
+                goto fail;
+            }
         }
     }
     status = REDP2P_EAUTH;
