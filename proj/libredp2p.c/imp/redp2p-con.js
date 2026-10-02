@@ -343,11 +343,6 @@
             throw new RedP2PError("Index URL must use HTTP or HTTPS", "bad_request");
         }
 
-        const local = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-        if (url.protocol !== "https:" && !local) {
-            throw new RedP2PError("Remote indexes require HTTPS", "insecure_index");
-        }
-
         return url.href;
     }
 
