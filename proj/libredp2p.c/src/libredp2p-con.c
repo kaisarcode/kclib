@@ -38,6 +38,17 @@ typedef struct redp2p_udp_consumer_session {
     redp2p_stream_state_t stream;
 } redp2p_udp_consumer_session_t;
 
+/**
+ * Reports whether peer punch tracing is enabled for diagnostics.
+ * @return 1 when REDP2P_PUNCH_TRACE=1, otherwise 0.
+ */
+static int redp2p_consumer_trace_enabled(void)
+{
+    const char *value = getenv("REDP2P_PUNCH_TRACE");
+
+    return value && strcmp(value, "1") == 0;
+}
+
 typedef struct {
     redp2p_t *ctx;
     const char *index_host;
@@ -305,8 +316,13 @@ static int redp2p_consumer_wait_server_ready(
 
         now_ms = redp2p_now_ms();
         if (now_ms >= next_probe_ms) {
-            redp2p_transport_sendto(runtime->ctx, peer_fd,
+            int probe_result = redp2p_transport_sendto(runtime->ctx, peer_fd,
                 ping_msg, strlen(ping_msg), peer_addr, via_turn);
+
+            if (redp2p_consumer_trace_enabled())
+                fprintf(stderr,
+                    "[PUNCH] ready-probe session=%s via_turn=%d result=%d\n",
+                    session_hex, via_turn, probe_result);
             next_probe_ms = now_ms + REDP2P_PUNCH_READY_PROBE_MS;
         }
         wait_ms = (int)(next_probe_ms > now_ms ?
@@ -343,7 +359,13 @@ static int redp2p_consumer_wait_server_ready(
                 continue;
             if ((size_t)n == strlen(REDP2P_CTRTOK_PUNCH_SERVER) &&
                 memcmp(buf, REDP2P_CTRTOK_PUNCH_SERVER, (size_t)n) == 0)
+            {
+                if (redp2p_consumer_trace_enabled())
+                    fprintf(stderr,
+                        "[PUNCH] ready-ok session=%s via_turn=%d\n",
+                        session_hex, via_turn);
                 return REDP2P_OK;
+            }
 
             buf[n] = '\0';
             if (redp2p_parse_punch_packet(buf, REDP2P_CTRTOK_PUNCH_PING,
@@ -362,6 +384,10 @@ static int redp2p_consumer_wait_server_ready(
             }
         }
     }
+    if (redp2p_consumer_trace_enabled())
+        fprintf(stderr,
+            "[PUNCH] ready-timeout session=%s via_turn=%d\n",
+            session_hex, via_turn);
     redp2p_set_error(runtime->ctx, "punch: publisher readiness timed out");
     return REDP2P_ETIMEOUT;
 }
@@ -957,11 +983,19 @@ redp2p_consumer_runtime_t *runtime)
     }
     if (found >= 0) {
         if (!(runtime->ctx->direct_mode && created && n == 0)) {
-            redp2p_udp_send(runtime->ctx, runtime->sessions[found].fd,
+            int send_result = redp2p_udp_send(runtime->ctx,
+                runtime->sessions[found].fd,
                 &runtime->sessions[found].peer_addr,
                 runtime->sessions[found].via_turn,
                 REDP2P_SESSION_ROLE_INITIATOR, REDP2P_SESSION_TYPE_DATA,
                 buf, (size_t)n);
+
+            if (redp2p_consumer_trace_enabled())
+                fprintf(stderr,
+                    "[PUNCH] udp-consumer-tx session=%d bytes=%d "
+                    "via_turn=%d result=%d\n",
+                    found, n, runtime->sessions[found].via_turn,
+                    send_result);
         }
         runtime->sessions[found].last_rx = redp2p_now_s();
     }
@@ -1055,8 +1089,15 @@ redp2p_consumer_runtime_t *runtime)
                 redp2p_consumer_session_close(runtime->ctx, &runtime->sessions[i]);
             }
         } else {
-            redp2p_sendto_addr(runtime->local_fd, envelope.payload,
-                envelope.payload_len, &runtime->sessions[i].client_addr);
+            int local_result = redp2p_sendto_addr(runtime->local_fd,
+                envelope.payload, envelope.payload_len,
+                &runtime->sessions[i].client_addr);
+
+            if (redp2p_consumer_trace_enabled())
+                fprintf(stderr,
+                    "[PUNCH] udp-consumer-rx session=%d bytes=%zu "
+                    "via_turn=%d local_result=%d\n",
+                    i, envelope.payload_len, via_turn, local_result);
         }
         runtime->sessions[i].last_rx = redp2p_now_s();
     }

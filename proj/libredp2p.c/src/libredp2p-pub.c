@@ -36,6 +36,17 @@ static SRWLOCK g_key_mutex = SRWLOCK_INIT;
 static pthread_mutex_t g_key_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
+/**
+ * Reports whether peer punch tracing is enabled for diagnostics.
+ * @return 1 when REDP2P_PUNCH_TRACE=1, otherwise 0.
+ */
+static int redp2p_publisher_trace_enabled(void)
+{
+    const char *value = getenv("REDP2P_PUNCH_TRACE");
+
+    return value && strcmp(value, "1") == 0;
+}
+
 typedef struct redp2p_udp_server_session {
     redp2p_fd_t backend_fd;
     redp2p_fd_t tcp_fd;
@@ -1451,6 +1462,10 @@ int via_turn)
             strcmp(session->punch_session, ping_session) != 0 ||
             !redp2p_sockaddr_equal(&session->peer_addr, from))
             continue;
+        if (redp2p_publisher_trace_enabled())
+            fprintf(stderr,
+                "[PUNCH] ready-resend session=%s via_turn=%d\n",
+                session->punch_session, via_turn);
         for (burst = 0; burst < 3; burst++) {
             redp2p_transport_sendto(runtime->borrowed_ctx,
                 runtime->owned_udp_fd, REDP2P_CTRTOK_PUNCH_SERVER,
@@ -1503,6 +1518,14 @@ int via_turn)
         return 0;
 
     session = &runtime->owned_sessions[found];
+    if (!session->stream_mode &&
+        envelope.type == REDP2P_SESSION_TYPE_DATA &&
+        redp2p_publisher_trace_enabled())
+    {
+        fprintf(stderr,
+            "[PUNCH] udp-publisher-rx session=%d bytes=%zu via_turn=%d\n",
+            found, envelope.payload_len, via_turn);
+    }
     if (!session->stream_mode &&
         envelope.type == REDP2P_SESSION_TYPE_KEEPALIVE)
     {
@@ -1716,6 +1739,10 @@ JSON_Object *out)
             session_id, &peer_addr, peer_via_turn)) {
             continue;
         }
+        if (redp2p_publisher_trace_enabled())
+            fprintf(stderr,
+                "[PUNCH] ready-send session=%s via_turn=%d\n",
+                session_hex, peer_via_turn);
         for (int ready_burst = 0; ready_burst < 3; ready_burst++) {
             redp2p_transport_sendto(runtime->borrowed_ctx,
                 runtime->owned_udp_fd, REDP2P_CTRTOK_PUNCH_SERVER,
@@ -2095,11 +2122,21 @@ redp2p_publisher_runtime_t *runtime)
             backend_from.sin_port != htons(runtime->borrowed_ctx->bind_port) ||
             ntohl(backend_from.sin_addr.s_addr) != REDP2P_IPV4_LOOPBACK)
             continue;
-        redp2p_udp_send(runtime->borrowed_ctx, runtime->owned_udp_fd,
-            &runtime->owned_sessions[i].peer_addr,
-            runtime->owned_sessions[i].via_turn,
-            REDP2P_SESSION_ROLE_RESPONDER, REDP2P_SESSION_TYPE_DATA,
-            buf, (size_t)n);
+        {
+            int send_result = redp2p_udp_send(runtime->borrowed_ctx,
+                runtime->owned_udp_fd,
+                &runtime->owned_sessions[i].peer_addr,
+                runtime->owned_sessions[i].via_turn,
+                REDP2P_SESSION_ROLE_RESPONDER, REDP2P_SESSION_TYPE_DATA,
+                buf, (size_t)n);
+
+            if (redp2p_publisher_trace_enabled())
+                fprintf(stderr,
+                    "[PUNCH] udp-publisher-tx session=%d bytes=%d "
+                    "via_turn=%d result=%d\n",
+                    i, n, runtime->owned_sessions[i].via_turn,
+                    send_result);
+        }
         runtime->owned_sessions[i].last_rx = redp2p_now_s();
     }
 }
