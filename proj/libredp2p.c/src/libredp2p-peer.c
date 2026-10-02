@@ -2597,14 +2597,13 @@ fail:
  */
 static int redp2p_turn_build_refresh(redp2p_t *ctx,
     redp2p_turn_allocation_t *allocation, unsigned char *buf, size_t cap,
-    unsigned char txid[12])
+    unsigned char txid[12], uint32_t lifetime_s)
 {
     unsigned char lifetime[4];
     int off;
 
     if (!allocation || !redp2p_stun_gen_id(txid)) return 0;
-    redp2p_turn_store_be32(lifetime, allocation->lifetime_s ?
-        allocation->lifetime_s : REDP2P_TURN_DEFAULT_LIFETIME);
+    redp2p_turn_store_be32(lifetime, lifetime_s);
     off = redp2p_stun_build(buf, REDP2P_TURN_REFRESH_REQ, txid);
     if (!redp2p_turn_attr(buf, cap, &off, REDP2P_TURN_ATTR_LIFETIME,
         lifetime, sizeof(lifetime)) ||
@@ -2629,7 +2628,9 @@ static void redp2p_turn_refresh_if_due(redp2p_t *ctx, redp2p_fd_t fd)
     if (!allocation || !allocation->ready ||
         redp2p_now_ms() < allocation->refresh_at_ms)
         return;
-    n = redp2p_turn_build_refresh(ctx, allocation, tx, sizeof(tx), txid);
+    n = redp2p_turn_build_refresh(ctx, allocation, tx, sizeof(tx), txid,
+        allocation->lifetime_s ? allocation->lifetime_s :
+        REDP2P_TURN_DEFAULT_LIFETIME);
     if (n > 0 && redp2p_turn_send_raw(allocation, tx, (size_t)n) >= 0)
         allocation->refresh_at_ms = redp2p_now_ms() +
             (uint64_t)(allocation->lifetime_s ?
@@ -2863,6 +2864,27 @@ int redp2p_transport_sendto(redp2p_t *ctx, redp2p_fd_t fd,
 }
 
 /**
+ * Releases one TURN allocation remotely before local socket teardown.
+ * Summary: Sends an authenticated Refresh with lifetime zero without making
+ *          cleanup wait for a response that will be discarded on close.
+ * @return None.
+ */
+static void redp2p_turn_deallocate(redp2p_t *ctx,
+    redp2p_turn_allocation_t *allocation)
+{
+    unsigned char tx[2048];
+    unsigned char txid[12];
+    int n;
+    int attempt;
+
+    if (!ctx || !allocation || !allocation->ready) return;
+    n = redp2p_turn_build_refresh(ctx, allocation, tx, sizeof(tx), txid, 0);
+    if (n <= 0) return;
+    for (attempt = 0; attempt < 2; attempt++)
+        (void)redp2p_turn_send_raw(allocation, tx, (size_t)n);
+}
+
+/**
  * Handles one internal TURN transport operation.
  * Summary: Supports TURN framing, state, authentication, or relay I/O.
  * @return None.
@@ -2873,6 +2895,7 @@ void redp2p_transport_forget(redp2p_t *ctx, redp2p_fd_t fd)
 
     allocation = redp2p_turn_find_allocation(ctx, fd);
     if (allocation) {
+        redp2p_turn_deallocate(ctx, allocation);
         crypto_wipe(allocation, sizeof(*allocation));
         allocation->fd = REDP2P_FD_INVALID;
     }

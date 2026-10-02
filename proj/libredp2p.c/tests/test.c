@@ -126,6 +126,7 @@ typedef struct {
     char relay_host[INET_ADDRSTRLEN];
     _Atomic int stop;
     _Atomic int allocate_count;
+    _Atomic int deallocate_count;
     _Atomic int permission_count;
     _Atomic int relayed_count;
     test_turn_allocation_t allocations[TEST_TURN_ALLOCATIONS];
@@ -6519,6 +6520,8 @@ static void test_direct_api_con_receive(const void *data, size_t size,
 #define TEST_TURN_ALLOCATE_REQ 0x0003
 #define TEST_TURN_ALLOCATE_OK 0x0103
 #define TEST_TURN_ALLOCATE_ERR 0x0113
+#define TEST_TURN_REFRESH_REQ 0x0004
+#define TEST_TURN_REFRESH_OK 0x0104
 #define TEST_TURN_PERMISSION_REQ 0x0008
 #define TEST_TURN_PERMISSION_OK 0x0108
 #define TEST_TURN_SEND_IND 0x0016
@@ -6554,6 +6557,17 @@ static void test_turn_put32(unsigned char *buf, size_t off, uint32_t value)
     buf[off + 1] = (unsigned char)(value >> 16);
     buf[off + 2] = (unsigned char)(value >> 8);
     buf[off + 3] = (unsigned char)value;
+}
+
+/**
+ * Reads one big-endian 32-bit TURN test value.
+ * @param buf Source bytes.
+ * @return Decoded value.
+ */
+static uint32_t test_turn_get32(const unsigned char *buf)
+{
+    return ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) |
+        ((uint32_t)buf[2] << 8) | (uint32_t)buf[3];
 }
 
 /**
@@ -6842,6 +6856,43 @@ static int test_turn_reply_permission(test_turn_stub_t *turn,
 }
 
 /**
+ * Applies one TURN Refresh request and releases lifetime-zero allocations.
+ * @param turn TURN stub state.
+ * @param from Client address.
+ * @param from_len Client address length.
+ * @param packet Refresh request bytes.
+ * @param packet_len Refresh request byte count.
+ * @return 0 on success, 1 on malformed input or send failure.
+ */
+static int test_turn_reply_refresh(test_turn_stub_t *turn,
+    const struct sockaddr_storage *from, test_socklen_t from_len,
+    const unsigned char *packet, int packet_len)
+{
+    unsigned char buf[64];
+    test_turn_allocation_t *allocation;
+    uint32_t lifetime;
+    int lifetime_len;
+    int lifetime_off;
+    int off;
+
+    lifetime_len = 0;
+    lifetime_off = test_turn_find_attr(packet, packet_len,
+        TEST_TURN_ATTR_LIFETIME, &lifetime_len);
+    if (lifetime_off < 0 || lifetime_len != 4) return 1;
+    lifetime = test_turn_get32(packet + lifetime_off);
+    allocation = test_turn_client_allocation(turn, from);
+    if (lifetime == 0 && allocation) {
+        memset(allocation, 0, sizeof(*allocation));
+        atomic_fetch_add(&turn->deallocate_count, 1);
+    }
+
+    off = test_turn_header(buf, sizeof(buf), TEST_TURN_REFRESH_OK, packet + 8);
+    if (!off) return 1;
+    test_turn_put16(buf, 2, 0);
+    return test_turn_send(turn, from, from_len, buf, (size_t)off);
+}
+
+/**
  * Implements one deterministic TURN test helper.
  * Summary: Supports the local relay stub or its API roundtrip checks.
  * @return Test helper result or matching state.
@@ -6913,6 +6964,8 @@ static void *test_turn_main(void *arg)
                 (void)test_turn_reply_challenge(turn, &from, from_len, packet + 8);
             else
                 (void)test_turn_reply_allocate(turn, &from, from_len, packet + 8);
+        } else if (type == TEST_TURN_REFRESH_REQ) {
+            (void)test_turn_reply_refresh(turn, &from, from_len, packet, n);
         } else if (type == TEST_TURN_PERMISSION_REQ) {
             (void)test_turn_reply_permission(turn, &from, from_len, packet + 8);
         } else if (type == TEST_TURN_SEND_IND) {
@@ -7158,8 +7211,17 @@ static int case_kc_redp2p_turn_api(void)
         fail += test_turn_api_overlapping_tcp(index, turn_url);
     fail += expect_int("restore test punch poll", 0,
         test_setenv("REDP2P_PUNCH_POLL_MS", "50"));
+    {
+        uint64_t deallocate_deadline = redp2p_now_ms() + 1000U;
+
+        while (atomic_load(&turn.deallocate_count) == 0 &&
+            redp2p_now_ms() < deallocate_deadline)
+            test_sleep_ms(10U);
+    }
     fail += expect_true("TURN allocations used",
         atomic_load(&turn.allocate_count) >= 4);
+    fail += expect_true("TURN allocations released",
+        atomic_load(&turn.deallocate_count) > 0);
     fail += expect_true("TURN permissions used",
         atomic_load(&turn.permission_count) > 0);
     fail += expect_true("TURN relayed data used",
