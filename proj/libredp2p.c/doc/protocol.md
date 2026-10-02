@@ -257,7 +257,18 @@ Native candidate objects use:
 host
 observed
 relay
+srflx
 ```
+
+Client-supplied native candidate lists may contain `host`, `srflx`, and
+`relay`. An `observed` candidate is index-derived only and must not be
+accepted as a client-supplied replacement.
+
+A `srflx` candidate is the server-reflexive UDP endpoint discovered by the
+peer through STUN. An `observed` candidate is derived by the index from the
+trusted request source address together with the declared UDP port. They are
+not equivalent: the index-observed address does not prove the public UDP port
+mapping that STUN discovered.
 
 The index exchanges relay candidates but never carries application payloads.
 TURN relays the same REDP2P session datagrams that would otherwise travel
