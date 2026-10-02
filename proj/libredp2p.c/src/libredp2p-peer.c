@@ -401,7 +401,8 @@ int redp2p_stream_init(redp2p_t *ctx, redp2p_stream_state_t *st,
     st->adapter->via_turn = via_turn ? 1 : 0;
     memcpy(st->adapter->session_id, session_id, REDP2P_SESSION_ID_SZ);
     st->kcp = ikcp_create(redp2p_stream_conv(session_id), st->adapter);
-    if (!st->kcp || ikcp_setmtu(st->kcp, REDP2P_STREAM_KCP_MTU) != 0 ||
+    if (!st->kcp || ikcp_setmtu(st->kcp, via_turn ?
+        REDP2P_STREAM_TURN_KCP_MTU : REDP2P_STREAM_KCP_MTU) != 0 ||
         ikcp_wndsize(st->kcp, REDP2P_STREAM_SEND_WINDOW,
             REDP2P_STREAM_RECV_WINDOW) != 0 ||
         ikcp_nodelay(st->kcp, 0, REDP2P_STREAM_KCP_INTERVAL_MS,
