@@ -3400,8 +3400,8 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
             &malformed_count, &mismatch_count) == REDP2P_OK)
             return REDP2P_OK;
     }
-    for (int sweep = 1; sweep <= sweep_limit && redp2p_now_ms() < deadline_ms;
-        sweep++)
+    for (int sweep = 1; direct_count > 0 && sweep <= sweep_limit &&
+        redp2p_now_ms() < deadline_ms; sweep++)
     {
         for (int sign = -1; sign <= 1 && redp2p_now_ms() < deadline_ms;
             sign += 2)
@@ -3435,7 +3435,7 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
         }
     }
     if ((relay_count > 0 || local_turn) && redp2p_now_ms() < deadline_ms) {
-        for (int i = 0; i < 2 && redp2p_now_ms() < deadline_ms; i++) {
+        while (redp2p_now_ms() < deadline_ms) {
             for (int cidx = 0; cidx < remote_candidate_count; cidx++) {
                 if (remote_candidates[cidx].type == REDP2P_CAND_RELAY) {
                     sent_count += redp2p_punch_send_candidate(ctx, udp_fd,

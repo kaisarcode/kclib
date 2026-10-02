@@ -7152,7 +7152,12 @@ static int case_kc_redp2p_turn_api(void)
         fail += test_turn_api_roundtrip(KC_REDP2P_TCP, "turntcp", index,
             turn_url);
     if (fail == 0)
+        fail += expect_int("delay TURN overlap punch poll", 0,
+            test_setenv("REDP2P_PUNCH_POLL_MS", "1200"));
+    if (fail == 0)
         fail += test_turn_api_overlapping_tcp(index, turn_url);
+    fail += expect_int("restore test punch poll", 0,
+        test_setenv("REDP2P_PUNCH_POLL_MS", "50"));
     fail += expect_true("TURN allocations used",
         atomic_load(&turn.allocate_count) >= 4);
     fail += expect_true("TURN permissions used",
