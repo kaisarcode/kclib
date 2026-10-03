@@ -78,9 +78,11 @@ An index exposes `list()` and `close()`. A publisher exposes `set()` and
 
 `set()` updates one supported live option without replacing the publisher or
 consumer handle. The currently mutable options are `stun` and `turn`. A TURN
-update replaces its URL, username, and password together so temporary TURN
-credentials can be refreshed as one configuration change. Other creation
-options remain fixed for the lifetime of the handle.
+update supplies its URL, username, and password together. Temporary TURN
+credentials can therefore be rotated while retaining an active allocation on
+the same TURN endpoint. Changing the TURN endpoint while an allocation is
+active is not supported; other creation options also remain fixed for the
+lifetime of the handle.
 
 The consumer does not select TCP or UDP. It learns the publisher transport through the index. TCP preserves stream semantics; UDP preserves datagram boundaries.
 
