@@ -1566,6 +1566,86 @@ fail_no_ctx:
 }
 
 /**
+ * Applies one supported live peer option to a private runtime context.
+ * @param ctx Live runtime context.
+ * @param option KC_REDP2P_OPTION_* selector.
+ * @param stun STUN endpoint for KC_REDP2P_OPTION_STUN.
+ * @param turn TURN endpoint for KC_REDP2P_OPTION_TURN.
+ * @param turn_user TURN username.
+ * @param turn_pass TURN password.
+ * @return KC_REDP2P_OK on success or a public status code.
+ */
+static int kc_redp2p_set_peer_option(redp2p_t *ctx, int option,
+    const char *stun, const char *turn, const char *turn_user,
+    const char *turn_pass)
+{
+    if (!ctx) return KC_REDP2P_EINVAL;
+    if (option == KC_REDP2P_OPTION_STUN) {
+        if (!stun) return KC_REDP2P_EINVAL;
+        return redp2p_set_stun_server(ctx, stun);
+    }
+    if (option == KC_REDP2P_OPTION_TURN) {
+        if (!turn) return KC_REDP2P_EINVAL;
+        return redp2p_set_turn_server(ctx, turn, turn_user, turn_pass);
+    }
+    return KC_REDP2P_EUNSUPPORTED;
+}
+
+/**
+ * Updates one supported publisher option on a live handle.
+ * @param pub Live publisher handle.
+ * @param option KC_REDP2P_OPTION_* selector.
+ * @param options Values for the selected option.
+ * @return KC_REDP2P_OK on success or a public status code.
+ */
+int kc_redp2p_pub_set(kc_redp2p_pub_t *pub, int option,
+    const kc_redp2p_pub_options_t *options)
+{
+    int status;
+
+    if (!pub || !options || atomic_load(&pub->closing))
+        return KC_REDP2P_EINVAL;
+    kc_redp2p_io_mutex_lock(&pub->io_mutex, pub->io_mutex_initialized);
+    if (atomic_load(&pub->closing) || !pub->runtime.ctx) {
+        kc_redp2p_io_mutex_unlock(&pub->io_mutex,
+            pub->io_mutex_initialized);
+        return KC_REDP2P_EINVAL;
+    }
+    status = kc_redp2p_set_peer_option(pub->runtime.ctx, option,
+        options->stun, options->turn, options->turn_user,
+        options->turn_pass);
+    kc_redp2p_io_mutex_unlock(&pub->io_mutex, pub->io_mutex_initialized);
+    return status;
+}
+
+/**
+ * Updates one supported consumer option on a live handle.
+ * @param con Live consumer handle.
+ * @param option KC_REDP2P_OPTION_* selector.
+ * @param options Values for the selected option.
+ * @return KC_REDP2P_OK on success or a public status code.
+ */
+int kc_redp2p_con_set(kc_redp2p_con_t *con, int option,
+    const kc_redp2p_con_options_t *options)
+{
+    int status;
+
+    if (!con || !options || atomic_load(&con->closing))
+        return KC_REDP2P_EINVAL;
+    kc_redp2p_io_mutex_lock(&con->io_mutex, con->io_mutex_initialized);
+    if (atomic_load(&con->closing) || !con->runtime.ctx) {
+        kc_redp2p_io_mutex_unlock(&con->io_mutex,
+            con->io_mutex_initialized);
+        return KC_REDP2P_EINVAL;
+    }
+    status = kc_redp2p_set_peer_option(con->runtime.ctx, option,
+        options->stun, options->turn, options->turn_user,
+        options->turn_pass);
+    kc_redp2p_io_mutex_unlock(&con->io_mutex, con->io_mutex_initialized);
+    return status;
+}
+
+/**
  * Returns a snapshot of fresh publisher identifiers from one index runtime.
  * @param idx Index handle.
  * @param out_entries Destination allocated entry array.
