@@ -119,9 +119,10 @@
          * Creates one application-facing consumer.
          * @return Consumer capability.
          */
-        constructor(peer, channel, handlers = {}) {
+        constructor(peer, channel, handlers = {}, options = {}) {
             this._peer = peer;
             this._channel = channel;
+            this._options = {...options};
             this._receive = typeof handlers.receive === "function"
                 ? handlers.receive
                 : null;
@@ -157,6 +158,35 @@
                     peer.close();
                 }
             });
+        }
+
+        /**
+         * Updates one live transport option.
+         * @return Consumer capability.
+         */
+        async set(option, value) {
+            if (option === "stun") {
+                if (typeof value !== "string" || value.length === 0) {
+                    throw new RedP2PError("Invalid STUN endpoint", "bad_request");
+                }
+                this._options.stun = value;
+            } else if (option === "turn") {
+                if (!value || typeof value !== "object" ||
+                    typeof value.url !== "string" || value.url.length === 0 ||
+                    (value.user === undefined) !== (value.pass === undefined)) {
+                    throw new RedP2PError("Invalid TURN configuration", "bad_request");
+                }
+                this._options.turn = value.url;
+                this._options.turn_user = value.user;
+                this._options.turn_pass = value.pass;
+            } else {
+                throw new RedP2PError("Unsupported option", "unsupported");
+            }
+
+            const configuration = this._peer.getConfiguration();
+            configuration.iceServers = iceServers(this._options);
+            this._peer.setConfiguration(configuration);
+            return this;
         }
 
         /**
@@ -762,14 +792,14 @@
     }
 
     /**
-     * Creates a WebRTC peer connection from REDP2P transport options.
-     * @return Peer connection.
+     * Builds ICE server configuration from transport options.
+     * @return ICE server entries.
      */
-    function createPeer(options = {}) {
-        const iceServers = [];
+    function iceServers(options = {}) {
+        const servers = [];
 
         if (options.stun) {
-            iceServers.push({urls: options.stun});
+            servers.push({urls: options.stun});
         }
         if (options.turn) {
             const relay = {urls: options.turn};
@@ -780,9 +810,17 @@
             if (options.turn_pass !== undefined) {
                 relay.credential = options.turn_pass;
             }
-            iceServers.push(relay);
+            servers.push(relay);
         }
-        return new RTCPeerConnection({iceServers});
+        return servers;
+    }
+
+    /**
+     * Creates a WebRTC peer connection from REDP2P transport options.
+     * @return Peer connection.
+     */
+    function createPeer(options = {}) {
+        return new RTCPeerConnection({iceServers: iceServers(options)});
     }
 
     global.RedP2PCore = Object.freeze({
@@ -802,7 +840,6 @@
         protocolHex,
         validDescription,
         validateChallenge,
-        validateConnection,
         registerCanonical,
         controlCanonical,
         nextProof,
@@ -813,6 +850,7 @@
         waitIce,
         waitChannel,
         descriptionObject,
+        iceServers,
         createPeer,
         decoder
     });
@@ -894,7 +932,7 @@
                 receive: options.receive,
                 disconnect: options.disconnect,
                 error: options.error
-            });
+            }, options);
         } catch (error) {
             peer.close();
             throw error;
