@@ -112,10 +112,9 @@
          * Creates one application-facing consumer.
          * @return Consumer capability.
          */
-        constructor(peer, channel, handlers = {}, options = {}) {
+        constructor(peer, channel, handlers = {}) {
             this._peer = peer;
             this._channel = channel;
-            this._options = {...options};
             this._receive = typeof handlers.receive === "function"
                 ? handlers.receive
                 : null;
@@ -144,21 +143,6 @@
                     );
                 }
             });
-        }
-
-        /**
-         * Updates one supported live peer option.
-         * @return Consumer capability.
-         */
-        set(option, value) {
-            const active = this._peer.connectionState !== "closed";
-            this._options = updatePeerOptions(
-                this._options,
-                option,
-                value,
-                active
-            );
-            return this;
         }
 
         /**
@@ -597,10 +581,10 @@
             return;
         }
 
-        await new Promise((resolve, reject) => {
+        await new Promise(resolve => {
             const timeout = setTimeout(() => {
                 cleanup();
-                reject(new RedP2PError("ICE gathering timed out", "ice_timeout"));
+                resolve();
             }, 15000);
 
             /**
@@ -686,85 +670,27 @@
     }
 
     /**
-     * Builds WebRTC ICE servers from REDP2P transport options.
-     * @return ICE server list.
-     */
-    function iceServers(options = {}) {
-        const servers = [];
-
-        if (options.stun) {
-            servers.push({urls: options.stun});
-        }
-        if (options.turn) {
-            const relay = {urls: options.turn};
-
-            if (options.turn_user !== undefined && options.turn_user !== null) {
-                relay.username = options.turn_user;
-            }
-            if (options.turn_pass !== undefined && options.turn_pass !== null) {
-                relay.credential = options.turn_pass;
-            }
-            servers.push(relay);
-        }
-        return servers;
-    }
-
-    /**
-     * Returns transport options with one supported live option updated.
-     * @return Updated transport options.
-     */
-    function updatePeerOptions(options, option, value, active = false) {
-        const next = {...options};
-
-        if (option === "stun") {
-            if (typeof value !== "string" || value.length === 0) {
-                throw new RedP2PError("Invalid STUN endpoint", "bad_request");
-            }
-            next.stun = value;
-            return next;
-        }
-
-        if (option !== "turn") {
-            throw new RedP2PError("Unsupported peer option", "unsupported");
-        }
-        if (
-            !value ||
-            typeof value !== "object" ||
-            Array.isArray(value) ||
-            typeof value.url !== "string" ||
-            !value.url.startsWith("turn:")
-        ) {
-            throw new RedP2PError("Invalid TURN configuration", "bad_request");
-        }
-
-        const hasUser = value.user !== undefined && value.user !== null;
-        const hasPass = value.pass !== undefined && value.pass !== null;
-        if (
-            hasUser !== hasPass ||
-            (hasUser && typeof value.user !== "string") ||
-            (hasPass && typeof value.pass !== "string")
-        ) {
-            throw new RedP2PError("Invalid TURN configuration", "bad_request");
-        }
-        if (active && next.turn && next.turn !== value.url) {
-            throw new RedP2PError(
-                "Changing TURN endpoint on an active peer is not supported",
-                "unsupported"
-            );
-        }
-
-        next.turn = value.url;
-        next.turn_user = hasUser ? value.user : undefined;
-        next.turn_pass = hasPass ? value.pass : undefined;
-        return next;
-    }
-
-    /**
      * Creates a WebRTC peer connection from REDP2P transport options.
      * @return Peer connection.
      */
     function createPeer(options = {}) {
-        return new RTCPeerConnection({iceServers: iceServers(options)});
+        const iceServers = [];
+
+        if (options.stun) {
+            iceServers.push({urls: options.stun});
+        }
+        if (options.turn) {
+            const relay = {urls: options.turn};
+
+            if (options.turn_user !== undefined) {
+                relay.username = options.turn_user;
+            }
+            if (options.turn_pass !== undefined) {
+                relay.credential = options.turn_pass;
+            }
+            iceServers.push(relay);
+        }
+        return new RTCPeerConnection({iceServers});
     }
 
     global.RedP2PCore = Object.freeze({
@@ -795,8 +721,6 @@
         waitIce,
         waitChannel,
         descriptionObject,
-        iceServers,
-        updatePeerOptions,
         createPeer,
         decoder
     });
@@ -866,24 +790,6 @@
                 }, this.options.pollInterval || 500);
             }
 
-            return this;
-        }
-
-        /**
-         * Updates one supported live peer option.
-         * @return Publisher capability.
-         */
-        set(option, value) {
-            if (this.closed) {
-                throw new core.Error("Publisher is closed", "bad_request");
-            }
-
-            this.options = core.updatePeerOptions(
-                this.options,
-                option,
-                value,
-                this.connections.size > 0
-            );
             return this;
         }
 
