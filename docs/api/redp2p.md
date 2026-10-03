@@ -49,6 +49,20 @@ local consumer = redp2p.con({
     end
 })
 
+publisher:set("stun", "stun:stun.example.com:3478")
+publisher:set("turn", {
+    url = "turn:turn.example.com:3478?transport=udp",
+    user = "temporary-user",
+    pass = "temporary-pass"
+})
+
+consumer:set("stun", "stun:stun.example.com:3478")
+consumer:set("turn", {
+    url = "turn:turn.example.com:3478?transport=udp",
+    user = "temporary-user",
+    pass = "temporary-pass"
+})
+
 consumer:send(bytes)
 
 consumer:close()
@@ -58,7 +72,15 @@ index:close()
 
 The three capability objects are index, publisher, and consumer.
 
-An index exposes `list()` and `close()`. A publisher exposes `close()`; clients received by publisher callbacks expose `respond(bytes)` and `close()`. A consumer exposes `send(bytes)` and `close()`.
+An index exposes `list()` and `close()`. A publisher exposes `set()` and
+`close()`; clients received by publisher callbacks expose `respond(bytes)` and
+`close()`. A consumer exposes `set()`, `send(bytes)`, and `close()`.
+
+`set()` updates one supported live option without replacing the publisher or
+consumer handle. The currently mutable options are `stun` and `turn`. A TURN
+update replaces its URL, username, and password together so temporary TURN
+credentials can be refreshed as one configuration change. Other creation
+options remain fixed for the lifetime of the handle.
 
 The consumer does not select TCP or UDP. It learns the publisher transport through the index. TCP preserves stream semantics; UDP preserves datagram boundaries.
 
@@ -107,6 +129,20 @@ const consumer = await redp2p.con({
   turn_user: null,
   turn_pass: null,
   receive(data) {}
+});
+
+await publisher.set("stun", "stun:stun.example.com:3478");
+await publisher.set("turn", {
+  url: "turn:turn.example.com:3478?transport=udp",
+  user: "temporary-user",
+  pass: "temporary-pass"
+});
+
+await consumer.set("stun", "stun:stun.example.com:3478");
+await consumer.set("turn", {
+  url: "turn:turn.example.com:3478?transport=udp",
+  user: "temporary-user",
+  pass: "temporary-pass"
 });
 
 await consumer.send(bytes);
