@@ -74,16 +74,23 @@
                 }
             });
             channel.addEventListener("close", () => {
+                this._peer.close();
                 if (this._disconnect) {
                     this._disconnect(this);
                 }
             });
             channel.addEventListener("error", () => {
+                this._peer.close();
                 if (this._error) {
                     this._error(
                         new RedP2PError("Client connection failed", "connection_failed"),
                         this
                     );
+                }
+            });
+            peer.addEventListener("connectionstatechange", () => {
+                if (peer.connectionState === "failed") {
+                    peer.close();
                 }
             });
         }
@@ -132,15 +139,22 @@
                 }
             });
             channel.addEventListener("close", () => {
+                this._peer.close();
                 if (this._disconnect) {
                     this._disconnect();
                 }
             });
             channel.addEventListener("error", () => {
+                this._peer.close();
                 if (this._error) {
                     this._error(
                         new RedP2PError("Connection failed", "connection_failed")
                     );
+                }
+            });
+            peer.addEventListener("connectionstatechange", () => {
+                if (peer.connectionState === "failed") {
+                    peer.close();
                 }
             });
         }
@@ -573,7 +587,7 @@
     }
 
     /**
-     * Waits for ICE gathering to finish.
+     * Waits for a useful ICE candidate or gathering completion.
      * @return None.
      */
     async function waitIce(peer) {
@@ -581,21 +595,53 @@
             return;
         }
 
+        const configuration = peer.getConfiguration();
+        const hasIceServers = Array.isArray(configuration.iceServers) &&
+            configuration.iceServers.length > 0;
+
         await new Promise(resolve => {
-            const timeout = setTimeout(() => {
-                cleanup();
-                resolve();
-            }, 15000);
+            let timeout = null;
+            let finished = false;
 
             /**
-             * Handles ICE gathering state changes.
-             * @return None.
+             * Reports whether a candidate is useful for signaling.
+             * @param candidate ICE candidate.
+             * @return Whether the candidate is useful.
              */
-            const changed = () => {
-                if (peer.iceGatheringState === "complete") {
-                    cleanup();
-                    resolve();
+            const usefulCandidate = candidate => {
+                if (!candidate) {
+                    return false;
                 }
+
+                let type = candidate.type;
+                if (!type && typeof candidate.candidate === "string") {
+                    const match =
+                        /(?:^|\s)typ\s+(host|srflx|relay|prflx)(?:\s|$)/
+                            .exec(candidate.candidate);
+                    type = match ? match[1] : null;
+                }
+
+                return type === "srflx" || type === "relay" ||
+                    (type === "host" && !hasIceServers);
+            };
+
+            /**
+             * Reports whether the current SDP can be signaled.
+             * @return Whether local signaling data is ready.
+             */
+            const usefulDescription = () => {
+                const description = peer.localDescription;
+                if (!description || typeof description.sdp !== "string") {
+                    return false;
+                }
+                if (
+                    /(?:^|\s)typ\s+(srflx|relay)(?:\s|$)/m
+                        .test(description.sdp)
+                ) {
+                    return true;
+                }
+                return !hasIceServers &&
+                    /(?:^|\s)typ\s+host(?:\s|$)/m.test(description.sdp);
             };
 
             /**
@@ -603,11 +649,57 @@
              * @return None.
              */
             const cleanup = () => {
-                clearTimeout(timeout);
+                if (timeout !== null) {
+                    clearTimeout(timeout);
+                }
+                peer.removeEventListener("icecandidate", candidateChanged);
                 peer.removeEventListener("icegatheringstatechange", changed);
             };
 
+            /**
+             * Resolves the ICE wait once.
+             * @return None.
+             */
+            const finish = () => {
+                if (finished) {
+                    return;
+                }
+                finished = true;
+                cleanup();
+                resolve();
+            };
+
+            /**
+             * Handles newly gathered ICE candidates.
+             * @param event ICE candidate event.
+             * @return None.
+             */
+            const candidateChanged = event => {
+                if (usefulCandidate(event.candidate)) {
+                    finish();
+                }
+            };
+
+            /**
+             * Handles ICE gathering state changes.
+             * @return None.
+             */
+            const changed = () => {
+                if (peer.iceGatheringState === "complete") {
+                    finish();
+                }
+            };
+
+            peer.addEventListener("icecandidate", candidateChanged);
             peer.addEventListener("icegatheringstatechange", changed);
+
+            if (usefulDescription() ||
+                peer.iceGatheringState === "complete") {
+                finish();
+                return;
+            }
+
+            timeout = setTimeout(finish, 15000);
         });
     }
 
