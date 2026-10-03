@@ -171,8 +171,10 @@ int kc_redp2p_con(kc_redp2p_con_t **out,
  *
  * KC_REDP2P_OPTION_STUN reads options->stun. KC_REDP2P_OPTION_TURN reads
  * options->turn, options->turn_user, and options->turn_pass as one relay
- * configuration. The selected endpoint must be non-NULL. Other option values
- * currently return KC_REDP2P_EUNSUPPORTED.
+ * configuration. TURN credential rotation preserves an allocation on the same
+ * TURN endpoint. Changing the TURN endpoint while an allocation is active
+ * returns KC_REDP2P_EUNSUPPORTED. The selected endpoint must be non-NULL.
+ * Other option values currently return KC_REDP2P_EUNSUPPORTED.
  *
  * @param pub Live publisher handle.
  * @param option KC_REDP2P_OPTION_* selector.
@@ -187,8 +189,10 @@ int kc_redp2p_pub_set(kc_redp2p_pub_t *pub, int option,
  *
  * KC_REDP2P_OPTION_STUN reads options->stun. KC_REDP2P_OPTION_TURN reads
  * options->turn, options->turn_user, and options->turn_pass as one relay
- * configuration. The selected endpoint must be non-NULL. Other option values
- * currently return KC_REDP2P_EUNSUPPORTED.
+ * configuration. TURN credential rotation preserves an allocation on the same
+ * TURN endpoint. Changing the TURN endpoint while an allocation is active
+ * returns KC_REDP2P_EUNSUPPORTED. The selected endpoint must be non-NULL.
+ * Other option values currently return KC_REDP2P_EUNSUPPORTED.
  *
  * @param con Live consumer handle.
  * @param option KC_REDP2P_OPTION_* selector.
