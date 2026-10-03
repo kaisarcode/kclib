@@ -36,6 +36,12 @@ established peer channel; the application can immediately send with
 `kc_redp2p_con_send()`, and incoming bytes are delivered to its receive
 callback.
 
+Live publisher and consumer handles may update the optional STUN or TURN
+configuration with `kc_redp2p_pub_set()` and `kc_redp2p_con_set()`. A TURN
+update applies the TURN URL, username, and password together, allowing temporary
+relay credentials to be refreshed without replacing the public handle. Other
+creation options remain fixed for the handle lifetime.
+
 What those bytes mean is an application decision. An application can process
 them directly, store them, feed another protocol, or bridge them to a local
 socket.
