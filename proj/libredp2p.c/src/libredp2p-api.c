@@ -1566,6 +1566,74 @@ fail_no_ctx:
 }
 
 /**
+ * Reports whether one runtime currently owns a TURN allocation.
+ * @param ctx Live runtime context.
+ * @return 1 when an allocation is in use, otherwise 0.
+ */
+static int kc_redp2p_turn_active(redp2p_t *ctx)
+{
+    size_t i;
+
+    for (i = 0; i < REDP2P_TURN_ALLOCATIONS_MAX; i++) {
+        if (ctx->turn_allocations[i].used) return 1;
+    }
+    return 0;
+}
+
+/**
+ * Updates one live STUN endpoint without rebuilding the public handle.
+ * @param ctx Live runtime context.
+ * @param stun STUN endpoint.
+ * @return KC_REDP2P_OK on success or KC_REDP2P_EINVAL.
+ */
+static int kc_redp2p_set_live_stun(redp2p_t *ctx, const char *stun)
+{
+    if (!ctx || !stun) return KC_REDP2P_EINVAL;
+    redp2p_lock(ctx);
+    strncpy(ctx->stun_url, stun, sizeof(ctx->stun_url) - 1);
+    ctx->stun_url[sizeof(ctx->stun_url) - 1] = '\0';
+    redp2p_unlock(ctx);
+    return KC_REDP2P_OK;
+}
+
+/**
+ * Updates live TURN configuration while preserving established allocations.
+ * Summary: Credential rotation on the current TURN server does not discard an
+ *          active relay path. Changing the server while an allocation exists
+ *          is rejected instead of disrupting that path.
+ * @param ctx Live runtime context.
+ * @param turn TURN endpoint.
+ * @param turn_user TURN username.
+ * @param turn_pass TURN password.
+ * @return KC_REDP2P_OK on success or a public status code.
+ */
+static int kc_redp2p_set_live_turn(redp2p_t *ctx, const char *turn,
+    const char *turn_user, const char *turn_pass)
+{
+    int active;
+
+    if (!ctx || !turn || strncmp(turn, "turn:", 5) != 0 ||
+        strlen(turn) > REDP2P_TURN_URL_MAX || (!!turn_user != !!turn_pass) ||
+        (turn_user && strlen(turn_user) > REDP2P_TURN_USER_MAX) ||
+        (turn_pass && strlen(turn_pass) > REDP2P_PASS_MAX))
+        return KC_REDP2P_EINVAL;
+
+    redp2p_lock(ctx);
+    active = kc_redp2p_turn_active(ctx);
+    if (active && strcmp(ctx->turn_url, turn) != 0) {
+        redp2p_unlock(ctx);
+        return KC_REDP2P_EUNSUPPORTED;
+    }
+    snprintf(ctx->turn_url, sizeof(ctx->turn_url), "%s", turn);
+    snprintf(ctx->turn_user, sizeof(ctx->turn_user), "%s",
+        turn_user ? turn_user : "");
+    snprintf(ctx->turn_pass, sizeof(ctx->turn_pass), "%s",
+        turn_pass ? turn_pass : "");
+    redp2p_unlock(ctx);
+    return KC_REDP2P_OK;
+}
+
+/**
  * Applies one supported live peer option to a private runtime context.
  * @param ctx Live runtime context.
  * @param option KC_REDP2P_OPTION_* selector.
@@ -1580,14 +1648,10 @@ static int kc_redp2p_set_peer_option(redp2p_t *ctx, int option,
     const char *turn_pass)
 {
     if (!ctx) return KC_REDP2P_EINVAL;
-    if (option == KC_REDP2P_OPTION_STUN) {
-        if (!stun) return KC_REDP2P_EINVAL;
-        return redp2p_set_stun_server(ctx, stun);
-    }
-    if (option == KC_REDP2P_OPTION_TURN) {
-        if (!turn) return KC_REDP2P_EINVAL;
-        return redp2p_set_turn_server(ctx, turn, turn_user, turn_pass);
-    }
+    if (option == KC_REDP2P_OPTION_STUN)
+        return kc_redp2p_set_live_stun(ctx, stun);
+    if (option == KC_REDP2P_OPTION_TURN)
+        return kc_redp2p_set_live_turn(ctx, turn, turn_user, turn_pass);
     return KC_REDP2P_EUNSUPPORTED;
 }
 
