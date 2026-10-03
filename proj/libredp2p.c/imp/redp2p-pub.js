@@ -930,7 +930,7 @@
             }
 
             for (const peer of this.connections.values()) {
-                if (peer.connectionState === "closed") {
+                if (peer.connectionState !== "new") {
                     continue;
                 }
                 const configuration = peer.getConfiguration();
