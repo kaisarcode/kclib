@@ -436,7 +436,7 @@
             !safeProtocolInt(value.expires_at) ||
             value.expires_at - value.issued_at !== 60 ||
             !Number.isInteger(value.bits) ||
-            value.bits < 0 ||
+            bits < 0 ||
             value.bits > 32
         ) {
             throw new RedP2PError("Invalid challenge response", "bad_response");
@@ -840,6 +840,7 @@
         protocolHex,
         validDescription,
         validateChallenge,
+        validateConnection,
         registerCanonical,
         controlCanonical,
         nextProof,
