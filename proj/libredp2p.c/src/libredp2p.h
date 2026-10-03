@@ -64,6 +64,9 @@ typedef void (*kc_redp2p_con_peer_shutdown_fn)(void *userdata);
 #define KC_REDP2P_TCP 1
 #define KC_REDP2P_UDP 2
 
+#define KC_REDP2P_OPTION_STUN 1
+#define KC_REDP2P_OPTION_TURN 2
+
 typedef struct {
     const char *id;
     const char *pass;
@@ -161,6 +164,38 @@ int kc_redp2p_pub(kc_redp2p_pub_t **out,
  * @return KC_REDP2P_OK on success, otherwise a negative status.
  */
 int kc_redp2p_con(kc_redp2p_con_t **out,
+    const kc_redp2p_con_options_t *options);
+
+/**
+ * Updates one supported publisher option without replacing the live handle.
+ *
+ * KC_REDP2P_OPTION_STUN reads options->stun. KC_REDP2P_OPTION_TURN reads
+ * options->turn, options->turn_user, and options->turn_pass as one relay
+ * configuration. The selected endpoint must be non-NULL. Other option values
+ * currently return KC_REDP2P_EUNSUPPORTED.
+ *
+ * @param pub Live publisher handle.
+ * @param option KC_REDP2P_OPTION_* selector.
+ * @param options Values for the selected option.
+ * @return KC_REDP2P_OK on success, otherwise a negative status.
+ */
+int kc_redp2p_pub_set(kc_redp2p_pub_t *pub, int option,
+    const kc_redp2p_pub_options_t *options);
+
+/**
+ * Updates one supported consumer option without replacing the live handle.
+ *
+ * KC_REDP2P_OPTION_STUN reads options->stun. KC_REDP2P_OPTION_TURN reads
+ * options->turn, options->turn_user, and options->turn_pass as one relay
+ * configuration. The selected endpoint must be non-NULL. Other option values
+ * currently return KC_REDP2P_EUNSUPPORTED.
+ *
+ * @param con Live consumer handle.
+ * @param option KC_REDP2P_OPTION_* selector.
+ * @param options Values for the selected option.
+ * @return KC_REDP2P_OK on success, otherwise a negative status.
+ */
+int kc_redp2p_con_set(kc_redp2p_con_t *con, int option,
     const kc_redp2p_con_options_t *options);
 
 /**
