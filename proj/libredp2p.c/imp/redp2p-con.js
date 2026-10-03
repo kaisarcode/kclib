@@ -183,9 +183,11 @@
                 throw new RedP2PError("Unsupported option", "unsupported");
             }
 
-            const configuration = this._peer.getConfiguration();
-            configuration.iceServers = iceServers(this._options);
-            this._peer.setConfiguration(configuration);
+            if (this._peer.connectionState === "new") {
+                const configuration = this._peer.getConfiguration();
+                configuration.iceServers = iceServers(this._options);
+                this._peer.setConfiguration(configuration);
+            }
             return this;
         }
 
@@ -436,7 +438,7 @@
             !safeProtocolInt(value.expires_at) ||
             value.expires_at - value.issued_at !== 60 ||
             !Number.isInteger(value.bits) ||
-            bits < 0 ||
+            value.bits < 0 ||
             value.bits > 32
         ) {
             throw new RedP2PError("Invalid challenge response", "bad_response");
