@@ -142,6 +142,7 @@
             });
 
             assert(pub !== null, "publisher did not start");
+            assert(typeof pub.set === "function", "publisher set unavailable");
         });
 
         await test("publisher lookup", async () => {
@@ -177,8 +178,37 @@
             });
 
             assert(con !== null, "consumer did not connect");
+            assert(typeof con.set === "function", "consumer set unavailable");
             assert(typeof con.send === "function", "consumer send unavailable");
             assert(typeof con.close === "function", "consumer close unavailable");
+        });
+
+        await test("live transport setters", async () => {
+            const stun = "stun:127.0.0.1:9";
+            const turn = "turn:127.0.0.1:9?transport=udp";
+
+            await pub.set("stun", stun);
+            await con.set("stun", stun);
+            await pub.set("turn", {
+                url: turn,
+                user: "temporary-user-a",
+                pass: "temporary-pass-a"
+            });
+            await con.set("turn", {
+                url: turn,
+                user: "temporary-user-a",
+                pass: "temporary-pass-a"
+            });
+            await pub.set("turn", {
+                url: turn,
+                user: "temporary-user-b",
+                pass: "temporary-pass-b"
+            });
+            await con.set("turn", {
+                url: turn,
+                user: "temporary-user-b",
+                pass: "temporary-pass-b"
+            });
         });
 
         await test("consumer -> publisher", async () => {
