@@ -67,10 +67,7 @@
             }
             channel.addEventListener("message", event => {
                 if (this._receive) {
-                    this._receive({
-                        client: this,
-                        data: event.data
-                    });
+                    this._receive({client: this, data: event.data});
                 }
             });
             channel.addEventListener("close", () => {
@@ -83,7 +80,10 @@
                 this._peer.close();
                 if (this._error) {
                     this._error(
-                        new RedP2PError("Client connection failed", "connection_failed"),
+                        new RedP2PError(
+                            "Client connection failed",
+                            "connection_failed"
+                        ),
                         this
                     );
                 }
@@ -148,7 +148,10 @@
                 this._peer.close();
                 if (this._error) {
                     this._error(
-                        new RedP2PError("Connection failed", "connection_failed")
+                        new RedP2PError(
+                            "Connection failed",
+                            "connection_failed"
+                        )
                     );
                 }
             });
@@ -182,7 +185,8 @@
      * @return Hexadecimal string.
      */
     function bytesToHex(bytes) {
-        return Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+        return Array.from(bytes, value =>
+            value.toString(16).padStart(2, "0")).join("");
     }
 
     /**
@@ -190,7 +194,8 @@
      * @return Byte array.
      */
     function hexToBytes(hex) {
-        if (typeof hex !== "string" || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) {
+        if (typeof hex !== "string" || hex.length % 2 !== 0 ||
+            !/^[0-9a-f]+$/i.test(hex)) {
             throw new RedP2PError("Invalid hexadecimal value", "bad_request");
         }
 
@@ -258,7 +263,10 @@
      * @return Hexadecimal digest.
      */
     async function sha256(text) {
-        const digest = await crypto.subtle.digest("SHA-256", encoder.encode(text));
+        const digest = await crypto.subtle.digest(
+            "SHA-256",
+            encoder.encode(text)
+        );
         return bytesToHex(new Uint8Array(digest));
     }
 
@@ -313,7 +321,10 @@
      */
     async function solvePow(id, nonce, issuedAt, expiresAt, bits) {
         if (!Number.isInteger(bits) || bits < 0 || bits > 32) {
-            throw new RedP2PError("Invalid proof-of-work difficulty", "bad_response");
+            throw new RedP2PError(
+                "Invalid proof-of-work difficulty",
+                "bad_response"
+            );
         }
         if (bits === 0) {
             return "0000000000000000";
@@ -333,7 +344,9 @@
                 idBytes,
                 hexToBytes(solution)
             );
-            const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
+            const digest = new Uint8Array(
+                await crypto.subtle.digest("SHA-256", input)
+            );
             if (leadingZeroBits(digest) >= bits) {
                 return solution;
             }
@@ -352,11 +365,16 @@
      * @return Normalized URL.
      */
     function normalizeIndexUrl(value) {
-        const url = new URL(value, global.location ? global.location.href : undefined);
+        const url = new URL(
+            value,
+            global.location ? global.location.href : undefined
+        );
         if (!/^https?:$/.test(url.protocol)) {
-            throw new RedP2PError("Index URL must use HTTP or HTTPS", "bad_request");
+            throw new RedP2PError(
+                "Index URL must use HTTP or HTTPS",
+                "bad_request"
+            );
         }
-
         return url.href;
     }
 
@@ -409,7 +427,10 @@
             value.bits < 0 ||
             value.bits > 32
         ) {
-            throw new RedP2PError("Invalid challenge response", "bad_response");
+            throw new RedP2PError(
+                "Invalid challenge response",
+                "bad_response"
+            );
         }
         return value;
     }
@@ -425,7 +446,10 @@
             !protocolHex(value.capability, 64) ||
             !safeProtocolInt(value.expires_at)
         ) {
-            throw new RedP2PError("Invalid connection response", "bad_response");
+            throw new RedP2PError(
+                "Invalid connection response",
+                "bad_response"
+            );
         }
         return value;
     }
@@ -448,21 +472,27 @@
         try {
             payload = await response.json();
         } catch (error) {
-            throw new RedP2PError(`Index returned HTTP ${response.status}`, "http_error", response.status);
-        }
-
-        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-            throw new RedP2PError("Invalid index response", "bad_response", response.status);
-        }
-
-        if (!response.ok || payload.ok !== true) {
             throw new RedP2PError(
-                payload && payload.error ? payload.error : `HTTP ${response.status}`,
-                payload && payload.error ? payload.error : "http_error",
+                `Index returned HTTP ${response.status}`,
+                "http_error",
                 response.status
             );
         }
-
+        if (!payload || typeof payload !== "object" ||
+            Array.isArray(payload)) {
+            throw new RedP2PError(
+                "Invalid index response",
+                "bad_response",
+                response.status
+            );
+        }
+        if (!response.ok || payload.ok !== true) {
+            throw new RedP2PError(
+                payload.error || `HTTP ${response.status}`,
+                payload.error || "http_error",
+                response.status
+            );
+        }
         return payload;
     }
 
@@ -491,7 +521,8 @@
      * @return Canonical payload.
      */
     function controlCanonical(op, id, seq, extra = []) {
-        return [op, id, String(seq), ...extra.map(value => String(value))].join("\n");
+        return [op, id, String(seq), ...extra.map(value =>
+            String(value))].join("\n");
     }
 
     /**
@@ -499,11 +530,8 @@
      * @return Sequence and proof.
      */
     async function nextProof(state, op, extra = []) {
-        if (
-            !Number.isSafeInteger(state.seq) ||
-            state.seq < 0 ||
-            state.seq >= Number.MAX_SAFE_INTEGER
-        ) {
+        if (!Number.isSafeInteger(state.seq) || state.seq < 0 ||
+            state.seq >= Number.MAX_SAFE_INTEGER) {
             throw new RedP2PError(
                 "Publisher control sequence exhausted",
                 "sequence_exhausted"
@@ -540,15 +568,10 @@
                 return null;
             }
             const value = JSON.parse(raw);
-            if (
-                value &&
-                value.version === 0 &&
-                value.id === id &&
+            if (value && value.version === 0 && value.id === id &&
                 typeof value.secret === "string" &&
                 /^[0-9a-f]{16}$/.test(value.secret) &&
-                Number.isSafeInteger(value.seq) &&
-                value.seq >= 0
-            ) {
+                Number.isSafeInteger(value.seq) && value.seq >= 0) {
                 return value;
             }
         } catch (error) {
@@ -563,12 +586,15 @@
      */
     function saveState(index, state) {
         try {
-            global.localStorage.setItem(storageKey(index, state.id), JSON.stringify({
-                version: 0,
-                id: state.id,
-                secret: state.secret,
-                seq: state.seq
-            }));
+            global.localStorage.setItem(
+                storageKey(index, state.id),
+                JSON.stringify({
+                    version: 0,
+                    id: state.id,
+                    secret: state.secret,
+                    seq: state.seq
+                })
+            );
         } catch (error) {
             return;
         }
@@ -605,14 +631,12 @@
 
             /**
              * Reports whether a candidate is useful for signaling.
-             * @param candidate ICE candidate.
              * @return Whether the candidate is useful.
              */
             const usefulCandidate = candidate => {
                 if (!candidate) {
                     return false;
                 }
-
                 let type = candidate.type;
                 if (!type && typeof candidate.candidate === "string") {
                     const match =
@@ -620,13 +644,12 @@
                             .exec(candidate.candidate);
                     type = match ? match[1] : null;
                 }
-
                 return type === "srflx" || type === "relay" ||
                     (type === "host" && !hasIceServers);
             };
 
             /**
-             * Reports whether the current SDP can be signaled.
+             * Reports whether current SDP can be signaled.
              * @return Whether local signaling data is ready.
              */
             const usefulDescription = () => {
@@ -634,20 +657,15 @@
                 if (!description || typeof description.sdp !== "string") {
                     return false;
                 }
-                if (
-                    /(?:^|\s)typ\s+(srflx|relay)(?:\s|$)/m
-                        .test(description.sdp)
-                ) {
+                if (/(?:^|\s)typ\s+(srflx|relay)(?:\s|$)/m
+                    .test(description.sdp)) {
                     return true;
                 }
                 return !hasIceServers &&
                     /(?:^|\s)typ\s+host(?:\s|$)/m.test(description.sdp);
             };
 
-            /**
-             * Removes ICE wait resources.
-             * @return None.
-             */
+            /** Removes ICE wait resources. */
             const cleanup = () => {
                 if (timeout !== null) {
                     clearTimeout(timeout);
@@ -656,10 +674,7 @@
                 peer.removeEventListener("icegatheringstatechange", changed);
             };
 
-            /**
-             * Resolves the ICE wait once.
-             * @return None.
-             */
+            /** Resolves ICE wait once. */
             const finish = () => {
                 if (finished) {
                     return;
@@ -669,21 +684,14 @@
                 resolve();
             };
 
-            /**
-             * Handles newly gathered ICE candidates.
-             * @param event ICE candidate event.
-             * @return None.
-             */
+            /** Handles newly gathered candidates. */
             const candidateChanged = event => {
                 if (usefulCandidate(event.candidate)) {
                     finish();
                 }
             };
 
-            /**
-             * Handles ICE gathering state changes.
-             * @return None.
-             */
+            /** Handles gathering state changes. */
             const changed = () => {
                 if (peer.iceGatheringState === "complete") {
                     finish();
@@ -692,13 +700,11 @@
 
             peer.addEventListener("icecandidate", candidateChanged);
             peer.addEventListener("icegatheringstatechange", changed);
-
             if (usefulDescription() ||
                 peer.iceGatheringState === "complete") {
                 finish();
                 return;
             }
-
             timeout = setTimeout(finish, 15000);
         });
     }
@@ -711,35 +717,31 @@
         if (channel.readyState === "open") {
             return;
         }
-
         await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 cleanup();
-                reject(new RedP2PError("Data channel timed out", "connection_timeout"));
+                reject(new RedP2PError(
+                    "Data channel timed out",
+                    "connection_timeout"
+                ));
             }, timeoutMs);
 
-            /**
-             * Resolves an opened channel wait.
-             * @return None.
-             */
+            /** Resolves an opened channel wait. */
             const opened = () => {
                 cleanup();
                 resolve();
             };
 
-            /**
-             * Rejects a failed channel wait.
-             * @return None.
-             */
+            /** Rejects a failed channel wait. */
             const failed = () => {
                 cleanup();
-                reject(new RedP2PError("Data channel failed", "connection_failed"));
+                reject(new RedP2PError(
+                    "Data channel failed",
+                    "connection_failed"
+                ));
             };
 
-            /**
-             * Removes channel wait resources.
-             * @return None.
-             */
+            /** Removes channel wait resources. */
             const cleanup = () => {
                 clearTimeout(timeout);
                 channel.removeEventListener("open", opened);
@@ -762,27 +764,33 @@
     }
 
     /**
-     * Creates a WebRTC peer connection from REDP2P transport options.
-     * @return Peer connection.
+     * Builds ICE server configuration from transport options.
+     * @return ICE server entries.
      */
-    function createPeer(options = {}) {
-        const iceServers = [];
-
+    function iceServers(options = {}) {
+        const servers = [];
         if (options.stun) {
-            iceServers.push({urls: options.stun});
+            servers.push({urls: options.stun});
         }
         if (options.turn) {
             const relay = {urls: options.turn};
-
             if (options.turn_user !== undefined) {
                 relay.username = options.turn_user;
             }
             if (options.turn_pass !== undefined) {
                 relay.credential = options.turn_pass;
             }
-            iceServers.push(relay);
+            servers.push(relay);
         }
-        return new RTCPeerConnection({iceServers});
+        return servers;
+    }
+
+    /**
+     * Creates a WebRTC peer connection from REDP2P transport options.
+     * @return Peer connection.
+     */
+    function createPeer(options = {}) {
+        return new RTCPeerConnection({iceServers: iceServers(options)});
     }
 
     global.RedP2PCore = Object.freeze({
@@ -813,6 +821,7 @@
         waitIce,
         waitChannel,
         descriptionObject,
+        iceServers,
         createPeer,
         decoder
     });
@@ -835,19 +844,19 @@
          * @return Publisher capability.
          */
         constructor(options) {
-            this.options = options;
+            this.options = {...options};
             this.registrations = [];
             this.connections = new Map();
             this.rejectedConnections = new Map();
             this.closed = false;
-            this.connect = typeof options.connect === "function" ? options.connect : null;
-            this.receive = typeof options.receive === "function" ? options.receive : null;
+            this.connect = typeof options.connect === "function"
+                ? options.connect : null;
+            this.receive = typeof options.receive === "function"
+                ? options.receive : null;
             this.disconnect = typeof options.disconnect === "function"
-                ? options.disconnect
-                : null;
+                ? options.disconnect : null;
             this.error = typeof options.error === "function"
-                ? options.error
-                : null;
+                ? options.error : null;
         }
 
         /**
@@ -881,7 +890,53 @@
                     });
                 }, this.options.pollInterval || 500);
             }
+            return this;
+        }
 
+        /**
+         * Updates one live transport option.
+         * @return Publisher capability.
+         */
+        async set(option, value) {
+            if (this.closed) {
+                throw new core.Error("Publisher is closed", "bad_request");
+            }
+            if (option === "stun") {
+                if (typeof value !== "string" || value.length === 0) {
+                    throw new core.Error("Invalid STUN endpoint", "bad_request");
+                }
+                this.options.stun = value;
+            } else if (option === "turn") {
+                if (!value || typeof value !== "object" ||
+                    typeof value.url !== "string" || value.url.length === 0 ||
+                    (value.user === undefined) !== (value.pass === undefined)) {
+                    throw new core.Error(
+                        "Invalid TURN configuration",
+                        "bad_request"
+                    );
+                }
+                if (this.options.turn && this.options.turn !== value.url &&
+                    this.connections.size > 0) {
+                    throw new core.Error(
+                        "Changing an active TURN endpoint is unsupported",
+                        "unsupported"
+                    );
+                }
+                this.options.turn = value.url;
+                this.options.turn_user = value.user;
+                this.options.turn_pass = value.pass;
+            } else {
+                throw new core.Error("Unsupported option", "unsupported");
+            }
+
+            for (const peer of this.connections.values()) {
+                if (peer.connectionState === "closed") {
+                    continue;
+                }
+                const configuration = peer.getConfiguration();
+                configuration.iceServers = core.iceServers(this.options);
+                peer.setConfiguration(configuration);
+            }
             return this;
         }
 
@@ -897,11 +952,9 @@
                     pass: item.pass
                 }));
             }
-
             if (!this.options.index || !this.options.id) {
                 throw new core.Error("pub requires id and index", "bad_request");
             }
-
             return [{
                 url: core.normalizeIndexUrl(this.options.index),
                 id: this.options.id,
@@ -917,7 +970,6 @@
             if (!/^[A-Za-z0-9]{1,63}$/.test(item.id || "")) {
                 throw new core.Error("Invalid publisher id", "invalid_id");
             }
-
             const saved = core.loadState(item.url, item.id);
             if (saved) {
                 const state = this.state(item, saved.secret, saved.seq);
@@ -932,7 +984,6 @@
                     }
                 }
             }
-
             const fresh = await this.freshRegistration(item);
             const state = this.state(item, fresh.secret, 0);
             core.saveState(item.url, state);
@@ -944,11 +995,9 @@
          * @return Fresh registration material.
          */
         async freshRegistration(item) {
-            const challenge = core.validateChallenge(await core.request(item.url, {
-                op: "challenge",
-                id: item.id
-            }));
-
+            const challenge = core.validateChallenge(
+                await core.request(item.url, {op: "challenge", id: item.id})
+            );
             const secret = core.randomHex(8);
             const solution = await core.solvePow(
                 item.id,
@@ -967,15 +1016,14 @@
                 transport: "rtc"
             };
             const canonical = core.registerCanonical(fields);
-            const request = {
+            const requestBody = {
                 op: "register",
                 ...fields,
                 mac: challenge.mac,
                 proof: await core.hmacBytesHex(secret, canonical)
             };
-
             if (item.pass) {
-                request.access_proof = await core.hmacBytesHex(
+                requestBody.access_proof = await core.hmacBytesHex(
                     item.pass,
                     core.concatBytes(
                         new TextEncoder().encode("REDP2P-ADMISSION-v1"),
@@ -983,8 +1031,7 @@
                     )
                 );
             }
-
-            await core.request(item.url, request);
+            await core.request(item.url, requestBody);
             return {secret};
         }
 
@@ -1021,7 +1068,6 @@
             if (this.closed) {
                 return;
             }
-
             return state.run(async () => {
                 const auth = await core.nextProof(state, "heartbeat");
                 await core.request(state.url, {
@@ -1040,7 +1086,6 @@
             if (this.closed || state.polling) {
                 return;
             }
-
             state.polling = true;
             try {
                 await state.run(async () => {
@@ -1050,34 +1095,29 @@
                         id: state.id,
                         ...auth
                     });
-
-                    if (
-                        !Array.isArray(response.connections) ||
-                        response.connections.length > 4
-                    ) {
+                    if (!Array.isArray(response.connections) ||
+                        response.connections.length > 4) {
                         throw new core.Error(
                             "Invalid publisher poll response",
                             "bad_response"
                         );
                     }
-
                     this.pruneRejectedConnections();
                     for (const pending of response.connections) {
-                        if (
-                            !pending ||
+                        if (!pending ||
                             !core.protocolHex(pending.connection, 32) ||
-                            !core.validDescription(pending.offer, "offer")
-                        ) {
+                            !core.validDescription(pending.offer, "offer")) {
                             throw new core.Error(
                                 "Invalid publisher signaling response",
                                 "bad_response"
                             );
                         }
-                        if (
-                            !this.connections.has(pending.connection) &&
-                            !this.rejectedConnections.has(pending.connection)
-                        ) {
-                            this.accept(state, pending).catch(error => this.fail(error));
+                        if (!this.connections.has(pending.connection) &&
+                            !this.rejectedConnections.has(
+                                pending.connection
+                            )) {
+                            this.accept(state, pending).catch(error =>
+                                this.fail(error));
                         }
                     }
                 });
@@ -1093,7 +1133,6 @@
         async accept(state, pending) {
             const peer = core.createPeer(this.options);
             this.connections.set(pending.connection, peer);
-
             try {
                 peer.addEventListener("connectionstatechange", () => {
                     if (peer.connectionState === "failed") {
@@ -1128,15 +1167,17 @@
                 await peer.setLocalDescription(answer);
                 await core.waitIce(peer);
 
-                const description = core.descriptionObject(peer.localDescription);
-                const digest = await core.sha256(`${description.type}\n${description.sdp}`);
-
+                const description = core.descriptionObject(
+                    peer.localDescription
+                );
+                const digest = await core.sha256(
+                    `${description.type}\n${description.sdp}`
+                );
                 await state.run(async () => {
                     const auth = await core.nextProof(state, "answer", [
                         pending.connection,
                         digest
                     ]);
-
                     await core.request(state.url, {
                         op: "answer",
                         id: state.id,
@@ -1147,7 +1188,10 @@
                 });
             } catch (error) {
                 this.connections.delete(pending.connection);
-                this.rejectedConnections.set(pending.connection, Date.now() + 31000);
+                this.rejectedConnections.set(
+                    pending.connection,
+                    Date.now() + 31000
+                );
                 peer.close();
                 throw error;
             }
@@ -1159,7 +1203,8 @@
          */
         pruneRejectedConnections() {
             const now = Date.now();
-            for (const [connection, expiresAt] of this.rejectedConnections.entries()) {
+            for (const [connection, expiresAt] of
+                this.rejectedConnections.entries()) {
                 if (expiresAt <= now) {
                     this.rejectedConnections.delete(connection);
                 }
@@ -1171,12 +1216,8 @@
          * @return None.
          */
         controlFailure(state, generation, error) {
-            if (
-                error &&
-                error.code === "not_found" &&
-                state.generation === generation &&
-                !this.closed
-            ) {
+            if (error && error.code === "not_found" &&
+                state.generation === generation && !this.closed) {
                 this.restoreRegistration(state, generation).catch(failure => {
                     this.fail(failure);
                 });
@@ -1194,7 +1235,6 @@
                 if (this.closed || state.generation !== generation) {
                     return;
                 }
-
                 core.removeState(state.url, state.id);
                 const fresh = await this.freshRegistration({
                     url: state.url,
@@ -1227,22 +1267,22 @@
                 return;
             }
             this.closed = true;
-
             for (const state of this.registrations) {
                 clearInterval(state.heartbeatTimer);
                 clearInterval(state.pollTimer);
             }
-
             for (const peer of this.connections.values()) {
                 peer.close();
             }
             this.connections.clear();
             this.rejectedConnections.clear();
-
             for (const state of this.registrations) {
                 try {
                     await state.run(async () => {
-                        const auth = await core.nextProof(state, "deregister");
+                        const auth = await core.nextProof(
+                            state,
+                            "deregister"
+                        );
                         await core.request(state.url, {
                             op: "deregister",
                             id: state.id,
