@@ -99,8 +99,6 @@ elseif(MSVC)
     target_link_libraries(redp2p_static ws2_32 bcrypt)
 endif()
 if(REDP2P_BUILD_TESTS)
-    enable_testing()
-
     add_executable(redp2p_contract_test
         tests/test.c
         ${REDP2P_SOURCES}
