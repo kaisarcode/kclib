@@ -4,9 +4,10 @@
 kclib-compatible C API.
 
 The implementation uses
-[`libdatachannel`](https://github.com/paullouisageneau/libdatachannel) internally.
-`libdatachannel` is a build-time implementation dependency and is not exposed as
-part of the public `librtc.c` API.
+[`libdatachannel`](https://github.com/paullouisageneau/libdatachannel) internally
+and uses Mbed TLS as the private DTLS/TLS backend. Both are build-time
+implementation dependencies and are not exposed as part of the public
+`librtc.c` API.
 
 The scope is native WebRTC peer connections and DataChannels. Media transport
 and WebSocket support are disabled in the bundled libdatachannel build.
@@ -40,29 +41,31 @@ level consumers without coupling `librtc.c` to a signaling protocol.
 
 ## Build
 
-`librtc.c` requires a local checkout of the `libdatachannel` source tree.
+`librtc.c` requires local source checkouts of `libdatachannel` and Mbed TLS.
 The sources are not vendored in kclib, downloaded automatically, or included as
-a Git submodule.
+Git submodules of kclib.
 
-Clone `libdatachannel` with its submodules in a vendor directory:
+Clone the dependencies in a vendor directory:
 
 ```bash
-mkdir -p ~/work/vendor
-cd ~/work/vendor
+mkdir -p "$VENDOR"
+cd "$VENDOR"
 git clone --recursive https://github.com/paullouisageneau/libdatachannel.git
+git clone https://github.com/Mbed-TLS/mbedtls.git
 ```
 
-For an existing checkout, initialize its submodules if needed:
+For an existing libdatachannel checkout, initialize its submodules if needed:
 
 ```bash
-cd ~/work/vendor/libdatachannel
+cd "$VENDOR/libdatachannel"
 git submodule update --init --recursive
 ```
 
-Set `LIBDATACHANNEL_DIR` to the source checkout:
+Set the source checkout paths:
 
 ```bash
-export LIBDATACHANNEL_DIR="$HOME/work/vendor/libdatachannel"
+export LIBDATACHANNEL_DIR="$VENDOR/libdatachannel"
+export MBEDTLS_DIR="$VENDOR/mbedtls"
 ```
 
 Then build normally:
@@ -71,14 +74,18 @@ Then build normally:
 make
 ```
 
-The variable can also be supplied directly:
+The variables can also be supplied directly:
 
 ```bash
-make LIBDATACHANNEL_DIR="$HOME/work/vendor/libdatachannel"
+make \
+    LIBDATACHANNEL_DIR="$VENDOR/libdatachannel" \
+    MBEDTLS_DIR="$VENDOR/mbedtls"
 ```
 
-The build compiles the required DataChannel-only libdatachannel implementation
-from that source tree and links it privately into the `librtc` artifact.
+The build compiles the required DataChannel-only libdatachannel implementation,
+Mbed TLS, libjuice, and usrsctp with the target toolchain and links them
+privately into the `librtc` artifact. No separate libdatachannel or Mbed TLS
+runtime library is required by consumers.
 
 ### Tests
 
@@ -119,6 +126,7 @@ make aarch64/macos
 - `ninja`
 - C11 and C++17 compilers for the target
 - a local `libdatachannel` source checkout referenced by `LIBDATACHANNEL_DIR`
+- a local Mbed TLS source checkout referenced by `MBEDTLS_DIR`
 
 ### Optional cross-compilation SDKs
 
