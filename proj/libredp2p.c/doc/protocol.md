@@ -218,6 +218,5 @@ directly between peers.
 ## Compatibility
 
 REDP2P publishers and consumers use only the native TCP/UDP protocol defined in
-this document. Implementations may include an optional `version` field where
-supported; unknown fields are ignored unless a field is explicitly required by
-an operation.
+this document. Unknown fields are ignored unless a field is explicitly required
+by an operation.

@@ -3829,29 +3829,34 @@ static int case_kc_redp2p_version(void) {
  */
 static int case_kc_redp2p_strerror(void) {
     const char *name = "kc_redp2p_strerror";
-    const char *detail = "strerror maps codes to messages";
+    const char *detail = "public strerror maps public status codes to messages";
     int fail;
 
     fail = 0;
-    fail += expect_string("OK text", "OK", redp2p_strerror(REDP2P_OK));
-    fail += expect_string("ERROR text", "general error", redp2p_strerror(REDP2P_ERROR));
-    fail += expect_string("ENET text", "network error", redp2p_strerror(REDP2P_ENET));
-    fail += expect_string("ENOENT text", "peer not found", redp2p_strerror(REDP2P_ENOENT));
-    fail += expect_string("ETIMEOUT text", "timeout", redp2p_strerror(REDP2P_ETIMEOUT));
-    fail += expect_string("EFULL text", "peer table full", redp2p_strerror(REDP2P_EFULL));
+    fail += expect_string("OK text", "OK", kc_redp2p_strerror(KC_REDP2P_OK));
+    fail += expect_string("ERROR text", "general error",
+        kc_redp2p_strerror(KC_REDP2P_ERROR));
+    fail += expect_string("ENET text", "network error",
+        kc_redp2p_strerror(KC_REDP2P_ENET));
+    fail += expect_string("ENOENT text", "publisher not found",
+        kc_redp2p_strerror(KC_REDP2P_ENOENT));
+    fail += expect_string("ETIMEOUT text", "timeout",
+        kc_redp2p_strerror(KC_REDP2P_ETIMEOUT));
+    fail += expect_string("EFULL text", "index capacity reached",
+        kc_redp2p_strerror(KC_REDP2P_EFULL));
     fail += expect_string("EINVAL text", "invalid argument",
-        redp2p_strerror(REDP2P_EINVAL));
+        kc_redp2p_strerror(KC_REDP2P_EINVAL));
     fail += expect_string("EPROTO text", "protocol error",
-        redp2p_strerror(REDP2P_EPROTO));
+        kc_redp2p_strerror(KC_REDP2P_EPROTO));
     fail += expect_string("EAUTH text", "authentication failed",
-        redp2p_strerror(REDP2P_EAUTH));
-    fail += expect_string("EVERSION text", "unsupported protocol version",
-        redp2p_strerror(REDP2P_EVERSION));
+        kc_redp2p_strerror(KC_REDP2P_EAUTH));
     fail += expect_string("EPUNCH text", "direct connectivity failed",
-        redp2p_strerror(REDP2P_EPUNCH));
+        kc_redp2p_strerror(KC_REDP2P_EPUNCH));
     fail += expect_string("EEXIST text", "publisher already registered",
-        redp2p_strerror(REDP2P_EEXIST));
-    fail += expect_string("unknown text", "unknown error", redp2p_strerror(999));
+        kc_redp2p_strerror(KC_REDP2P_EEXIST));
+    fail += expect_string("EUNSUPPORTED text", "unsupported operation",
+        kc_redp2p_strerror(KC_REDP2P_EUNSUPPORTED));
+    fail += expect_string("unknown text", "unknown error", kc_redp2p_strerror(999));
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }

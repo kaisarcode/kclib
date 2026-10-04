@@ -28,7 +28,6 @@ typedef struct redp2p redp2p_t;
 #define REDP2P_EINVAL   KC_REDP2P_EINVAL
 #define REDP2P_EPROTO   KC_REDP2P_EPROTO
 #define REDP2P_EAUTH    KC_REDP2P_EAUTH
-#define REDP2P_EVERSION KC_REDP2P_EVERSION
 #define REDP2P_EPUNCH   KC_REDP2P_EPUNCH
 #define REDP2P_EEXIST   KC_REDP2P_EEXIST
 #define REDP2P_EUNSUPPORTED KC_REDP2P_EUNSUPPORTED
@@ -782,7 +781,6 @@ REDP2P_INTERNAL int redp2p_context_create(redp2p_t **out);
 REDP2P_INTERNAL int redp2p_context_destroy(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_context_request_stop(redp2p_t *ctx);
 REDP2P_INTERNAL uint64_t redp2p_version(void);
-REDP2P_INTERNAL const char *redp2p_strerror(int code);
 REDP2P_INTERNAL const char *redp2p_get_error(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_is_valid_id(const char *id);
 REDP2P_INTERNAL int redp2p_is_valid_pass_token(const char *pass);

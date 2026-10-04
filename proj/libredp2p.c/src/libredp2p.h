@@ -53,7 +53,6 @@ typedef void (*kc_redp2p_con_peer_shutdown_fn)(void *userdata);
 #define KC_REDP2P_EINVAL     -6
 #define KC_REDP2P_EPROTO     -7
 #define KC_REDP2P_EAUTH      -8
-#define KC_REDP2P_EVERSION   -9
 #define KC_REDP2P_EPUNCH    -10
 #define KC_REDP2P_EEXIST    -11
 #define KC_REDP2P_EUNSUPPORTED -12

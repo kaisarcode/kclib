@@ -845,31 +845,29 @@ check($acceptedAfterRejects['status'] === 200
     'active target accepted after rejected fills');
 
 $ttlPath = tempnam(sys_get_temp_dir(), 'redp2p-pending-ttl-');
-check($ttlPath !== false, 'short pending TTL database path');
+check($ttlPath !== false, 'pending TTL database path');
 $ttlDb = new PDO('sqlite:' . $ttlPath);
 $ttlDb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-putenv('REDP2P_PENDING_CALL_TTL_S=1');
-$shortTtlIndex = new Redp2pIndex($ttlDb, ['pass' => '']);
-putenv('REDP2P_PENDING_CALL_TTL_S');
+$ttlIndex = new Redp2pIndex($ttlDb, ['pass' => '']);
 $ttlSecret = str_pad(dechex(42040), 16, '0', STR_PAD_LEFT);
-check(body(request($shortTtlIndex, registration($shortTtlIndex, 'ttlpub', 42040)))['ok'] === true,
-    'short pending TTL publisher registration');
-check(body(request($shortTtlIndex, [
+check(body(request($ttlIndex, registration($ttlIndex, 'ttlpub', 42040)))['ok'] === true,
+    'pending TTL publisher registration');
+check(body(request($ttlIndex, [
     'op' => 'punch_req', 'udp_port' => 41080,
     'self_id' => 'ttlcaller',
     'target_id' => 'ttlpub',
     'session' => 'ttlsess',
     'candidates' => [['type' => 'host', 'addr' => '192.0.2.1', 'port' => 7]],
-]))['ok'] === true, 'short pending TTL punch request queued');
+]))['ok'] === true, 'pending TTL punch request queued');
 check($ttlDb->query('SELECT COUNT(*) FROM redp2p_pending_calls')->fetchColumn() === 1,
-    'short pending TTL punch request stored');
+    'pending TTL punch request stored');
 $ttlDb->exec('UPDATE redp2p_pending_calls SET ts = ts - 61');
-$shortPoll = request($shortTtlIndex, [
+$ttlPoll = request($ttlIndex, [
     'op' => 'punch_poll', 'id' => 'ttlpub', 'seq' => 1,
     'proof' => hash_hmac('sha256', "punch_poll\nttlpub\n1", $ttlSecret),
 ]);
-check($shortPoll['status'] === 200 && body($shortPoll)['calls'] === [],
-    'pending call expired at shortened TTL is not returned');
+check($ttlPoll['status'] === 200 && body($ttlPoll)['calls'] === [],
+    'expired pending call is not returned');
 
 $publisherLimitPath = tempnam(sys_get_temp_dir(), 'redp2p-pending-publisher-');
 check($publisherLimitPath !== false, 'publisher pending-limit database path');

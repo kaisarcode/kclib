@@ -12,11 +12,6 @@ endif()
 
 option(REDP2P_BUILD_TESTS "Build redp2p tests" OFF)
 
-set(REDP2P_TEST_EXTERNAL_ARTIFACTS OFF)
-if(REDP2P_BUILD_TESTS AND REDP2P_TEST_SHARED_LIBRARY)
-    set(REDP2P_TEST_EXTERNAL_ARTIFACTS ON)
-endif()
-
 if(NOT MSVC)
     add_compile_options(-O3 -Wall -Wextra -Werror)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -57,75 +52,54 @@ set_source_files_properties(src/libredp2p-core.c PROPERTIES
     COMPILE_DEFINITIONS REDP2P_BUILD_VERSION=${REDP2P_BUILD_VERSION}
 )
 
-if(NOT REDP2P_TEST_EXTERNAL_ARTIFACTS)
-    add_library(redp2p_shared SHARED ${REDP2P_SOURCES})
-    set_target_properties(redp2p_shared PROPERTIES
-        OUTPUT_NAME "redp2p"
-        C_VISIBILITY_PRESET hidden
-        WINDOWS_EXPORT_ALL_SYMBOLS ON
+add_library(redp2p_shared SHARED ${REDP2P_SOURCES})
+set_target_properties(redp2p_shared PROPERTIES
+    OUTPUT_NAME "redp2p"
+    C_VISIBILITY_PRESET hidden
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+target_include_directories(redp2p_shared PRIVATE src lib/monocypher lib/kcp lib/parson)
+if(NOT WIN32 AND NOT MSVC)
+    set_source_files_properties(src/libredp2p-api.c PROPERTIES
+        COMPILE_OPTIONS "-fvisibility=default"
     )
-    target_include_directories(redp2p_shared PRIVATE src lib/monocypher lib/kcp lib/parson)
-    if(NOT WIN32 AND NOT MSVC)
-        set_source_files_properties(src/libredp2p-api.c PROPERTIES
-            COMPILE_OPTIONS "-fvisibility=default"
-        )
-    endif()
-
-    if(MINGW)
-        set(REDP2P_PRIVATE_HEADERS src/libredp2p-core.h src/libredp2p-peer.h)
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${REDP2P_PRIVATE_HEADERS})
-        set(REDP2P_PRIVATE_SYMBOLS)
-        foreach(header IN LISTS REDP2P_PRIVATE_HEADERS)
-            file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/${header}" declarations
-                REGEX "^REDP2P_INTERNAL .*[ (]redp2p_[a-z0-9_]+\\(")
-            foreach(declaration IN LISTS declarations)
-                string(REGEX REPLACE ".*[ *](redp2p_[a-z0-9_]+)\\(.*" "\\1"
-                    symbol "${declaration}")
-                list(APPEND REDP2P_PRIVATE_SYMBOLS "${symbol}")
-            endforeach()
-        endforeach()
-        list(JOIN REDP2P_PRIVATE_SYMBOLS "," REDP2P_PRIVATE_SYMBOLS)
-        target_link_options(redp2p_shared PRIVATE
-            "SHELL:-Xlinker --exclude-symbols -Xlinker ${REDP2P_PRIVATE_SYMBOLS}")
-    endif()
-
-    # Static library
-    add_library(redp2p_static STATIC ${REDP2P_SOURCES})
-    set_target_properties(redp2p_static PROPERTIES OUTPUT_NAME "redp2p")
-    target_include_directories(redp2p_static PRIVATE src lib/monocypher lib/kcp lib/parson)
-
-    if(UNIX AND NOT ANDROID AND NOT APPLE)
-        target_link_libraries(redp2p_shared pthread m)
-        target_link_libraries(redp2p_static pthread m)
-    elseif(MINGW)
-        target_link_libraries(redp2p_shared ws2_32 bcrypt)
-        target_link_libraries(redp2p_static ws2_32 bcrypt)
-    elseif(MSVC)
-        target_link_libraries(redp2p_shared ws2_32 bcrypt)
-        target_link_libraries(redp2p_static ws2_32 bcrypt)
-    endif()
 endif()
 
+if(MINGW)
+    set(REDP2P_PRIVATE_HEADERS src/libredp2p-core.h src/libredp2p-peer.h)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${REDP2P_PRIVATE_HEADERS})
+    set(REDP2P_PRIVATE_SYMBOLS)
+    foreach(header IN LISTS REDP2P_PRIVATE_HEADERS)
+        file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/${header}" declarations
+            REGEX "^REDP2P_INTERNAL .*[ (]redp2p_[a-z0-9_]+\\(")
+        foreach(declaration IN LISTS declarations)
+            string(REGEX REPLACE ".*[ *](redp2p_[a-z0-9_]+)\\(.*" "\\1"
+                symbol "${declaration}")
+            list(APPEND REDP2P_PRIVATE_SYMBOLS "${symbol}")
+        endforeach()
+    endforeach()
+    list(JOIN REDP2P_PRIVATE_SYMBOLS "," REDP2P_PRIVATE_SYMBOLS)
+    target_link_options(redp2p_shared PRIVATE
+        "SHELL:-Xlinker --exclude-symbols -Xlinker ${REDP2P_PRIVATE_SYMBOLS}")
+endif()
+
+# Static library
+add_library(redp2p_static STATIC ${REDP2P_SOURCES})
+set_target_properties(redp2p_static PROPERTIES OUTPUT_NAME "redp2p")
+target_include_directories(redp2p_static PRIVATE src lib/monocypher lib/kcp lib/parson)
+
+if(UNIX AND NOT ANDROID AND NOT APPLE)
+    target_link_libraries(redp2p_shared pthread m)
+    target_link_libraries(redp2p_static pthread m)
+elseif(MINGW)
+    target_link_libraries(redp2p_shared ws2_32 bcrypt)
+    target_link_libraries(redp2p_static ws2_32 bcrypt)
+elseif(MSVC)
+    target_link_libraries(redp2p_shared ws2_32 bcrypt)
+    target_link_libraries(redp2p_static ws2_32 bcrypt)
+endif()
 if(REDP2P_BUILD_TESTS)
     enable_testing()
-
-    if(REDP2P_TEST_SHARED_LIBRARY)
-        add_library(redp2p_test_shared SHARED IMPORTED)
-        set_target_properties(redp2p_test_shared PROPERTIES
-            IMPORTED_LOCATION "${REDP2P_TEST_SHARED_LIBRARY}"
-        )
-        if(REDP2P_TEST_IMPORT_LIBRARY)
-            set_target_properties(redp2p_test_shared PROPERTIES
-                IMPORTED_IMPLIB "${REDP2P_TEST_IMPORT_LIBRARY}"
-            )
-        endif()
-    else()
-        set(REDP2P_TEST_SHARED_TARGET redp2p_shared)
-    endif()
-
-    if(TARGET redp2p_test_shared)
-        set(REDP2P_TEST_SHARED_TARGET redp2p_test_shared)
-    endif()
 
     add_executable(redp2p_contract_test
         tests/test.c

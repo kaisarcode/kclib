@@ -136,22 +136,15 @@ ifeq ($(HOST_SYSTEM),Linux)
 NATIVE_PLATFORM := linux
 endif
 
+ifeq ($(HOST_SYSTEM),Darwin)
+NATIVE_PLATFORM := macos
+endif
+
 ifneq ($(filter MINGW% MSYS% CYGWIN%,$(HOST_SYSTEM)),)
 NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_SHARED_NAME := libredp2p.so
-NATIVE_IMPORT_LIBRARY :=
-
-ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_SHARED_NAME := libredp2p.dll
-NATIVE_IMPORT_LIBRARY := -DREDP2P_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libredp2p.dll.a
-endif
-
-ifeq ($(NATIVE_PLATFORM),macos)
-NATIVE_SHARED_NAME := libredp2p.dylib
-endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
@@ -396,23 +389,12 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libredp2p.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libredp2p.dll.a ]; then \
-			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
-			exit 1; \
-		fi; \
-		test_ver=$$(sed -n 's/^REDP2P_BUILD_VERSION:UNINITIALIZED=//p; s/^REDP2P_BUILD_VERSION:STRING=//p' $(BUILD_DIR)/x86_64-windows/CMakeCache.txt | tail -n 1); \
-		if [ -z "$$test_ver" ]; then \
-			echo "Missing Windows build version. Rebuild x86_64/windows first." >&2; \
-			exit 1; \
-		fi; \
 		cmake -S . -B $(BUILD_DIR)/test-wine \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Windows \
 			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
 			-DREDP2P_BUILD_TESTS=ON \
-			-DREDP2P_BUILD_VERSION=$$test_ver \
-			-DREDP2P_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libredp2p.dll \
-			-DREDP2P_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libredp2p.dll.a \
+			-DREDP2P_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine && \
@@ -422,21 +404,10 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
-			echo "Missing native artifacts. Run 'make' first." >&2; \
-			exit 1; \
-		fi; \
-		test_ver=$$(sed -n 's/^REDP2P_BUILD_VERSION:UNINITIALIZED=//p; s/^REDP2P_BUILD_VERSION:STRING=//p' $(BUILD_DIR)/$(subst /,-,$(NATIVE_TARGET))/CMakeCache.txt | tail -n 1); \
-		if [ -z "$$test_ver" ]; then \
-			echo "Missing native build version. Run 'make' first." >&2; \
-			exit 1; \
-		fi; \
 		cmake -S . -B $(BUILD_DIR)/test \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DREDP2P_BUILD_TESTS=ON \
-			-DREDP2P_BUILD_VERSION=$$test_ver \
-			-DREDP2P_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
-			$(NATIVE_IMPORT_LIBRARY) \
+			-DREDP2P_BUILD_VERSION=$(BUILD_VERSION) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test && \
 		$(BUILD_DIR)/test/redp2p_contract_test all; \

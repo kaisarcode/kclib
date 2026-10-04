@@ -1445,28 +1445,6 @@ int redp2p_context_request_stop(redp2p_t *ctx) {
 }
 
 /**
- * Return string for status code.
- * @return Status string.
- */
-const char *redp2p_strerror(int code) {
-    switch (code) {
-        case REDP2P_OK:       return "OK";
-        case REDP2P_ERROR:    return "general error";
-        case REDP2P_ENET:     return "network error";
-        case REDP2P_ENOENT:   return "peer not found";
-        case REDP2P_ETIMEOUT: return "timeout";
-        case REDP2P_EFULL:    return "peer table full";
-        case REDP2P_EINVAL:   return "invalid argument";
-        case REDP2P_EPROTO:   return "protocol error";
-        case REDP2P_EAUTH:    return "authentication failed";
-        case REDP2P_EVERSION: return "unsupported protocol version";
-        case REDP2P_EPUNCH:   return "direct connectivity failed";
-        case REDP2P_EEXIST:   return "publisher already registered";
-        default:              return "unknown error";
-    }
-}
-
-/**
  * Records one per-context detail error message.
  * @return None.
  */
