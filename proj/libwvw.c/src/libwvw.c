@@ -5555,6 +5555,7 @@ static gboolean kc_wvw_linux_configure(
  */
 static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     GdkRGBA background;
+    WebKitSettings *settings;
 
     ctx->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     if (!ctx->window) {
@@ -5599,6 +5600,10 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
         g_object_unref(ctx->web_context);
         ctx->web_context = NULL;
         return KC_WVW_ERROR;
+    }
+    settings = webkit_web_view_get_settings(ctx->web_view);
+    if (settings) {
+        webkit_settings_set_enable_webrtc(settings, TRUE);
     }
     if (g_once_init_enter(&kc_wvw_gtk_shutdown_once)) {
         atexit(kc_wvw_linux_shutdown);
