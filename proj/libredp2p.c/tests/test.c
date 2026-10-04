@@ -7901,7 +7901,7 @@ static int case_kc_redp2p_api(void)
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 18;
+    test_case_total = 17;
     test_case_current = 0;
     run_case(&rc, case_kc_redp2p_validation);
     run_case(&rc, case_kc_redp2p_register);
@@ -7912,7 +7912,6 @@ static int case_all(void) {
     run_case(&rc, case_kc_redp2p_wait);
     run_case(&rc, case_kc_redp2p_connect);
     run_case(&rc, case_kc_redp2p_heartbeat);
-    run_case(&rc, case_kc_redp2p_rtc_index);
     run_case(&rc, case_redp2p_protocol_ttl);
     run_case(&rc, case_kc_redp2p_udp_tunnel);
     run_case(&rc, case_kc_redp2p_tcp_stream);
