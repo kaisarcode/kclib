@@ -2,7 +2,7 @@
 
 ## Purpose
 
-REDP2P has one index protocol for all implementations.
+REDP2P has one native index protocol for its implementations.
 
 The index coordinates three roles:
 
@@ -13,61 +13,45 @@ con
 ```
 
 The index never relays application payloads. After connection establishment,
-application data travels directly between peers.
+application data travels through the peer path selected by REDP2P.
 
-Publisher implementations currently provide:
-
-```text
-native C       TCP / UDP
-JavaScript     WebRTC
-```
+Native publishers provide TCP or UDP application semantics. The peer transport
+is datagram based in both cases; TCP mode uses KCP and endpoint stream adapters.
 
 The protocol does not require a particular implementation language for the
 index. Any index implementation is valid if it preserves the wire contract and
-transport-independent behavior defined in this document.
+behavior defined in this document.
 
-Consumer implementations select a publisher by `id`. They do not select the
-transport. The publisher record determines the connection path.
+Consumers select a publisher by `id`. They do not select TCP or UDP. The
+publisher record determines the service protocol.
 
-## Common registry model
+## Publisher registry
 
 Every active publisher record has:
 
 ```text
 id
-transport
 control secret
 control sequence
 last_seen
+proto
+udp_port
+candidates
 rate-limit state
 ```
 
-Transport values are:
-
-```text
-tcp
-udp
-rtc
-```
-
-Native records additionally carry the endpoint metadata required for native
-peer establishment. RTC records carry no persistent SDP/ICE state; RTC
-signaling belongs to temporary connection state.
-
-For compatibility, native requests continue to use the existing `proto`
-encoding:
+Protocol values are:
 
 ```text
 1 = TCP
 2 = UDP
 ```
 
-Indexes normalize those values internally to `tcp` and `udp`.
+The index stores the endpoint metadata required for native peer establishment.
 
 ## Common policy
 
-The following behavior is transport-independent and must be equivalent in every
-index implementation:
+The following behavior is part of the REDP2P index contract:
 
 - publisher IDs;
 - challenge lifetime;
@@ -89,102 +73,75 @@ index implementation:
 
 ## Challenge
 
-`challenge` is common to native and RTC publishers.
+`challenge` starts native publisher registration.
 
-The canonical challenge and PoW constructions remain the existing REDP2P
-constructions.
+The response provides the challenge nonce, timestamps, PoW difficulty, MAC, and
+registration key-agreement material required by the native registration flow.
 
-A native-capable index may include native registration key-agreement material
-such as `pkey` in the response. Implementations that do not need a field ignore
-it.
+The canonical challenge and PoW constructions are part of the REDP2P wire
+contract and must be reproduced exactly by alternate index implementations.
 
 ## Registration
 
-`register` creates one publisher record.
+`register` creates one native publisher record.
 
-Native publishers keep the existing REDP2P registration mechanism, including
-the protected initial control secret, `proto`, `udp_port`, and candidates.
+Registration protects the initial control secret and includes:
 
-RTC publishers identify the registration with:
-
-```json
-{
-  "transport": "rtc"
-}
+```text
+proto
+udp_port
+candidates
 ```
 
-RTC uses the JavaScript/WebRTC-compatible registration proof and sends the
-initial control secret only over the HTTPS-protected index request.
-
-Both registration forms apply the same PoW, admission, VIP, seat, active-ID,
-TTL, and control-session policies.
+PoW, admission password, VIP, seat, active-ID, TTL, and control-session policies
+are applied before the publisher becomes visible.
 
 ## Heartbeat
 
-Heartbeat refreshes publisher lifetime.
+`heartbeat` refreshes publisher lifetime and updates the native endpoint data.
 
-Native heartbeat retains the native endpoint update and its canonical proof.
-
-RTC heartbeat uses:
-
-```text
-heartbeat
-<id>
-<seq>
-```
-
-with HMAC-SHA256 under the publisher control secret.
-
-The index determines which canonical heartbeat form applies from the stored
-publisher transport. The caller does not negotiate it.
+The request is authenticated with the publisher control secret and a strictly
+increasing control sequence. The heartbeat carries the current protocol, UDP
+port, and candidate set used by peer establishment.
 
 ## Lookup
 
-`lookup` returns the active publisher and its transport.
+`lookup` returns the active publisher and its native endpoint metadata.
 
-Common response fields:
-
-```json
-{
-  "ok": true,
-  "id": "site",
-  "transport": "rtc",
-  "last_seen": 1700000000
-}
-```
-
-Native publishers additionally return the existing `proto`, `udp_port`, and
-`candidates` fields.
+A successful response includes the publisher identifier together with `proto`,
+`udp_port`, `candidates`, and freshness information required by consumers.
 
 Unknown response fields are ignored by clients.
 
 ## List
 
-`list` returns active publisher IDs exactly as before.
+`list` returns active publisher IDs.
 
 ## Connection lifecycle
 
-All transports follow the same logical lifecycle:
+Native TCP and UDP use the same introduction lifecycle:
 
 ```text
-consumer requests publisher
+consumer gathers candidates
         ↓
-index allocates temporary connection state
+punch_req
         ↓
-publisher receives pending connection
+index stores bounded pending introduction
         ↓
-publisher and consumer exchange transport-specific setup data
+publisher punch_poll
         ↓
-direct peer channel becomes usable
+index exchanges peer candidates
         ↓
-temporary index state expires or is consumed
+peers perform hole punching / relay selection
+        ↓
+REDP2P session becomes usable
 ```
 
-Transport-specific setup data is private protocol plumbing.
+The index carries only control metadata. It never relays application payloads.
 
 ### Native TCP / UDP
 
-Native implementations retain the existing:
+Native implementations use:
 
 ```text
 punch_req
@@ -194,55 +151,39 @@ hole punching
 native session establishment
 ```
 
-### RTC
-
-RTC implementations retain the WebRTC signaling flow:
-
-```text
-connect
-publisher poll
-answer
-consumer poll
-```
-
-`connect` is valid only for an RTC publisher.
-
-The publisher-authenticated `poll` and `answer` operations are valid only for
-RTC publisher records.
-
-Consumer poll uses the temporary unguessable capability associated with one RTC
-connection.
+TCP is an application-facing stream mode. REDP2P peer traffic remains UDP, and
+KCP reconstructs the ordered byte stream at the endpoint adapters. UDP mode
+preserves datagram boundaries.
 
 ## Pending limits and rate limiting
 
-Native pending calls and RTC pending signaling sessions share the same logical
-capacity policy.
+Pending introductions are bounded globally and per publisher.
 
-Per-publisher and global pending limits count pending work regardless of
-transport.
-
-Connection attempts share the same source and target token-bucket policy.
+Connection attempts share the source and target token-bucket policy. Limits
+protect the index from unbounded pending state without changing normal peer
+traffic after introduction.
 
 ## Deregistration
 
-`deregister` is common to all publisher transports.
+`deregister` removes one publisher after validating its monotonic sequence and
+control proof.
 
-A successful deregistration removes the publisher and all temporary connection
-state addressed to it, including both native punch state and RTC signaling
-state.
+Temporary native punch state addressed to an expired or removed publisher is
+cleaned according to the index lifecycle rules.
 
 ## STUN and TURN
 
 STUN and TURN are optional connection infrastructure, not index semantics.
 
 Native implementations use STUN for candidate discovery and may advertise a
-TURN `relay` candidate. Direct native UDP connectivity remains preferred;
-TURN is a transparent fallback when the native peer path cannot be established.
+TURN `relay` candidate. Direct native UDP connectivity remains preferred; TURN
+is a transparent fallback when the native peer path cannot be established.
+
 The native TCP capability keeps application stream semantics only at the
-endpoints. Peer transport is always datagram based: REDP2P uses UDP directly
-or through TURN, and KCP reconstructs an ordered byte stream for the local
-stream adapters. TCP sockets, TCP FIN, half-close, and EOF are not peer
-transport semantics.
+endpoints. Peer transport is always datagram based: REDP2P uses UDP directly or
+through TURN, and KCP reconstructs an ordered byte stream for the local stream
+adapters. TCP sockets, TCP FIN, half-close, and EOF are not peer transport
+semantics.
 
 Stream CLOSE/CLOSE_ACK frames are REDP2P session-lifecycle control messages.
 They do not represent TCP packets and are never encoded into application data.
@@ -260,41 +201,23 @@ relay
 srflx
 ```
 
-Client-supplied native candidate lists may contain `host`, `srflx`, and
-`relay`. An `observed` candidate is index-derived only and must not be
-accepted as a client-supplied replacement.
+Client-supplied candidate lists may contain `host`, `srflx`, and `relay`. An
+`observed` candidate is index-derived only and must not be accepted as a
+client-supplied replacement.
 
-A `srflx` candidate is the server-reflexive UDP endpoint discovered by the
-peer through STUN. An `observed` candidate is derived by the index from the
-trusted request source address together with the declared UDP port. They are
-not equivalent: the index-observed address does not prove the public UDP port
+A `srflx` candidate is the server-reflexive UDP endpoint discovered by the peer
+through STUN. An `observed` candidate is derived by the index from the trusted
+request source address together with the declared UDP port. They are not
+equivalent: the index-observed address does not prove the public UDP port
 mapping that STUN discovered.
 
 The index exchanges relay candidates but never carries application payloads.
 TURN relays the same REDP2P session datagrams that would otherwise travel
 directly between peers.
 
-JavaScript/WebRTC implementations pass STUN/TURN infrastructure to WebRTC ICE
-configuration. ICE, SDP, direct-vs-relay selection, and native TURN state remain
-internal details; applications continue to use the same REDP2P capability API.
-
 ## Compatibility
 
-Native TCP/UDP protocol operations remain accepted while the unified protocol is
-introduced.
-
-JavaScript/WebRTC requests may continue to include `version: 0`; indexes
-ignore unknown fields unless a field is explicitly required by an operation.
-
-## Unsupported cross-family connections
-
-Initial implementations support:
-
-```text
-C con  -> TCP pub
-C con  -> UDP pub
-JS con -> RTC pub
-```
-
-A consumer that cannot implement the publisher transport fails explicitly. It
-does not ask the user to select a different transport.
+REDP2P publishers and consumers use only the native TCP/UDP protocol defined in
+this document. Implementations may include an optional `version` field where
+supported; unknown fields are ignored unless a field is explicitly required by
+an operation.
