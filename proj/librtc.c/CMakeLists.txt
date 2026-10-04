@@ -39,6 +39,13 @@ if(NOT EXISTS "${MBEDTLS_DIR}/CMakeLists.txt")
         "Invalid MBEDTLS_DIR: ${MBEDTLS_DIR}")
 endif()
 
+if(EXISTS "${MBEDTLS_DIR}/tf-psa-crypto/CMakeLists.txt" AND
+    NOT EXISTS "${MBEDTLS_DIR}/tf-psa-crypto/framework/CMakeLists.txt")
+    message(FATAL_ERROR
+        "Mbed TLS nested submodules are not initialized. Run: "
+        "cd ${MBEDTLS_DIR} && git submodule update --init --recursive")
+endif()
+
 set(RTC_TEST_EXTERNAL_ARTIFACTS OFF)
 if(RTC_BUILD_TESTS AND RTC_TEST_SHARED_LIBRARY)
     set(RTC_TEST_EXTERNAL_ARTIFACTS ON)
