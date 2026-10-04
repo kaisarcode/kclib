@@ -36,17 +36,6 @@ static SRWLOCK g_key_mutex = SRWLOCK_INIT;
 static pthread_mutex_t g_key_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-/**
- * Reports whether peer punch tracing is enabled for diagnostics.
- * @return 1 when REDP2P_PUNCH_TRACE=1, otherwise 0.
- */
-static int redp2p_publisher_trace_enabled(void)
-{
-    const char *value = getenv("REDP2P_PUNCH_TRACE");
-
-    return value && strcmp(value, "1") == 0;
-}
-
 typedef struct redp2p_udp_server_session {
     redp2p_fd_t backend_fd;
     redp2p_fd_t tcp_fd;
@@ -84,7 +73,6 @@ typedef struct {
 typedef struct {
     char dir[768];
     char scoped[848];
-    char legacy[848];
 } redp2p_key_paths_t;
 
 /**
@@ -264,7 +252,7 @@ static void redp2p_key_scope_hash(const char *index_host,
 }
 
 /**
- * Builds bounded scoped and legacy publisher session secret paths.
+ * Builds the bounded publisher session secret path.
  * @param ctx Context receiving error detail.
  * @param index_host Index host.
  * @param index_port Index port.
@@ -324,14 +312,6 @@ static int redp2p_key_paths(redp2p_t *ctx, const char *index_host,
         paths->dir, filename);
     if (n < 0 || (size_t)n >= sizeof(paths->scoped)) {
         redp2p_set_error(ctx, "key: scoped path is too long");
-        crypto_wipe(digest, sizeof(digest));
-        crypto_wipe(filename, sizeof(filename));
-        return REDP2P_ERROR;
-    }
-    n = snprintf(paths->legacy, sizeof(paths->legacy), "%s/%s",
-        paths->dir, id);
-    if (n < 0 || (size_t)n >= sizeof(paths->legacy)) {
-        redp2p_set_error(ctx, "key: legacy path is too long");
         crypto_wipe(digest, sizeof(digest));
         crypto_wipe(filename, sizeof(filename));
         return REDP2P_ERROR;
@@ -925,7 +905,6 @@ int redp2p_test_deregister_persisted_publisher(
     const char *id)
 {
     redp2p_key_paths_t paths;
-    const char *loaded_path;
     char key[REDP2P_KEY_STR_SZ];
     uint64_t sequence;
     int result;
@@ -950,11 +929,6 @@ int redp2p_test_deregister_persisted_publisher(
     redp2p_key_lock();
     sequence = 0;
     result = redp2p_load_key_path(ctx, paths.scoped, key, &sequence);
-    loaded_path = paths.scoped;
-    if (result == REDP2P_ENOENT) {
-        result = redp2p_load_key_path(ctx, paths.legacy, key, &sequence);
-        loaded_path = paths.legacy;
-    }
     redp2p_key_unlock();
     if (result == REDP2P_ENOENT) {
         redp2p_set_error(ctx, "deregister: no persisted key for publisher");
@@ -971,7 +945,7 @@ int redp2p_test_deregister_persisted_publisher(
         result = redp2p_pub_deregister_registration(ctx, index_host, index_port, id,
             key, sequence + 1);
         if (result == REDP2P_OK)
-            result = redp2p_remove_key(ctx, loaded_path, key);
+            result = redp2p_remove_key(ctx, paths.scoped, key);
     }
     crypto_wipe(key, sizeof(key));
     return result;
@@ -1462,10 +1436,6 @@ int via_turn)
             strcmp(session->punch_session, ping_session) != 0 ||
             !redp2p_sockaddr_equal(&session->peer_addr, from))
             continue;
-        if (redp2p_publisher_trace_enabled())
-            fprintf(stderr,
-                "[PUNCH] ready-resend session=%s via_turn=%d\n",
-                session->punch_session, via_turn);
         for (burst = 0; burst < 3; burst++) {
             redp2p_transport_sendto(runtime->borrowed_ctx,
                 runtime->owned_udp_fd, REDP2P_CTRTOK_PUNCH_SERVER,
@@ -1518,14 +1488,6 @@ int via_turn)
         return 0;
 
     session = &runtime->owned_sessions[found];
-    if (!session->stream_mode &&
-        envelope.type == REDP2P_SESSION_TYPE_DATA &&
-        redp2p_publisher_trace_enabled())
-    {
-        fprintf(stderr,
-            "[PUNCH] udp-publisher-rx session=%d bytes=%zu via_turn=%d\n",
-            found, envelope.payload_len, via_turn);
-    }
     if (!session->stream_mode &&
         envelope.type == REDP2P_SESSION_TYPE_KEEPALIVE)
     {
@@ -1739,10 +1701,6 @@ JSON_Object *out)
             session_id, &peer_addr, peer_via_turn)) {
             continue;
         }
-        if (redp2p_publisher_trace_enabled())
-            fprintf(stderr,
-                "[PUNCH] ready-send session=%s via_turn=%d\n",
-                session_hex, peer_via_turn);
         for (int ready_burst = 0; ready_burst < 3; ready_burst++) {
             redp2p_transport_sendto(runtime->borrowed_ctx,
                 runtime->owned_udp_fd, REDP2P_CTRTOK_PUNCH_SERVER,
@@ -2122,21 +2080,12 @@ redp2p_publisher_runtime_t *runtime)
             backend_from.sin_port != htons(runtime->borrowed_ctx->bind_port) ||
             ntohl(backend_from.sin_addr.s_addr) != REDP2P_IPV4_LOOPBACK)
             continue;
-        {
-            int send_result = redp2p_udp_send(runtime->borrowed_ctx,
-                runtime->owned_udp_fd,
-                &runtime->owned_sessions[i].peer_addr,
-                runtime->owned_sessions[i].via_turn,
-                REDP2P_SESSION_ROLE_RESPONDER, REDP2P_SESSION_TYPE_DATA,
-                buf, (size_t)n);
-
-            if (redp2p_publisher_trace_enabled())
-                fprintf(stderr,
-                    "[PUNCH] udp-publisher-tx session=%d bytes=%d "
-                    "via_turn=%d result=%d\n",
-                    i, n, runtime->owned_sessions[i].via_turn,
-                    send_result);
-        }
+        redp2p_udp_send(runtime->borrowed_ctx,
+            runtime->owned_udp_fd,
+            &runtime->owned_sessions[i].peer_addr,
+            runtime->owned_sessions[i].via_turn,
+            REDP2P_SESSION_ROLE_RESPONDER, REDP2P_SESSION_TYPE_DATA,
+            buf, (size_t)n);
         runtime->owned_sessions[i].last_rx = redp2p_now_s();
     }
 }
@@ -2433,14 +2382,3 @@ int redp2p_pub_run(
     redp2p_publisher_runtime_cleanup(&runtime, 1);
     return wait_result;
 }
-
-#ifdef REDP2P_TEST_RANDOM
-/**
- * Generates one publisher session secret through the test-visible path.
- * @param out Output key buffer.
- * @return 1 on success, 0 on error.
- */
-int redp2p_test_generate_key(char *out) {
-    return redp2p_generate_key(out);
-}
-#endif
