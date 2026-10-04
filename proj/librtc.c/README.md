@@ -45,11 +45,9 @@ level consumers without coupling `librtc.c` to a signaling protocol.
 The sources are not vendored in kclib, downloaded automatically, or included as
 Git submodules of kclib.
 
-Clone the dependencies in a vendor directory:
+Clone the dependencies wherever you keep external source trees:
 
 ```bash
-mkdir -p "$VENDOR"
-cd "$VENDOR"
 git clone --recursive https://github.com/paullouisageneau/libdatachannel.git
 git clone --recursive https://github.com/Mbed-TLS/mbedtls.git
 ```
@@ -57,18 +55,18 @@ git clone --recursive https://github.com/Mbed-TLS/mbedtls.git
 For existing checkouts, initialize all nested submodules if needed:
 
 ```bash
-cd "$VENDOR/libdatachannel"
+cd /path/to/libdatachannel
 git submodule update --init --recursive
 
-cd "$VENDOR/mbedtls"
+cd /path/to/mbedtls
 git submodule update --init --recursive
 ```
 
 Set the source checkout paths:
 
 ```bash
-export LIBDATACHANNEL_DIR="$VENDOR/libdatachannel"
-export MBEDTLS_DIR="$VENDOR/mbedtls"
+export LIBDATACHANNEL_DIR="/path/to/libdatachannel"
+export MBEDTLS_DIR="/path/to/mbedtls"
 ```
 
 Then build normally:
@@ -81,8 +79,8 @@ The variables can also be supplied directly:
 
 ```bash
 make \
-    LIBDATACHANNEL_DIR="$VENDOR/libdatachannel" \
-    MBEDTLS_DIR="$VENDOR/mbedtls"
+    LIBDATACHANNEL_DIR="/path/to/libdatachannel" \
+    MBEDTLS_DIR="/path/to/mbedtls"
 ```
 
 The build compiles the required DataChannel-only libdatachannel implementation,
