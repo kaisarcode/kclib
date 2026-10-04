@@ -29,6 +29,16 @@ foreach(RTC_LIBDATACHANNEL_DEP plog usrsctp libjuice)
     endif()
 endforeach()
 
+if(NOT MBEDTLS_DIR)
+    message(FATAL_ERROR
+        "MBEDTLS_DIR is required and must point to Mbed TLS sources")
+endif()
+
+if(NOT EXISTS "${MBEDTLS_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "Invalid MBEDTLS_DIR: ${MBEDTLS_DIR}")
+endif()
+
 set(RTC_TEST_EXTERNAL_ARTIFACTS OFF)
 if(RTC_BUILD_TESTS AND RTC_TEST_SHARED_LIBRARY)
     set(RTC_TEST_EXTERNAL_ARTIFACTS ON)
@@ -50,6 +60,43 @@ set(RTC_CORE_SOURCES
 )
 
 if(NOT RTC_TEST_EXTERNAL_ARTIFACTS)
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "" FORCE)
+    set(USE_SHARED_MBEDTLS_LIBRARY OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory(
+        "${MBEDTLS_DIR}"
+        "${CMAKE_BINARY_DIR}/mbedtls"
+        EXCLUDE_FROM_ALL
+    )
+
+    if(NOT TARGET MbedTLS::MbedTLS)
+        if(NOT TARGET MbedTLS::mbedtls OR NOT TARGET MbedTLS::mbedx509)
+            message(FATAL_ERROR
+                "Mbed TLS source tree does not expose expected CMake targets")
+        endif()
+
+        add_library(rtc_mbedtls INTERFACE)
+        target_link_libraries(rtc_mbedtls INTERFACE
+            MbedTLS::mbedtls
+            MbedTLS::mbedx509
+        )
+
+        if(TARGET MbedTLS::tfpsacrypto)
+            target_link_libraries(rtc_mbedtls INTERFACE
+                MbedTLS::tfpsacrypto)
+        elseif(TARGET MbedTLS::mbedcrypto)
+            target_link_libraries(rtc_mbedtls INTERFACE
+                MbedTLS::mbedcrypto)
+        else()
+            message(FATAL_ERROR
+                "Mbed TLS source tree does not expose a crypto target")
+        endif()
+
+        add_library(MbedTLS::MbedTLS ALIAS rtc_mbedtls)
+    endif()
+
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_DEPS_LIBS OFF CACHE BOOL "" FORCE)
     set(NO_MEDIA ON CACHE BOOL "" FORCE)
@@ -57,6 +104,8 @@ if(NOT RTC_TEST_EXTERNAL_ARTIFACTS)
     set(NO_EXAMPLES ON CACHE BOOL "" FORCE)
     set(NO_TESTS ON CACHE BOOL "" FORCE)
     set(PREFER_SYSTEM_LIB OFF CACHE BOOL "" FORCE)
+    set(USE_GNUTLS OFF CACHE BOOL "" FORCE)
+    set(USE_MBEDTLS ON CACHE BOOL "" FORCE)
     set(USE_NICE OFF CACHE BOOL "" FORCE)
     set(WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
     set(RTC_UPDATE_VERSION_HEADER OFF CACHE BOOL "" FORCE)
