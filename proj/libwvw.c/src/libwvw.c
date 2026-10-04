@@ -5603,7 +5603,9 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     }
     settings = webkit_web_view_get_settings(ctx->web_view);
     if (settings) {
+#if WEBKIT_CHECK_VERSION(2, 38, 0)
         webkit_settings_set_enable_webrtc(settings, TRUE);
+#endif
     }
     if (g_once_init_enter(&kc_wvw_gtk_shutdown_once)) {
         atexit(kc_wvw_linux_shutdown);
