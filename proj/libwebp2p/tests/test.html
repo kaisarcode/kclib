@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>REDP2P Browser Tests</title>
+    <style>
+        html,body {
+            background: #111;
+            color: #ddd;
+            font-family: monospace;
+        }
+        body {
+            margin: 2rem;
+            padding: 1rem;
+        }
+
+        h1 {
+            color: #fff;
+        }
+
+        #output {
+            white-space: pre-wrap;
+        }
+
+        .pass {
+            color: #8f8;
+        }
+
+        .fail {
+            color: #f88;
+        }
+    </style>
+</head>
+<body>
+<h1>REDP2P Browser Tests</h1>
+<div id="output"></div>
+
+<script>
+"use strict";
+
+const redp2pScriptVersion = Date.now();
+document.write(
+    `<script src="../imp/redp2p-pub.js?v=${redp2pScriptVersion}"><\/script>`
+);
+document.write(
+    `<script src="../imp/redp2p-con.js?v=${redp2pScriptVersion}"><\/script>`
+);
+</script>
+<script>
+"use strict";
+
+(async () => {
+    const output = document.getElementById("output");
+    const params = new URLSearchParams(location.search);
+    const index = params.get("index") || new URL("/index", location.href).href;
+    const id = "browser" + crypto.getRandomValues(new Uint32Array(1))[0];
+
+    let passed = 0;
+    let failed = 0;
+    let pub = null;
+    let con = null;
+    let publisherClient = null;
+    let publisherInput = null;
+    let consumerReplyResolve = null;
+
+    function report(ok, name, detail = "") {
+        const line = document.createElement("div");
+        line.className = ok ? "pass" : "fail";
+        line.textContent =
+            `[${ok ? "PASS" : "FAIL"}] ${name}${detail ? ": " + detail : ""}`;
+        output.appendChild(line);
+
+        if (ok) {
+            passed++;
+        } else {
+            failed++;
+        }
+    }
+
+    async function test(name, callback) {
+        try {
+            await callback();
+            report(true, name);
+        } catch (error) {
+            const detail = error && error.message ? error.message : String(error);
+            report(false, name, detail);
+            throw error;
+        }
+    }
+
+    function assert(condition, message) {
+        if (!condition) {
+            throw new Error(message);
+        }
+    }
+
+    try {
+        await test("browser capabilities", async () => {
+            assert(typeof RTCPeerConnection === "function", "RTCPeerConnection unavailable");
+            assert(globalThis.crypto && crypto.subtle, "Web Crypto unavailable");
+            assert(globalThis.TextEncoder, "TextEncoder unavailable");
+            assert(globalThis.TextDecoder, "TextDecoder unavailable");
+            assert(globalThis.RedP2P, "RedP2P namespace unavailable");
+            assert(typeof RedP2P.pub === "function", "RedP2P.pub unavailable");
+            assert(typeof RedP2P.con === "function", "RedP2P.con unavailable");
+        });
+
+        await test("index endpoint", async () => {
+            const response = await fetch(index, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({version: 0, op: "list"}),
+                cache: "no-store"
+            });
+
+            const body = await response.json();
+            assert(response.ok, `HTTP ${response.status}`);
+            assert(body && body.ok === true, body && body.error
+                ? body.error
+                : "invalid index response");
+            assert(Array.isArray(body.ids), "index list missing ids");
+        });
+
+        await test("publisher register", async () => {
+            pub = await RedP2P.pub({
+                id,
+                index,
+                pollInterval: 100,
+                connect(client) {
+                    publisherClient = client;
+                },
+                receive(input) {
+                    publisherInput = input;
+                    if (input.data === "ping") {
+                        input.client.respond("pong");
+                    }
+                }
+            });
+
+            assert(pub !== null, "publisher did not start");
+            assert(typeof pub.set === "function", "publisher set unavailable");
+        });
+
+        await test("publisher lookup", async () => {
+            const response = await fetch(index, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({version: 0, op: "lookup", id}),
+                cache: "no-store"
+            });
+
+            const body = await response.json();
+            assert(response.ok, `HTTP ${response.status}`);
+            assert(body && body.ok === true, body && body.error
+                ? body.error
+                : "invalid lookup response");
+            assert(body.id === id, "publisher id mismatch");
+            assert(body.transport === "rtc", "publisher transport is not rtc");
+        });
+
+        await test("consumer connect", async () => {
+            con = await RedP2P.con({
+                id,
+                index,
+                pollInterval: 100,
+                timeout: 15000,
+                receive(data) {
+                    if (consumerReplyResolve) {
+                        const resolve = consumerReplyResolve;
+                        consumerReplyResolve = null;
+                        resolve(data);
+                    }
+                }
+            });
+
+            assert(con !== null, "consumer did not connect");
+            assert(typeof con.set === "function", "consumer set unavailable");
+            assert(typeof con.send === "function", "consumer send unavailable");
+            assert(typeof con.close === "function", "consumer close unavailable");
+        });
+
+        await test("live transport setters", async () => {
+            const stun = "stun:127.0.0.1:9";
+            const turn = "turn:127.0.0.1:9?transport=udp";
+
+            await pub.set("stun", stun);
+            await con.set("stun", stun);
+            await pub.set("turn", {
+                url: turn,
+                user: "temporary-user-a",
+                pass: "temporary-pass-a"
+            });
+            await con.set("turn", {
+                url: turn,
+                user: "temporary-user-a",
+                pass: "temporary-pass-a"
+            });
+            await pub.set("turn", {
+                url: turn,
+                user: "temporary-user-b",
+                pass: "temporary-pass-b"
+            });
+            await con.set("turn", {
+                url: turn,
+                user: "temporary-user-b",
+                pass: "temporary-pass-b"
+            });
+        });
+
+        await test("consumer -> publisher", async () => {
+            const received = new Promise(resolve => {
+                const started = Date.now();
+                const timer = setInterval(() => {
+                    if (publisherInput !== null) {
+                        clearInterval(timer);
+                        resolve(publisherInput.data);
+                        return;
+                    }
+                    if (Date.now() - started >= 5000) {
+                        clearInterval(timer);
+                        resolve(null);
+                    }
+                }, 20);
+            });
+
+            con.send("ping");
+            const data = await received;
+            assert(data === "ping", `publisher received ${String(data)}`);
+        });
+
+        await test("publisher -> consumer", async () => {
+            const reply = new Promise(resolve => {
+                consumerReplyResolve = resolve;
+                setTimeout(() => {
+                    if (consumerReplyResolve) {
+                        consumerReplyResolve = null;
+                        resolve(null);
+                    }
+                }, 5000);
+            });
+
+            assert(publisherClient !== null, "publisher client unavailable");
+            publisherClient.respond("reply");
+            const data = await reply;
+            assert(data === "reply", `consumer received ${String(data)}`);
+        });
+
+        await test("consumer close", async () => {
+            await con.close();
+            con = null;
+        });
+
+        await test("publisher deregister", async () => {
+            await pub.close();
+            pub = null;
+
+            const response = await fetch(index, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({version: 0, op: "lookup", id}),
+                cache: "no-store"
+            });
+            const body = await response.json();
+            assert(response.status === 404, `HTTP ${response.status}`);
+            assert(body && body.error === "not_found", "publisher still registered");
+        });
+    } catch (error) {
+        if (con) {
+            try {
+                await con.close();
+            } catch (closeError) {
+                // Best-effort cleanup.
+            }
+        }
+        if (pub) {
+            try {
+                await pub.close();
+            } catch (closeError) {
+                // Best-effort cleanup.
+            }
+        }
+    }
+
+    const summary = document.createElement("div");
+    summary.textContent = `\n${passed}/${passed + failed} passed`;
+    output.appendChild(summary);
+})();
+</script>
+</body>
+</html>
