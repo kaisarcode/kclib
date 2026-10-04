@@ -37,7 +37,6 @@ typedef struct redp2p redp2p_t;
 #define REDP2P_PORT_DEFAULT KC_REDP2P_PORT_DEFAULT
 #define REDP2P_PROTO_TCP KC_REDP2P_TCP
 #define REDP2P_PROTO_UDP KC_REDP2P_UDP
-#define REDP2P_PROTO_RTC 3
 
 #define REDP2P_ADDR_MAX 47
 #define REDP2P_BUF 4096
@@ -135,10 +134,7 @@ typedef struct json_object_t JSON_Object;
 #define REDP2P_CTRL_SESSION_MAX    63
 #define REDP2P_HTTP_LINE_MAX      256
 #define REDP2P_HTTP_HEADERS_MAX    32
-#define REDP2P_HTTP_BODY_MAX     65536
-#define REDP2P_RTC_SDP_MAX       49152
-#define REDP2P_RTC_CONNECTION_HEX 32
-#define REDP2P_RTC_CAPABILITY_HEX 64
+#define REDP2P_HTTP_BODY_MAX     REDP2P_BUF
 #define REDP2P_HTTP_TIMEOUT_S       5
 #define REDP2P_HTTP_BUF_MAX (REDP2P_HTTP_LINE_MAX * REDP2P_HTTP_HEADERS_MAX + \
     REDP2P_HTTP_BODY_MAX + 128)
@@ -166,17 +162,6 @@ typedef struct {
     int n_candidates;
     uint64_t ts;
 } redp2p_pending_call_t;
-
-/** Stores one temporary WebRTC signaling exchange. */
-typedef struct {
-    char connection[REDP2P_RTC_CONNECTION_HEX + 1];
-    char publisher_id[REDP2P_ID_MAX + 1];
-    unsigned char capability_hash[32];
-    char *offer_sdp;
-    char *answer_sdp;
-    uint64_t created_at;
-    uint64_t expires_at;
-} redp2p_rtc_pending_t;
 
 /**
  * Stores one in-flight index HTTP connection and its partial request buffer.
@@ -286,9 +271,6 @@ struct redp2p {
     redp2p_pending_call_t *pending_calls;
     size_t pending_calls_cap;
     int n_pending_calls;
-    redp2p_rtc_pending_t *rtc_pending;
-    size_t rtc_pending_cap;
-    int n_rtc_pending;
     size_t max_consumers_per_publisher;
     _Atomic int stop_requested;
     redp2p_fd_t wake_write_fd;
