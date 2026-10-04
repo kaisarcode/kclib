@@ -20,6 +20,15 @@ if(NOT EXISTS "${LIBDATACHANNEL_DIR}/CMakeLists.txt")
         "Invalid LIBDATACHANNEL_DIR: ${LIBDATACHANNEL_DIR}")
 endif()
 
+foreach(RTC_LIBDATACHANNEL_DEP plog usrsctp libjuice)
+    if(NOT EXISTS
+        "${LIBDATACHANNEL_DIR}/deps/${RTC_LIBDATACHANNEL_DEP}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "libdatachannel submodules are not initialized. Run: "
+            "cd ${LIBDATACHANNEL_DIR} && git submodule update --init --recursive")
+    endif()
+endforeach()
+
 set(RTC_TEST_EXTERNAL_ARTIFACTS OFF)
 if(RTC_BUILD_TESTS AND RTC_TEST_SHARED_LIBRARY)
     set(RTC_TEST_EXTERNAL_ARTIFACTS ON)
