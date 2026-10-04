@@ -55,8 +55,7 @@ class Redp2pIndex
     public const MAX_PENDING_CALLS_PER_PUBLISHER = 32;
     public const MAX_CONSUMERS_PER_PUBLISHER = self::MAX_PENDING_CALLS_PER_PUBLISHER;
     public const PENDING_TTL_S = 30;
-    public const BODY_MAX = 65536;
-    public const MAX_SDP = 49152;
+    public const BODY_MAX = 4096;
     public const DEFAULT_TTL_S = 120;
 
     public const CANDIDATE_TYPES = ['host', 'observed', 'relay', 'srflx'];
@@ -123,19 +122,13 @@ class Redp2pIndex
 
         $req = json_decode($body);
         if (!($req instanceof \stdClass)) {
-            return $bodySize > 4096
-                ? $this->httpError(413, 'Payload Too Large')
-                : $this->jsonError(400, 'bad_request');
+            return $this->jsonError(400, 'bad_request');
         }
         if ($this->hasDuplicateTopKeys($body)) {
             return $this->jsonError(400, 'bad_request');
         }
         if (!$this->hasString($req, 'op')) {
             return $this->jsonError(400, 'bad_request');
-        }
-        if ($bodySize > 4096 && $req->op !== 'connect' &&
-            $req->op !== 'answer') {
-            return $this->httpError(413, 'Payload Too Large');
         }
 
         try {
@@ -156,14 +149,6 @@ class Redp2pIndex
                     return $this->handlePunchReq($req, $peerAddress);
                 case 'punch_poll':
                     return $this->handlePunchPoll($req);
-                case 'connect':
-                    return $this->handleRtcConnect($req, $peerAddress);
-                case 'poll':
-                    return property_exists($req, 'id')
-                        ? $this->handleRtcPublisherPoll($req)
-                        : $this->handleRtcConsumerPoll($req);
-                case 'answer':
-                    return $this->handleRtcAnswer($req);
                 default:
                     return $this->jsonError(400, 'bad_request');
             }
@@ -431,9 +416,6 @@ class Redp2pIndex
         if ($result < 0) {
             return $this->jsonError(400, 'invalid_id');
         }
-        if (property_exists($req, 'transport') && $req->transport === 'rtc') {
-            return $this->handleRtcRegister($req, $id);
-        }
         $nonce = $this->requireHex($req, 'nonce', 64);
         $mac = $this->requireHex($req, 'mac', 64);
         $solution = $this->requireHex($req, 'pow_solution', 16);
@@ -544,24 +526,6 @@ class Redp2pIndex
             return $this->jsonError(404, 'not_found');
         }
 
-        if ($this->publisherTransport($stored) === 'rtc') {
-            $expected = $this->simpleControlProof(
-                (string)$stored['key'], 'heartbeat', $id, $seq
-            );
-            if ($seq <= (int)$stored['seq'] || !hash_equals($expected, strtolower($proof))) {
-                return $this->jsonError(403, 'invalid_proof');
-            }
-            $up = $this->db->prepare(
-                'UPDATE redp2p_publishers SET seq = ?, last_seen = ?'
-                . ' WHERE id = ? AND seq < ?'
-            );
-            $up->execute([$seq, time(), $id, $seq]);
-            if ($up->rowCount() !== 1) {
-                return $this->jsonError(403, 'invalid_proof');
-            }
-            return $this->jsonOk();
-        }
-
         [$proto, $udpPort] = $this->requireProtoPort($req);
         if ($proto === null) {
             return $this->jsonError(400, 'bad_request');
@@ -613,14 +577,11 @@ class Redp2pIndex
         $response = [
             'id' => $id,
             'transport' => $transport,
+            'proto' => (int)$row['proto'],
+            'udp_port' => (int)$row['udp_port'],
+            'candidates' => $this->decodeCandidates((string)$row['candidates']),
             'last_seen' => (int)$row['last_seen'],
         ];
-        if ($transport !== 'rtc') {
-            $response['proto'] = (int)$row['proto'];
-            $response['udp_port'] = (int)$row['udp_port'];
-            $response['candidates'] =
-                $this->decodeCandidates((string)$row['candidates']);
-        }
         return $this->jsonOk($response);
     }
 
@@ -685,10 +646,6 @@ class Redp2pIndex
                 $seq), $proof)) {
             return $this->jsonError(403, 'invalid_proof');
         }
-        $pending = $this->db->prepare(
-            'DELETE FROM redp2p_rtc_pending WHERE publisher_id = ?'
-        );
-        $pending->execute([$id]);
         $st = $this->db->prepare(
             'DELETE FROM redp2p_publishers WHERE id = ? AND seq < ?'
         );
@@ -700,445 +657,7 @@ class Redp2pIndex
     }
 
     /**
-     * Registers one RTC publisher using the browser-safe registration form.
-     *
-     * @param \stdClass $req Parsed request object.
-     * @param string $id Validated publisher id.
-     * @return array<string, mixed> HTTP response.
-     */
-    private function handleRtcRegister(\stdClass $req, string $id): array
-    {
-        $nonce = $this->requireHex($req, 'nonce', 64);
-        $mac = $this->requireHex($req, 'mac', 64);
-        $solution = $this->requireLowerHex($req, 'pow_solution', 16);
-        $secret = $this->requireLowerHex($req, 'secret', 16);
-        $proof = $this->requireLowerHex($req, 'proof', 64);
-        $access = $this->requireLowerHex($req, 'access_proof', 64);
-        if (property_exists($req, 'access_proof') && $access === null) {
-            return $this->jsonError(400, 'bad_request');
-        }
-        $issuedAt = $this->requireTimestamp($req, 'issued_at');
-        $expiresAt = $this->requireTimestamp($req, 'expires_at');
-        if ($nonce === null || $mac === null || $solution === null ||
-            $secret === null || $proof === null || $issuedAt === null ||
-            $expiresAt === null) {
-            return $this->jsonError(400, 'bad_request');
-        }
-
-        $nonceRaw = $this->hexBytes($nonce, 32);
-        $macRaw = $this->hexBytes($mac, 32);
-        $solutionRaw = $this->hexBytes($solution, 8);
-        if ($nonceRaw === null || $macRaw === null || $solutionRaw === null) {
-            return $this->jsonError(400, 'bad_request');
-        }
-        if (!$this->verifyChallenge($nonceRaw, $issuedAt, $expiresAt, $macRaw) ||
-            !$this->verifyPow($nonceRaw, $issuedAt, $expiresAt, $id,
-                $solutionRaw)) {
-            return $this->jsonError(403, 'auth_failed');
-        }
-
-        $message = $this->rtcRegistrationMessage(
-            $nonceRaw, $issuedAt, $expiresAt, $id, $secret, $solutionRaw
-        );
-        $expected = hash_hmac('sha256', $message, $secret);
-        if (!hash_equals($expected, $proof)) {
-            return $this->jsonError(403, 'auth_failed');
-        }
-
-        $password = $this->getPass($id);
-        if ($password !== '' && ($access === null || !hash_equals(
-            $this->admissionProof($password, $message), hex2bin($access)))) {
-            return $this->jsonError(403, 'auth_failed');
-        }
-
-        $this->evictStale();
-        $added = $this->addRtcPublisher($id, $secret);
-        if ($added === 'exists') {
-            return $this->jsonError(409, 'already_registered');
-        }
-        if ($added === 'full') {
-            return $this->jsonError(503, 'table_full');
-        }
-        return $added === 'ok'
-            ? $this->jsonOk()
-            : $this->jsonError(500, 'internal');
-    }
-
-    /**
-     * Starts one RTC signaling connection.
-     *
-     * @param \stdClass $req Parsed request object.
-     * @param string|null $peerAddress Trusted HTTP source address.
-     * @return array<string, mixed> HTTP response.
-     */
-    private function handleRtcConnect(
-        \stdClass $req, ?string $peerAddress
-    ): array {
-        [$result, $id] = $this->requireId($req, 'id');
-        if ($result === 0) return $this->jsonError(400, 'bad_request');
-        if ($result < 0) return $this->jsonError(400, 'invalid_id');
-
-        $offer = property_exists($req, 'offer')
-            ? $this->rtcDescription($req->offer, 'offer') : null;
-        if ($offer === null || $peerAddress === null ||
-            !filter_var($peerAddress, FILTER_VALIDATE_IP)) {
-            return $this->jsonError(400, 'bad_request');
-        }
-
-        $lock = $this->beginPendingWrite();
-        $active = true;
-        try {
-            $publisher = $this->findPublisher($id, true);
-            if ($publisher === null ||
-                (int)$publisher['last_seen'] < time() - $this->ttl) {
-                $this->endPendingWrite($lock, true);
-                $active = false;
-                return $this->jsonError(404, 'not_found');
-            }
-            if ($this->publisherTransport($publisher) !== 'rtc') {
-                $this->endPendingWrite($lock, false);
-                $active = false;
-                return $this->jsonError(409, 'unsupported_transport');
-            }
-            if (!$this->allowPunchRate($peerAddress, $id, $publisher)) {
-                $this->endPendingWrite($lock, true);
-                $active = false;
-                return $this->jsonError(429, 'rate_limited');
-            }
-
-            $this->evictPending();
-            if ($this->pendingCountForPublisher($id) >= $this->maxConsumers) {
-                $this->endPendingWrite($lock, true);
-                $active = false;
-                return $this->jsonError(429, 'pending_limit_publisher');
-            }
-            if ($this->pendingCountGlobal() >= self::MAX_PENDING_CALLS_GLOBAL) {
-                $this->endPendingWrite($lock, true);
-                $active = false;
-                return $this->jsonError(429, 'pending_limit_global');
-            }
-
-            $connection = bin2hex(random_bytes(16));
-            $capability = bin2hex(random_bytes(32));
-            $expiresAt = time() + $this->pendingTtlS;
-            $insert = $this->db->prepare(
-                'INSERT INTO redp2p_rtc_pending'
-                . ' (connection_id, publisher_id, capability_hash, offer_json,'
-                . ' answer_json, created_at, expires_at)'
-                . ' VALUES (?, ?, ?, ?, NULL, ?, ?)'
-            );
-            $insert->execute([
-                $connection,
-                $id,
-                hash('sha256', $capability),
-                json_encode($offer, JSON_UNESCAPED_SLASHES),
-                time(),
-                $expiresAt,
-            ]);
-            $this->endPendingWrite($lock, true);
-            $active = false;
-            return $this->jsonOk([
-                'connection' => $connection,
-                'capability' => $capability,
-                'expires_at' => $expiresAt,
-            ]);
-        } catch (\Throwable $e) {
-            if ($active) $this->endPendingWrite($lock, false);
-            throw $e;
-        }
-    }
-
-    /**
-     * Returns unanswered RTC offers to one publisher.
-     *
-     * @param \stdClass $req Parsed request object.
-     * @return array<string, mixed> HTTP response.
-     */
-    private function handleRtcPublisherPoll(\stdClass $req): array
-    {
-        [$result, $id] = $this->requireId($req, 'id');
-        if ($result === 0) return $this->jsonError(400, 'bad_request');
-        if ($result < 0) return $this->jsonError(400, 'invalid_id');
-        $seq = $this->requireSequence($req);
-        $proof = $this->requireHex($req, 'proof', 64);
-        if ($seq === null || $proof === null) {
-            return $this->jsonError(400, 'bad_request');
-        }
-        $proof = strtolower($proof);
-
-        $lock = $this->beginPendingWrite();
-        $active = true;
-        try {
-            $this->evictStale();
-            $stored = $this->findPublisherSecret($id);
-            if ($stored === null) {
-                $this->endPendingWrite($lock, true);
-                $active = false;
-                return $this->jsonError(404, 'not_found');
-            }
-            if ($this->publisherTransport($stored) !== 'rtc' ||
-                $seq <= (int)$stored['seq'] || !hash_equals(
-                    $this->simpleControlProof(
-                        (string)$stored['key'], 'poll', $id, $seq
-                    ),
-                    $proof
-                )) {
-                $this->endPendingWrite($lock, false);
-                $active = false;
-                return $this->jsonError(403, 'invalid_proof');
-            }
-            $up = $this->db->prepare(
-                'UPDATE redp2p_publishers SET seq = ?, last_seen = ?'
-                . ' WHERE id = ? AND seq < ?'
-            );
-            $up->execute([$seq, time(), $id, $seq]);
-            if ($up->rowCount() !== 1) {
-                $this->endPendingWrite($lock, false);
-                $active = false;
-                return $this->jsonError(403, 'invalid_proof');
-            }
-
-            $this->evictPending();
-            $st = $this->db->prepare(
-                'SELECT connection_id, offer_json FROM redp2p_rtc_pending'
-                . ' WHERE publisher_id = ? AND answer_json IS NULL'
-                . ' AND expires_at >= ? ORDER BY created_at LIMIT '
-                . self::PUNCH_POLL_MAX
-            );
-            $st->execute([$id, time()]);
-            $connections = [];
-            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $offer = json_decode((string)$row['offer_json'], true);
-                $connections[] = [
-                    'connection' => (string)$row['connection_id'],
-                    'offer' => $offer,
-                ];
-            }
-            $this->endPendingWrite($lock, true);
-            $active = false;
-            return $this->jsonOk(['connections' => $connections], false);
-        } catch (\Throwable $e) {
-            if ($active) $this->endPendingWrite($lock, false);
-            throw $e;
-        }
-    }
-
-    /**
-     * Stores one RTC answer from a publisher.
-     *
-     * @param \stdClass $req Parsed request object.
-     * @return array<string, mixed> HTTP response.
-     */
-    private function handleRtcAnswer(\stdClass $req): array
-    {
-        [$result, $id] = $this->requireId($req, 'id');
-        if ($result === 0) return $this->jsonError(400, 'bad_request');
-        if ($result < 0) return $this->jsonError(400, 'invalid_id');
-        $seq = $this->requireSequence($req);
-        $proof = $this->requireHex($req, 'proof', 64);
-        $connection = property_exists($req, 'connection')
-            ? $this->requireLowerHex($req, 'connection', 32) : null;
-        $answer = property_exists($req, 'answer')
-            ? $this->rtcDescription($req->answer, 'answer') : null;
-        if ($seq === null || $proof === null || $connection === null ||
-            $answer === null) {
-            return $this->jsonError(400, 'bad_request');
-        }
-        $proof = strtolower($proof);
-
-        $digest = hash('sha256', $answer['type'] . "\n" . $answer['sdp']);
-        $lock = $this->beginPendingWrite();
-        $active = true;
-        try {
-            $this->evictStale();
-            $stored = $this->findPublisherSecret($id);
-            if ($stored === null) {
-                $this->endPendingWrite($lock, true);
-                $active = false;
-                return $this->jsonError(404, 'not_found');
-            }
-            if ($this->publisherTransport($stored) !== 'rtc' ||
-                $seq <= (int)$stored['seq'] || !hash_equals(
-                    $this->simpleControlProof(
-                        (string)$stored['key'], 'answer', $id, $seq,
-                        [$connection, $digest]
-                    ),
-                    $proof
-                )) {
-                $this->endPendingWrite($lock, false);
-                $active = false;
-                return $this->jsonError(403, 'invalid_proof');
-            }
-
-            $up = $this->db->prepare(
-                'UPDATE redp2p_rtc_pending SET answer_json = ?'
-                . ' WHERE connection_id = ? AND publisher_id = ?'
-                . ' AND answer_json IS NULL AND expires_at >= ?'
-            );
-            $up->execute([
-                json_encode($answer, JSON_UNESCAPED_SLASHES),
-                $connection,
-                $id,
-                time(),
-            ]);
-            if ($up->rowCount() !== 1) {
-                $this->endPendingWrite($lock, false);
-                $active = false;
-                return $this->jsonError(404, 'not_found');
-            }
-
-            $publisherUpdate = $this->db->prepare(
-                'UPDATE redp2p_publishers SET seq = ?, last_seen = ?'
-                . ' WHERE id = ? AND seq < ?'
-            );
-            $publisherUpdate->execute([$seq, time(), $id, $seq]);
-            if ($publisherUpdate->rowCount() !== 1) {
-                $this->endPendingWrite($lock, false);
-                $active = false;
-                return $this->jsonError(403, 'invalid_proof');
-            }
-            $this->endPendingWrite($lock, true);
-            $active = false;
-            return $this->jsonOk();
-        } catch (\Throwable $e) {
-            if ($active) $this->endPendingWrite($lock, false);
-            throw $e;
-        }
-    }
-
-    /**
-     * Polls one RTC connection using its consumer capability.
-     *
-     * @param \stdClass $req Parsed request object.
-     * @return array<string, mixed> HTTP response.
-     */
-    private function handleRtcConsumerPoll(\stdClass $req): array
-    {
-        $connection = property_exists($req, 'connection')
-            ? $this->requireLowerHex($req, 'connection', 32) : null;
-        $capability = property_exists($req, 'capability')
-            ? $this->requireLowerHex($req, 'capability', 64) : null;
-        if ($connection === null || $capability === null) {
-            return $this->jsonError(400, 'bad_request');
-        }
-
-        $this->evictPending();
-        $st = $this->db->prepare(
-            'SELECT capability_hash, answer_json FROM redp2p_rtc_pending'
-            . ' WHERE connection_id = ? AND expires_at >= ?'
-        );
-        $st->execute([$connection, time()]);
-        $row = $st->fetch(PDO::FETCH_ASSOC);
-        if ($row === false) {
-            return $this->jsonError(404, 'not_found');
-        }
-        if (!hash_equals((string)$row['capability_hash'],
-            hash('sha256', $capability))) {
-            return $this->jsonError(403, 'auth_failed');
-        }
-
-        $answer = $row['answer_json'] === null
-            ? null : json_decode((string)$row['answer_json'], true);
-        if ($answer !== null) {
-            $del = $this->db->prepare(
-                'DELETE FROM redp2p_rtc_pending WHERE connection_id = ?'
-            );
-            $del->execute([$connection]);
-        }
-        return $this->jsonOk(['answer' => $answer], false);
-    }
-
-    /**
-     * Parses one RTC session description.
-     *
-     * @param mixed $value Description value.
-     * @param string $type Required description type.
-     * @return array{type:string,sdp:string}|null Valid description.
-     */
-    private function rtcDescription(mixed $value, string $type): ?array
-    {
-        if (!($value instanceof \stdClass) || !property_exists($value, 'type') ||
-            !property_exists($value, 'sdp') || $value->type !== $type ||
-            !is_string($value->sdp) || $value->sdp === '' ||
-            strlen($value->sdp) > self::MAX_SDP) {
-            return null;
-        }
-        return ['type' => $type, 'sdp' => $value->sdp];
-    }
-
-    /**
-     * Builds the RTC registration canonical bytes.
-     *
-     * @return string Canonical registration payload.
-     */
-    private function rtcRegistrationMessage(
-        string $nonce, int $issuedAt, int $expiresAt, string $id,
-        string $secret, string $solution
-    ): string {
-        return 'REDP2P-WEB-REGISTER' . $nonce . $this->u64be($issuedAt) .
-            $this->u64be($expiresAt) . pack('n', strlen($id)) . $id .
-            pack('n', strlen($secret)) . $secret . $solution;
-    }
-
-    /**
-     * Computes the simple sequenced publisher control proof used by RTC.
-     *
-     * @param array<int,string> $extra Extra canonical fields.
-     * @return string Lowercase hexadecimal HMAC.
-     */
-    private function simpleControlProof(
-        string $secret, string $op, string $id, int $sequence,
-        array $extra = []
-    ): string {
-        return hash_hmac(
-            'sha256',
-            implode("\n", [$op, $id, (string)$sequence, ...$extra]),
-            $secret
-        );
-    }
-
-    /**
-     * Adds one RTC publisher under the common seat policy.
-     *
-     * @return string ok, exists, or full.
-     */
-    private function addRtcPublisher(string $id, string $secret): string
-    {
-        $now = time();
-        $st = $this->db->prepare(
-            'SELECT 1 FROM redp2p_publishers WHERE id = ?'
-        );
-        $st->execute([$id]);
-        if ($st->fetch()) return 'exists';
-
-        if ($this->seats !== null) {
-            $st = $this->db->query('SELECT COUNT(*) FROM redp2p_publishers');
-            if ((int)$st->fetchColumn() >= $this->seats) return 'full';
-            if (!isset($this->vips[$id])) {
-                $nonVip = $this->countNonVip();
-                $cap = max(0, $this->seats - count($this->vips));
-                if ($nonVip >= $cap) return 'full';
-            }
-        }
-
-        $ins = $this->db->prepare(
-            'INSERT INTO redp2p_publishers'
-            . ' (id, key, seq, transport, proto, udp_port, candidates,'
-            . ' last_seen) VALUES (?, ?, 0, ?, 0, 0, ?, ?)'
-        );
-        try {
-            $ins->execute([$id, $secret, 'rtc', '[]', $now]);
-        } catch (\PDOException $e) {
-            $state = isset($e->errorInfo[0]) ? (string)$e->errorInfo[0]
-                : (string)$e->getCode();
-            if (strncmp($state, '23', 2) === 0) return 'exists';
-            throw $e;
-        }
-        return 'ok';
-    }
-
-    /**
-     * Counts all pending connection work for one publisher.
+     * Counts pending connection work for one publisher.
      * @param string $id Publisher identifier.
      * @return int Pending connection count.
      */
@@ -1148,12 +667,7 @@ class Redp2pIndex
             'SELECT COUNT(*) FROM redp2p_pending_calls WHERE target_id = ?'
         );
         $native->execute([$id]);
-        $rtc = $this->db->prepare(
-            'SELECT COUNT(*) FROM redp2p_rtc_pending'
-            . ' WHERE publisher_id = ? AND expires_at >= ?'
-        );
-        $rtc->execute([$id, time()]);
-        return (int)$native->fetchColumn() + (int)$rtc->fetchColumn();
+        return (int)$native->fetchColumn();
     }
 
     /**
@@ -1162,14 +676,9 @@ class Redp2pIndex
      */
     private function pendingCountGlobal(): int
     {
-        $native = (int)$this->db->query(
+        return (int)$this->db->query(
             'SELECT COUNT(*) FROM redp2p_pending_calls'
         )->fetchColumn();
-        $rtc = $this->db->prepare(
-            'SELECT COUNT(*) FROM redp2p_rtc_pending WHERE expires_at >= ?'
-        );
-        $rtc->execute([time()]);
-        return $native + (int)$rtc->fetchColumn();
     }
 
     /**
@@ -1307,11 +816,6 @@ class Redp2pIndex
                 return $this->jsonError(429, 'rate_limited');
             }
             $this->evictPending();
-            if ($this->publisherTransport($targetRow) === 'rtc') {
-                $this->endPendingWrite($lock, false);
-                $lockActive = false;
-                return $this->jsonError(409, 'unsupported_transport');
-            }
             if ($this->pendingCountForPublisher($targetId) >=
                 $this->maxConsumers) {
                 $this->endPendingWrite($lock, true);
@@ -1704,12 +1208,12 @@ class Redp2pIndex
      * Returns the normalized transport for one stored publisher.
      *
      * @param array<string, mixed> $row Publisher row.
-     * @return string tcp, udp, or rtc.
+     * @return string tcp or udp.
      */
     private function publisherTransport(array $row): string
     {
         $stored = isset($row['transport']) ? (string)$row['transport'] : '';
-        if ($stored === 'rtc' || $stored === 'tcp' || $stored === 'udp') {
+        if ($stored === 'tcp' || $stored === 'udp') {
             return $stored;
         }
         return (int)($row['proto'] ?? 0) === 1 ? 'tcp' : 'udp';
@@ -1735,10 +1239,6 @@ class Redp2pIndex
     {
         $st = $this->db->prepare('DELETE FROM redp2p_pending_calls WHERE ts < ?');
         $st->execute([time() - $this->pendingTtlS]);
-        $rtc = $this->db->prepare(
-            'DELETE FROM redp2p_rtc_pending WHERE expires_at < ?'
-        );
-        $rtc->execute([time()]);
     }
 
     /**
@@ -1798,17 +1298,6 @@ class Redp2pIndex
             . ')'
         );
         $this->db->exec(
-            'CREATE TABLE IF NOT EXISTS redp2p_rtc_pending ('
-            . ' connection_id CHAR(32) NOT NULL PRIMARY KEY'
-            . ', publisher_id VARCHAR(63) NOT NULL'
-            . ', capability_hash CHAR(64) NOT NULL'
-            . ', offer_json TEXT NOT NULL'
-            . ', answer_json TEXT NULL'
-            . ', created_at INTEGER NOT NULL'
-            . ', expires_at INTEGER NOT NULL'
-            . ')'
-        );
-        $this->db->exec(
             'CREATE TABLE IF NOT EXISTS redp2p_meta ('
             . ' name VARCHAR(32) NOT NULL PRIMARY KEY'
             . ', value TEXT NULL'
@@ -1829,17 +1318,6 @@ class Redp2pIndex
         try {
             $this->db->exec(
                 'CREATE INDEX IF NOT EXISTS redp2p_pending_calls_target ON redp2p_pending_calls (target_id)'
-            );
-        } catch (\PDOException $e) {
-        }
-        try {
-            $this->db->exec(
-                'CREATE INDEX IF NOT EXISTS redp2p_rtc_pending_publisher'
-                . ' ON redp2p_rtc_pending (publisher_id)'
-            );
-            $this->db->exec(
-                'CREATE INDEX IF NOT EXISTS redp2p_rtc_pending_expiry'
-                . ' ON redp2p_rtc_pending (expires_at)'
             );
         } catch (\PDOException $e) {
         }
