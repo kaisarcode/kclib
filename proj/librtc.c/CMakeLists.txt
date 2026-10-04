@@ -67,6 +67,20 @@ set(RTC_CORE_SOURCES
 )
 
 if(NOT RTC_TEST_EXTERNAL_ARTIFACTS)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import jsonschema"
+        RESULT_VARIABLE RTC_MBEDTLS_PYTHON_RESULT
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+    if(NOT RTC_MBEDTLS_PYTHON_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "Mbed TLS Python build requirements are missing. Run: "
+            "${Python3_EXECUTABLE} -m pip install --user -r "
+            "${MBEDTLS_DIR}/scripts/basic.requirements.txt")
+    endif()
+
     set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
     set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
     set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "" FORCE)
