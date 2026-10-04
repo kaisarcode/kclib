@@ -1,6 +1,7 @@
 # libredp2p.c - Peer-to-Peer Transport
 
-`libredp2p.c` connects applications directly through peer-to-peer transport.
+`libredp2p.c` connects applications directly through native peer-to-peer
+transport.
 
 ---
 
@@ -80,25 +81,6 @@ even when direct connectivity would have worked. A TURN server must be
 configured, and publisher or consumer setup fails if a relay candidate cannot
 be established. The index is unaffected.
 
-### WebRTC use
-
-Native applications use the C library and native TCP/UDP networking.
-
-The JavaScript implementation under `imp/` uses WebRTC, but it connects through
-the same REDP2P index and uses the same publisher IDs. Its application-facing
-model is the same: publishers observe established clients and receive their
-data, while consumers return connected channels that can send and receive.
-
-Browsers provide the Web APIs expected by this implementation directly. Other
-JavaScript runtimes can use the same files when their host environment exposes
-compatible Web APIs.
-
-For Node.js or QuickJS-ng, you'll need to provide a small runtime adapter before
-loading the REDP2P JavaScript implementation. The adapter should supply any
-missing host capabilities, such as WebRTC peer connections, `fetch`, Web Crypto,
-`TextEncoder`/`TextDecoder`, and timers. REDP2P itself does not depend on a
-specific external module; only a compatible host interface is required.
-
 ---
 
 ## Build
@@ -124,21 +106,13 @@ candidate handling, and simulated relay behavior inside the test harness. They
 are not a substitute for a black-box deployment test with separate index,
 publisher, and consumer processes.
 
+The PHP index contract is covered by `tests/test.php` when its optional PHP test
+dependencies are available.
+
 The native black-box REDP2P process integration lives in `kccli`, where the
 real CLI is statically linked against this library. Its test starts independent
 `redp2p idx`, `redp2p pub`, and `redp2p con` processes and verifies real
 TCP/HTTP and UDP traffic through the consumer-facing port.
-
-The browser RTC integration test is independent from the native build:
-
-```bash
-./tests/test.sh
-```
-
-The script first runs the PHP index contract tests, then starts a temporary
-SQLite-backed PHP index on `127.0.0.1:8088` and serves the browser integration
-page at `http://127.0.0.1:8088/tests/test.html`. Set `TEST_HOST` or `TEST_PORT`
-to override the local endpoint. Stop it with Ctrl+C.
 
 To run through Wine:
 
