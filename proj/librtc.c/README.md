@@ -51,13 +51,16 @@ Clone the dependencies in a vendor directory:
 mkdir -p "$VENDOR"
 cd "$VENDOR"
 git clone --recursive https://github.com/paullouisageneau/libdatachannel.git
-git clone https://github.com/Mbed-TLS/mbedtls.git
+git clone --recursive https://github.com/Mbed-TLS/mbedtls.git
 ```
 
-For an existing libdatachannel checkout, initialize its submodules if needed:
+For existing checkouts, initialize all nested submodules if needed:
 
 ```bash
 cd "$VENDOR/libdatachannel"
+git submodule update --init --recursive
+
+cd "$VENDOR/mbedtls"
 git submodule update --init --recursive
 ```
 
