@@ -62,6 +62,13 @@ cd /path/to/mbedtls
 git submodule update --init --recursive
 ```
 
+Mbed TLS development checkouts generate some source files during the build and
+require the Python packages listed by that checkout. Install them with:
+
+```bash
+python3 -m pip install --user -r /path/to/mbedtls/scripts/basic.requirements.txt
+```
+
 Set the source checkout paths:
 
 ```bash
@@ -125,6 +132,7 @@ make aarch64/macos
 - `make` (GNU Make)
 - `cmake` >= 3.14
 - `ninja`
+- Python 3 with the Mbed TLS build requirements
 - C11 and C++17 compilers for the target
 - a local `libdatachannel` source checkout referenced by `LIBDATACHANNEL_DIR`
 - a local Mbed TLS source checkout referenced by `MBEDTLS_DIR`
