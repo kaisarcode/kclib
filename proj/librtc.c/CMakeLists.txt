@@ -110,13 +110,11 @@ if(NOT RTC_TEST_EXTERNAL_ARTIFACTS)
                 "Mbed TLS source tree does not expose a crypto target")
         endif()
 
-        add_library(rtc_mbedtls INTERFACE)
-        target_link_libraries(rtc_mbedtls INTERFACE
-            ${RTC_MBEDTLS_TLS_TARGET}
-            ${RTC_MBEDTLS_X509_TARGET}
-            ${RTC_MBEDTLS_CRYPTO_TARGET}
+        add_library(MbedTLS::MbedTLS INTERFACE IMPORTED GLOBAL)
+        set_property(TARGET MbedTLS::MbedTLS PROPERTY
+            INTERFACE_LINK_LIBRARIES
+            "${RTC_MBEDTLS_TLS_TARGET};${RTC_MBEDTLS_X509_TARGET};${RTC_MBEDTLS_CRYPTO_TARGET}"
         )
-        add_library(MbedTLS::MbedTLS ALIAS rtc_mbedtls)
     endif()
 
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
