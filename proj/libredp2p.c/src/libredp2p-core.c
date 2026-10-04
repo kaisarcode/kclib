@@ -80,13 +80,6 @@ static const uint32_t redp2p_sha256_k[64] = {
 #define REDP2P_SHA256_s0(x) (REDP2P_SHA256_ROR(x, 7) ^ REDP2P_SHA256_ROR(x, 18) ^ ((x) >> 3))
 #define REDP2P_SHA256_s1(x) (REDP2P_SHA256_ROR(x, 17) ^ REDP2P_SHA256_ROR(x, 19) ^ ((x) >> 10))
 
-#ifdef REDP2P_TEST_RANDOM
-static unsigned char redp2p_test_random_bytes[256];
-static size_t redp2p_test_random_len;
-static size_t redp2p_test_random_pos;
-static int redp2p_test_random_fail;
-#endif
-
 /**
  * Returns the textual name for one local candidate type.
  * @param type Candidate type.
@@ -923,18 +916,6 @@ uint64_t redp2p_now_s(void) {
  * @return 0 on success, -1 on error.
  */
 int redp2p_fill_random(unsigned char *buf, size_t len) {
-#ifdef REDP2P_TEST_RANDOM
-    if (redp2p_test_random_fail) return -1;
-    if (redp2p_test_random_len > 0) {
-        size_t i;
-        for (i = 0; i < len; i++) {
-            buf[i] = redp2p_test_random_bytes[redp2p_test_random_pos %
-                redp2p_test_random_len];
-            redp2p_test_random_pos++;
-        }
-        return 0;
-    }
-#endif
 #ifdef _WIN32
     return BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)len,
         BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
@@ -957,39 +938,6 @@ int redp2p_fill_random(unsigned char *buf, size_t len) {
     return 0;
 #endif
 }
-
-#ifdef REDP2P_TEST_RANDOM
-/**
- * Configures deterministic random bytes for test builds.
- * @param bytes Byte stream to repeat.
- * @param len   Byte stream length.
- * @return None.
- */
-void redp2p_test_random_set(const unsigned char *bytes, size_t len) {
-    if (!bytes || len == 0) {
-        redp2p_test_random_len = 0;
-        redp2p_test_random_pos = 0;
-        return;
-    }
-    if (len > sizeof(redp2p_test_random_bytes))
-        len = sizeof(redp2p_test_random_bytes);
-    memcpy(redp2p_test_random_bytes, bytes, len);
-    redp2p_test_random_len = len;
-    redp2p_test_random_pos = 0;
-    redp2p_test_random_fail = 0;
-}
-#endif
-
-#ifdef REDP2P_TEST_RANDOM
-/**
- * Configures random-source failure for test builds.
- * @param fail Non-zero forces failure.
- * @return None.
- */
-void redp2p_test_random_set_fail(int fail) {
-    redp2p_test_random_fail = fail ? 1 : 0;
-}
-#endif
 
 /**
  * Decodes one hex nibble.
@@ -2019,31 +1967,3 @@ void redp2p_append_candidates(JSON_Object *obj,
     }
     json_object_set_value(obj, field, array_value);
 }
-
-#ifdef REDP2P_TEST_RANDOM
-/**
- * Generates one register challenge nonce through the test-visible path.
- * @param hex Output hex nonce.
- * @return 1 on success, 0 on error.
- */
-int redp2p_test_pow_nonce(char hex[17]) {
-    unsigned char nonce[8];
-
-    if (redp2p_fill_random(nonce, sizeof(nonce)) != 0) return 0;
-    return redp2p_hex_encode(nonce, sizeof(nonce), hex, 17);
-}
-#endif
-
-#ifdef REDP2P_TEST_RANDOM
-/**
- * Generates one UDP session identifier through the test-visible path.
- * @param hex Output hex session identifier.
- * @return 1 on success, 0 on error.
- */
-int redp2p_test_udp_session_id(char hex[17]) {
-    unsigned char session_id[8];
-
-    if (redp2p_fill_random(session_id, sizeof(session_id)) != 0) return 0;
-    return redp2p_hex_encode(session_id, sizeof(session_id), hex, 17);
-}
-#endif

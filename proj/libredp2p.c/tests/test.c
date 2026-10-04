@@ -4956,7 +4956,6 @@ static int case_redp2p_persisted_deregister(void) {
     char names[8][128];
     char paths[8][768];
     char key_data[64];
-    char legacy_path[768];
     char blocked_home[640];
     char long_home[900];
     size_t key_len;
@@ -5121,29 +5120,6 @@ static int case_redp2p_persisted_deregister(void) {
     fail += expect_int("shutdown key list", 0,
         test_key_list(names, 8, &count));
     fail += expect_int("successful shutdown deletes scoped key", 0, count);
-
-    if (test_publisher_start(&publisher, "legacy",
-        (unsigned short)(base + 1U), (unsigned short)(base + 6U)) != 0)
-        goto cleanup;
-    publisher_started = 1;
-    if (test_key_list(names, 8, &count) != 0 || count != 1 ||
-        test_key_path(names[0], paths[0], sizeof(paths[0])) != 0 ||
-        test_file_read(paths[0], key_data, sizeof(key_data), &key_len) != 0 ||
-        test_key_path("legacy", legacy_path, sizeof(legacy_path)) != 0)
-    {
-        fail++;
-        goto cleanup;
-    }
-    fail += expect_int("create legacy key", 0,
-        test_file_write(legacy_path, key_data, key_len));
-    fail += expect_int("remove scoped key for migration", 0, remove(paths[0]));
-    fail += expect_int("legacy deregistration", REDP2P_OK,
-        redp2p_test_deregister_persisted_publisher(client, TEST_HOST, (unsigned short)(base + 1U),
-            "legacy"));
-    fail += expect_true("successful legacy lookup removes legacy key",
-        !test_path_exists(legacy_path));
-    test_publisher_stop(&publisher);
-    publisher_started = 0;
 
 #ifdef _WIN32
     test_setenv("USERPROFILE", test_home_path);

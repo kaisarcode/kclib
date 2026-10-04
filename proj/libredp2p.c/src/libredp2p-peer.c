@@ -29,8 +29,6 @@
 #include <sys/time.h>
 #endif
 
-#define REDP2P_PUNCH_ATTEMPTS   10
-#define REDP2P_PUNCH_INTERVAL_MS 200
 #define REDP2P_SESSION_MAGIC             0x50434b52u
 #define REDP2P_SESSION_VERSION           2u
 #define REDP2P_STREAM_SEND_WINDOW       64
@@ -81,75 +79,6 @@ typedef pthread_t redp2p_thread_t;
  * @return Socket address length, or 0 for unsupported families.
  */
 static socklen_t redp2p_sockaddr_len(const struct sockaddr_storage *addr);
-
-/**
- * Reports whether direct-punch tracing is enabled.
- * @return 1 when REDP2P_PUNCH_TRACE=1, otherwise 0.
- */
-static int redp2p_punch_trace_enabled(void)
-{
-    const char *value;
-
-    value = getenv("REDP2P_PUNCH_TRACE");
-    return value && strcmp(value, "1") == 0;
-}
-
-/**
- * Formats one socket endpoint for punch diagnostics.
- * @param addr Endpoint to format.
- * @param out Output text.
- * @param out_cap Output capacity.
- * @return None.
- */
-static void redp2p_punch_trace_addr(const struct sockaddr_storage *addr,
-    char *out, size_t out_cap)
-{
-    char host[INET6_ADDRSTRLEN];
-    unsigned short port;
-
-    if (!out || out_cap == 0) return;
-    snprintf(out, out_cap, "?");
-    if (!addr) return;
-    host[0] = '\0';
-    port = redp2p_sockaddr_port(addr);
-    if (addr->ss_family == AF_INET) {
-        if (!inet_ntop(AF_INET,
-            &((const struct sockaddr_in *)addr)->sin_addr,
-            host, sizeof(host)))
-            return;
-        snprintf(out, out_cap, "%s:%u", host, (unsigned)port);
-        return;
-    }
-    if (addr->ss_family == AF_INET6) {
-        if (!inet_ntop(AF_INET6,
-            &((const struct sockaddr_in6 *)addr)->sin6_addr,
-            host, sizeof(host)))
-            return;
-        snprintf(out, out_cap, "[%s]:%u", host, (unsigned)port);
-    }
-}
-
-/**
- * Writes one candidate to stderr when punch tracing is enabled.
- * @param label Diagnostic label.
- * @param candidate Candidate to print.
- * @return None.
- */
-static void redp2p_punch_trace_candidate(const char *label,
-    const redp2p_candidate_t *candidate)
-{
-    const char *type;
-
-    if (!redp2p_punch_trace_enabled() || !candidate) return;
-    if (candidate->type == REDP2P_CAND_SRFLX) type = "srflx";
-    else if (candidate->type == REDP2P_CAND_HOST) type = "host";
-    else if (candidate->type == REDP2P_CAND_OBSERVED) type = "observed";
-    else if (candidate->type == REDP2P_CAND_RELAY) type = "relay";
-    else type = "unknown";
-    fprintf(stderr, "[PUNCH] %s type=%s endpoint=%s:%u priority=%u\n",
-        label ? label : "candidate", type, candidate->addr,
-        (unsigned)candidate->port, candidate->priority);
-}
 
 /**
  * Shuts down the write side of one local stream-adapter socket.
@@ -2567,10 +2496,6 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
     {
         int error_code = redp2p_turn_error_code(rx, len);
 
-        if (redp2p_punch_trace_enabled())
-            fprintf(stderr,
-                "[PUNCH] turn-allocate-error code=%d authenticated=0\n",
-                error_code);
         if (!redp2p_turn_auth_challenge(allocation, rx, len) ||
             !ctx->turn_user[0])
         {
@@ -2601,11 +2526,6 @@ static int redp2p_turn_allocate(redp2p_t *ctx, redp2p_fd_t fd)
         {
             int error_code = redp2p_turn_error_code(rx, len);
 
-            if (redp2p_punch_trace_enabled())
-                fprintf(stderr,
-                    "[PUNCH] turn-allocate-error code=%d authenticated=1 "
-                    "attempt=%d\n",
-                    error_code, attempt + 1);
             if (!redp2p_turn_auth_challenge(allocation, rx, len)) {
                 status = redp2p_turn_allocate_error_status(error_code);
                 goto fail;
@@ -3195,17 +3115,6 @@ int redp2p_gather_candidates(redp2p_t *ctx, int udp_fd,
         }
     }
     if (!redp2p_normalize_candidates(out, out_count)) return REDP2P_ERROR;
-    if (redp2p_punch_trace_enabled()) {
-        char local_text[96];
-        int i;
-
-        local_text[0] = '\0';
-        redp2p_punch_trace_addr(&udp_sa, local_text, sizeof(local_text));
-        fprintf(stderr, "[PUNCH] gather fd=%d local=%s count=%d\n",
-            udp_fd, local_text, *out_count);
-        for (i = 0; i < *out_count; i++)
-            redp2p_punch_trace_candidate("local", &out[i]);
-    }
     if (!direct_enabled && *out_count == 0) {
         redp2p_set_error(ctx,
             "candidate gather: forced TURN produced no relay candidate");
@@ -3277,15 +3186,6 @@ static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
             sizeof(recv_buf) - 1, 0, &src_addr, &src_len, &via_turn);
         if (n == -2) continue;
         if (n > 0) {
-            if (redp2p_punch_trace_enabled()) {
-                char endpoint[96];
-
-                redp2p_punch_trace_addr(&src_addr, endpoint,
-                    sizeof(endpoint));
-                fprintf(stderr,
-                    "[PUNCH] recv source=%s bytes=%d via_turn=%d\n",
-                    endpoint, n, via_turn);
-            }
             char rx_sess[64] = {0};
             char rx_from[REDP2P_ID_MAX + 1] = {0};
             char rx_to[REDP2P_ID_MAX + 1] = {0};
@@ -3335,15 +3235,6 @@ static int redp2p_punch_wait_response(redp2p_t *ctx, int udp_fd,
                 }
                 *selected_addr = src_addr;
                 if (selected_via_turn) *selected_via_turn = via_turn;
-                if (redp2p_punch_trace_enabled()) {
-                    char endpoint[96];
-
-                    redp2p_punch_trace_addr(&src_addr, endpoint,
-                        sizeof(endpoint));
-                    fprintf(stderr,
-                        "[PUNCH] selected source=%s kind=%s\n",
-                        endpoint, is_ping ? "ping" : "pong");
-                }
                 return REDP2P_OK;
             }
             if (mismatched) (*mismatched)++;
@@ -3382,26 +3273,6 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
     int unsupported_count;
 
     if (selected_via_turn) *selected_via_turn = 0;
-    if (redp2p_punch_trace_enabled()) {
-        struct sockaddr_storage local_sa;
-        socklen_t local_len;
-        char local_text[96];
-        int c;
-
-        memset(&local_sa, 0, sizeof(local_sa));
-        local_len = sizeof(local_sa);
-        local_text[0] = '\0';
-        if (getsockname(udp_fd, (struct sockaddr *)&local_sa, &local_len) == 0)
-            redp2p_punch_trace_addr(&local_sa, local_text,
-                sizeof(local_text));
-        fprintf(stderr,
-            "[PUNCH] begin fd=%d local=%s session=%s self=%s peer=%s "
-            "remote_count=%d\n",
-            udp_fd, local_text, session_id, from_id, to_id,
-            remote_candidate_count);
-        for (c = 0; c < remote_candidate_count; c++)
-            redp2p_punch_trace_candidate("remote", &remote_candidates[c]);
-    }
     if (remote_candidate_count <= 0) {
         redp2p_set_error(ctx, "punch: no candidates");
         return REDP2P_ERROR;
@@ -3511,13 +3382,6 @@ int redp2p_punch_select(redp2p_t *ctx, int sweep_limit, int udp_fd,
                 return REDP2P_OK;
         }
     }
-    if (redp2p_punch_trace_enabled()) {
-        fprintf(stderr,
-            "[PUNCH] failed self=%s peer=%s sent=%d malformed=%d "
-            "mismatch=%d unsupported=%d deadline=%d\n",
-            from_id, to_id, sent_count, malformed_count, mismatch_count,
-            unsupported_count, redp2p_now_ms() >= deadline_ms ? 1 : 0);
-    }
     if (sent_count == 0) {
         redp2p_set_error(ctx, "punch: no valid peer candidates");
     } else if (malformed_count > 0) {
@@ -3595,28 +3459,3 @@ int redp2p_idx_query_publishers(
     redp2p_set_error(ctx, NULL);
     return REDP2P_OK;
 }
-
-#ifdef REDP2P_TEST_RANDOM
-/**
- * Generates one STUN transaction identifier through the test-visible path.
- * @param out Output transaction identifier.
- * @return 1 on success, 0 on error.
- */
-int redp2p_test_stun_gen_id(unsigned char out[12]) {
-    return redp2p_stun_gen_id(out);
-}
-#endif
-
-#ifdef REDP2P_TEST_RANDOM
-/**
- * Compares STUN transaction identifiers through the test-visible path.
- * @param expected Expected transaction identifier.
- * @param actual   Actual transaction identifier.
- * @return 1 when equal, 0 otherwise.
- */
-int redp2p_test_stun_id_matches(const unsigned char expected[12],
-const unsigned char actual[12])
-{
-    return memcmp(expected, actual, 12) == 0;
-}
-#endif
