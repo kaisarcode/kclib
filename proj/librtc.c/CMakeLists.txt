@@ -79,28 +79,43 @@ if(NOT RTC_TEST_EXTERNAL_ARTIFACTS)
     )
 
     if(NOT TARGET MbedTLS::MbedTLS)
-        if(NOT TARGET MbedTLS::mbedtls OR NOT TARGET MbedTLS::mbedx509)
+        if(TARGET MbedTLS::mbedtls)
+            set(RTC_MBEDTLS_TLS_TARGET MbedTLS::mbedtls)
+        elseif(TARGET mbedtls)
+            set(RTC_MBEDTLS_TLS_TARGET mbedtls)
+        else()
             message(FATAL_ERROR
-                "Mbed TLS source tree does not expose expected CMake targets")
+                "Mbed TLS source tree does not expose a TLS target")
         endif()
 
-        add_library(rtc_mbedtls INTERFACE)
-        target_link_libraries(rtc_mbedtls INTERFACE
-            MbedTLS::mbedtls
-            MbedTLS::mbedx509
-        )
+        if(TARGET MbedTLS::mbedx509)
+            set(RTC_MBEDTLS_X509_TARGET MbedTLS::mbedx509)
+        elseif(TARGET mbedx509)
+            set(RTC_MBEDTLS_X509_TARGET mbedx509)
+        else()
+            message(FATAL_ERROR
+                "Mbed TLS source tree does not expose an X.509 target")
+        endif()
 
         if(TARGET MbedTLS::tfpsacrypto)
-            target_link_libraries(rtc_mbedtls INTERFACE
-                MbedTLS::tfpsacrypto)
+            set(RTC_MBEDTLS_CRYPTO_TARGET MbedTLS::tfpsacrypto)
+        elseif(TARGET tfpsacrypto)
+            set(RTC_MBEDTLS_CRYPTO_TARGET tfpsacrypto)
         elseif(TARGET MbedTLS::mbedcrypto)
-            target_link_libraries(rtc_mbedtls INTERFACE
-                MbedTLS::mbedcrypto)
+            set(RTC_MBEDTLS_CRYPTO_TARGET MbedTLS::mbedcrypto)
+        elseif(TARGET mbedcrypto)
+            set(RTC_MBEDTLS_CRYPTO_TARGET mbedcrypto)
         else()
             message(FATAL_ERROR
                 "Mbed TLS source tree does not expose a crypto target")
         endif()
 
+        add_library(rtc_mbedtls INTERFACE)
+        target_link_libraries(rtc_mbedtls INTERFACE
+            ${RTC_MBEDTLS_TLS_TARGET}
+            ${RTC_MBEDTLS_X509_TARGET}
+            ${RTC_MBEDTLS_CRYPTO_TARGET}
+        )
         add_library(MbedTLS::MbedTLS ALIAS rtc_mbedtls)
     endif()
 
