@@ -182,7 +182,8 @@ build_project() {
 # @param target Logical kclib name or all.
 # @return 0 on success.
 main() {
-    local script_dir root_dir proj_dir target project_dir
+    local script_dir root_dir proj_dir target project_dir project_name
+    local failed_projects
 
     [ "$#" -eq 1 ] || {
         usage
@@ -200,10 +201,19 @@ main() {
     }
 
     if [ "$target" = "all" ]; then
+        failed_projects=""
         for project_dir in "$proj_dir"/lib*.c; do
             [ -d "$project_dir" ] || continue
-            build_project "$project_dir"
+            if ! build_project "$project_dir"; then
+                project_name=$(basename "$project_dir")
+                failed_projects="$failed_projects $project_name"
+            fi
         done
+
+        if [ -n "$failed_projects" ]; then
+            echo "error: failed projects:$failed_projects" >&2
+            return 1
+        fi
         return 0
     fi
 
