@@ -12,6 +12,8 @@ ROOT_DIR=$(dirname "$SCRIPT_DIR")
 PROJ_DIR="$ROOT_DIR/proj"
 DIST_DIR="$ROOT_DIR/dist"
 readonly EXCLUDED_PROJECTS=("liblibr.c")
+declare -A MANIFEST_SHA=()
+declare -A MANIFEST_COUNT=()
 
 # Prints command usage information.
 # @return 0 on success.
@@ -81,144 +83,94 @@ resolve_project() {
     return 1
 }
 
-# Computes the SHA-256 digest of one file.
-# @param file File path.
-# @return 0 on success; the digest is written to stdout.
-compute_sha256() {
-    local file="$1"
-
-    if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file" | awk '{print $1}'
-    elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$file" | awk '{print $1}'
-    else
-        openssl dgst -sha256 "$file" | awk '{print $NF}'
-    fi
-}
-
-# Writes the expected file list for one compiled target.
-# @param project_dir Project directory.
-# @param target_dir Compiled target directory.
-# @param output_file Destination list file.
+# Loads artifact checksums from the current distribution manifest.
 # @return 0 on success.
-write_target_file_list() {
-    local project_dir="$1"
-    local target_dir="$2"
-    local output_file="$3"
-    local project_name name
+load_manifest_state() {
+    local manifest sha path prefix
 
-    project_name=$(basename "$project_dir")
-    name=$(capability_name "$project_name")
+    MANIFEST_SHA=()
+    MANIFEST_COUNT=()
+    manifest="$DIST_DIR/manifest.json"
+    [ -f "$manifest" ] || return 0
 
-    {
-        find "$target_dir" -maxdepth 1 -type f \
-            -name "lib$name.*" \
-            ! -name "*.sync-conflict-*" \
-            -printf '%f\n'
-        printf 'lib%s.h\n' "$name"
-    } | LC_ALL=C sort -u > "$output_file"
-}
+    while IFS=$'\t' read -r sha path; do
+        [ -n "$sha" ] || continue
+        [ -n "$path" ] || continue
 
-# Checks whether a compiled target checksum is still current.
-# @param project_dir Project directory.
-# @param target_dir Compiled target directory.
-# @return 0 when current, 1 otherwise.
-target_checksum_is_current() {
-    local project_dir="$1"
-    local target_dir="$2"
-    local project_name name header checksum current_list stored_list
-
-    project_name=$(basename "$project_dir")
-    name=$(capability_name "$project_name")
-    header="$project_dir/src/lib$name.h"
-    checksum="$target_dir/SHA256SUMS"
-
-    [ -f "$checksum" ] || return 1
-    [ -f "$header" ] || return 1
-    [ "$header" -ot "$checksum" ] || return 1
-
-    if find "$target_dir" -maxdepth 1 -type f \
-        -name "lib$name.*" \
-        ! -name "*.sync-conflict-*" \
-        -newer "$checksum" -print -quit | grep -q .; then
-        return 1
-    fi
-
-    current_list=$(mktemp)
-    stored_list=$(mktemp)
-    write_target_file_list "$project_dir" "$target_dir" "$current_list"
-    awk '{print $2}' "$checksum" | LC_ALL=C sort -u > "$stored_list"
-
-    if cmp -s "$current_list" "$stored_list"; then
-        rm -f "$current_list" "$stored_list"
-        return 0
-    fi
-
-    rm -f "$current_list" "$stored_list"
-    return 1
-}
-
-# Updates one compiled target checksum only when its inputs changed.
-# @param project_dir Project directory.
-# @param target_dir Compiled target directory.
-# @return 0 on success.
-update_target_checksum() {
-    local project_dir="$1"
-    local target_dir="$2"
-    local project_name name header checksum temporary artifact
-    local filename sha256
-
-    if target_checksum_is_current "$project_dir" "$target_dir"; then
-        return 0
-    fi
-
-    project_name=$(basename "$project_dir")
-    name=$(capability_name "$project_name")
-    header="$project_dir/src/lib$name.h"
-    checksum="$target_dir/SHA256SUMS"
-
-    if [ ! -f "$header" ]; then
-        echo "error: public header not found: $header" >&2
-        return 1
-    fi
-
-    temporary=$(mktemp)
-    while IFS= read -r -d '' artifact; do
-        filename=$(basename "$artifact")
-        sha256=$(compute_sha256 "$artifact")
-        printf '%s  %s\n' "$sha256" "$filename" >> "$temporary"
+        MANIFEST_SHA["$path"]="$sha"
+        prefix="${path%/*}"
+        MANIFEST_COUNT["$prefix"]=$((
+            ${MANIFEST_COUNT["$prefix"]:-0} + 1
+        ))
     done < <(
-        find "$target_dir" -maxdepth 1 -type f \
-            -name "lib$name.*" \
-            ! -name "*.sync-conflict-*" \
-            -print0 | sort -z
+        awk '
+            /"sha256":/ {
+                sha = $0
+                sub(/^.*"sha256": "/, "", sha)
+                sub(/".*$/, "", sha)
+            }
+            /"path":/ {
+                path = $0
+                sub(/^.*"path": "/, "", path)
+                sub(/".*$/, "", path)
+                if (sha != "" && path != "") {
+                    printf "%s\t%s\n", sha, path
+                }
+                sha = ""
+            }
+        ' "$manifest"
     )
-
-    sha256=$(compute_sha256 "$header")
-    printf '%s  lib%s.h\n' "$sha256" "$name" >> "$temporary"
-    LC_ALL=C sort -u -k2,2 "$temporary" > "$checksum"
-    rm -f "$temporary"
 }
 
-# Checks whether one distributed target matches its source checksum.
-# @param project_name Project directory basename.
+# Removes checksum files left by the superseded dist layout.
+# @return 0 on success.
+remove_dist_checksum_files() {
+    [ -d "$DIST_DIR" ] || return 0
+    find "$DIST_DIR" -type f -name SHA256SUMS -delete
+    rm -f "$DIST_DIR/.build_state"
+}
+
+# Checks whether one distributed target matches the build checksum.
+# @param project_dir Project directory.
 # @param target_dir Compiled target directory.
-# @return 0 when current, 1 otherwise.
+# @return 0 when current, 1 when changed, 2 when checksum is missing.
 dist_target_is_current() {
-    local project_name="$1"
+    local project_dir="$1"
     local target_dir="$2"
-    local relative dist_target checksum file
+    local project_name name relative prefix checksum dist_target
+    local sha file path count expected_count
 
-    relative="${target_dir#"$PROJ_DIR/$project_name/bin/"}"
-    dist_target="$DIST_DIR/$project_name/$relative"
+    project_dir="${project_dir%/}"
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+    relative="${target_dir#"$project_dir/bin/"}"
+    prefix="$project_name/$relative"
     checksum="$target_dir/SHA256SUMS"
+    dist_target="$DIST_DIR/$prefix"
 
-    [ -f "$dist_target/SHA256SUMS" ] || return 1
-    cmp -s "$checksum" "$dist_target/SHA256SUMS" || return 1
+    if [ ! -f "$checksum" ]; then
+        echo "error: build checksum not found: $checksum" >&2
+        echo "run ./scripts/build.sh ${project_name#lib}" >&2
+        return 2
+    fi
 
-    while read -r _ file; do
-        [ -f "$dist_target/$file" ] || return 1
+    [ -d "$dist_target" ] || return 1
+    [ -f "$dist_target/lib$name.h" ] || return 1
+
+    count=0
+    while read -r sha file; do
+        [ -n "$sha" ] || continue
+        [ -n "$file" ] || continue
+
+        path="$prefix/$file"
+        [ "${MANIFEST_SHA["$path"]:-}" = "$sha" ] || return 1
+        [ -f "$DIST_DIR/$path" ] || return 1
+        count=$((count + 1))
     done < "$checksum"
+
+    expected_count=${MANIFEST_COUNT["$prefix"]:-0}
+    [ "$count" -eq "$expected_count" ] || return 1
+    [ "$count" -gt 0 ] || return 1
 
     return 0
 }
@@ -230,28 +182,35 @@ dist_target_is_current() {
 sync_target() {
     local project_dir="$1"
     local target_dir="$2"
-    local project_name name header relative dist_target artifact
+    local project_name name header relative dist_target sha file
 
+    project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
     header="$project_dir/src/lib$name.h"
     relative="${target_dir#"$project_dir/bin/"}"
     dist_target="$DIST_DIR/$project_name/$relative"
 
+    if [ ! -f "$header" ]; then
+        echo "error: public header not found: $header" >&2
+        return 1
+    fi
+
     rm -rf "$dist_target"
     mkdir -p "$dist_target"
 
-    while IFS= read -r -d '' artifact; do
-        cp "$artifact" "$dist_target/"
-    done < <(
-        find "$target_dir" -maxdepth 1 -type f \
-            -name "lib$name.*" \
-            ! -name "*.sync-conflict-*" \
-            -print0
-    )
+    while read -r sha file; do
+        [ -n "$sha" ] || continue
+        [ -n "$file" ] || continue
+
+        if [ ! -f "$target_dir/$file" ]; then
+            echo "error: build artifact not found: $target_dir/$file" >&2
+            return 1
+        fi
+        cp "$target_dir/$file" "$dist_target/$file"
+    done < "$target_dir/SHA256SUMS"
 
     cp "$header" "$dist_target/lib$name.h"
-    cp "$target_dir/SHA256SUMS" "$dist_target/SHA256SUMS"
 }
 
 # Removes distributed targets that no longer exist in bin.
@@ -262,6 +221,7 @@ prune_stale_targets() {
     local project_name project_dist arch_dir platform_dir relative source_dir
     local changed
 
+    project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
     project_dist="$DIST_DIR/$project_name"
     [ -d "$project_dist" ] || return 0
@@ -284,55 +244,38 @@ prune_stale_targets() {
     return "$changed"
 }
 
-# Writes the aggregate checksum list for one distributed project.
-# @param project_dir Project directory.
-# @return 0 on success.
-generate_project_checksums() {
-    local project_dir="$1"
-    local project_name project_dist output checksum relative sha file
-
-    project_name=$(basename "$project_dir")
-    project_dist="$DIST_DIR/$project_name"
-    output="$project_dist/SHA256SUMS"
-    mkdir -p "$project_dist"
-    : > "$output"
-
-    while IFS= read -r -d '' checksum; do
-        relative="${checksum#"$project_dist/"}"
-        relative="${relative%/SHA256SUMS}"
-        while read -r sha file; do
-            printf '%s  %s/%s\n' "$sha" "$relative" "$file" >> "$output"
-        done < "$checksum"
-    done < <(
-        find "$project_dist" -mindepth 3 -maxdepth 3 \
-            -type f -name SHA256SUMS -print0 | sort -z
-    )
-}
-
-# Synchronizes one project using per-target source checksums.
+# Synchronizes one project using build-generated target checksums.
 # @param project_dir Project directory.
 # @return 0 when changed, 1 when no work was needed.
 package_project() {
     local project_dir="$1"
-    local project_name target_dir changed stale_changed
+    local project_name target_dir status changed stale_changed
 
+    project_dir="${project_dir%/}"
     [ -d "$project_dir/bin" ] || return 1
     project_name=$(basename "$project_dir")
     changed=0
 
-    for target_dir in "$project_dir/bin"/*/*; do
+    for target_dir in "$project_dir"/bin/*/*; do
         [ -d "$target_dir" ] || continue
 
-        update_target_checksum "$project_dir" "$target_dir"
-        if dist_target_is_current "$project_name" "$target_dir"; then
-            continue
-        fi
-
-        if [ "$changed" -eq 0 ]; then
-            echo "Processing $project_name..."
-        fi
-        sync_target "$project_dir" "$target_dir"
-        changed=1
+        status=0
+        dist_target_is_current "$project_dir" "$target_dir" || status=$?
+        case "$status" in
+            0)
+                continue
+                ;;
+            1)
+                if [ "$changed" -eq 0 ]; then
+                    echo "Processing $project_name..."
+                fi
+                sync_target "$project_dir" "$target_dir"
+                changed=1
+                ;;
+            *)
+                return "$status"
+                ;;
+        esac
     done
 
     stale_changed=0
@@ -341,7 +284,6 @@ package_project() {
     fi
 
     if [ "$changed" -eq 1 ] || [ "$stale_changed" -eq 1 ]; then
-        generate_project_checksums "$project_dir"
         echo "    [+] Distribution updated."
         return 0
     fi
@@ -370,17 +312,17 @@ prune_stale_projects() {
     return "$changed"
 }
 
-# Writes manifest.json from the currently distributed projects.
+# Writes manifest.json from build-generated target checksums.
 # @return 0 on success.
 generate_manifest() {
-    local manifest_file first_project first_binary
-    local project_dir project_name project_sha_file
-    local binary_path filename rel_path arch platform bin_name
-    local sha256 filesize updated_at
+    local manifest_file first_project first_binary updated_at
+    local project_dir project_name project_dist target_dir checksum
+    local relative arch platform sha file dist_file filesize
 
     manifest_file="$DIST_DIR/manifest.json"
     first_project=true
     updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
     {
         echo "{"
         printf '  "updated_at": "%s",\n' "$updated_at"
@@ -388,10 +330,12 @@ generate_manifest() {
         echo '  "projects": {'
     } > "$manifest_file"
 
-    for project_dir in "$DIST_DIR"/lib*.c/; do
-        [ -d "$project_dir" ] || continue
+    for project_dir in "$PROJ_DIR"/lib*.c/; do
+        is_project "$project_dir" || continue
+        project_dir="${project_dir%/}"
         project_name=$(basename "$project_dir")
-        project_sha_file="$project_dir/SHA256SUMS"
+        project_dist="$DIST_DIR/$project_name"
+        [ -d "$project_dist" ] || continue
 
         if [ "$first_project" = true ]; then
             first_project=false
@@ -402,41 +346,44 @@ generate_manifest() {
         echo "    \"$project_name\": [" >> "$manifest_file"
         first_binary=true
 
-        while IFS= read -r -d '' binary_path; do
-            filename=$(basename "$binary_path")
-            case "$filename" in
-                SHA256SUMS|*.h) continue ;;
-            esac
-
-            rel_path="${binary_path#"$project_dir/"}"
-            sha256=$(awk -v path="$rel_path" \
-                '$2 == path { print $1; exit }' "$project_sha_file")
-            filesize=$(stat -c%s "$binary_path" 2>/dev/null || \
-                stat -f%z "$binary_path" 2>/dev/null)
-
-            IFS="/" read -r arch platform bin_name <<< "$rel_path"
-            if [ "$first_binary" = true ]; then
-                first_binary=false
-            else
-                echo "," >> "$manifest_file"
+        for target_dir in "$project_dir"/bin/*/*; do
+            [ -d "$target_dir" ] || continue
+            checksum="$target_dir/SHA256SUMS"
+            if [ ! -f "$checksum" ]; then
+                echo "error: build checksum not found: $checksum" >&2
+                return 1
             fi
 
-            cat <<MANIFEST_ENTRY >> "$manifest_file"
+            relative="${target_dir#"$project_dir/bin/"}"
+            IFS="/" read -r arch platform <<< "$relative"
+
+            while read -r sha file; do
+                [ -n "$sha" ] || continue
+                [ -n "$file" ] || continue
+
+                dist_file="$project_dist/$relative/$file"
+                [ -f "$dist_file" ] || continue
+                filesize=$(stat -c%s "$dist_file" 2>/dev/null || \
+                    stat -f%z "$dist_file" 2>/dev/null)
+
+                if [ "$first_binary" = true ]; then
+                    first_binary=false
+                else
+                    echo "," >> "$manifest_file"
+                fi
+
+                cat <<MANIFEST_ENTRY >> "$manifest_file"
       {
         "arch": "$arch",
         "platform": "$platform",
-        "binary": "$bin_name",
+        "binary": "$file",
         "size_bytes": $filesize,
-        "sha256": "$sha256",
-        "path": "$project_name/$rel_path"
+        "sha256": "$sha",
+        "path": "$project_name/$relative/$file"
       }
 MANIFEST_ENTRY
-        done < <(
-            find "$project_dir" -type f \
-                ! -name "SHA256SUMS" \
-                ! -name "*.h" \
-                -print0 | sort -z
-        )
+            done < "$checksum"
+        done
 
         printf '\n    ]' >> "$manifest_file"
     done
@@ -462,7 +409,8 @@ main() {
     }
 
     mkdir -p "$DIST_DIR"
-    rm -f "$DIST_DIR/.build_state"
+    remove_dist_checksum_files
+    load_manifest_state
 
     stale_changed=0
     if ! prune_stale_projects; then
