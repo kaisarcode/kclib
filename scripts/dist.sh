@@ -96,165 +96,260 @@ compute_sha256() {
     fi
 }
 
-# Writes the expected checksum list for one built project.
+# Writes the expected file list for one compiled target.
 # @param project_dir Project directory.
-# @param output_file Destination checksum-list file.
+# @param target_dir Compiled target directory.
+# @param output_file Destination list file.
 # @return 0 on success.
-write_expected_checksums() {
+write_target_file_list() {
     local project_dir="$1"
-    local output_file="$2"
-    local project_name name header artifact rel_path target_dir
-    local header_sha artifact_sha temp_file
+    local target_dir="$2"
+    local output_file="$3"
+    local project_name name
+
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+
+    {
+        find "$target_dir" -maxdepth 1 -type f \
+            -name "lib$name.*" \
+            ! -name "*.sync-conflict-*" \
+            -printf '%f\n'
+        printf 'lib%s.h\n' "$name"
+    } | LC_ALL=C sort -u > "$output_file"
+}
+
+# Checks whether a compiled target checksum is still current.
+# @param project_dir Project directory.
+# @param target_dir Compiled target directory.
+# @return 0 when current, 1 otherwise.
+target_checksum_is_current() {
+    local project_dir="$1"
+    local target_dir="$2"
+    local project_name name header checksum current_list stored_list
 
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
     header="$project_dir/src/lib$name.h"
+    checksum="$target_dir/SHA256SUMS"
+
+    [ -f "$checksum" ] || return 1
+    [ -f "$header" ] || return 1
+    [ "$header" -ot "$checksum" ] || return 1
+
+    if find "$target_dir" -maxdepth 1 -type f \
+        -name "lib$name.*" \
+        ! -name "*.sync-conflict-*" \
+        -newer "$checksum" -print -quit | grep -q .; then
+        return 1
+    fi
+
+    current_list=$(mktemp)
+    stored_list=$(mktemp)
+    write_target_file_list "$project_dir" "$target_dir" "$current_list"
+    awk '{print $2}' "$checksum" | LC_ALL=C sort -u > "$stored_list"
+
+    if cmp -s "$current_list" "$stored_list"; then
+        rm -f "$current_list" "$stored_list"
+        return 0
+    fi
+
+    rm -f "$current_list" "$stored_list"
+    return 1
+}
+
+# Updates one compiled target checksum only when its inputs changed.
+# @param project_dir Project directory.
+# @param target_dir Compiled target directory.
+# @return 0 on success.
+update_target_checksum() {
+    local project_dir="$1"
+    local target_dir="$2"
+    local project_name name header checksum temporary artifact
+    local filename sha256
+
+    if target_checksum_is_current "$project_dir" "$target_dir"; then
+        return 0
+    fi
+
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+    header="$project_dir/src/lib$name.h"
+    checksum="$target_dir/SHA256SUMS"
 
     if [ ! -f "$header" ]; then
         echo "error: public header not found: $header" >&2
         return 1
     fi
 
-    temp_file=$(mktemp)
-    header_sha=$(compute_sha256 "$header")
-
+    temporary=$(mktemp)
     while IFS= read -r -d '' artifact; do
-        rel_path="${artifact#"$project_dir/bin/"}"
-        artifact_sha=$(compute_sha256 "$artifact")
-        printf '%s  %s\n' "$artifact_sha" "$rel_path" >> "$temp_file"
-
-        target_dir=$(dirname "$rel_path")
-        printf '%s  %s/lib%s.h\n' \
-            "$header_sha" "$target_dir" "$name" >> "$temp_file"
+        filename=$(basename "$artifact")
+        sha256=$(compute_sha256 "$artifact")
+        printf '%s  %s\n' "$sha256" "$filename" >> "$temporary"
     done < <(
-        find "$project_dir/bin" -type f \
+        find "$target_dir" -maxdepth 1 -type f \
             -name "lib$name.*" \
             ! -name "*.sync-conflict-*" \
             -print0 | sort -z
     )
 
-    LC_ALL=C sort -u -k2,2 "$temp_file" > "$output_file"
-    rm -f "$temp_file"
+    sha256=$(compute_sha256 "$header")
+    printf '%s  lib%s.h\n' "$sha256" "$name" >> "$temporary"
+    LC_ALL=C sort -u -k2,2 "$temporary" > "$checksum"
+    rm -f "$temporary"
 }
 
-# Writes checksums for the files currently present in one dist project.
-# @param project_dist Project distribution directory.
-# @param output_file Destination checksum-list file.
+# Checks whether one distributed target matches its source checksum.
+# @param project_name Project directory basename.
+# @param target_dir Compiled target directory.
+# @return 0 when current, 1 otherwise.
+dist_target_is_current() {
+    local project_name="$1"
+    local target_dir="$2"
+    local relative dist_target checksum file
+
+    relative="${target_dir#"$PROJ_DIR/$project_name/bin/"}"
+    dist_target="$DIST_DIR/$project_name/$relative"
+    checksum="$target_dir/SHA256SUMS"
+
+    [ -f "$dist_target/SHA256SUMS" ] || return 1
+    cmp -s "$checksum" "$dist_target/SHA256SUMS" || return 1
+
+    while read -r _ file; do
+        [ -f "$dist_target/$file" ] || return 1
+    done < "$checksum"
+
+    return 0
+}
+
+# Copies one changed compiled target into dist.
+# @param project_dir Project directory.
+# @param target_dir Compiled target directory.
 # @return 0 on success.
-write_actual_checksums() {
-    local project_dist="$1"
-    local output_file="$2"
-    local file rel_path sha256 temp_file
-
-    temp_file=$(mktemp)
-    if [ -d "$project_dist" ]; then
-        while IFS= read -r -d '' file; do
-            rel_path="${file#"$project_dist/"}"
-            sha256=$(compute_sha256 "$file")
-            printf '%s  %s\n' "$sha256" "$rel_path" >> "$temp_file"
-        done < <(
-            find "$project_dist" -type f \
-                ! -name "SHA256SUMS" \
-                -print0 | sort -z
-        )
-    fi
-
-    LC_ALL=C sort -u -k2,2 "$temp_file" > "$output_file"
-    rm -f "$temp_file"
-}
-
-# Checks whether one built project is already distributed unchanged.
-# @param project_dir Project directory.
-# @param expected_file Expected checksum-list file.
-# @return 0 when up to date, 1 otherwise.
-project_is_current() {
+sync_target() {
     local project_dir="$1"
-    local expected_file="$2"
-    local project_dist actual_file
-
-    project_dist="$DIST_DIR/$(basename "$project_dir")"
-    [ -d "$project_dist" ] || return 1
-
-    actual_file=$(mktemp)
-    write_actual_checksums "$project_dist" "$actual_file"
-
-    if cmp -s "$expected_file" "$actual_file"; then
-        rm -f "$actual_file"
-        return 0
-    fi
-
-    rm -f "$actual_file"
-    return 1
-}
-
-# Copies one project's artifacts and public header into dist.
-# @param project_dir Project directory.
-# @return 0 when artifacts changed, 1 when no work was needed.
-package_project() {
-    local project_dir="$1"
-    local project_name project_dist name header target_dir target_header
-    local artifact rel_path destination checksum_file expected_file
+    local target_dir="$2"
+    local project_name name header relative dist_target artifact
 
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
     header="$project_dir/src/lib$name.h"
+    relative="${target_dir#"$project_dir/bin/"}"
+    dist_target="$DIST_DIR/$project_name/$relative"
 
-    [ -d "$project_dir/bin" ] || return 1
-
-    expected_file=$(mktemp)
-    write_expected_checksums "$project_dir" "$expected_file"
-
-    if project_is_current "$project_dir" "$expected_file"; then
-        checksum_file="$DIST_DIR/$project_name/SHA256SUMS"
-        if [ ! -f "$checksum_file" ] || \
-            ! cmp -s "$expected_file" "$checksum_file"; then
-            cp "$expected_file" "$checksum_file"
-        fi
-        rm -f "$expected_file"
-        echo "Processing $project_name..."
-        echo "    ninja: no work to do."
-        return 1
-    fi
-
-    if [ ! -f "$header" ]; then
-        rm -f "$expected_file"
-        echo "error: public header not found: $header" >&2
-        return 2
-    fi
-
-    echo "Processing $project_name..."
-    find "$project_dir/bin" -type f -name "*.sync-conflict-*" -delete \
-        2>/dev/null || true
-
-    project_dist="$DIST_DIR/$project_name"
-    rm -rf "$project_dist"
-    mkdir -p "$project_dist"
+    rm -rf "$dist_target"
+    mkdir -p "$dist_target"
 
     while IFS= read -r -d '' artifact; do
-        rel_path="${artifact#"$project_dir/bin/"}"
-        destination="$project_dist/$rel_path"
-        mkdir -p "$(dirname "$destination")"
-        cp "$artifact" "$destination"
+        cp "$artifact" "$dist_target/"
     done < <(
-        find "$project_dir/bin" -type f -name "lib$name.*" -print0
+        find "$target_dir" -maxdepth 1 -type f \
+            -name "lib$name.*" \
+            ! -name "*.sync-conflict-*" \
+            -print0
     )
 
-    while IFS= read -r -d '' target_dir; do
-        target_header="$target_dir/lib$name.h"
-        cp "$header" "$target_header"
-    done < <(
-        find "$project_dist" -mindepth 2 -maxdepth 2 -type d -print0
-    )
-
-    checksum_file="$project_dist/SHA256SUMS"
-    cp "$expected_file" "$checksum_file"
-    rm -f "$expected_file"
-
-    echo "    [+] Artifacts collected in $project_dist/"
-    return 0
+    cp "$header" "$dist_target/lib$name.h"
+    cp "$target_dir/SHA256SUMS" "$dist_target/SHA256SUMS"
 }
 
-# Removes distributions for project directories that no longer exist.
+# Removes distributed targets that no longer exist in bin.
+# @param project_dir Project directory.
+# @return 0 when unchanged, 1 when stale targets were removed.
+prune_stale_targets() {
+    local project_dir="$1"
+    local project_name project_dist arch_dir platform_dir relative source_dir
+    local changed
+
+    project_name=$(basename "$project_dir")
+    project_dist="$DIST_DIR/$project_name"
+    [ -d "$project_dist" ] || return 0
+
+    changed=0
+    for arch_dir in "$project_dist"/*; do
+        [ -d "$arch_dir" ] || continue
+        for platform_dir in "$arch_dir"/*; do
+            [ -d "$platform_dir" ] || continue
+            relative="${platform_dir#"$project_dist/"}"
+            source_dir="$project_dir/bin/$relative"
+
+            if [ ! -d "$source_dir" ]; then
+                rm -rf "$platform_dir"
+                changed=1
+            fi
+        done
+    done
+
+    return "$changed"
+}
+
+# Writes the aggregate checksum list for one distributed project.
+# @param project_dir Project directory.
+# @return 0 on success.
+generate_project_checksums() {
+    local project_dir="$1"
+    local project_name project_dist output checksum relative sha file
+
+    project_name=$(basename "$project_dir")
+    project_dist="$DIST_DIR/$project_name"
+    output="$project_dist/SHA256SUMS"
+    mkdir -p "$project_dist"
+    : > "$output"
+
+    while IFS= read -r -d '' checksum; do
+        relative="${checksum#"$project_dist/"}"
+        relative="${relative%/SHA256SUMS}"
+        while read -r sha file; do
+            printf '%s  %s/%s\n' "$sha" "$relative" "$file" >> "$output"
+        done < "$checksum"
+    done < <(
+        find "$project_dist" -mindepth 3 -maxdepth 3 \
+            -type f -name SHA256SUMS -print0 | sort -z
+    )
+}
+
+# Synchronizes one project using per-target source checksums.
+# @param project_dir Project directory.
+# @return 0 when changed, 1 when no work was needed.
+package_project() {
+    local project_dir="$1"
+    local project_name target_dir changed stale_changed
+
+    [ -d "$project_dir/bin" ] || return 1
+    project_name=$(basename "$project_dir")
+    changed=0
+
+    for target_dir in "$project_dir/bin"/*/*; do
+        [ -d "$target_dir" ] || continue
+
+        update_target_checksum "$project_dir" "$target_dir"
+        if dist_target_is_current "$project_name" "$target_dir"; then
+            continue
+        fi
+
+        if [ "$changed" -eq 0 ]; then
+            echo "Processing $project_name..."
+        fi
+        sync_target "$project_dir" "$target_dir"
+        changed=1
+    done
+
+    stale_changed=0
+    if ! prune_stale_targets "$project_dir"; then
+        stale_changed=1
+    fi
+
+    if [ "$changed" -eq 1 ] || [ "$stale_changed" -eq 1 ]; then
+        generate_project_checksums "$project_dir"
+        echo "    [+] Distribution updated."
+        return 0
+    fi
+
+    return 1
+}
+
+# Removes distributions for projects that no longer exist.
 # @return 0 when unchanged, 1 when stale distributions were removed.
 prune_stale_projects() {
     local project_dist project_name source_project changed
@@ -310,21 +405,16 @@ generate_manifest() {
         while IFS= read -r -d '' binary_path; do
             filename=$(basename "$binary_path")
             case "$filename" in
-                SHA256SUMS|manifest.json) continue ;;
-                *.h) continue ;;
+                SHA256SUMS|*.h) continue ;;
             esac
 
             rel_path="${binary_path#"$project_dir/"}"
             sha256=$(awk -v path="$rel_path" \
                 '$2 == path { print $1; exit }' "$project_sha_file")
-            if [ -z "$sha256" ]; then
-                sha256=$(compute_sha256 "$binary_path")
-            fi
-
-            IFS="/" read -r arch platform bin_name <<< "$rel_path"
             filesize=$(stat -c%s "$binary_path" 2>/dev/null || \
                 stat -f%z "$binary_path" 2>/dev/null)
 
+            IFS="/" read -r arch platform bin_name <<< "$rel_path"
             if [ "$first_binary" = true ]; then
                 first_binary=false
             else
@@ -344,7 +434,7 @@ MANIFEST_ENTRY
         done < <(
             find "$project_dir" -type f \
                 ! -name "SHA256SUMS" \
-                ! -name "manifest.json" \
+                ! -name "*.h" \
                 -print0 | sort -z
         )
 
@@ -420,15 +510,9 @@ main() {
     status=0
     package_project "$project_dir" || status=$?
     case "$status" in
-        0)
-            changed=1
-            ;;
-        1)
-            changed="$stale_changed"
-            ;;
-        *)
-            exit "$status"
-            ;;
+        0) changed=1 ;;
+        1) changed="$stale_changed" ;;
+        *) exit "$status" ;;
     esac
 
     if [ "$changed" -eq 1 ] || [ ! -f "$DIST_DIR/manifest.json" ]; then
