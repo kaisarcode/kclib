@@ -558,17 +558,8 @@ static int kc_ppn_dbus_read_message(int socket_fd) {
         ((uint32_t)fixed[14] << 16) |
         ((uint32_t)fixed[15] << 24);
 
-    if ((size_t)fields_size > SIZE_MAX - 16U) {
-        return -1;
-    }
     header_size = 16U + (size_t)fields_size;
-    if (header_size > SIZE_MAX - 7U) {
-        return -1;
-    }
     header_size = (header_size + 7U) & ~(size_t)7U;
-    if ((size_t)body_size > SIZE_MAX - (header_size - 16U)) {
-        return -1;
-    }
     remaining = header_size - 16U + (size_t)body_size;
 
     while (remaining > 0) {
