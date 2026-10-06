@@ -127,6 +127,22 @@ static int kc_ppn_buffer_u32(kc_ppn_buffer_t *buffer, uint32_t value) {
 }
 
 /**
+ * Append one little-endian 64-bit integer.
+ * @param buffer Destination byte buffer.
+ * @param value Integer value.
+ * @return KC_PPN_OK on success, or KC_PPN_ERROR on failure.
+ */
+static int kc_ppn_buffer_u64(kc_ppn_buffer_t *buffer, uint64_t value) {
+    unsigned char raw[8];
+    size_t index;
+
+    for (index = 0; index < sizeof(raw); index++) {
+        raw[index] = (unsigned char)(value >> (index * 8U));
+    }
+    return kc_ppn_buffer_append(buffer, raw, sizeof(raw));
+}
+
+/**
  * Append one D-Bus string or object path.
  * @param buffer Byte buffer.
  * @param value String value.
@@ -415,13 +431,15 @@ static int kc_ppn_dbus_authenticate(int socket_fd) {
     size_t index;
     size_t offset = 0;
     int count;
+    size_t uid_length;
 
     count = snprintf(uid, sizeof(uid), "%lu", (unsigned long)getuid());
     if (count <= 0 || (size_t)count >= sizeof(uid)) {
         return KC_PPN_ERROR;
     }
+    uid_length = (size_t)count;
 
-    for (index = 0; index < (size_t)count; index++) {
+    for (index = 0; index < uid_length; index++) {
         count = snprintf(
             encoded + offset,
             sizeof(encoded) - offset,
@@ -600,6 +618,52 @@ static int kc_ppn_dbus_hello(int socket_fd) {
 }
 
 /**
+ * Append the standard Linux notification hints.
+ * @param body Notification body buffer.
+ * @return KC_PPN_OK on success, or KC_PPN_ERROR on failure.
+ */
+static int kc_ppn_dbus_hints(kc_ppn_buffer_t *body) {
+    size_t length_offset;
+    size_t payload_offset;
+    size_t payload_size;
+    uint32_t length;
+    unsigned char normal_urgency = 1;
+
+    if (kc_ppn_buffer_align(body, 4) != KC_PPN_OK) {
+        return KC_PPN_ERROR;
+    }
+    length_offset = body->size;
+    if (kc_ppn_buffer_u32(body, 0) != KC_PPN_OK ||
+        kc_ppn_buffer_align(body, 8) != KC_PPN_OK) {
+        return KC_PPN_ERROR;
+    }
+
+    payload_offset = body->size;
+    if (kc_ppn_buffer_string(body, "urgency") != KC_PPN_OK ||
+        kc_ppn_buffer_signature(body, "y") != KC_PPN_OK ||
+        kc_ppn_buffer_append(body, &normal_urgency, sizeof(normal_urgency)) !=
+            KC_PPN_OK ||
+        kc_ppn_buffer_align(body, 8) != KC_PPN_OK ||
+        kc_ppn_buffer_string(body, "sender-pid") != KC_PPN_OK ||
+        kc_ppn_buffer_signature(body, "x") != KC_PPN_OK ||
+        kc_ppn_buffer_align(body, 8) != KC_PPN_OK ||
+        kc_ppn_buffer_u64(body, (uint64_t)getpid()) != KC_PPN_OK) {
+        return KC_PPN_ERROR;
+    }
+
+    payload_size = body->size - payload_offset;
+    if (payload_size > UINT32_MAX) {
+        return KC_PPN_ERROR;
+    }
+    length = (uint32_t)payload_size;
+    body->data[length_offset] = (unsigned char)(length & 0xffU);
+    body->data[length_offset + 1] = (unsigned char)((length >> 8) & 0xffU);
+    body->data[length_offset + 2] = (unsigned char)((length >> 16) & 0xffU);
+    body->data[length_offset + 3] = (unsigned char)((length >> 24) & 0xffU);
+    return KC_PPN_OK;
+}
+
+/**
  * Construct the Freedesktop Notify method body.
  * @param body Destination body buffer.
  * @param notification Notification values.
@@ -616,8 +680,7 @@ static int kc_ppn_dbus_body(
         kc_ppn_buffer_string(body, notification->message) != KC_PPN_OK ||
         kc_ppn_buffer_align(body, 4) != KC_PPN_OK ||
         kc_ppn_buffer_u32(body, 0) != KC_PPN_OK ||
-        kc_ppn_buffer_align(body, 4) != KC_PPN_OK ||
-        kc_ppn_buffer_u32(body, 0) != KC_PPN_OK ||
+        kc_ppn_dbus_hints(body) != KC_PPN_OK ||
         kc_ppn_buffer_align(body, 8) != KC_PPN_OK ||
         kc_ppn_buffer_u32(body, UINT32_MAX) != KC_PPN_OK) {
         return KC_PPN_ERROR;
