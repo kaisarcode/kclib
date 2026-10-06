@@ -64,6 +64,8 @@ if(NOT PPN_TEST_EXTERNAL_ARTIFACTS)
     target_include_directories(ppn_shared PRIVATE src)
 
     if(WIN32)
+        target_compile_definitions(ppn_static PRIVATE UNICODE _UNICODE)
+        target_compile_definitions(ppn_shared PRIVATE UNICODE _UNICODE)
         target_link_libraries(ppn_static PRIVATE user32 shell32)
         target_link_libraries(ppn_shared PRIVATE user32 shell32)
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
