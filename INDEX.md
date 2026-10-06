@@ -55,6 +55,7 @@ index is the summary, not the contract.
 | [`mmap`](https://github.com/kaisarcode/kclib/tree/master/proj/libmmap.c) | Stores bytes in files and later exposes them as mapped memory. | File-backed storage or shared memory. |
 | [`wvw`](https://github.com/kaisarcode/kclib/tree/master/proj/libwvw.c) | Opens a native WebView window with an explicit optional JavaScript bridge. | A GUI window that renders HTML. |
 | [`tray`](https://github.com/kaisarcode/kclib/tree/master/proj/libtray.c) | Provides a persistent native system tray and mutable menu items with callbacks. | A tray/notification-area status entry with a lightweight menu. |
+| [`ppn`](https://github.com/kaisarcode/kclib/tree/master/proj/libppn.c) | Displays native popup notifications through the operating system. | Showing desktop notifications without requiring a WebView or tray. |
 
 ## Composition
 
