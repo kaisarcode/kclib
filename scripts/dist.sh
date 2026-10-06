@@ -161,6 +161,7 @@ dist_target_is_current() {
     while read -r sha file; do
         [ -n "$sha" ] || continue
         [ -n "$file" ] || continue
+        case "$file" in *.h) continue ;; esac
 
         path="$prefix/$file"
         [ "${MANIFEST_SHA["$path"]:-}" = "$sha" ] || return 1
@@ -202,6 +203,7 @@ sync_target() {
     while read -r sha file; do
         [ -n "$sha" ] || continue
         [ -n "$file" ] || continue
+        case "$file" in *.h) continue ;; esac
 
         if [ ! -f "$target_dir/$file" ]; then
             echo "error: build artifact not found: $target_dir/$file" >&2
@@ -360,6 +362,7 @@ generate_manifest() {
             while read -r sha file; do
                 [ -n "$sha" ] || continue
                 [ -n "$file" ] || continue
+                case "$file" in *.h) continue ;; esac
 
                 dist_file="$project_dist/$relative/$file"
                 [ -f "$dist_file" ] || continue
