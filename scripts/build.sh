@@ -55,7 +55,7 @@ compute_sha256() {
     fi
 }
 
-# Writes the expected file list for one compiled target.
+# Writes the artifact file list for one compiled target.
 # @param project_dir Project directory.
 # @param target_dir Compiled target directory.
 # @param output_file Destination list file.
@@ -69,13 +69,10 @@ write_target_file_list() {
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
 
-    {
-        find "$target_dir" -maxdepth 1 -type f \
-            -name "lib$name.*" \
-            ! -name "*.sync-conflict-*" \
-            -printf '%f\n'
-        printf 'lib%s.h\n' "$name"
-    } | LC_ALL=C sort -u > "$output_file"
+    find "$target_dir" -maxdepth 1 -type f \
+        -name "lib$name.*" \
+        ! -name "*.sync-conflict-*" \
+        -printf '%f\n' | LC_ALL=C sort -u > "$output_file"
 }
 
 # Checks whether one target checksum is still current.
@@ -85,16 +82,13 @@ write_target_file_list() {
 target_checksum_is_current() {
     local project_dir="$1"
     local target_dir="$2"
-    local project_name name header checksum current_list stored_list
+    local project_name name checksum current_list stored_list
 
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
-    header="$project_dir/src/lib$name.h"
     checksum="$target_dir/SHA256SUMS"
 
     [ -f "$checksum" ] || return 1
-    [ -f "$header" ] || return 1
-    [ "$header" -ot "$checksum" ] || return 1
 
     if find "$target_dir" -maxdepth 1 -type f \
         -name "lib$name.*" \
@@ -117,14 +111,14 @@ target_checksum_is_current() {
     return 1
 }
 
-# Updates one target checksum only when its inputs changed.
+# Updates one target checksum only when its artifacts changed.
 # @param project_dir Project directory.
 # @param target_dir Compiled target directory.
 # @return 0 on success.
 update_target_checksum() {
     local project_dir="$1"
     local target_dir="$2"
-    local project_name name header checksum temporary artifact
+    local project_name name checksum temporary artifact
     local filename sha256
 
     if target_checksum_is_current "$project_dir" "$target_dir"; then
@@ -133,12 +127,9 @@ update_target_checksum() {
 
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
-    header="$project_dir/src/lib$name.h"
     checksum="$target_dir/SHA256SUMS"
-
-    [ -f "$header" ] || return 0
-
     temporary=$(mktemp)
+
     while IFS= read -r -d '' artifact; do
         filename=$(basename "$artifact")
         sha256=$(compute_sha256 "$artifact")
@@ -150,8 +141,6 @@ update_target_checksum() {
             -print0 | sort -z
     )
 
-    sha256=$(compute_sha256 "$header")
-    printf '%s  lib%s.h\n' "$sha256" "$name" >> "$temporary"
     LC_ALL=C sort -u -k2,2 "$temporary" > "$checksum"
     rm -f "$temporary"
 }
@@ -163,9 +152,10 @@ update_project_checksums() {
     local project_dir="$1"
     local target_dir
 
+    project_dir="${project_dir%/}"
     [ -d "$project_dir/bin" ] || return 0
 
-    for target_dir in "$project_dir/bin"/*/*; do
+    for target_dir in "$project_dir"/bin/*/*; do
         [ -d "$target_dir" ] || continue
         update_target_checksum "$project_dir" "$target_dir"
     done
@@ -178,6 +168,7 @@ build_project() {
     local project_dir="$1"
     local project_name
 
+    project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
     echo "Building $project_name..."
     (
