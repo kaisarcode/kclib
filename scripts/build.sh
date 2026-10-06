@@ -166,15 +166,22 @@ update_project_checksums() {
 # @return 0 on success.
 build_project() {
     local project_dir="$1"
-    local project_name
+    local project_name status
 
     project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
     echo "Building $project_name..."
+
+    status=0
     (
         cd "$project_dir"
         make all
-    )
+    ) || status=$?
+
+    if [ "$status" -ne 0 ]; then
+        return "$status"
+    fi
+
     update_project_checksums "$project_dir"
 }
 
