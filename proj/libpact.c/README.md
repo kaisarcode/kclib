@@ -14,9 +14,9 @@ Initialize the local trust store:
 ```c
 #include "libpact.h"
 
-kc_pact_t *trust = NULL;
+kc_pact_t *pact = NULL;
 
-if (kc_pact_init(&trust) != KC_PACT_OK) {
+if (kc_pact_init(&pact) != KC_PACT_OK) {
     return 1;
 }
 ```
@@ -27,7 +27,7 @@ Create an invitation:
 char *alice_uid = NULL;
 char *code = NULL;
 
-if (kc_pact_invite(trust, &alice_uid, &code) != KC_PACT_OK) {
+if (kc_pact_invite(pact, &alice_uid, &code) != KC_PACT_OK) {
     return 1;
 }
 ```
@@ -39,7 +39,7 @@ char *bob_uid = NULL;
 char *confirmation = NULL;
 
 if (kc_pact_join(
-    trust,
+    pact,
     code,
     &bob_uid,
     &confirmation
@@ -55,7 +55,7 @@ invitation, which confirms it:
 char *confirmed_uid = NULL;
 
 if (kc_pact_confirm(
-    trust,
+    pact,
     confirmation,
     &confirmed_uid
 ) != KC_PACT_OK) {
@@ -72,7 +72,7 @@ void *protected = NULL;
 size_t protected_size = 0;
 
 if (kc_pact_seal(
-    trust,
+    pact,
     alice_uid,
     message,
     message_size,
@@ -92,7 +92,7 @@ void *message = NULL;
 size_t message_size = 0;
 
 if (kc_pact_unseal(
-    trust,
+    pact,
     alice_uid,
     protected,
     protected_size,
