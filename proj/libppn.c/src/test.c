@@ -1,6 +1,6 @@
 /**
  * test.c - libppn contract tests.
- * Summary: Tests validation, versioning, and optional native notification output.
+ * Summary: Tests validation, versioning, and native notification output.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -10,8 +10,6 @@
 #include "libppn.h"
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 /**
  * Report one successful contract check.
@@ -30,8 +28,7 @@ static void pass(int index, int total, const char *name) {
  */
 int main(void) {
     kc_ppn_notification_t notification;
-    const char *native;
-    int total = 4;
+    int total = 5;
 
     if (kc_ppn_show(NULL) != KC_PPN_ERROR) {
         return 1;
@@ -57,15 +54,12 @@ int main(void) {
     }
     pass(4, total, "version: build version is available");
 
-    native = getenv("PPN_TEST_NOTIFY");
-    if (native != NULL && strcmp(native, "1") == 0) {
-        notification.title = "libppn.c";
-        notification.message = "Native notification test";
-        if (kc_ppn_show(&notification) != KC_PPN_OK) {
-            return 1;
-        }
-        printf("[PASS] native: notification accepted by the operating system\n");
+    notification.title = "libppn.c";
+    notification.message = "Native notification test";
+    if (kc_ppn_show(&notification) != KC_PPN_OK) {
+        return 1;
     }
+    pass(5, total, "native: notification accepted by the operating system");
 
     return 0;
 }
