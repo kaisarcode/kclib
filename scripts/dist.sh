@@ -434,7 +434,8 @@ main() {
     if [ "$changed" -eq 1 ] || [ ! -f "$DIST_DIR/manifest.json" ]; then
         echo "Generating manifest.json..."
         generate_manifest
-        echo "Done. Distribution updated in $DIST_DIR/$(basename "$project_dir")/."
+        echo "Done. Distribution updated in" \
+            "$DIST_DIR/$(basename "$project_dir")/."
     else
         echo "Done. No distribution changes."
     fi
