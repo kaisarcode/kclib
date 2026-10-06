@@ -1,5 +1,5 @@
 /**
- * libtrust.c - Portable identity trust and message cryptography.
+ * libpact.c - Portable identity trust and message cryptography.
  * Summary: Scoped trust relationships using Noise one-way patterns.
  *
  * Author:  KaisarCode
@@ -17,7 +17,7 @@
 #endif
 #endif
 
-#include "libtrust.h"
+#include "libpact.h"
 
 #include <errno.h>
 #include <stddef.h>
@@ -43,60 +43,60 @@
 
 #include "monocypher.h"
 
-#ifndef KC_TRUST_BUILD_VERSION
-#define KC_TRUST_BUILD_VERSION 0
+#ifndef KC_PACT_BUILD_VERSION
+#define KC_PACT_BUILD_VERSION 0
 #endif
 
-#define KC_TRUST_PATH_SIZE 4096
-#define KC_TRUST_SK_SIZE 32
-#define KC_TRUST_PK_SIZE 32
-#define KC_TRUST_PSK_SIZE 32
-#define KC_TRUST_UID_BYTES 16
-#define KC_TRUST_MAC_SIZE 16
-#define KC_TRUST_NONCE_SIZE 12
-#define KC_TRUST_HASH_SIZE 64
-#define KC_TRUST_BLAKE2B_BLOCK 128
-#define KC_TRUST_RECORD_MAGIC_SIZE 4
-#define KC_TRUST_PENDING_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE + KC_TRUST_PSK_SIZE)
-#define KC_TRUST_PEER_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE + KC_TRUST_PK_SIZE)
-#define KC_TRUST_LOCAL_RECORD_SIZE (KC_TRUST_RECORD_MAGIC_SIZE + KC_TRUST_UID_BYTES)
+#define KC_PACT_PATH_SIZE 4096
+#define KC_PACT_SK_SIZE 32
+#define KC_PACT_PK_SIZE 32
+#define KC_PACT_PSK_SIZE 32
+#define KC_PACT_UID_BYTES 16
+#define KC_PACT_MAC_SIZE 16
+#define KC_PACT_NONCE_SIZE 12
+#define KC_PACT_HASH_SIZE 64
+#define KC_PACT_BLAKE2B_BLOCK 128
+#define KC_PACT_RECORD_MAGIC_SIZE 4
+#define KC_PACT_PENDING_RECORD_SIZE (KC_PACT_RECORD_MAGIC_SIZE + KC_PACT_UID_BYTES + KC_PACT_SK_SIZE + KC_PACT_PSK_SIZE)
+#define KC_PACT_PEER_RECORD_SIZE (KC_PACT_RECORD_MAGIC_SIZE + KC_PACT_UID_BYTES + KC_PACT_SK_SIZE + KC_PACT_PK_SIZE)
+#define KC_PACT_LOCAL_RECORD_SIZE (KC_PACT_RECORD_MAGIC_SIZE + KC_PACT_UID_BYTES)
 
-#define KC_TRUST_INVITE_VERSION 1
-#define KC_TRUST_INVITE_RAW_SIZE (1 + (2 * KC_TRUST_UID_BYTES) + KC_TRUST_PK_SIZE + KC_TRUST_PSK_SIZE)
+#define KC_PACT_INVITE_VERSION 1
+#define KC_PACT_INVITE_RAW_SIZE (1 + (2 * KC_PACT_UID_BYTES) + KC_PACT_PK_SIZE + KC_PACT_PSK_SIZE)
 
-#define KC_TRUST_XPSK1_MESSAGE_SIZE (KC_TRUST_PK_SIZE + (KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE) + KC_TRUST_MAC_SIZE)
-#define KC_TRUST_CONFIRM_RAW_SIZE (1 + (2 * KC_TRUST_UID_BYTES) + KC_TRUST_XPSK1_MESSAGE_SIZE)
+#define KC_PACT_XPSK1_MESSAGE_SIZE (KC_PACT_PK_SIZE + (KC_PACT_PK_SIZE + KC_PACT_MAC_SIZE) + KC_PACT_MAC_SIZE)
+#define KC_PACT_CONFIRM_RAW_SIZE (1 + (2 * KC_PACT_UID_BYTES) + KC_PACT_XPSK1_MESSAGE_SIZE)
 
-#define KC_TRUST_K_HANDSHAKE_SIZE (KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE)
-#define KC_TRUST_TRANSPORT_MESSAGE_MAX 65535
-#define KC_TRUST_TRANSPORT_PLAINTEXT_MAX (KC_TRUST_TRANSPORT_MESSAGE_MAX - KC_TRUST_MAC_SIZE)
-#define KC_TRUST_LOGICAL_LENGTH_SIZE 8
-#define KC_TRUST_LENGTH_RECORD_SIZE (KC_TRUST_LOGICAL_LENGTH_SIZE + KC_TRUST_MAC_SIZE)
-#define KC_TRUST_PAYLOAD_BASE_SIZE (KC_TRUST_K_HANDSHAKE_SIZE + KC_TRUST_LENGTH_RECORD_SIZE)
+#define KC_PACT_K_HANDSHAKE_SIZE (KC_PACT_PK_SIZE + KC_PACT_MAC_SIZE)
+#define KC_PACT_TRANSPORT_MESSAGE_MAX 65535
+#define KC_PACT_TRANSPORT_PLAINTEXT_MAX (KC_PACT_TRANSPORT_MESSAGE_MAX - KC_PACT_MAC_SIZE)
+#define KC_PACT_LOGICAL_LENGTH_SIZE 8
+#define KC_PACT_LENGTH_RECORD_SIZE (KC_PACT_LOGICAL_LENGTH_SIZE + KC_PACT_MAC_SIZE)
+#define KC_PACT_PAYLOAD_BASE_SIZE (KC_PACT_K_HANDSHAKE_SIZE + KC_PACT_LENGTH_RECORD_SIZE)
 
-static const unsigned char KC_TRUST_PENDING_MAGIC[4] = { 'K', 'T', 'P', '1' };
-static const unsigned char KC_TRUST_PEER_MAGIC[4] = { 'K', 'T', 'R', '1' };
-static const unsigned char KC_TRUST_LOCAL_MAGIC[4] = { 'K', 'T', 'L', '1' };
+static const unsigned char KC_PACT_PENDING_MAGIC[4] = { 'K', 'T', 'P', '1' };
+static const unsigned char KC_PACT_PEER_MAGIC[4] = { 'K', 'T', 'R', '1' };
+static const unsigned char KC_PACT_LOCAL_MAGIC[4] = { 'K', 'T', 'L', '1' };
 
-struct kc_trust {
-    char dir[KC_TRUST_PATH_SIZE];
+struct kc_pact {
+    char dir[KC_PACT_PATH_SIZE];
 };
 
 typedef struct {
     size_t size;
-} kc_trust_alloc_header_t;
+} kc_pact_alloc_header_t;
 
 typedef struct {
     unsigned char k[32];
     uint64_t n;
     int has_key;
-} kc_trust_cipher_state_t;
+} kc_pact_cipher_state_t;
 
 typedef struct {
-    unsigned char ck[KC_TRUST_HASH_SIZE];
-    unsigned char h[KC_TRUST_HASH_SIZE];
-    kc_trust_cipher_state_t cipher;
-} kc_trust_symmetric_state_t;
+    unsigned char ck[KC_PACT_HASH_SIZE];
+    unsigned char h[KC_PACT_HASH_SIZE];
+    kc_pact_cipher_state_t cipher;
+} kc_pact_symmetric_state_t;
 
 #ifdef _WIN32
 /**
@@ -105,7 +105,7 @@ typedef struct {
  * @param size Byte count.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_read_random(unsigned char *buf, size_t size) {
+static int kc_pact_read_random(unsigned char *buf, size_t size) {
     if (!buf || size > 0xFFFFFFFFU) return -1;
     return BCryptGenRandom(NULL, buf, (ULONG)size,
         BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
@@ -117,7 +117,7 @@ static int kc_trust_read_random(unsigned char *buf, size_t size) {
  * @param size Byte count.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_read_random(unsigned char *buf, size_t size) {
+static int kc_pact_read_random(unsigned char *buf, size_t size) {
     size_t done = 0;
     if (!buf) return -1;
     while (done < size) {
@@ -135,7 +135,7 @@ static int kc_trust_read_random(unsigned char *buf, size_t size) {
  * @param size Byte count.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_read_random(unsigned char *buf, size_t size) {
+static int kc_pact_read_random(unsigned char *buf, size_t size) {
     FILE *f;
     size_t done = 0;
     if (!buf) return -1;
@@ -158,10 +158,10 @@ static int kc_trust_read_random(unsigned char *buf, size_t size) {
  * @param size Byte count.
  * @return Allocated buffer, or NULL on failure.
  */
-static void *kc_trust_alloc(size_t size) {
-    kc_trust_alloc_header_t *header;
+static void *kc_pact_alloc(size_t size) {
+    kc_pact_alloc_header_t *header;
     if (size > SIZE_MAX - sizeof(*header)) return NULL;
-    header = (kc_trust_alloc_header_t *)malloc(sizeof(*header) + (size ? size : 1));
+    header = (kc_pact_alloc_header_t *)malloc(sizeof(*header) + (size ? size : 1));
     if (!header) return NULL;
     header->size = size ? size : 1;
     memset(header + 1, 0, header->size);
@@ -169,14 +169,14 @@ static void *kc_trust_alloc(size_t size) {
 }
 
 /**
- * Releases a buffer returned by trust.c.
+ * Releases a buffer returned by pact.c.
  * @param ptr Allocation pointer.
  * @return No return value.
  */
-void kc_trust_free(void *ptr) {
-    kc_trust_alloc_header_t *header;
+void kc_pact_free(void *ptr) {
+    kc_pact_alloc_header_t *header;
     if (!ptr) return;
-    header = ((kc_trust_alloc_header_t *)ptr) - 1;
+    header = ((kc_pact_alloc_header_t *)ptr) - 1;
     crypto_wipe(ptr, header->size);
     crypto_wipe(header, sizeof(*header));
     free(header);
@@ -187,12 +187,12 @@ void kc_trust_free(void *ptr) {
  * @param value Input value.
  * @return Allocated copy, or NULL on failure.
  */
-static char *kc_trust_public_strdup(const char *value) {
+static char *kc_pact_public_strdup(const char *value) {
     size_t size;
     char *copy;
     if (!value) return NULL;
     size = strlen(value) + 1;
-    copy = (char *)kc_trust_alloc(size);
+    copy = (char *)kc_pact_alloc(size);
     if (!copy) return NULL;
     memcpy(copy, value, size);
     return copy;
@@ -206,7 +206,7 @@ static char *kc_trust_public_strdup(const char *value) {
  * @param b Second path component.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_path_join(char *out, size_t cap,
+static int kc_pact_path_join(char *out, size_t cap,
     const char *a, const char *b) {
 #ifdef _WIN32
     return (size_t)snprintf(out, cap, "%s\\%s", a, b) < cap ? 0 : -1;
@@ -221,8 +221,8 @@ static int kc_trust_path_join(char *out, size_t cap,
  * @param cap Buffer capacity.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_resolve_dir(char *out, size_t cap) {
-    const char *override = getenv("KC_TRUST_DIR");
+static int kc_pact_resolve_dir(char *out, size_t cap) {
+    const char *override = getenv("KC_PACT_DIR");
     if (!out || cap == 0) return -1;
     if (override && override[0])
         return (size_t)snprintf(out, cap, "%s", override) < cap ? 0 : -1;
@@ -231,16 +231,16 @@ static int kc_trust_resolve_dir(char *out, size_t cap) {
         const char *base = getenv("LOCALAPPDATA");
         if (!base || !base[0]) base = getenv("APPDATA");
         if (!base || !base[0]) return -1;
-        return (size_t)snprintf(out, cap, "%s\\kaisarcode\\trust.c", base) < cap ? 0 : -1;
+        return (size_t)snprintf(out, cap, "%s\\kaisarcode\\pact.c", base) < cap ? 0 : -1;
     }
 #else
     {
         const char *xdg = getenv("XDG_DATA_HOME");
         const char *home = getenv("HOME");
         if (xdg && xdg[0])
-            return (size_t)snprintf(out, cap, "%s/kaisarcode/trust.c", xdg) < cap ? 0 : -1;
+            return (size_t)snprintf(out, cap, "%s/kaisarcode/pact.c", xdg) < cap ? 0 : -1;
         if (!home || !home[0]) return -1;
-        return (size_t)snprintf(out, cap, "%s/.local/share/kaisarcode/trust.c", home) < cap ? 0 : -1;
+        return (size_t)snprintf(out, cap, "%s/.local/share/kaisarcode/pact.c", home) < cap ? 0 : -1;
     }
 #endif
 }
@@ -251,7 +251,7 @@ static int kc_trust_resolve_dir(char *out, size_t cap) {
  * @param path Filesystem path.
  * @return 1 when acceptable, or 0 otherwise.
  */
-static int kc_trust_dir_secure(const char *path) {
+static int kc_pact_dir_secure(const char *path) {
     DWORD attrs = GetFileAttributesA(path);
     if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
     if (!(attrs & FILE_ATTRIBUTE_DIRECTORY)) return 0;
@@ -264,8 +264,8 @@ static int kc_trust_dir_secure(const char *path) {
  * @param path Filesystem path.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_mkdirs(const char *path) {
-    char buf[KC_TRUST_PATH_SIZE];
+static int kc_pact_mkdirs(const char *path) {
+    char buf[KC_PACT_PATH_SIZE];
     char *p;
     if (!path || (size_t)snprintf(buf, sizeof(buf), "%s", path) >= sizeof(buf))
         return -1;
@@ -282,7 +282,7 @@ static int kc_trust_mkdirs(const char *path) {
     }
     if (!CreateDirectoryA(buf, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
         return -1;
-    return kc_trust_dir_secure(path) ? 0 : -1;
+    return kc_pact_dir_secure(path) ? 0 : -1;
 }
 #else
 /**
@@ -290,7 +290,7 @@ static int kc_trust_mkdirs(const char *path) {
  * @param path Filesystem path.
  * @return 1 when acceptable, or 0 otherwise.
  */
-static int kc_trust_dir_secure(const char *path) {
+static int kc_pact_dir_secure(const char *path) {
     struct stat st;
     if (lstat(path, &st) != 0) return 0;
     if (!S_ISDIR(st.st_mode)) return 0;
@@ -303,8 +303,8 @@ static int kc_trust_dir_secure(const char *path) {
  * @param path Filesystem path.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_mkdirs(const char *path) {
-    char buf[KC_TRUST_PATH_SIZE];
+static int kc_pact_mkdirs(const char *path) {
+    char buf[KC_PACT_PATH_SIZE];
     char *p;
     struct stat st;
     if (!path || (size_t)snprintf(buf, sizeof(buf), "%s", path) >= sizeof(buf))
@@ -319,7 +319,7 @@ static int kc_trust_mkdirs(const char *path) {
     if (mkdir(buf, 0700) != 0 && errno != EEXIST) return -1;
     if (lstat(path, &st) != 0 || !S_ISDIR(st.st_mode)) return -1;
     if ((st.st_mode & 0022) != 0 && chmod(path, 0700) != 0) return -1;
-    return kc_trust_dir_secure(path) ? 0 : -1;
+    return kc_pact_dir_secure(path) ? 0 : -1;
 }
 #endif
 
@@ -328,20 +328,20 @@ static int kc_trust_mkdirs(const char *path) {
  * @param trust Trust context.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_store_dirs(kc_trust_t *trust) {
-    char pending[KC_TRUST_PATH_SIZE];
-    char peers[KC_TRUST_PATH_SIZE];
-    char local[KC_TRUST_PATH_SIZE];
+static int kc_pact_store_dirs(kc_pact_t *trust) {
+    char pending[KC_PACT_PATH_SIZE];
+    char peers[KC_PACT_PATH_SIZE];
+    char local[KC_PACT_PATH_SIZE];
     if (!trust) return -1;
-    if (kc_trust_mkdirs(trust->dir) != 0) return -1;
-    if (kc_trust_path_join(pending, sizeof(pending), trust->dir, "pending") != 0)
+    if (kc_pact_mkdirs(trust->dir) != 0) return -1;
+    if (kc_pact_path_join(pending, sizeof(pending), trust->dir, "pending") != 0)
         return -1;
-    if (kc_trust_path_join(peers, sizeof(peers), trust->dir, "peers") != 0)
+    if (kc_pact_path_join(peers, sizeof(peers), trust->dir, "peers") != 0)
         return -1;
-    if (kc_trust_path_join(local, sizeof(local), trust->dir, "local") != 0)
+    if (kc_pact_path_join(local, sizeof(local), trust->dir, "local") != 0)
         return -1;
-    if (kc_trust_mkdirs(pending) != 0 || kc_trust_mkdirs(peers) != 0 ||
-        kc_trust_mkdirs(local) != 0)
+    if (kc_pact_mkdirs(pending) != 0 || kc_pact_mkdirs(peers) != 0 ||
+        kc_pact_mkdirs(local) != 0)
         return -1;
     return 0;
 }
@@ -352,14 +352,14 @@ static int kc_trust_store_dirs(kc_trust_t *trust) {
  * @param out Destination output.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_uid_format(const unsigned char uid[KC_TRUST_UID_BYTES],
-    char out[KC_TRUST_UID_SIZE + 1]) {
+static int kc_pact_uid_format(const unsigned char uid[KC_PACT_UID_BYTES],
+    char out[KC_PACT_UID_SIZE + 1]) {
     static const char hex[] = "0123456789abcdef";
     static const int hyphen_after[] = { 4, 6, 8, 10 };
     size_t pos = 0;
     int h = 0;
     if (!uid || !out) return -1;
-    for (int i = 0; i < KC_TRUST_UID_BYTES; i++) {
+    for (int i = 0; i < KC_PACT_UID_BYTES; i++) {
         out[pos++] = hex[uid[i] >> 4];
         out[pos++] = hex[uid[i] & 15];
         if (h < 4 && i + 1 == hyphen_after[h]) {
@@ -368,7 +368,7 @@ static int kc_trust_uid_format(const unsigned char uid[KC_TRUST_UID_BYTES],
         }
     }
     out[pos] = '\0';
-    return pos == KC_TRUST_UID_SIZE ? 0 : -1;
+    return pos == KC_PACT_UID_SIZE ? 0 : -1;
 }
 
 /**
@@ -376,7 +376,7 @@ static int kc_trust_uid_format(const unsigned char uid[KC_TRUST_UID_BYTES],
  * @param c Function parameter.
  * @return Decoded nibble, or -1 for invalid input.
  */
-static int kc_trust_hex_value(char c) {
+static int kc_pact_hex_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
@@ -389,14 +389,14 @@ static int kc_trust_hex_value(char c) {
  * @param uid UID string.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_uid_parse(const char *text,
-    unsigned char uid[KC_TRUST_UID_BYTES]) {
+static int kc_pact_uid_parse(const char *text,
+    unsigned char uid[KC_PACT_UID_BYTES]) {
     static const int hyphens[] = { 8, 13, 18, 23 };
     size_t i = 0;
     size_t out = 0;
     int h = 0;
-    if (!text || strlen(text) != KC_TRUST_UID_SIZE || !uid) return -1;
-    while (i < KC_TRUST_UID_SIZE) {
+    if (!text || strlen(text) != KC_PACT_UID_SIZE || !uid) return -1;
+    while (i < KC_PACT_UID_SIZE) {
         int hi;
         int lo;
         if (h < 4 && (int)i == hyphens[h]) {
@@ -405,15 +405,15 @@ static int kc_trust_uid_parse(const char *text,
             h++;
             continue;
         }
-        if (i + 1 >= KC_TRUST_UID_SIZE || out >= KC_TRUST_UID_BYTES)
+        if (i + 1 >= KC_PACT_UID_SIZE || out >= KC_PACT_UID_BYTES)
             return -1;
-        hi = kc_trust_hex_value(text[i]);
-        lo = kc_trust_hex_value(text[i + 1]);
+        hi = kc_pact_hex_value(text[i]);
+        lo = kc_pact_hex_value(text[i + 1]);
         if (hi < 0 || lo < 0) return -1;
         uid[out++] = (unsigned char)((hi << 4) | lo);
         i += 2;
     }
-    return out == KC_TRUST_UID_BYTES ? 0 : -1;
+    return out == KC_PACT_UID_BYTES ? 0 : -1;
 }
 
 /**
@@ -422,12 +422,12 @@ static int kc_trust_uid_parse(const char *text,
  * @param text Input text.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_uid_new(unsigned char uid[KC_TRUST_UID_BYTES],
-    char text[KC_TRUST_UID_SIZE + 1]) {
-    if (kc_trust_read_random(uid, KC_TRUST_UID_BYTES) != 0) return -1;
+static int kc_pact_uid_new(unsigned char uid[KC_PACT_UID_BYTES],
+    char text[KC_PACT_UID_SIZE + 1]) {
+    if (kc_pact_read_random(uid, KC_PACT_UID_BYTES) != 0) return -1;
     uid[6] = (unsigned char)((uid[6] & 0x0fU) | 0x40U);
     uid[8] = (unsigned char)((uid[8] & 0x3fU) | 0x80U);
-    return kc_trust_uid_format(uid, text);
+    return kc_pact_uid_format(uid, text);
 }
 
 /**
@@ -438,17 +438,17 @@ static int kc_trust_uid_new(unsigned char uid[KC_TRUST_UID_BYTES],
  * @param out Destination output.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_record_path(const kc_trust_t *trust, const char *kind,
-    const char *uid, char out[KC_TRUST_PATH_SIZE]) {
-    unsigned char parsed[KC_TRUST_UID_BYTES];
-    char canonical[KC_TRUST_UID_SIZE + 1];
-    char dir[KC_TRUST_PATH_SIZE];
+static int kc_pact_record_path(const kc_pact_t *trust, const char *kind,
+    const char *uid, char out[KC_PACT_PATH_SIZE]) {
+    unsigned char parsed[KC_PACT_UID_BYTES];
+    char canonical[KC_PACT_UID_SIZE + 1];
+    char dir[KC_PACT_PATH_SIZE];
     if (!trust || !kind || !uid || !out) return -1;
-    if (kc_trust_uid_parse(uid, parsed) != 0 ||
-        kc_trust_uid_format(parsed, canonical) != 0) return -1;
-    if (kc_trust_path_join(dir, sizeof(dir), trust->dir, kind) != 0)
+    if (kc_pact_uid_parse(uid, parsed) != 0 ||
+        kc_pact_uid_format(parsed, canonical) != 0) return -1;
+    if (kc_pact_path_join(dir, sizeof(dir), trust->dir, kind) != 0)
         return -1;
-    return kc_trust_path_join(out, KC_TRUST_PATH_SIZE, dir, canonical);
+    return kc_pact_path_join(out, KC_PACT_PATH_SIZE, dir, canonical);
 }
 
 /**
@@ -458,7 +458,7 @@ static int kc_trust_record_path(const kc_trust_t *trust, const char *kind,
  * @param size Byte count.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_write_file(const char *path,
+static int kc_pact_write_file(const char *path,
     const unsigned char *data, size_t size) {
 #ifdef _WIN32
     HANDLE file;
@@ -507,7 +507,7 @@ static int kc_trust_write_file(const char *path,
  * @param size Byte count.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_read_file(const char *path,
+static int kc_pact_read_file(const char *path,
     unsigned char *data, size_t size) {
     FILE *f;
     size_t done;
@@ -526,7 +526,7 @@ static int kc_trust_read_file(const char *path,
  * @param path Filesystem path.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_remove_file(const char *path) {
+static int kc_pact_remove_file(const char *path) {
 #ifdef _WIN32
     return DeleteFileA(path) ? 0 : -1;
 #else
@@ -543,21 +543,21 @@ static int kc_trust_remove_file(const char *path) {
  * @param psk One-use invitation secret.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_pending_write(kc_trust_t *trust, const char *remote_uid,
-    const unsigned char local_uid[KC_TRUST_UID_BYTES],
-    const unsigned char sk[KC_TRUST_SK_SIZE],
-    const unsigned char psk[KC_TRUST_PSK_SIZE]) {
-    unsigned char record[KC_TRUST_PENDING_RECORD_SIZE];
-    char path[KC_TRUST_PATH_SIZE];
+static int kc_pact_pending_write(kc_pact_t *trust, const char *remote_uid,
+    const unsigned char local_uid[KC_PACT_UID_BYTES],
+    const unsigned char sk[KC_PACT_SK_SIZE],
+    const unsigned char psk[KC_PACT_PSK_SIZE]) {
+    unsigned char record[KC_PACT_PENDING_RECORD_SIZE];
+    char path[KC_PACT_PATH_SIZE];
     int rc;
-    if (kc_trust_record_path(trust, "pending", remote_uid, path) != 0)
+    if (kc_pact_record_path(trust, "pending", remote_uid, path) != 0)
         return -1;
-    memcpy(record, KC_TRUST_PENDING_MAGIC, 4);
-    memcpy(record + 4, local_uid, KC_TRUST_UID_BYTES);
-    memcpy(record + 4 + KC_TRUST_UID_BYTES, sk, KC_TRUST_SK_SIZE);
-    memcpy(record + 4 + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE,
-        psk, KC_TRUST_PSK_SIZE);
-    rc = kc_trust_write_file(path, record, sizeof(record));
+    memcpy(record, KC_PACT_PENDING_MAGIC, 4);
+    memcpy(record + 4, local_uid, KC_PACT_UID_BYTES);
+    memcpy(record + 4 + KC_PACT_UID_BYTES, sk, KC_PACT_SK_SIZE);
+    memcpy(record + 4 + KC_PACT_UID_BYTES + KC_PACT_SK_SIZE,
+        psk, KC_PACT_PSK_SIZE);
+    rc = kc_pact_write_file(path, record, sizeof(record));
     crypto_wipe(record, sizeof(record));
     return rc;
 }
@@ -571,21 +571,21 @@ static int kc_trust_pending_write(kc_trust_t *trust, const char *remote_uid,
  * @param psk One-use invitation secret.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_pending_read(kc_trust_t *trust, const char *remote_uid,
-    unsigned char local_uid[KC_TRUST_UID_BYTES],
-    unsigned char sk[KC_TRUST_SK_SIZE],
-    unsigned char psk[KC_TRUST_PSK_SIZE]) {
-    unsigned char record[KC_TRUST_PENDING_RECORD_SIZE];
-    char path[KC_TRUST_PATH_SIZE];
+static int kc_pact_pending_read(kc_pact_t *trust, const char *remote_uid,
+    unsigned char local_uid[KC_PACT_UID_BYTES],
+    unsigned char sk[KC_PACT_SK_SIZE],
+    unsigned char psk[KC_PACT_PSK_SIZE]) {
+    unsigned char record[KC_PACT_PENDING_RECORD_SIZE];
+    char path[KC_PACT_PATH_SIZE];
     int rc = -1;
-    if (kc_trust_record_path(trust, "pending", remote_uid, path) != 0)
+    if (kc_pact_record_path(trust, "pending", remote_uid, path) != 0)
         return -1;
-    if (kc_trust_read_file(path, record, sizeof(record)) == 0 &&
-        memcmp(record, KC_TRUST_PENDING_MAGIC, 4) == 0) {
-        memcpy(local_uid, record + 4, KC_TRUST_UID_BYTES);
-        memcpy(sk, record + 4 + KC_TRUST_UID_BYTES, KC_TRUST_SK_SIZE);
-        memcpy(psk, record + 4 + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE,
-            KC_TRUST_PSK_SIZE);
+    if (kc_pact_read_file(path, record, sizeof(record)) == 0 &&
+        memcmp(record, KC_PACT_PENDING_MAGIC, 4) == 0) {
+        memcpy(local_uid, record + 4, KC_PACT_UID_BYTES);
+        memcpy(sk, record + 4 + KC_PACT_UID_BYTES, KC_PACT_SK_SIZE);
+        memcpy(psk, record + 4 + KC_PACT_UID_BYTES + KC_PACT_SK_SIZE,
+            KC_PACT_PSK_SIZE);
         rc = 0;
     }
     crypto_wipe(record, sizeof(record));
@@ -598,10 +598,10 @@ static int kc_trust_pending_read(kc_trust_t *trust, const char *remote_uid,
  * @param uid UID string.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_pending_remove(kc_trust_t *trust, const char *uid) {
-    char path[KC_TRUST_PATH_SIZE];
-    if (kc_trust_record_path(trust, "pending", uid, path) != 0) return -1;
-    return kc_trust_remove_file(path);
+static int kc_pact_pending_remove(kc_pact_t *trust, const char *uid) {
+    char path[KC_PACT_PATH_SIZE];
+    if (kc_pact_record_path(trust, "pending", uid, path) != 0) return -1;
+    return kc_pact_remove_file(path);
 }
 
 /**
@@ -613,21 +613,21 @@ static int kc_trust_pending_remove(kc_trust_t *trust, const char *uid) {
  * @param remote_pk Remote static public key.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_peer_write(kc_trust_t *trust, const char *remote_uid,
-    const unsigned char local_uid[KC_TRUST_UID_BYTES],
-    const unsigned char local_sk[KC_TRUST_SK_SIZE],
-    const unsigned char remote_pk[KC_TRUST_PK_SIZE]) {
-    unsigned char record[KC_TRUST_PEER_RECORD_SIZE];
-    char path[KC_TRUST_PATH_SIZE];
+static int kc_pact_peer_write(kc_pact_t *trust, const char *remote_uid,
+    const unsigned char local_uid[KC_PACT_UID_BYTES],
+    const unsigned char local_sk[KC_PACT_SK_SIZE],
+    const unsigned char remote_pk[KC_PACT_PK_SIZE]) {
+    unsigned char record[KC_PACT_PEER_RECORD_SIZE];
+    char path[KC_PACT_PATH_SIZE];
     int rc;
-    if (kc_trust_record_path(trust, "peers", remote_uid, path) != 0)
+    if (kc_pact_record_path(trust, "peers", remote_uid, path) != 0)
         return -1;
-    memcpy(record, KC_TRUST_PEER_MAGIC, 4);
-    memcpy(record + 4, local_uid, KC_TRUST_UID_BYTES);
-    memcpy(record + 4 + KC_TRUST_UID_BYTES, local_sk, KC_TRUST_SK_SIZE);
-    memcpy(record + 4 + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE,
-        remote_pk, KC_TRUST_PK_SIZE);
-    rc = kc_trust_write_file(path, record, sizeof(record));
+    memcpy(record, KC_PACT_PEER_MAGIC, 4);
+    memcpy(record + 4, local_uid, KC_PACT_UID_BYTES);
+    memcpy(record + 4 + KC_PACT_UID_BYTES, local_sk, KC_PACT_SK_SIZE);
+    memcpy(record + 4 + KC_PACT_UID_BYTES + KC_PACT_SK_SIZE,
+        remote_pk, KC_PACT_PK_SIZE);
+    rc = kc_pact_write_file(path, record, sizeof(record));
     crypto_wipe(record, sizeof(record));
     return rc;
 }
@@ -641,21 +641,21 @@ static int kc_trust_peer_write(kc_trust_t *trust, const char *remote_uid,
  * @param remote_pk Remote static public key.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_peer_read(kc_trust_t *trust, const char *remote_uid,
-    unsigned char local_uid[KC_TRUST_UID_BYTES],
-    unsigned char local_sk[KC_TRUST_SK_SIZE],
-    unsigned char remote_pk[KC_TRUST_PK_SIZE]) {
-    unsigned char record[KC_TRUST_PEER_RECORD_SIZE];
-    char path[KC_TRUST_PATH_SIZE];
+static int kc_pact_peer_read(kc_pact_t *trust, const char *remote_uid,
+    unsigned char local_uid[KC_PACT_UID_BYTES],
+    unsigned char local_sk[KC_PACT_SK_SIZE],
+    unsigned char remote_pk[KC_PACT_PK_SIZE]) {
+    unsigned char record[KC_PACT_PEER_RECORD_SIZE];
+    char path[KC_PACT_PATH_SIZE];
     int rc = -1;
-    if (kc_trust_record_path(trust, "peers", remote_uid, path) != 0)
+    if (kc_pact_record_path(trust, "peers", remote_uid, path) != 0)
         return -1;
-    if (kc_trust_read_file(path, record, sizeof(record)) == 0 &&
-        memcmp(record, KC_TRUST_PEER_MAGIC, 4) == 0) {
-        memcpy(local_uid, record + 4, KC_TRUST_UID_BYTES);
-        memcpy(local_sk, record + 4 + KC_TRUST_UID_BYTES, KC_TRUST_SK_SIZE);
-        memcpy(remote_pk, record + 4 + KC_TRUST_UID_BYTES + KC_TRUST_SK_SIZE,
-            KC_TRUST_PK_SIZE);
+    if (kc_pact_read_file(path, record, sizeof(record)) == 0 &&
+        memcmp(record, KC_PACT_PEER_MAGIC, 4) == 0) {
+        memcpy(local_uid, record + 4, KC_PACT_UID_BYTES);
+        memcpy(local_sk, record + 4 + KC_PACT_UID_BYTES, KC_PACT_SK_SIZE);
+        memcpy(remote_pk, record + 4 + KC_PACT_UID_BYTES + KC_PACT_SK_SIZE,
+            KC_PACT_PK_SIZE);
         rc = 0;
     }
     crypto_wipe(record, sizeof(record));
@@ -668,10 +668,10 @@ static int kc_trust_peer_read(kc_trust_t *trust, const char *remote_uid,
  * @param uid UID string.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_peer_remove(kc_trust_t *trust, const char *uid) {
-    char path[KC_TRUST_PATH_SIZE];
-    if (kc_trust_record_path(trust, "peers", uid, path) != 0) return -1;
-    return kc_trust_remove_file(path);
+static int kc_pact_peer_remove(kc_pact_t *trust, const char *uid) {
+    char path[KC_PACT_PATH_SIZE];
+    if (kc_pact_record_path(trust, "peers", uid, path) != 0) return -1;
+    return kc_pact_remove_file(path);
 }
 
 /**
@@ -681,16 +681,16 @@ static int kc_trust_peer_remove(kc_trust_t *trust, const char *uid) {
  * @param remote_uid Remote endpoint UID.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_local_write(kc_trust_t *trust, const char *local_uid,
-    const unsigned char remote_uid[KC_TRUST_UID_BYTES]) {
-    unsigned char record[KC_TRUST_LOCAL_RECORD_SIZE];
-    char path[KC_TRUST_PATH_SIZE];
+static int kc_pact_local_write(kc_pact_t *trust, const char *local_uid,
+    const unsigned char remote_uid[KC_PACT_UID_BYTES]) {
+    unsigned char record[KC_PACT_LOCAL_RECORD_SIZE];
+    char path[KC_PACT_PATH_SIZE];
     int rc;
-    if (kc_trust_record_path(trust, "local", local_uid, path) != 0)
+    if (kc_pact_record_path(trust, "local", local_uid, path) != 0)
         return -1;
-    memcpy(record, KC_TRUST_LOCAL_MAGIC, 4);
-    memcpy(record + 4, remote_uid, KC_TRUST_UID_BYTES);
-    rc = kc_trust_write_file(path, record, sizeof(record));
+    memcpy(record, KC_PACT_LOCAL_MAGIC, 4);
+    memcpy(record + 4, remote_uid, KC_PACT_UID_BYTES);
+    rc = kc_pact_write_file(path, record, sizeof(record));
     crypto_wipe(record, sizeof(record));
     return rc;
 }
@@ -702,16 +702,16 @@ static int kc_trust_local_write(kc_trust_t *trust, const char *local_uid,
  * @param remote_uid Remote endpoint UID.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_local_read(kc_trust_t *trust, const char *local_uid,
-    unsigned char remote_uid[KC_TRUST_UID_BYTES]) {
-    unsigned char record[KC_TRUST_LOCAL_RECORD_SIZE];
-    char path[KC_TRUST_PATH_SIZE];
+static int kc_pact_local_read(kc_pact_t *trust, const char *local_uid,
+    unsigned char remote_uid[KC_PACT_UID_BYTES]) {
+    unsigned char record[KC_PACT_LOCAL_RECORD_SIZE];
+    char path[KC_PACT_PATH_SIZE];
     int rc = -1;
-    if (kc_trust_record_path(trust, "local", local_uid, path) != 0)
+    if (kc_pact_record_path(trust, "local", local_uid, path) != 0)
         return -1;
-    if (kc_trust_read_file(path, record, sizeof(record)) == 0 &&
-        memcmp(record, KC_TRUST_LOCAL_MAGIC, 4) == 0) {
-        memcpy(remote_uid, record + 4, KC_TRUST_UID_BYTES);
+    if (kc_pact_read_file(path, record, sizeof(record)) == 0 &&
+        memcmp(record, KC_PACT_LOCAL_MAGIC, 4) == 0) {
+        memcpy(remote_uid, record + 4, KC_PACT_UID_BYTES);
         rc = 0;
     }
     crypto_wipe(record, sizeof(record));
@@ -724,10 +724,10 @@ static int kc_trust_local_read(kc_trust_t *trust, const char *local_uid,
  * @param uid UID string.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_local_remove(kc_trust_t *trust, const char *uid) {
-    char path[KC_TRUST_PATH_SIZE];
-    if (kc_trust_record_path(trust, "local", uid, path) != 0) return -1;
-    return kc_trust_remove_file(path);
+static int kc_pact_local_remove(kc_pact_t *trust, const char *uid) {
+    char path[KC_PACT_PATH_SIZE];
+    if (kc_pact_record_path(trust, "local", uid, path) != 0) return -1;
+    return kc_pact_remove_file(path);
 }
 
 /**
@@ -735,7 +735,7 @@ static int kc_trust_local_remove(kc_trust_t *trust, const char *uid) {
  * @param c Function parameter.
  * @return Decoded sextet, or -1 for invalid input.
  */
-static int kc_trust_base64_value(char c) {
+static int kc_pact_base64_value(char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
     if (c >= 'a' && c <= 'z') return c - 'a' + 26;
     if (c >= '0' && c <= '9') return c - '0' + 52;
@@ -750,7 +750,7 @@ static int kc_trust_base64_value(char c) {
  * @param size Byte count.
  * @return Allocated Base64 string, or NULL on failure.
  */
-static char *kc_trust_base64_encode(const unsigned char *data, size_t size) {
+static char *kc_pact_base64_encode(const unsigned char *data, size_t size) {
     static const char alphabet[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t out_size;
@@ -760,7 +760,7 @@ static char *kc_trust_base64_encode(const unsigned char *data, size_t size) {
     if (!data && size) return NULL;
     if (size > (SIZE_MAX - 2) / 3) return NULL;
     out_size = ((size + 2) / 3) * 4;
-    out = (char *)kc_trust_alloc(out_size + 1);
+    out = (char *)kc_pact_alloc(out_size + 1);
     if (!out) return NULL;
     while (i + 3 <= size) {
         unsigned v = ((unsigned)data[i] << 16) |
@@ -795,7 +795,7 @@ static char *kc_trust_base64_encode(const unsigned char *data, size_t size) {
  * @param out_size Destination byte count.
  * @return Allocated bytes, or NULL on failure.
  */
-static unsigned char *kc_trust_base64_decode(const char *text,
+static unsigned char *kc_pact_base64_decode(const char *text,
     size_t *out_size) {
     size_t len;
     size_t size;
@@ -811,10 +811,10 @@ static unsigned char *kc_trust_base64_decode(const char *text,
     out = (unsigned char *)malloc(size ? size : 1);
     if (!out) return NULL;
     for (size_t i = 0; i < len; i += 4) {
-        int a = kc_trust_base64_value(text[i]);
-        int b = kc_trust_base64_value(text[i + 1]);
-        int c = text[i + 2] == '=' ? -2 : kc_trust_base64_value(text[i + 2]);
-        int d = text[i + 3] == '=' ? -2 : kc_trust_base64_value(text[i + 3]);
+        int a = kc_pact_base64_value(text[i]);
+        int b = kc_pact_base64_value(text[i + 1]);
+        int c = text[i + 2] == '=' ? -2 : kc_pact_base64_value(text[i + 2]);
+        int d = text[i + 3] == '=' ? -2 : kc_pact_base64_value(text[i + 3]);
         unsigned v;
         int last = i + 4 == len;
         if (a < 0 || b < 0 || c == -1 || d == -1 ||
@@ -845,13 +845,13 @@ static unsigned char *kc_trust_base64_decode(const char *text,
  * @param data_size Function parameter.
  * @return No return value.
  */
-static void kc_trust_hmac_blake2b(unsigned char out[KC_TRUST_HASH_SIZE],
+static void kc_pact_hmac_blake2b(unsigned char out[KC_PACT_HASH_SIZE],
     const unsigned char *key, size_t key_size,
     const unsigned char *data, size_t data_size) {
-    unsigned char kpad[KC_TRUST_BLAKE2B_BLOCK];
-    unsigned char outer[KC_TRUST_BLAKE2B_BLOCK];
-    unsigned char inner_pad[KC_TRUST_BLAKE2B_BLOCK];
-    unsigned char inner[KC_TRUST_HASH_SIZE];
+    unsigned char kpad[KC_PACT_BLAKE2B_BLOCK];
+    unsigned char outer[KC_PACT_BLAKE2B_BLOCK];
+    unsigned char inner_pad[KC_PACT_BLAKE2B_BLOCK];
+    unsigned char inner[KC_PACT_HASH_SIZE];
     crypto_blake2b_ctx hash;
     memset(kpad, 0, sizeof(kpad));
     memcpy(kpad, key, key_size);
@@ -861,11 +861,11 @@ static void kc_trust_hmac_blake2b(unsigned char out[KC_TRUST_HASH_SIZE],
         outer[i] ^= 0x5c;
         inner_pad[i] ^= 0x36;
     }
-    crypto_blake2b_init(&hash, KC_TRUST_HASH_SIZE);
+    crypto_blake2b_init(&hash, KC_PACT_HASH_SIZE);
     crypto_blake2b_update(&hash, inner_pad, sizeof(inner_pad));
     if (data_size) crypto_blake2b_update(&hash, data, data_size);
     crypto_blake2b_final(&hash, inner);
-    crypto_blake2b_init(&hash, KC_TRUST_HASH_SIZE);
+    crypto_blake2b_init(&hash, KC_PACT_HASH_SIZE);
     crypto_blake2b_update(&hash, outer, sizeof(outer));
     crypto_blake2b_update(&hash, inner, sizeof(inner));
     crypto_blake2b_final(&hash, out);
@@ -884,18 +884,18 @@ static void kc_trust_hmac_blake2b(unsigned char out[KC_TRUST_HASH_SIZE],
  * @param ikm_size Function parameter.
  * @return No return value.
  */
-static void kc_trust_hkdf2(unsigned char out1[KC_TRUST_HASH_SIZE],
-    unsigned char out2[KC_TRUST_HASH_SIZE],
-    const unsigned char ck[KC_TRUST_HASH_SIZE],
+static void kc_pact_hkdf2(unsigned char out1[KC_PACT_HASH_SIZE],
+    unsigned char out2[KC_PACT_HASH_SIZE],
+    const unsigned char ck[KC_PACT_HASH_SIZE],
     const unsigned char *ikm, size_t ikm_size) {
-    unsigned char temp[KC_TRUST_HASH_SIZE];
-    unsigned char input[KC_TRUST_HASH_SIZE + 1];
+    unsigned char temp[KC_PACT_HASH_SIZE];
+    unsigned char input[KC_PACT_HASH_SIZE + 1];
     unsigned char one = 1;
-    kc_trust_hmac_blake2b(temp, ck, KC_TRUST_HASH_SIZE, ikm, ikm_size);
-    kc_trust_hmac_blake2b(out1, temp, KC_TRUST_HASH_SIZE, &one, 1);
-    memcpy(input, out1, KC_TRUST_HASH_SIZE);
-    input[KC_TRUST_HASH_SIZE] = 2;
-    kc_trust_hmac_blake2b(out2, temp, KC_TRUST_HASH_SIZE,
+    kc_pact_hmac_blake2b(temp, ck, KC_PACT_HASH_SIZE, ikm, ikm_size);
+    kc_pact_hmac_blake2b(out1, temp, KC_PACT_HASH_SIZE, &one, 1);
+    memcpy(input, out1, KC_PACT_HASH_SIZE);
+    input[KC_PACT_HASH_SIZE] = 2;
+    kc_pact_hmac_blake2b(out2, temp, KC_PACT_HASH_SIZE,
         input, sizeof(input));
     crypto_wipe(temp, sizeof(temp));
     crypto_wipe(input, sizeof(input));
@@ -911,23 +911,23 @@ static void kc_trust_hkdf2(unsigned char out1[KC_TRUST_HASH_SIZE],
  * @param ikm_size Function parameter.
  * @return No return value.
  */
-static void kc_trust_hkdf3(unsigned char out1[KC_TRUST_HASH_SIZE],
-    unsigned char out2[KC_TRUST_HASH_SIZE],
-    unsigned char out3[KC_TRUST_HASH_SIZE],
-    const unsigned char ck[KC_TRUST_HASH_SIZE],
+static void kc_pact_hkdf3(unsigned char out1[KC_PACT_HASH_SIZE],
+    unsigned char out2[KC_PACT_HASH_SIZE],
+    unsigned char out3[KC_PACT_HASH_SIZE],
+    const unsigned char ck[KC_PACT_HASH_SIZE],
     const unsigned char *ikm, size_t ikm_size) {
-    unsigned char temp[KC_TRUST_HASH_SIZE];
-    unsigned char input[KC_TRUST_HASH_SIZE + 1];
+    unsigned char temp[KC_PACT_HASH_SIZE];
+    unsigned char input[KC_PACT_HASH_SIZE + 1];
     unsigned char one = 1;
-    kc_trust_hmac_blake2b(temp, ck, KC_TRUST_HASH_SIZE, ikm, ikm_size);
-    kc_trust_hmac_blake2b(out1, temp, KC_TRUST_HASH_SIZE, &one, 1);
-    memcpy(input, out1, KC_TRUST_HASH_SIZE);
-    input[KC_TRUST_HASH_SIZE] = 2;
-    kc_trust_hmac_blake2b(out2, temp, KC_TRUST_HASH_SIZE,
+    kc_pact_hmac_blake2b(temp, ck, KC_PACT_HASH_SIZE, ikm, ikm_size);
+    kc_pact_hmac_blake2b(out1, temp, KC_PACT_HASH_SIZE, &one, 1);
+    memcpy(input, out1, KC_PACT_HASH_SIZE);
+    input[KC_PACT_HASH_SIZE] = 2;
+    kc_pact_hmac_blake2b(out2, temp, KC_PACT_HASH_SIZE,
         input, sizeof(input));
-    memcpy(input, out2, KC_TRUST_HASH_SIZE);
-    input[KC_TRUST_HASH_SIZE] = 3;
-    kc_trust_hmac_blake2b(out3, temp, KC_TRUST_HASH_SIZE,
+    memcpy(input, out2, KC_PACT_HASH_SIZE);
+    input[KC_PACT_HASH_SIZE] = 3;
+    kc_pact_hmac_blake2b(out3, temp, KC_PACT_HASH_SIZE,
         input, sizeof(input));
     crypto_wipe(temp, sizeof(temp));
     crypto_wipe(input, sizeof(input));
@@ -938,7 +938,7 @@ static void kc_trust_hkdf3(unsigned char out1[KC_TRUST_HASH_SIZE],
  * @param cipher Cipher state.
  * @return No return value.
  */
-static void kc_trust_cipher_empty(kc_trust_cipher_state_t *cipher) {
+static void kc_pact_cipher_empty(kc_pact_cipher_state_t *cipher) {
     memset(cipher, 0, sizeof(*cipher));
 }
 
@@ -948,7 +948,7 @@ static void kc_trust_cipher_empty(kc_trust_cipher_state_t *cipher) {
  * @param key Key bytes.
  * @return No return value.
  */
-static void kc_trust_cipher_key(kc_trust_cipher_state_t *cipher,
+static void kc_pact_cipher_key(kc_pact_cipher_state_t *cipher,
     const unsigned char key[32]) {
     memcpy(cipher->k, key, 32);
     cipher->n = 0;
@@ -965,11 +965,11 @@ static void kc_trust_cipher_key(kc_trust_cipher_state_t *cipher,
  * @param out Destination output.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_cipher_encrypt(kc_trust_cipher_state_t *cipher,
+static int kc_pact_cipher_encrypt(kc_pact_cipher_state_t *cipher,
     const unsigned char *ad, size_t ad_size,
     const unsigned char *plain, size_t plain_size,
     unsigned char *out) {
-    unsigned char nonce[KC_TRUST_NONCE_SIZE] = {0};
+    unsigned char nonce[KC_PACT_NONCE_SIZE] = {0};
     crypto_aead_ctx aead;
     if (!cipher || !cipher->has_key || cipher->n == UINT64_MAX || !out)
         return -1;
@@ -993,18 +993,18 @@ static int kc_trust_cipher_encrypt(kc_trust_cipher_state_t *cipher,
  * @param out Destination output.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_cipher_decrypt(kc_trust_cipher_state_t *cipher,
+static int kc_pact_cipher_decrypt(kc_pact_cipher_state_t *cipher,
     const unsigned char *ad, size_t ad_size,
     const unsigned char *data, size_t data_size,
     unsigned char *out) {
-    unsigned char nonce[KC_TRUST_NONCE_SIZE] = {0};
+    unsigned char nonce[KC_PACT_NONCE_SIZE] = {0};
     crypto_aead_ctx aead;
     size_t plain_size;
     int rc;
     if (!cipher || !cipher->has_key || cipher->n == UINT64_MAX ||
-        !data || data_size < KC_TRUST_MAC_SIZE || !out)
+        !data || data_size < KC_PACT_MAC_SIZE || !out)
         return -1;
-    plain_size = data_size - KC_TRUST_MAC_SIZE;
+    plain_size = data_size - KC_PACT_MAC_SIZE;
     for (size_t i = 0; i < 8; i++)
         nonce[4 + i] = (unsigned char)(cipher->n >> (8 * i));
     crypto_aead_init_ietf(&aead, cipher->k, nonce);
@@ -1023,12 +1023,12 @@ static int kc_trust_cipher_decrypt(kc_trust_cipher_state_t *cipher,
  * @param size Byte count.
  * @return No return value.
  */
-static void kc_trust_mix_hash(kc_trust_symmetric_state_t *state,
+static void kc_pact_mix_hash(kc_pact_symmetric_state_t *state,
     const unsigned char *data, size_t size) {
-    unsigned char next[KC_TRUST_HASH_SIZE];
+    unsigned char next[KC_PACT_HASH_SIZE];
     crypto_blake2b_ctx hash;
-    crypto_blake2b_init(&hash, KC_TRUST_HASH_SIZE);
-    crypto_blake2b_update(&hash, state->h, KC_TRUST_HASH_SIZE);
+    crypto_blake2b_init(&hash, KC_PACT_HASH_SIZE);
+    crypto_blake2b_update(&hash, state->h, KC_PACT_HASH_SIZE);
     if (size) crypto_blake2b_update(&hash, data, size);
     crypto_blake2b_final(&hash, next);
     memcpy(state->h, next, sizeof(next));
@@ -1042,13 +1042,13 @@ static void kc_trust_mix_hash(kc_trust_symmetric_state_t *state,
  * @param size Byte count.
  * @return No return value.
  */
-static void kc_trust_mix_key(kc_trust_symmetric_state_t *state,
+static void kc_pact_mix_key(kc_pact_symmetric_state_t *state,
     const unsigned char *input, size_t size) {
-    unsigned char ck[KC_TRUST_HASH_SIZE];
-    unsigned char key[KC_TRUST_HASH_SIZE];
-    kc_trust_hkdf2(ck, key, state->ck, input, size);
+    unsigned char ck[KC_PACT_HASH_SIZE];
+    unsigned char key[KC_PACT_HASH_SIZE];
+    kc_pact_hkdf2(ck, key, state->ck, input, size);
     memcpy(state->ck, ck, sizeof(ck));
-    kc_trust_cipher_key(&state->cipher, key);
+    kc_pact_cipher_key(&state->cipher, key);
     crypto_wipe(ck, sizeof(ck));
     crypto_wipe(key, sizeof(key));
 }
@@ -1059,15 +1059,15 @@ static void kc_trust_mix_key(kc_trust_symmetric_state_t *state,
  * @param psk One-use invitation secret.
  * @return No return value.
  */
-static void kc_trust_mix_key_and_hash(kc_trust_symmetric_state_t *state,
-    const unsigned char psk[KC_TRUST_PSK_SIZE]) {
-    unsigned char ck[KC_TRUST_HASH_SIZE];
-    unsigned char hash[KC_TRUST_HASH_SIZE];
-    unsigned char key[KC_TRUST_HASH_SIZE];
-    kc_trust_hkdf3(ck, hash, key, state->ck, psk, KC_TRUST_PSK_SIZE);
+static void kc_pact_mix_key_and_hash(kc_pact_symmetric_state_t *state,
+    const unsigned char psk[KC_PACT_PSK_SIZE]) {
+    unsigned char ck[KC_PACT_HASH_SIZE];
+    unsigned char hash[KC_PACT_HASH_SIZE];
+    unsigned char key[KC_PACT_HASH_SIZE];
+    kc_pact_hkdf3(ck, hash, key, state->ck, psk, KC_PACT_PSK_SIZE);
     memcpy(state->ck, ck, sizeof(ck));
-    kc_trust_mix_hash(state, hash, sizeof(hash));
-    kc_trust_cipher_key(&state->cipher, key);
+    kc_pact_mix_hash(state, hash, sizeof(hash));
+    kc_pact_cipher_key(&state->cipher, key);
     crypto_wipe(ck, sizeof(ck));
     crypto_wipe(hash, sizeof(hash));
     crypto_wipe(key, sizeof(key));
@@ -1081,11 +1081,11 @@ static void kc_trust_mix_key_and_hash(kc_trust_symmetric_state_t *state,
  * @param out Destination output.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_encrypt_and_hash(kc_trust_symmetric_state_t *state,
+static int kc_pact_encrypt_and_hash(kc_pact_symmetric_state_t *state,
     const unsigned char *plain, size_t plain_size, unsigned char *out) {
-    if (kc_trust_cipher_encrypt(&state->cipher, state->h,
-        KC_TRUST_HASH_SIZE, plain, plain_size, out) != 0) return -1;
-    kc_trust_mix_hash(state, out, plain_size + KC_TRUST_MAC_SIZE);
+    if (kc_pact_cipher_encrypt(&state->cipher, state->h,
+        KC_PACT_HASH_SIZE, plain, plain_size, out) != 0) return -1;
+    kc_pact_mix_hash(state, out, plain_size + KC_PACT_MAC_SIZE);
     return 0;
 }
 
@@ -1097,11 +1097,11 @@ static int kc_trust_encrypt_and_hash(kc_trust_symmetric_state_t *state,
  * @param out Destination output.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_decrypt_and_hash(kc_trust_symmetric_state_t *state,
+static int kc_pact_decrypt_and_hash(kc_pact_symmetric_state_t *state,
     const unsigned char *data, size_t data_size, unsigned char *out) {
-    if (kc_trust_cipher_decrypt(&state->cipher, state->h,
-        KC_TRUST_HASH_SIZE, data, data_size, out) != 0) return -1;
-    kc_trust_mix_hash(state, data, data_size);
+    if (kc_pact_cipher_decrypt(&state->cipher, state->h,
+        KC_PACT_HASH_SIZE, data, data_size, out) != 0) return -1;
+    kc_pact_mix_hash(state, data, data_size);
     return 0;
 }
 
@@ -1112,13 +1112,13 @@ static int kc_trust_decrypt_and_hash(kc_trust_symmetric_state_t *state,
  * @param second Function parameter.
  * @return No return value.
  */
-static void kc_trust_split(const kc_trust_symmetric_state_t *state,
-    kc_trust_cipher_state_t *first, kc_trust_cipher_state_t *second) {
-    unsigned char first_key[KC_TRUST_HASH_SIZE];
-    unsigned char second_key[KC_TRUST_HASH_SIZE];
-    kc_trust_hkdf2(first_key, second_key, state->ck, NULL, 0);
-    kc_trust_cipher_key(first, first_key);
-    kc_trust_cipher_key(second, second_key);
+static void kc_pact_split(const kc_pact_symmetric_state_t *state,
+    kc_pact_cipher_state_t *first, kc_pact_cipher_state_t *second) {
+    unsigned char first_key[KC_PACT_HASH_SIZE];
+    unsigned char second_key[KC_PACT_HASH_SIZE];
+    kc_pact_hkdf2(first_key, second_key, state->ck, NULL, 0);
+    kc_pact_cipher_key(first, first_key);
+    kc_pact_cipher_key(second, second_key);
     crypto_wipe(first_key, sizeof(first_key));
     crypto_wipe(second_key, sizeof(second_key));
 }
@@ -1131,24 +1131,24 @@ static void kc_trust_split(const kc_trust_symmetric_state_t *state,
  * @param responder_uid Responder endpoint UID.
  * @return No return value.
  */
-static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
+static void kc_pact_noise_init(kc_pact_symmetric_state_t *state,
     const char *name,
-    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
-    const unsigned char responder_uid[KC_TRUST_UID_BYTES]) {
-    unsigned char prologue[2 * KC_TRUST_UID_BYTES];
+    const unsigned char initiator_uid[KC_PACT_UID_BYTES],
+    const unsigned char responder_uid[KC_PACT_UID_BYTES]) {
+    unsigned char prologue[2 * KC_PACT_UID_BYTES];
     size_t name_size = strlen(name);
     memset(state, 0, sizeof(*state));
-    if (name_size <= KC_TRUST_HASH_SIZE) {
+    if (name_size <= KC_PACT_HASH_SIZE) {
         memcpy(state->h, name, name_size);
     } else {
-        crypto_blake2b(state->h, KC_TRUST_HASH_SIZE,
+        crypto_blake2b(state->h, KC_PACT_HASH_SIZE,
             (const unsigned char *)name, name_size);
     }
-    memcpy(state->ck, state->h, KC_TRUST_HASH_SIZE);
-    kc_trust_cipher_empty(&state->cipher);
-    memcpy(prologue, initiator_uid, KC_TRUST_UID_BYTES);
-    memcpy(prologue + KC_TRUST_UID_BYTES, responder_uid, KC_TRUST_UID_BYTES);
-    kc_trust_mix_hash(state, prologue, sizeof(prologue));
+    memcpy(state->ck, state->h, KC_PACT_HASH_SIZE);
+    kc_pact_cipher_empty(&state->cipher);
+    memcpy(prologue, initiator_uid, KC_PACT_UID_BYTES);
+    memcpy(prologue + KC_PACT_UID_BYTES, responder_uid, KC_PACT_UID_BYTES);
+    kc_pact_mix_hash(state, prologue, sizeof(prologue));
     crypto_wipe(prologue, sizeof(prologue));
 }
 
@@ -1159,7 +1159,7 @@ static void kc_trust_noise_init(kc_trust_symmetric_state_t *state,
  * @param pk Static public key.
  * @return 0 on success, or -1 for a low-order point.
  */
-static int kc_trust_x25519(unsigned char out[32],
+static int kc_pact_x25519(unsigned char out[32],
     const unsigned char sk[32], const unsigned char pk[32]) {
     unsigned char zero[32] = {0};
     crypto_x25519(out, sk, pk);
@@ -1176,7 +1176,7 @@ static int kc_trust_x25519(unsigned char out[32],
  * @param value Input value.
  * @return No return value.
  */
-static void kc_trust_store_u64(unsigned char out[8], uint64_t value) {
+static void kc_pact_store_u64(unsigned char out[8], uint64_t value) {
     for (size_t i = 0; i < 8; i++)
         out[7 - i] = (unsigned char)(value >> (8 * i));
 }
@@ -1186,7 +1186,7 @@ static void kc_trust_store_u64(unsigned char out[8], uint64_t value) {
  * @param in Input bytes.
  * @return Decoded 64-bit value.
  */
-static uint64_t kc_trust_load_u64(const unsigned char in[8]) {
+static uint64_t kc_pact_load_u64(const unsigned char in[8]) {
     uint64_t value = 0;
     for (size_t i = 0; i < 8; i++) value = (value << 8) | in[i];
     return value;
@@ -1197,9 +1197,9 @@ static uint64_t kc_trust_load_u64(const unsigned char in[8]) {
  * @param size Byte count.
  * @return Required transport record count.
  */
-static size_t kc_trust_record_count(size_t size) {
+static size_t kc_pact_record_count(size_t size) {
     if (size == 0) return 0;
-    return 1 + (size - 1) / KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
+    return 1 + (size - 1) / KC_PACT_TRANSPORT_PLAINTEXT_MAX;
 }
 
 /**
@@ -1207,9 +1207,9 @@ static size_t kc_trust_record_count(size_t size) {
  * @param size Byte count.
  * @return Required protected blob size.
  */
-static size_t kc_trust_payload_size(size_t size) {
-    return KC_TRUST_PAYLOAD_BASE_SIZE + size +
-        kc_trust_record_count(size) * KC_TRUST_MAC_SIZE;
+static size_t kc_pact_payload_size(size_t size) {
+    return KC_PACT_PAYLOAD_BASE_SIZE + size +
+        kc_pact_record_count(size) * KC_PACT_MAC_SIZE;
 }
 
 /**
@@ -1222,46 +1222,46 @@ static size_t kc_trust_payload_size(size_t size) {
  * @param out Destination output.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_xpsk1_write(
-    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
-    const unsigned char responder_uid[KC_TRUST_UID_BYTES],
-    const unsigned char local_sk[KC_TRUST_SK_SIZE],
-    const unsigned char remote_pk[KC_TRUST_PK_SIZE],
-    const unsigned char psk[KC_TRUST_PSK_SIZE],
-    unsigned char out[KC_TRUST_XPSK1_MESSAGE_SIZE]) {
+static int kc_pact_xpsk1_write(
+    const unsigned char initiator_uid[KC_PACT_UID_BYTES],
+    const unsigned char responder_uid[KC_PACT_UID_BYTES],
+    const unsigned char local_sk[KC_PACT_SK_SIZE],
+    const unsigned char remote_pk[KC_PACT_PK_SIZE],
+    const unsigned char psk[KC_PACT_PSK_SIZE],
+    unsigned char out[KC_PACT_XPSK1_MESSAGE_SIZE]) {
     static const char name[] = "Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b";
-    kc_trust_symmetric_state_t state;
-    unsigned char local_pk[KC_TRUST_PK_SIZE];
-    unsigned char eph_sk[KC_TRUST_SK_SIZE];
+    kc_pact_symmetric_state_t state;
+    unsigned char local_pk[KC_PACT_PK_SIZE];
+    unsigned char eph_sk[KC_PACT_SK_SIZE];
     unsigned char dh[32];
     unsigned char *p = out;
     int rc = -1;
     crypto_x25519_public_key(local_pk, local_sk);
-    kc_trust_noise_init(&state, name, initiator_uid, responder_uid);
-    kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
-    if (kc_trust_read_random(eph_sk, sizeof(eph_sk)) != 0) goto done;
+    kc_pact_noise_init(&state, name, initiator_uid, responder_uid);
+    kc_pact_mix_hash(&state, remote_pk, KC_PACT_PK_SIZE);
+    if (kc_pact_read_random(eph_sk, sizeof(eph_sk)) != 0) goto done;
     crypto_x25519_public_key(p, eph_sk);
-    kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
-    kc_trust_mix_key(&state, p, KC_TRUST_PK_SIZE);
-    if (kc_trust_x25519(dh, eph_sk, remote_pk) != 0) goto done;
-    kc_trust_mix_key(&state, dh, sizeof(dh));
+    kc_pact_mix_hash(&state, p, KC_PACT_PK_SIZE);
+    kc_pact_mix_key(&state, p, KC_PACT_PK_SIZE);
+    if (kc_pact_x25519(dh, eph_sk, remote_pk) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
     crypto_wipe(dh, sizeof(dh));
-    p += KC_TRUST_PK_SIZE;
-    if (kc_trust_encrypt_and_hash(&state, local_pk, KC_TRUST_PK_SIZE, p) != 0)
+    p += KC_PACT_PK_SIZE;
+    if (kc_pact_encrypt_and_hash(&state, local_pk, KC_PACT_PK_SIZE, p) != 0)
         goto done;
-    p += KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE;
-    if (kc_trust_x25519(dh, local_sk, remote_pk) != 0) goto done;
-    kc_trust_mix_key(&state, dh, sizeof(dh));
+    p += KC_PACT_PK_SIZE + KC_PACT_MAC_SIZE;
+    if (kc_pact_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
     crypto_wipe(dh, sizeof(dh));
-    kc_trust_mix_key_and_hash(&state, psk);
-    if (kc_trust_encrypt_and_hash(&state, NULL, 0, p) != 0) goto done;
+    kc_pact_mix_key_and_hash(&state, psk);
+    if (kc_pact_encrypt_and_hash(&state, NULL, 0, p) != 0) goto done;
     rc = 0;
 done:
     crypto_wipe(local_pk, sizeof(local_pk));
     crypto_wipe(eph_sk, sizeof(eph_sk));
     crypto_wipe(dh, sizeof(dh));
     crypto_wipe(&state, sizeof(state));
-    if (rc != 0) crypto_wipe(out, KC_TRUST_XPSK1_MESSAGE_SIZE);
+    if (rc != 0) crypto_wipe(out, KC_PACT_XPSK1_MESSAGE_SIZE);
     return rc;
 }
 
@@ -1275,37 +1275,37 @@ done:
  * @param remote_pk Remote static public key.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_xpsk1_read(
-    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
-    const unsigned char responder_uid[KC_TRUST_UID_BYTES],
-    const unsigned char local_sk[KC_TRUST_SK_SIZE],
-    const unsigned char psk[KC_TRUST_PSK_SIZE],
-    const unsigned char message[KC_TRUST_XPSK1_MESSAGE_SIZE],
-    unsigned char remote_pk[KC_TRUST_PK_SIZE]) {
+static int kc_pact_xpsk1_read(
+    const unsigned char initiator_uid[KC_PACT_UID_BYTES],
+    const unsigned char responder_uid[KC_PACT_UID_BYTES],
+    const unsigned char local_sk[KC_PACT_SK_SIZE],
+    const unsigned char psk[KC_PACT_PSK_SIZE],
+    const unsigned char message[KC_PACT_XPSK1_MESSAGE_SIZE],
+    unsigned char remote_pk[KC_PACT_PK_SIZE]) {
     static const char name[] = "Noise_Xpsk1_25519_ChaChaPoly_BLAKE2b";
-    kc_trust_symmetric_state_t state;
-    unsigned char local_pk[KC_TRUST_PK_SIZE];
+    kc_pact_symmetric_state_t state;
+    unsigned char local_pk[KC_PACT_PK_SIZE];
     unsigned char dh[32];
     unsigned char empty[1];
     const unsigned char *p = message;
     int rc = -1;
     crypto_x25519_public_key(local_pk, local_sk);
-    kc_trust_noise_init(&state, name, initiator_uid, responder_uid);
-    kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
-    kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
-    kc_trust_mix_key(&state, p, KC_TRUST_PK_SIZE);
-    if (kc_trust_x25519(dh, local_sk, p) != 0) goto done;
-    kc_trust_mix_key(&state, dh, sizeof(dh));
+    kc_pact_noise_init(&state, name, initiator_uid, responder_uid);
+    kc_pact_mix_hash(&state, local_pk, KC_PACT_PK_SIZE);
+    kc_pact_mix_hash(&state, p, KC_PACT_PK_SIZE);
+    kc_pact_mix_key(&state, p, KC_PACT_PK_SIZE);
+    if (kc_pact_x25519(dh, local_sk, p) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
     crypto_wipe(dh, sizeof(dh));
-    p += KC_TRUST_PK_SIZE;
-    if (kc_trust_decrypt_and_hash(&state, p,
-        KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE, remote_pk) != 0) goto done;
-    p += KC_TRUST_PK_SIZE + KC_TRUST_MAC_SIZE;
-    if (kc_trust_x25519(dh, local_sk, remote_pk) != 0) goto done;
-    kc_trust_mix_key(&state, dh, sizeof(dh));
+    p += KC_PACT_PK_SIZE;
+    if (kc_pact_decrypt_and_hash(&state, p,
+        KC_PACT_PK_SIZE + KC_PACT_MAC_SIZE, remote_pk) != 0) goto done;
+    p += KC_PACT_PK_SIZE + KC_PACT_MAC_SIZE;
+    if (kc_pact_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
     crypto_wipe(dh, sizeof(dh));
-    kc_trust_mix_key_and_hash(&state, psk);
-    if (kc_trust_decrypt_and_hash(&state, p, KC_TRUST_MAC_SIZE, empty) != 0)
+    kc_pact_mix_key_and_hash(&state, psk);
+    if (kc_pact_decrypt_and_hash(&state, p, KC_PACT_MAC_SIZE, empty) != 0)
         goto done;
     rc = 0;
 done:
@@ -1313,7 +1313,7 @@ done:
     crypto_wipe(dh, sizeof(dh));
     crypto_wipe(empty, sizeof(empty));
     crypto_wipe(&state, sizeof(state));
-    if (rc != 0) crypto_wipe(remote_pk, KC_TRUST_PK_SIZE);
+    if (rc != 0) crypto_wipe(remote_pk, KC_PACT_PK_SIZE);
     return rc;
 }
 
@@ -1328,52 +1328,52 @@ done:
  * @param out Destination output.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_k_write(
-    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
-    const unsigned char responder_uid[KC_TRUST_UID_BYTES],
-    const unsigned char local_sk[KC_TRUST_SK_SIZE],
-    const unsigned char remote_pk[KC_TRUST_PK_SIZE],
+static int kc_pact_k_write(
+    const unsigned char initiator_uid[KC_PACT_UID_BYTES],
+    const unsigned char responder_uid[KC_PACT_UID_BYTES],
+    const unsigned char local_sk[KC_PACT_SK_SIZE],
+    const unsigned char remote_pk[KC_PACT_PK_SIZE],
     const unsigned char *message, size_t message_size,
     unsigned char *out) {
     static const char name[] = "Noise_K_25519_ChaChaPoly_BLAKE2b";
-    kc_trust_symmetric_state_t state;
-    kc_trust_cipher_state_t first;
-    kc_trust_cipher_state_t second;
-    unsigned char local_pk[KC_TRUST_PK_SIZE];
-    unsigned char eph_sk[KC_TRUST_SK_SIZE];
+    kc_pact_symmetric_state_t state;
+    kc_pact_cipher_state_t first;
+    kc_pact_cipher_state_t second;
+    unsigned char local_pk[KC_PACT_PK_SIZE];
+    unsigned char eph_sk[KC_PACT_SK_SIZE];
     unsigned char dh[32];
     unsigned char logical[8];
     unsigned char *p = out;
     size_t offset = 0;
     int rc = -1;
     crypto_x25519_public_key(local_pk, local_sk);
-    kc_trust_noise_init(&state, name, initiator_uid, responder_uid);
-    kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
-    kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
-    if (kc_trust_read_random(eph_sk, sizeof(eph_sk)) != 0) goto done;
+    kc_pact_noise_init(&state, name, initiator_uid, responder_uid);
+    kc_pact_mix_hash(&state, local_pk, KC_PACT_PK_SIZE);
+    kc_pact_mix_hash(&state, remote_pk, KC_PACT_PK_SIZE);
+    if (kc_pact_read_random(eph_sk, sizeof(eph_sk)) != 0) goto done;
     crypto_x25519_public_key(p, eph_sk);
-    kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
-    if (kc_trust_x25519(dh, eph_sk, remote_pk) != 0) goto done;
-    kc_trust_mix_key(&state, dh, sizeof(dh));
+    kc_pact_mix_hash(&state, p, KC_PACT_PK_SIZE);
+    if (kc_pact_x25519(dh, eph_sk, remote_pk) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
     crypto_wipe(dh, sizeof(dh));
-    if (kc_trust_x25519(dh, local_sk, remote_pk) != 0) goto done;
-    kc_trust_mix_key(&state, dh, sizeof(dh));
+    if (kc_pact_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
     crypto_wipe(dh, sizeof(dh));
-    p += KC_TRUST_PK_SIZE;
-    if (kc_trust_encrypt_and_hash(&state, NULL, 0, p) != 0) goto done;
-    p += KC_TRUST_MAC_SIZE;
-    kc_trust_split(&state, &first, &second);
-    kc_trust_store_u64(logical, (uint64_t)message_size);
-    if (kc_trust_cipher_encrypt(&first, NULL, 0, logical, sizeof(logical), p) != 0)
+    p += KC_PACT_PK_SIZE;
+    if (kc_pact_encrypt_and_hash(&state, NULL, 0, p) != 0) goto done;
+    p += KC_PACT_MAC_SIZE;
+    kc_pact_split(&state, &first, &second);
+    kc_pact_store_u64(logical, (uint64_t)message_size);
+    if (kc_pact_cipher_encrypt(&first, NULL, 0, logical, sizeof(logical), p) != 0)
         goto done;
-    p += KC_TRUST_LENGTH_RECORD_SIZE;
+    p += KC_PACT_LENGTH_RECORD_SIZE;
     while (offset < message_size) {
         size_t part = message_size - offset;
-        if (part > KC_TRUST_TRANSPORT_PLAINTEXT_MAX)
-            part = KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
-        if (kc_trust_cipher_encrypt(&first, NULL, 0, message + offset,
+        if (part > KC_PACT_TRANSPORT_PLAINTEXT_MAX)
+            part = KC_PACT_TRANSPORT_PLAINTEXT_MAX;
+        if (kc_pact_cipher_encrypt(&first, NULL, 0, message + offset,
             part, p) != 0) goto done;
-        p += part + KC_TRUST_MAC_SIZE;
+        p += part + KC_PACT_MAC_SIZE;
         offset += part;
     }
     rc = 0;
@@ -1400,18 +1400,18 @@ done:
  * @param out_message_size Destination plaintext byte count.
  * @return 0 on success, or -1 on failure.
  */
-static int kc_trust_k_read(
-    const unsigned char initiator_uid[KC_TRUST_UID_BYTES],
-    const unsigned char responder_uid[KC_TRUST_UID_BYTES],
-    const unsigned char local_sk[KC_TRUST_SK_SIZE],
-    const unsigned char remote_pk[KC_TRUST_PK_SIZE],
+static int kc_pact_k_read(
+    const unsigned char initiator_uid[KC_PACT_UID_BYTES],
+    const unsigned char responder_uid[KC_PACT_UID_BYTES],
+    const unsigned char local_sk[KC_PACT_SK_SIZE],
+    const unsigned char remote_pk[KC_PACT_PK_SIZE],
     const unsigned char *data, size_t data_size,
     unsigned char **out_message, size_t *out_message_size) {
     static const char name[] = "Noise_K_25519_ChaChaPoly_BLAKE2b";
-    kc_trust_symmetric_state_t state;
-    kc_trust_cipher_state_t first;
-    kc_trust_cipher_state_t second;
-    unsigned char local_pk[KC_TRUST_PK_SIZE];
+    kc_pact_symmetric_state_t state;
+    kc_pact_cipher_state_t first;
+    kc_pact_cipher_state_t second;
+    unsigned char local_pk[KC_PACT_PK_SIZE];
     unsigned char dh[32];
     unsigned char empty[1];
     unsigned char logical[8];
@@ -1421,39 +1421,39 @@ static int kc_trust_k_read(
     size_t message_size;
     size_t offset = 0;
     int rc = -1;
-    if (data_size < KC_TRUST_PAYLOAD_BASE_SIZE) return -1;
+    if (data_size < KC_PACT_PAYLOAD_BASE_SIZE) return -1;
     crypto_x25519_public_key(local_pk, local_sk);
-    kc_trust_noise_init(&state, name, initiator_uid, responder_uid);
-    kc_trust_mix_hash(&state, remote_pk, KC_TRUST_PK_SIZE);
-    kc_trust_mix_hash(&state, local_pk, KC_TRUST_PK_SIZE);
-    kc_trust_mix_hash(&state, p, KC_TRUST_PK_SIZE);
-    if (kc_trust_x25519(dh, local_sk, p) != 0) goto done;
-    kc_trust_mix_key(&state, dh, sizeof(dh));
+    kc_pact_noise_init(&state, name, initiator_uid, responder_uid);
+    kc_pact_mix_hash(&state, remote_pk, KC_PACT_PK_SIZE);
+    kc_pact_mix_hash(&state, local_pk, KC_PACT_PK_SIZE);
+    kc_pact_mix_hash(&state, p, KC_PACT_PK_SIZE);
+    if (kc_pact_x25519(dh, local_sk, p) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
     crypto_wipe(dh, sizeof(dh));
-    if (kc_trust_x25519(dh, local_sk, remote_pk) != 0) goto done;
-    kc_trust_mix_key(&state, dh, sizeof(dh));
+    if (kc_pact_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
     crypto_wipe(dh, sizeof(dh));
-    p += KC_TRUST_PK_SIZE;
-    if (kc_trust_decrypt_and_hash(&state, p, KC_TRUST_MAC_SIZE, empty) != 0)
+    p += KC_PACT_PK_SIZE;
+    if (kc_pact_decrypt_and_hash(&state, p, KC_PACT_MAC_SIZE, empty) != 0)
         goto done;
-    p += KC_TRUST_MAC_SIZE;
-    kc_trust_split(&state, &first, &second);
-    if (kc_trust_cipher_decrypt(&first, NULL, 0, p,
-        KC_TRUST_LENGTH_RECORD_SIZE, logical) != 0) goto done;
-    p += KC_TRUST_LENGTH_RECORD_SIZE;
-    logical_size = kc_trust_load_u64(logical);
-    if (logical_size > KC_TRUST_MAX_MESSAGE) goto done;
+    p += KC_PACT_MAC_SIZE;
+    kc_pact_split(&state, &first, &second);
+    if (kc_pact_cipher_decrypt(&first, NULL, 0, p,
+        KC_PACT_LENGTH_RECORD_SIZE, logical) != 0) goto done;
+    p += KC_PACT_LENGTH_RECORD_SIZE;
+    logical_size = kc_pact_load_u64(logical);
+    if (logical_size > KC_PACT_MAX_MESSAGE) goto done;
     message_size = (size_t)logical_size;
-    if (data_size != kc_trust_payload_size(message_size)) goto done;
-    message = (unsigned char *)kc_trust_alloc(message_size ? message_size : 1);
+    if (data_size != kc_pact_payload_size(message_size)) goto done;
+    message = (unsigned char *)kc_pact_alloc(message_size ? message_size : 1);
     if (!message) goto done;
     while (offset < message_size) {
         size_t part = message_size - offset;
-        if (part > KC_TRUST_TRANSPORT_PLAINTEXT_MAX)
-            part = KC_TRUST_TRANSPORT_PLAINTEXT_MAX;
-        if (kc_trust_cipher_decrypt(&first, NULL, 0, p,
-            part + KC_TRUST_MAC_SIZE, message + offset) != 0) goto done;
-        p += part + KC_TRUST_MAC_SIZE;
+        if (part > KC_PACT_TRANSPORT_PLAINTEXT_MAX)
+            part = KC_PACT_TRANSPORT_PLAINTEXT_MAX;
+        if (kc_pact_cipher_decrypt(&first, NULL, 0, p,
+            part + KC_PACT_MAC_SIZE, message + offset) != 0) goto done;
+        p += part + KC_PACT_MAC_SIZE;
         offset += part;
     }
     *out_message = message;
@@ -1461,7 +1461,7 @@ static int kc_trust_k_read(
     message = NULL;
     rc = 0;
 done:
-    kc_trust_free(message);
+    kc_pact_free(message);
     crypto_wipe(local_pk, sizeof(local_pk));
     crypto_wipe(dh, sizeof(dh));
     crypto_wipe(empty, sizeof(empty));
@@ -1476,29 +1476,29 @@ done:
  * Returns the generated trust build version.
  * @return Generated build timestamp.
  */
-uint64_t kc_trust_version(void) {
-    return (uint64_t)KC_TRUST_BUILD_VERSION;
+uint64_t kc_pact_version(void) {
+    return (uint64_t)KC_PACT_BUILD_VERSION;
 }
 
 /**
  * Initializes the local persistent trust store.
  * @param out Destination output.
- * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ * @return KC_PACT_OK on success, or KC_PACT_ERROR.
  */
-int kc_trust_init(kc_trust_t **out) {
-    kc_trust_t *trust;
+int kc_pact_init(kc_pact_t **out) {
+    kc_pact_t *trust;
     if (out) *out = NULL;
-    if (!out) return KC_TRUST_ERROR;
-    trust = (kc_trust_t *)calloc(1, sizeof(*trust));
-    if (!trust) return KC_TRUST_ERROR;
-    if (kc_trust_resolve_dir(trust->dir, sizeof(trust->dir)) != 0 ||
-        kc_trust_store_dirs(trust) != 0) {
+    if (!out) return KC_PACT_ERROR;
+    trust = (kc_pact_t *)calloc(1, sizeof(*trust));
+    if (!trust) return KC_PACT_ERROR;
+    if (kc_pact_resolve_dir(trust->dir, sizeof(trust->dir)) != 0 ||
+        kc_pact_store_dirs(trust) != 0) {
         crypto_wipe(trust, sizeof(*trust));
         free(trust);
-        return KC_TRUST_ERROR;
+        return KC_PACT_ERROR;
     }
     *out = trust;
-    return KC_TRUST_OK;
+    return KC_PACT_OK;
 }
 
 /**
@@ -1506,47 +1506,47 @@ int kc_trust_init(kc_trust_t **out) {
  * @param trust Trust context.
  * @param out_uid Destination UID string.
  * @param out_code Destination invitation code.
- * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ * @return KC_PACT_OK on success, or KC_PACT_ERROR.
  */
-int kc_trust_invite(kc_trust_t *trust, char **out_uid, char **out_code) {
-    unsigned char remote_uid[KC_TRUST_UID_BYTES];
-    unsigned char local_uid[KC_TRUST_UID_BYTES];
-    unsigned char sk[KC_TRUST_SK_SIZE];
-    unsigned char pk[KC_TRUST_PK_SIZE];
-    unsigned char psk[KC_TRUST_PSK_SIZE];
-    unsigned char raw[KC_TRUST_INVITE_RAW_SIZE];
-    char remote_uid_text[KC_TRUST_UID_SIZE + 1];
-    char local_uid_text[KC_TRUST_UID_SIZE + 1];
+int kc_pact_invite(kc_pact_t *trust, char **out_uid, char **out_code) {
+    unsigned char remote_uid[KC_PACT_UID_BYTES];
+    unsigned char local_uid[KC_PACT_UID_BYTES];
+    unsigned char sk[KC_PACT_SK_SIZE];
+    unsigned char pk[KC_PACT_PK_SIZE];
+    unsigned char psk[KC_PACT_PSK_SIZE];
+    unsigned char raw[KC_PACT_INVITE_RAW_SIZE];
+    char remote_uid_text[KC_PACT_UID_SIZE + 1];
+    char local_uid_text[KC_PACT_UID_SIZE + 1];
     char *uid_copy = NULL;
     char *code = NULL;
-    int rc = KC_TRUST_ERROR;
+    int rc = KC_PACT_ERROR;
 
     if (out_uid) *out_uid = NULL;
     if (out_code) *out_code = NULL;
-    if (!trust || !out_uid || !out_code) return KC_TRUST_ERROR;
+    if (!trust || !out_uid || !out_code) return KC_PACT_ERROR;
 
-    if (kc_trust_uid_new(remote_uid, remote_uid_text) != 0 ||
-        kc_trust_uid_new(local_uid, local_uid_text) != 0 ||
-        kc_trust_read_random(sk, sizeof(sk)) != 0 ||
-        kc_trust_read_random(psk, sizeof(psk)) != 0)
+    if (kc_pact_uid_new(remote_uid, remote_uid_text) != 0 ||
+        kc_pact_uid_new(local_uid, local_uid_text) != 0 ||
+        kc_pact_read_random(sk, sizeof(sk)) != 0 ||
+        kc_pact_read_random(psk, sizeof(psk)) != 0)
         goto done;
 
     crypto_x25519_public_key(pk, sk);
 
-    raw[0] = KC_TRUST_INVITE_VERSION;
-    memcpy(raw + 1, remote_uid, KC_TRUST_UID_BYTES);
-    memcpy(raw + 1 + KC_TRUST_UID_BYTES, local_uid, KC_TRUST_UID_BYTES);
-    memcpy(raw + 1 + (2 * KC_TRUST_UID_BYTES), pk, KC_TRUST_PK_SIZE);
-    memcpy(raw + 1 + (2 * KC_TRUST_UID_BYTES) + KC_TRUST_PK_SIZE,
-        psk, KC_TRUST_PSK_SIZE);
+    raw[0] = KC_PACT_INVITE_VERSION;
+    memcpy(raw + 1, remote_uid, KC_PACT_UID_BYTES);
+    memcpy(raw + 1 + KC_PACT_UID_BYTES, local_uid, KC_PACT_UID_BYTES);
+    memcpy(raw + 1 + (2 * KC_PACT_UID_BYTES), pk, KC_PACT_PK_SIZE);
+    memcpy(raw + 1 + (2 * KC_PACT_UID_BYTES) + KC_PACT_PK_SIZE,
+        psk, KC_PACT_PSK_SIZE);
 
-    if (kc_trust_pending_write(trust, remote_uid_text, local_uid, sk, psk) != 0)
+    if (kc_pact_pending_write(trust, remote_uid_text, local_uid, sk, psk) != 0)
         goto done;
 
-    uid_copy = kc_trust_public_strdup(remote_uid_text);
-    code = kc_trust_base64_encode(raw, sizeof(raw));
+    uid_copy = kc_pact_public_strdup(remote_uid_text);
+    code = kc_pact_base64_encode(raw, sizeof(raw));
     if (!uid_copy || !code) {
-        kc_trust_pending_remove(trust, remote_uid_text);
+        kc_pact_pending_remove(trust, remote_uid_text);
         goto done;
     }
 
@@ -1554,11 +1554,11 @@ int kc_trust_invite(kc_trust_t *trust, char **out_uid, char **out_code) {
     *out_code = code;
     uid_copy = NULL;
     code = NULL;
-    rc = KC_TRUST_OK;
+    rc = KC_PACT_OK;
 
 done:
-    kc_trust_free(uid_copy);
-    kc_trust_free(code);
+    kc_pact_free(uid_copy);
+    kc_pact_free(code);
     crypto_wipe(remote_uid, sizeof(remote_uid));
     crypto_wipe(local_uid, sizeof(local_uid));
     crypto_wipe(sk, sizeof(sk));
@@ -1574,67 +1574,67 @@ done:
  * @param code Invitation code.
  * @param out_uid Destination UID string.
  * @param out_confirmation Destination confirmation code.
- * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ * @return KC_PACT_OK on success, or KC_PACT_ERROR.
  */
-int kc_trust_join(kc_trust_t *trust, const char *code,
+int kc_pact_join(kc_pact_t *trust, const char *code,
     char **out_uid, char **out_confirmation) {
     unsigned char *raw = NULL;
     size_t raw_size = 0;
-    unsigned char local_uid[KC_TRUST_UID_BYTES];
-    unsigned char remote_uid[KC_TRUST_UID_BYTES];
-    unsigned char remote_pk[KC_TRUST_PK_SIZE];
-    unsigned char psk[KC_TRUST_PSK_SIZE];
-    unsigned char local_sk[KC_TRUST_SK_SIZE];
-    unsigned char confirmation[KC_TRUST_CONFIRM_RAW_SIZE];
-    char local_uid_text[KC_TRUST_UID_SIZE + 1];
-    char remote_uid_text[KC_TRUST_UID_SIZE + 1];
+    unsigned char local_uid[KC_PACT_UID_BYTES];
+    unsigned char remote_uid[KC_PACT_UID_BYTES];
+    unsigned char remote_pk[KC_PACT_PK_SIZE];
+    unsigned char psk[KC_PACT_PSK_SIZE];
+    unsigned char local_sk[KC_PACT_SK_SIZE];
+    unsigned char confirmation[KC_PACT_CONFIRM_RAW_SIZE];
+    char local_uid_text[KC_PACT_UID_SIZE + 1];
+    char remote_uid_text[KC_PACT_UID_SIZE + 1];
     char *uid_copy = NULL;
     char *confirmation_text = NULL;
     int peer_written = 0;
     int local_written = 0;
-    int rc = KC_TRUST_ERROR;
+    int rc = KC_PACT_ERROR;
 
     if (out_uid) *out_uid = NULL;
     if (out_confirmation) *out_confirmation = NULL;
     if (!trust || !code || !out_uid || !out_confirmation)
-        return KC_TRUST_ERROR;
+        return KC_PACT_ERROR;
 
-    raw = kc_trust_base64_decode(code, &raw_size);
-    if (!raw || raw_size != KC_TRUST_INVITE_RAW_SIZE ||
-        raw[0] != KC_TRUST_INVITE_VERSION)
+    raw = kc_pact_base64_decode(code, &raw_size);
+    if (!raw || raw_size != KC_PACT_INVITE_RAW_SIZE ||
+        raw[0] != KC_PACT_INVITE_VERSION)
         goto done;
 
-    memcpy(local_uid, raw + 1, KC_TRUST_UID_BYTES);
-    memcpy(remote_uid, raw + 1 + KC_TRUST_UID_BYTES, KC_TRUST_UID_BYTES);
-    memcpy(remote_pk, raw + 1 + (2 * KC_TRUST_UID_BYTES), KC_TRUST_PK_SIZE);
-    memcpy(psk, raw + 1 + (2 * KC_TRUST_UID_BYTES) + KC_TRUST_PK_SIZE,
-        KC_TRUST_PSK_SIZE);
+    memcpy(local_uid, raw + 1, KC_PACT_UID_BYTES);
+    memcpy(remote_uid, raw + 1 + KC_PACT_UID_BYTES, KC_PACT_UID_BYTES);
+    memcpy(remote_pk, raw + 1 + (2 * KC_PACT_UID_BYTES), KC_PACT_PK_SIZE);
+    memcpy(psk, raw + 1 + (2 * KC_PACT_UID_BYTES) + KC_PACT_PK_SIZE,
+        KC_PACT_PSK_SIZE);
 
-    if (kc_trust_uid_format(local_uid, local_uid_text) != 0 ||
-        kc_trust_uid_format(remote_uid, remote_uid_text) != 0 ||
-        kc_trust_read_random(local_sk, sizeof(local_sk)) != 0)
+    if (kc_pact_uid_format(local_uid, local_uid_text) != 0 ||
+        kc_pact_uid_format(remote_uid, remote_uid_text) != 0 ||
+        kc_pact_read_random(local_sk, sizeof(local_sk)) != 0)
         goto done;
 
-    confirmation[0] = KC_TRUST_INVITE_VERSION;
-    memcpy(confirmation + 1, local_uid, KC_TRUST_UID_BYTES);
-    memcpy(confirmation + 1 + KC_TRUST_UID_BYTES,
-        remote_uid, KC_TRUST_UID_BYTES);
+    confirmation[0] = KC_PACT_INVITE_VERSION;
+    memcpy(confirmation + 1, local_uid, KC_PACT_UID_BYTES);
+    memcpy(confirmation + 1 + KC_PACT_UID_BYTES,
+        remote_uid, KC_PACT_UID_BYTES);
 
-    if (kc_trust_xpsk1_write(local_uid, remote_uid, local_sk, remote_pk, psk,
-        confirmation + 1 + (2 * KC_TRUST_UID_BYTES)) != 0)
+    if (kc_pact_xpsk1_write(local_uid, remote_uid, local_sk, remote_pk, psk,
+        confirmation + 1 + (2 * KC_PACT_UID_BYTES)) != 0)
         goto done;
 
-    uid_copy = kc_trust_public_strdup(remote_uid_text);
-    confirmation_text = kc_trust_base64_encode(confirmation,
+    uid_copy = kc_pact_public_strdup(remote_uid_text);
+    confirmation_text = kc_pact_base64_encode(confirmation,
         sizeof(confirmation));
     if (!uid_copy || !confirmation_text) goto done;
 
-    if (kc_trust_peer_write(trust, remote_uid_text, local_uid,
+    if (kc_pact_peer_write(trust, remote_uid_text, local_uid,
         local_sk, remote_pk) != 0)
         goto done;
     peer_written = 1;
 
-    if (kc_trust_local_write(trust, local_uid_text, remote_uid) != 0)
+    if (kc_pact_local_write(trust, local_uid_text, remote_uid) != 0)
         goto done;
     local_written = 1;
 
@@ -1642,19 +1642,19 @@ int kc_trust_join(kc_trust_t *trust, const char *code,
     *out_confirmation = confirmation_text;
     uid_copy = NULL;
     confirmation_text = NULL;
-    rc = KC_TRUST_OK;
+    rc = KC_PACT_OK;
 
 done:
-    if (rc != KC_TRUST_OK) {
-        if (local_written) kc_trust_local_remove(trust, local_uid_text);
-        if (peer_written) kc_trust_peer_remove(trust, remote_uid_text);
+    if (rc != KC_PACT_OK) {
+        if (local_written) kc_pact_local_remove(trust, local_uid_text);
+        if (peer_written) kc_pact_peer_remove(trust, remote_uid_text);
     }
     if (raw) {
         crypto_wipe(raw, raw_size ? raw_size : 1);
         free(raw);
     }
-    kc_trust_free(uid_copy);
-    kc_trust_free(confirmation_text);
+    kc_pact_free(uid_copy);
+    kc_pact_free(confirmation_text);
     crypto_wipe(local_uid, sizeof(local_uid));
     crypto_wipe(remote_uid, sizeof(remote_uid));
     crypto_wipe(remote_pk, sizeof(remote_pk));
@@ -1669,76 +1669,76 @@ done:
  * @param trust Trust context.
  * @param confirmation Confirmation code.
  * @param out_uid Destination UID string.
- * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ * @return KC_PACT_OK on success, or KC_PACT_ERROR.
  */
-int kc_trust_confirm(kc_trust_t *trust, const char *confirmation,
+int kc_pact_confirm(kc_pact_t *trust, const char *confirmation,
     char **out_uid) {
     unsigned char *raw = NULL;
     size_t raw_size = 0;
-    unsigned char remote_uid[KC_TRUST_UID_BYTES];
-    unsigned char local_uid[KC_TRUST_UID_BYTES];
-    unsigned char pending_local_uid[KC_TRUST_UID_BYTES];
-    unsigned char local_sk[KC_TRUST_SK_SIZE];
-    unsigned char psk[KC_TRUST_PSK_SIZE];
-    unsigned char remote_pk[KC_TRUST_PK_SIZE];
-    char remote_uid_text[KC_TRUST_UID_SIZE + 1];
-    char local_uid_text[KC_TRUST_UID_SIZE + 1];
+    unsigned char remote_uid[KC_PACT_UID_BYTES];
+    unsigned char local_uid[KC_PACT_UID_BYTES];
+    unsigned char pending_local_uid[KC_PACT_UID_BYTES];
+    unsigned char local_sk[KC_PACT_SK_SIZE];
+    unsigned char psk[KC_PACT_PSK_SIZE];
+    unsigned char remote_pk[KC_PACT_PK_SIZE];
+    char remote_uid_text[KC_PACT_UID_SIZE + 1];
+    char local_uid_text[KC_PACT_UID_SIZE + 1];
     char *uid_copy = NULL;
     int peer_written = 0;
     int local_written = 0;
-    int rc = KC_TRUST_ERROR;
+    int rc = KC_PACT_ERROR;
 
     if (out_uid) *out_uid = NULL;
-    if (!trust || !confirmation || !out_uid) return KC_TRUST_ERROR;
+    if (!trust || !confirmation || !out_uid) return KC_PACT_ERROR;
 
-    raw = kc_trust_base64_decode(confirmation, &raw_size);
-    if (!raw || raw_size != KC_TRUST_CONFIRM_RAW_SIZE ||
-        raw[0] != KC_TRUST_INVITE_VERSION)
+    raw = kc_pact_base64_decode(confirmation, &raw_size);
+    if (!raw || raw_size != KC_PACT_CONFIRM_RAW_SIZE ||
+        raw[0] != KC_PACT_INVITE_VERSION)
         goto done;
 
-    memcpy(remote_uid, raw + 1, KC_TRUST_UID_BYTES);
-    memcpy(local_uid, raw + 1 + KC_TRUST_UID_BYTES, KC_TRUST_UID_BYTES);
+    memcpy(remote_uid, raw + 1, KC_PACT_UID_BYTES);
+    memcpy(local_uid, raw + 1 + KC_PACT_UID_BYTES, KC_PACT_UID_BYTES);
 
-    if (kc_trust_uid_format(remote_uid, remote_uid_text) != 0 ||
-        kc_trust_uid_format(local_uid, local_uid_text) != 0 ||
-        kc_trust_pending_read(trust, remote_uid_text, pending_local_uid,
+    if (kc_pact_uid_format(remote_uid, remote_uid_text) != 0 ||
+        kc_pact_uid_format(local_uid, local_uid_text) != 0 ||
+        kc_pact_pending_read(trust, remote_uid_text, pending_local_uid,
             local_sk, psk) != 0 ||
-        memcmp(local_uid, pending_local_uid, KC_TRUST_UID_BYTES) != 0)
+        memcmp(local_uid, pending_local_uid, KC_PACT_UID_BYTES) != 0)
         goto done;
 
-    if (kc_trust_xpsk1_read(remote_uid, local_uid, local_sk, psk,
-        raw + 1 + (2 * KC_TRUST_UID_BYTES), remote_pk) != 0)
+    if (kc_pact_xpsk1_read(remote_uid, local_uid, local_sk, psk,
+        raw + 1 + (2 * KC_PACT_UID_BYTES), remote_pk) != 0)
         goto done;
 
-    uid_copy = kc_trust_public_strdup(remote_uid_text);
+    uid_copy = kc_pact_public_strdup(remote_uid_text);
     if (!uid_copy) goto done;
 
-    if (kc_trust_peer_write(trust, remote_uid_text, local_uid,
+    if (kc_pact_peer_write(trust, remote_uid_text, local_uid,
         local_sk, remote_pk) != 0)
         goto done;
     peer_written = 1;
 
-    if (kc_trust_local_write(trust, local_uid_text, remote_uid) != 0)
+    if (kc_pact_local_write(trust, local_uid_text, remote_uid) != 0)
         goto done;
     local_written = 1;
 
-    if (kc_trust_pending_remove(trust, remote_uid_text) != 0)
+    if (kc_pact_pending_remove(trust, remote_uid_text) != 0)
         goto done;
 
     *out_uid = uid_copy;
     uid_copy = NULL;
-    rc = KC_TRUST_OK;
+    rc = KC_PACT_OK;
 
 done:
-    if (rc != KC_TRUST_OK) {
-        if (local_written) kc_trust_local_remove(trust, local_uid_text);
-        if (peer_written) kc_trust_peer_remove(trust, remote_uid_text);
+    if (rc != KC_PACT_OK) {
+        if (local_written) kc_pact_local_remove(trust, local_uid_text);
+        if (peer_written) kc_pact_peer_remove(trust, remote_uid_text);
     }
     if (raw) {
         crypto_wipe(raw, raw_size ? raw_size : 1);
         free(raw);
     }
-    kc_trust_free(uid_copy);
+    kc_pact_free(uid_copy);
     crypto_wipe(remote_uid, sizeof(remote_uid));
     crypto_wipe(local_uid, sizeof(local_uid));
     crypto_wipe(pending_local_uid, sizeof(pending_local_uid));
@@ -1756,44 +1756,44 @@ done:
  * @param message_size Message byte count.
  * @param out_data Destination protected-data pointer.
  * @param out_size Destination byte count.
- * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ * @return KC_PACT_OK on success, or KC_PACT_ERROR.
  */
-int kc_trust_seal(kc_trust_t *trust, const char *uid,
+int kc_pact_seal(kc_pact_t *trust, const char *uid,
     const void *message, size_t message_size,
     void **out_data, size_t *out_size) {
-    unsigned char remote_uid[KC_TRUST_UID_BYTES];
-    unsigned char local_uid[KC_TRUST_UID_BYTES];
-    unsigned char local_sk[KC_TRUST_SK_SIZE];
-    unsigned char remote_pk[KC_TRUST_PK_SIZE];
+    unsigned char remote_uid[KC_PACT_UID_BYTES];
+    unsigned char local_uid[KC_PACT_UID_BYTES];
+    unsigned char local_sk[KC_PACT_SK_SIZE];
+    unsigned char remote_pk[KC_PACT_PK_SIZE];
     unsigned char *data = NULL;
     size_t data_size;
-    int rc = KC_TRUST_ERROR;
+    int rc = KC_PACT_ERROR;
 
     if (out_data) *out_data = NULL;
     if (out_size) *out_size = 0;
     if (!trust || !uid || !out_data || !out_size ||
-        (message_size && !message) || message_size > KC_TRUST_MAX_MESSAGE)
-        return KC_TRUST_ERROR;
+        (message_size && !message) || message_size > KC_PACT_MAX_MESSAGE)
+        return KC_PACT_ERROR;
 
-    if (kc_trust_uid_parse(uid, remote_uid) != 0 ||
-        kc_trust_peer_read(trust, uid, local_uid, local_sk, remote_pk) != 0)
+    if (kc_pact_uid_parse(uid, remote_uid) != 0 ||
+        kc_pact_peer_read(trust, uid, local_uid, local_sk, remote_pk) != 0)
         goto done;
 
-    data_size = kc_trust_payload_size(message_size);
-    data = (unsigned char *)kc_trust_alloc(data_size);
+    data_size = kc_pact_payload_size(message_size);
+    data = (unsigned char *)kc_pact_alloc(data_size);
     if (!data) goto done;
 
-    if (kc_trust_k_write(local_uid, remote_uid, local_sk, remote_pk,
+    if (kc_pact_k_write(local_uid, remote_uid, local_sk, remote_pk,
         (const unsigned char *)message, message_size, data) != 0)
         goto done;
 
     *out_data = data;
     *out_size = data_size;
     data = NULL;
-    rc = KC_TRUST_OK;
+    rc = KC_PACT_OK;
 
 done:
-    kc_trust_free(data);
+    kc_pact_free(data);
     crypto_wipe(remote_uid, sizeof(remote_uid));
     crypto_wipe(local_uid, sizeof(local_uid));
     crypto_wipe(local_sk, sizeof(local_sk));
@@ -1809,35 +1809,35 @@ done:
  * @param data_size Function parameter.
  * @param out_message Destination plaintext pointer.
  * @param out_message_size Destination plaintext byte count.
- * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ * @return KC_PACT_OK on success, or KC_PACT_ERROR.
  */
-int kc_trust_unseal(kc_trust_t *trust, const char *uid,
+int kc_pact_unseal(kc_pact_t *trust, const char *uid,
     const void *data, size_t data_size,
     void **out_message, size_t *out_message_size) {
-    unsigned char local_uid[KC_TRUST_UID_BYTES];
-    unsigned char remote_uid[KC_TRUST_UID_BYTES];
-    unsigned char stored_local_uid[KC_TRUST_UID_BYTES];
-    unsigned char local_sk[KC_TRUST_SK_SIZE];
-    unsigned char remote_pk[KC_TRUST_PK_SIZE];
-    char remote_uid_text[KC_TRUST_UID_SIZE + 1];
+    unsigned char local_uid[KC_PACT_UID_BYTES];
+    unsigned char remote_uid[KC_PACT_UID_BYTES];
+    unsigned char stored_local_uid[KC_PACT_UID_BYTES];
+    unsigned char local_sk[KC_PACT_SK_SIZE];
+    unsigned char remote_pk[KC_PACT_PK_SIZE];
+    char remote_uid_text[KC_PACT_UID_SIZE + 1];
     unsigned char *message = NULL;
     size_t message_size = 0;
-    int rc = KC_TRUST_ERROR;
+    int rc = KC_PACT_ERROR;
 
     if (out_message) *out_message = NULL;
     if (out_message_size) *out_message_size = 0;
     if (!trust || !uid || !data || !out_message || !out_message_size)
-        return KC_TRUST_ERROR;
+        return KC_PACT_ERROR;
 
-    if (kc_trust_uid_parse(uid, local_uid) != 0 ||
-        kc_trust_local_read(trust, uid, remote_uid) != 0 ||
-        kc_trust_uid_format(remote_uid, remote_uid_text) != 0 ||
-        kc_trust_peer_read(trust, remote_uid_text, stored_local_uid,
+    if (kc_pact_uid_parse(uid, local_uid) != 0 ||
+        kc_pact_local_read(trust, uid, remote_uid) != 0 ||
+        kc_pact_uid_format(remote_uid, remote_uid_text) != 0 ||
+        kc_pact_peer_read(trust, remote_uid_text, stored_local_uid,
             local_sk, remote_pk) != 0 ||
-        memcmp(local_uid, stored_local_uid, KC_TRUST_UID_BYTES) != 0)
+        memcmp(local_uid, stored_local_uid, KC_PACT_UID_BYTES) != 0)
         goto done;
 
-    if (kc_trust_k_read(remote_uid, local_uid, local_sk, remote_pk,
+    if (kc_pact_k_read(remote_uid, local_uid, local_sk, remote_pk,
         (const unsigned char *)data, data_size,
         &message, &message_size) != 0)
         goto done;
@@ -1845,10 +1845,10 @@ int kc_trust_unseal(kc_trust_t *trust, const char *uid,
     *out_message = message;
     *out_message_size = message_size;
     message = NULL;
-    rc = KC_TRUST_OK;
+    rc = KC_PACT_OK;
 
 done:
-    kc_trust_free(message);
+    kc_pact_free(message);
     crypto_wipe(local_uid, sizeof(local_uid));
     crypto_wipe(remote_uid, sizeof(remote_uid));
     crypto_wipe(stored_local_uid, sizeof(stored_local_uid));
@@ -1861,28 +1861,28 @@ done:
  * Revokes one remote UID or pending invitation.
  * @param trust Trust context.
  * @param uid UID string.
- * @return KC_TRUST_OK on success, or KC_TRUST_ERROR.
+ * @return KC_PACT_OK on success, or KC_PACT_ERROR.
  */
-int kc_trust_revoke(kc_trust_t *trust, const char *uid) {
-    unsigned char remote_uid[KC_TRUST_UID_BYTES];
-    unsigned char local_uid[KC_TRUST_UID_BYTES];
-    unsigned char local_sk[KC_TRUST_SK_SIZE];
-    unsigned char remote_pk[KC_TRUST_PK_SIZE];
-    unsigned char psk[KC_TRUST_PSK_SIZE];
-    char local_uid_text[KC_TRUST_UID_SIZE + 1];
+int kc_pact_revoke(kc_pact_t *trust, const char *uid) {
+    unsigned char remote_uid[KC_PACT_UID_BYTES];
+    unsigned char local_uid[KC_PACT_UID_BYTES];
+    unsigned char local_sk[KC_PACT_SK_SIZE];
+    unsigned char remote_pk[KC_PACT_PK_SIZE];
+    unsigned char psk[KC_PACT_PSK_SIZE];
+    char local_uid_text[KC_PACT_UID_SIZE + 1];
     int removed = 0;
 
-    if (!trust || !uid || kc_trust_uid_parse(uid, remote_uid) != 0)
-        return KC_TRUST_ERROR;
+    if (!trust || !uid || kc_pact_uid_parse(uid, remote_uid) != 0)
+        return KC_PACT_ERROR;
 
-    if (kc_trust_peer_read(trust, uid, local_uid, local_sk, remote_pk) == 0) {
-        if (kc_trust_uid_format(local_uid, local_uid_text) == 0)
-            kc_trust_local_remove(trust, local_uid_text);
-        if (kc_trust_peer_remove(trust, uid) == 0) removed = 1;
+    if (kc_pact_peer_read(trust, uid, local_uid, local_sk, remote_pk) == 0) {
+        if (kc_pact_uid_format(local_uid, local_uid_text) == 0)
+            kc_pact_local_remove(trust, local_uid_text);
+        if (kc_pact_peer_remove(trust, uid) == 0) removed = 1;
     }
 
-    if (kc_trust_pending_read(trust, uid, local_uid, local_sk, psk) == 0) {
-        if (kc_trust_pending_remove(trust, uid) == 0) removed = 1;
+    if (kc_pact_pending_read(trust, uid, local_uid, local_sk, psk) == 0) {
+        if (kc_pact_pending_remove(trust, uid) == 0) removed = 1;
     }
 
     crypto_wipe(remote_uid, sizeof(remote_uid));
@@ -1890,7 +1890,7 @@ int kc_trust_revoke(kc_trust_t *trust, const char *uid) {
     crypto_wipe(local_sk, sizeof(local_sk));
     crypto_wipe(remote_pk, sizeof(remote_pk));
     crypto_wipe(psk, sizeof(psk));
-    return removed ? KC_TRUST_OK : KC_TRUST_ERROR;
+    return removed ? KC_PACT_OK : KC_PACT_ERROR;
 }
 
 /**
@@ -1898,7 +1898,7 @@ int kc_trust_revoke(kc_trust_t *trust, const char *uid) {
  * @param trust Trust context.
  * @return No return value.
  */
-void kc_trust_close(kc_trust_t *trust) {
+void kc_pact_close(kc_pact_t *trust) {
     if (!trust) return;
     crypto_wipe(trust, sizeof(*trust));
     free(trust);

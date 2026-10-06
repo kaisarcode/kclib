@@ -1,6 +1,6 @@
-# libtrust.c - Persistent Scoped Trust
+# libpact.c - Persistent Scoped Trust
 
-`libtrust.c` is a small C library for establishing persistent scoped trust
+`libpact.c` is a small C library for establishing persistent scoped trust
 relationships and protecting binary messages with the Noise Protocol
 Framework. It does not implement transport; applications move invitations,
 confirmations, UIDs, and protected messages themselves.
@@ -12,11 +12,11 @@ confirmations, UIDs, and protected messages themselves.
 Initialize the local trust store:
 
 ```c
-#include "libtrust.h"
+#include "libpact.h"
 
-kc_trust_t *trust = NULL;
+kc_pact_t *trust = NULL;
 
-if (kc_trust_init(&trust) != KC_TRUST_OK) {
+if (kc_pact_init(&trust) != KC_PACT_OK) {
     return 1;
 }
 ```
@@ -27,7 +27,7 @@ Create an invitation:
 char *alice_uid = NULL;
 char *code = NULL;
 
-if (kc_trust_invite(trust, &alice_uid, &code) != KC_TRUST_OK) {
+if (kc_pact_invite(trust, &alice_uid, &code) != KC_PACT_OK) {
     return 1;
 }
 ```
@@ -38,12 +38,12 @@ On the invited endpoint, join with the invitation code:
 char *bob_uid = NULL;
 char *confirmation = NULL;
 
-if (kc_trust_join(
+if (kc_pact_join(
     trust,
     code,
     &bob_uid,
     &confirmation
-) != KC_TRUST_OK) {
+) != KC_PACT_OK) {
     return 1;
 }
 ```
@@ -54,16 +54,16 @@ invitation, which confirms it:
 ```c
 char *confirmed_uid = NULL;
 
-if (kc_trust_confirm(
+if (kc_pact_confirm(
     trust,
     confirmation,
     &confirmed_uid
-) != KC_TRUST_OK) {
+) != KC_PACT_OK) {
     return 1;
 }
 ```
 
-`confirmed_uid` is the same UID returned by `kc_trust_invite()`.
+`confirmed_uid` is the same UID returned by `kc_pact_invite()`.
 
 To protect a message for Alice:
 
@@ -71,34 +71,34 @@ To protect a message for Alice:
 void *protected = NULL;
 size_t protected_size = 0;
 
-if (kc_trust_seal(
+if (kc_pact_seal(
     trust,
     alice_uid,
     message,
     message_size,
     &protected,
     &protected_size
-) != KC_TRUST_OK) {
+) != KC_PACT_OK) {
     return 1;
 }
 ```
 
 The application transports `alice_uid` beside the protected bytes. On
 Alice's endpoint, that same UID is local and is passed to
-`kc_trust_unseal()`:
+`kc_pact_unseal()`:
 
 ```c
 void *message = NULL;
 size_t message_size = 0;
 
-if (kc_trust_unseal(
+if (kc_pact_unseal(
     trust,
     alice_uid,
     protected,
     protected_size,
     &message,
     &message_size
-) != KC_TRUST_OK) {
+) != KC_PACT_OK) {
     return 1;
 }
 ```
@@ -108,37 +108,37 @@ The reverse direction uses `bob_uid` in the same way.
 The public API is:
 
 ```c
-typedef struct kc_trust kc_trust_t;
+typedef struct kc_pact kc_pact_t;
 
-#define KC_TRUST_OK 0
-#define KC_TRUST_ERROR -1
+#define KC_PACT_OK 0
+#define KC_PACT_ERROR -1
 
-#define KC_TRUST_UID_SIZE 36
-#define KC_TRUST_MAX_MESSAGE (64 * 1024 * 1024)
+#define KC_PACT_UID_SIZE 36
+#define KC_PACT_MAX_MESSAGE (64 * 1024 * 1024)
 
-int kc_trust_init(kc_trust_t **out);
+int kc_pact_init(kc_pact_t **out);
 
-int kc_trust_invite(
-    kc_trust_t *trust,
+int kc_pact_invite(
+    kc_pact_t *trust,
     char **out_uid,
     char **out_code
 );
 
-int kc_trust_join(
-    kc_trust_t *trust,
+int kc_pact_join(
+    kc_pact_t *trust,
     const char *code,
     char **out_uid,
     char **out_confirmation
 );
 
-int kc_trust_confirm(
-    kc_trust_t *trust,
+int kc_pact_confirm(
+    kc_pact_t *trust,
     const char *confirmation,
     char **out_uid
 );
 
-int kc_trust_seal(
-    kc_trust_t *trust,
+int kc_pact_seal(
+    kc_pact_t *trust,
     const char *uid,
     const void *message,
     size_t message_size,
@@ -146,8 +146,8 @@ int kc_trust_seal(
     size_t *out_size
 );
 
-int kc_trust_unseal(
-    kc_trust_t *trust,
+int kc_pact_unseal(
+    kc_pact_t *trust,
     const char *uid,
     const void *data,
     size_t data_size,
@@ -155,43 +155,43 @@ int kc_trust_unseal(
     size_t *out_message_size
 );
 
-int kc_trust_revoke(
-    kc_trust_t *trust,
+int kc_pact_revoke(
+    kc_pact_t *trust,
     const char *uid
 );
 
-void kc_trust_close(kc_trust_t *trust);
-void kc_trust_free(void *ptr);
-uint64_t kc_trust_version(void);
+void kc_pact_close(kc_pact_t *trust);
+void kc_pact_free(void *ptr);
+uint64_t kc_pact_version(void);
 ```
 
 A relationship has two endpoint UIDs. The UID returned by
-`kc_trust_invite()` identifies the invited endpoint. The UID returned by
-`kc_trust_join()` identifies the inviter. They are distinct.
+`kc_pact_invite()` identifies the invited endpoint. The UID returned by
+`kc_pact_join()` identifies the inviter. They are distinct.
 
-`kc_trust_seal()` receives a remote UID. The application transports that UID
+`kc_pact_seal()` receives a remote UID. The application transports that UID
 with the protected message. On the receiving endpoint, the same UID is local
-and is passed to `kc_trust_unseal()`.
+and is passed to `kc_pact_unseal()`.
 
-`kc_trust_revoke()` receives the remote UID known by the local endpoint.
+`kc_pact_revoke()` receives the remote UID known by the local endpoint.
 
-`kc_trust_seal()` and `kc_trust_unseal()` do not implement transport,
+`kc_pact_seal()` and `kc_pact_unseal()` do not implement transport,
 ordering, retries, timeouts, or replay detection. A valid protected message may
-be passed to `kc_trust_unseal()` more than once.
+be passed to `kc_pact_unseal()` more than once.
 
-Messages may contain arbitrary binary data up to `KC_TRUST_MAX_MESSAGE`.
+Messages may contain arbitrary binary data up to `KC_PACT_MAX_MESSAGE`.
 
-Use `kc_trust_free()` to release strings and buffers returned by the library.
+Use `kc_pact_free()` to release strings and buffers returned by the library.
 
-`kc_trust_close()` releases the local handle. It does not delete persistent
+`kc_pact_close()` releases the local handle. It does not delete persistent
 trust relationships.
 
 Normal callers do not select a storage directory. On XDG environments,
-libtrust.c uses `$XDG_DATA_HOME/kaisarcode/trust.c`, falling back to
-`$HOME/.local/share/kaisarcode/trust.c`. Windows uses the corresponding
-per-user application-data directory under `kaisarcode\trust.c`.
+libpact.c uses `$XDG_DATA_HOME/kaisarcode/pact.c`, falling back to
+`$HOME/.local/share/kaisarcode/pact.c`. Windows uses the corresponding
+per-user application-data directory under `kaisarcode\pact.c`.
 
-`KC_TRUST_DIR` is an advanced process-level override for tests and controlled
+`KC_PACT_DIR` is an advanced process-level override for tests and controlled
 deployments.
 
 ---
@@ -231,11 +231,11 @@ make wasm32/wasm
 make test wasm
 ```
 
-- Artifacts: `bin/wasm32/wasm/libtrust.js` and `bin/wasm32/wasm/libtrust.wasm`
-- Exports: `kc_trust_init`, `kc_trust_invite`, `kc_trust_join`,
-    `kc_trust_confirm`, `kc_trust_seal`, `kc_trust_unseal`,
-    `kc_trust_revoke`, `kc_trust_close`, `kc_trust_free`,
-    `kc_trust_version`
+- Artifacts: `bin/wasm32/wasm/libpact.js` and `bin/wasm32/wasm/libpact.wasm`
+- Exports: `kc_pact_init`, `kc_pact_invite`, `kc_pact_join`,
+    `kc_pact_confirm`, `kc_pact_seal`, `kc_pact_unseal`,
+    `kc_pact_revoke`, `kc_pact_close`, `kc_pact_free`,
+    `kc_pact_version`
 `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds

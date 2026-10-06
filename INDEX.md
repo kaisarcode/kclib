@@ -32,7 +32,7 @@ index is the summary, not the contract.
 
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
-| [`trust`](https://github.com/kaisarcode/kclib/tree/master/proj/libtrust.c) | Establishes scoped identities by one-use Noise invitations and seals/unseals messages for confirmed UIDs. | Transport-agnostic identity trust and authenticated encryption. |
+| [`pact`](https://github.com/kaisarcode/kclib/tree/master/proj/libpact.c) | Establishes scoped identities by one-use Noise invitations and seals/unseals messages for confirmed UIDs. | Transport-agnostic identity trust and authenticated encryption. |
 
 ## Network and IPC
 
