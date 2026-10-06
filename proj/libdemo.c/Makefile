@@ -180,7 +180,7 @@ all: \
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
 	@cache=$(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; \
-	if [ ! -f "$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/linux' "$cache"; then \
+	if [ ! -f "$$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/linux' "$$cache"; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Linux \
@@ -236,7 +236,7 @@ loongarch64/linux:
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
 	@cache=$(BUILD_DIR)/$(1)-windows/CMakeCache.txt; \
-	if [ ! -f "$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/windows' "$cache"; then \
+	if [ ! -f "$$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/windows' "$$cache"; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Windows \
@@ -348,7 +348,7 @@ define android_target
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-android/build.ninja && rm -rf $(BUILD_DIR)/$(1)-android/CMakeFiles; \
 	fi
 	@cache=$(BUILD_DIR)/$(1)-android/CMakeCache.txt; \
-	if [ ! -f "$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/android' "$cache"; then \
+	if [ ! -f "$$cache" ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/android' "$$cache"; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-android \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
