@@ -10,8 +10,8 @@
 #include "libppn.h"
 
 #include <stddef.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -353,6 +353,30 @@ static int kc_ppn_socket_write(int socket_fd, const void *data, size_t size) {
 }
 
 /**
+ * Read all requested bytes from a socket.
+ * @param socket_fd Connected socket descriptor.
+ * @param data Destination buffer.
+ * @param size Byte count.
+ * @return KC_PPN_OK on success, or KC_PPN_ERROR on failure.
+ */
+static int kc_ppn_socket_read(int socket_fd, void *data, size_t size) {
+    unsigned char *bytes = (unsigned char *)data;
+
+    while (size > 0) {
+        ssize_t count = recv(socket_fd, bytes, size, 0);
+        if (count <= 0) {
+            if (count < 0 && errno == EINTR) {
+                continue;
+            }
+            return KC_PPN_ERROR;
+        }
+        bytes += count;
+        size -= (size_t)count;
+    }
+    return KC_PPN_OK;
+}
+
+/**
  * Read one CRLF-terminated D-Bus authentication line.
  * @param socket_fd Connected socket descriptor.
  * @param line Destination line buffer.
@@ -436,6 +460,155 @@ static int kc_ppn_dbus_authenticate(int socket_fd) {
 }
 
 /**
+ * Build one D-Bus method-call message.
+ * @param message Destination message buffer.
+ * @param serial Message serial.
+ * @param flags D-Bus message flags.
+ * @param path Object path.
+ * @param interface Interface name.
+ * @param member Method name.
+ * @param destination Destination bus name.
+ * @param signature Optional body signature.
+ * @param body Optional body buffer.
+ * @return KC_PPN_OK on success, or KC_PPN_ERROR on failure.
+ */
+static int kc_ppn_dbus_message(
+    kc_ppn_buffer_t *message,
+    uint32_t serial,
+    unsigned char flags,
+    const char *path,
+    const char *interface,
+    const char *member,
+    const char *destination,
+    const char *signature,
+    const kc_ppn_buffer_t *body
+) {
+    kc_ppn_buffer_t fields = {0};
+    unsigned char fixed[16] = {'l', 1, 0, 1};
+    uint32_t body_size;
+    uint32_t fields_size;
+    int result = KC_PPN_ERROR;
+
+    fixed[2] = flags;
+    if (kc_ppn_header_field(&fields, 1, "o", path) != KC_PPN_OK ||
+        kc_ppn_header_field(&fields, 2, "s", interface) != KC_PPN_OK ||
+        kc_ppn_header_field(&fields, 3, "s", member) != KC_PPN_OK ||
+        kc_ppn_header_field(&fields, 6, "s", destination) != KC_PPN_OK ||
+        (signature != NULL &&
+            kc_ppn_header_field(&fields, 8, "g", signature) != KC_PPN_OK) ||
+        fields.size > UINT32_MAX ||
+        (body != NULL && body->size > UINT32_MAX)) {
+        goto cleanup;
+    }
+
+    body_size = body == NULL ? 0 : (uint32_t)body->size;
+    fields_size = (uint32_t)fields.size;
+    fixed[4] = (unsigned char)(body_size & 0xffU);
+    fixed[5] = (unsigned char)((body_size >> 8) & 0xffU);
+    fixed[6] = (unsigned char)((body_size >> 16) & 0xffU);
+    fixed[7] = (unsigned char)((body_size >> 24) & 0xffU);
+    fixed[8] = (unsigned char)(serial & 0xffU);
+    fixed[9] = (unsigned char)((serial >> 8) & 0xffU);
+    fixed[10] = (unsigned char)((serial >> 16) & 0xffU);
+    fixed[11] = (unsigned char)((serial >> 24) & 0xffU);
+    fixed[12] = (unsigned char)(fields_size & 0xffU);
+    fixed[13] = (unsigned char)((fields_size >> 8) & 0xffU);
+    fixed[14] = (unsigned char)((fields_size >> 16) & 0xffU);
+    fixed[15] = (unsigned char)((fields_size >> 24) & 0xffU);
+
+    if (kc_ppn_buffer_append(message, fixed, sizeof(fixed)) != KC_PPN_OK ||
+        kc_ppn_buffer_append(message, fields.data, fields.size) != KC_PPN_OK ||
+        kc_ppn_buffer_align(message, 8) != KC_PPN_OK ||
+        (body != NULL && kc_ppn_buffer_append(
+            message, body->data, body->size
+        ) != KC_PPN_OK)) {
+        goto cleanup;
+    }
+    result = KC_PPN_OK;
+
+cleanup:
+    free(fields.data);
+    return result;
+}
+
+/**
+ * Read and discard one complete D-Bus message.
+ * @param socket_fd Connected socket descriptor.
+ * @return Message type on success, or -1 on failure.
+ */
+static int kc_ppn_dbus_read_message(int socket_fd) {
+    unsigned char fixed[16];
+    unsigned char discard[256];
+    uint32_t body_size;
+    uint32_t fields_size;
+    size_t header_size;
+    size_t remaining;
+
+    if (kc_ppn_socket_read(socket_fd, fixed, sizeof(fixed)) != KC_PPN_OK ||
+        fixed[0] != 'l' || fixed[3] != 1) {
+        return -1;
+    }
+
+    body_size = (uint32_t)fixed[4] |
+        ((uint32_t)fixed[5] << 8) |
+        ((uint32_t)fixed[6] << 16) |
+        ((uint32_t)fixed[7] << 24);
+    fields_size = (uint32_t)fixed[12] |
+        ((uint32_t)fixed[13] << 8) |
+        ((uint32_t)fixed[14] << 16) |
+        ((uint32_t)fixed[15] << 24);
+
+    if ((size_t)fields_size > SIZE_MAX - 16U) {
+        return -1;
+    }
+    header_size = 16U + (size_t)fields_size;
+    if (header_size > SIZE_MAX - 7U) {
+        return -1;
+    }
+    header_size = (header_size + 7U) & ~(size_t)7U;
+    if ((size_t)body_size > SIZE_MAX - (header_size - 16U)) {
+        return -1;
+    }
+    remaining = header_size - 16U + (size_t)body_size;
+
+    while (remaining > 0) {
+        size_t chunk = remaining < sizeof(discard) ? remaining : sizeof(discard);
+        if (kc_ppn_socket_read(socket_fd, discard, chunk) != KC_PPN_OK) {
+            return -1;
+        }
+        remaining -= chunk;
+    }
+    return fixed[1];
+}
+
+/**
+ * Register the authenticated connection with the D-Bus daemon.
+ * @param socket_fd Connected socket descriptor.
+ * @return KC_PPN_OK on success, or KC_PPN_ERROR on failure.
+ */
+static int kc_ppn_dbus_hello(int socket_fd) {
+    kc_ppn_buffer_t message = {0};
+    int result;
+
+    result = kc_ppn_dbus_message(
+        &message,
+        1,
+        1,
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "Hello",
+        "org.freedesktop.DBus",
+        NULL,
+        NULL
+    );
+    if (result == KC_PPN_OK) {
+        result = kc_ppn_socket_write(socket_fd, message.data, message.size);
+    }
+    free(message.data);
+    return result;
+}
+
+/**
  * Construct the Freedesktop Notify method body.
  * @param body Destination body buffer.
  * @param notification Notification values.
@@ -445,22 +618,17 @@ static int kc_ppn_dbus_body(
     kc_ppn_buffer_t *body,
     const kc_ppn_notification_t *notification
 ) {
-    uint32_t zero = 0;
-    uint32_t timeout = UINT32_MAX;
-
     if (kc_ppn_buffer_string(body, "Application") != KC_PPN_OK ||
-        kc_ppn_buffer_align(body, 4) != KC_PPN_OK ||
         kc_ppn_buffer_u32(body, 0) != KC_PPN_OK ||
         kc_ppn_buffer_string(body, "") != KC_PPN_OK ||
         kc_ppn_buffer_string(body, notification->title) != KC_PPN_OK ||
         kc_ppn_buffer_string(body, notification->message) != KC_PPN_OK ||
         kc_ppn_buffer_align(body, 4) != KC_PPN_OK ||
-        kc_ppn_buffer_append(body, &zero, sizeof(zero)) != KC_PPN_OK ||
+        kc_ppn_buffer_u32(body, 0) != KC_PPN_OK ||
         kc_ppn_buffer_align(body, 4) != KC_PPN_OK ||
-        kc_ppn_buffer_append(body, &zero, sizeof(zero)) != KC_PPN_OK ||
+        kc_ppn_buffer_u32(body, 0) != KC_PPN_OK ||
         kc_ppn_buffer_align(body, 8) != KC_PPN_OK ||
-        kc_ppn_buffer_align(body, 4) != KC_PPN_OK ||
-        kc_ppn_buffer_u32(body, timeout) != KC_PPN_OK) {
+        kc_ppn_buffer_u32(body, UINT32_MAX) != KC_PPN_OK) {
         return KC_PPN_ERROR;
     }
     return KC_PPN_OK;
@@ -472,55 +640,25 @@ static int kc_ppn_dbus_body(
  * @return KC_PPN_OK on success, or KC_PPN_ERROR on failure.
  */
 static int kc_ppn_show_linux(const kc_ppn_notification_t *notification) {
-    kc_ppn_buffer_t fields = {0};
     kc_ppn_buffer_t body = {0};
     kc_ppn_buffer_t message = {0};
-    unsigned char fixed[16] = {'l', 1, 0, 1};
-    unsigned char reply[16];
     struct timeval timeout;
-    uint32_t value;
     int socket_fd = -1;
     int result = KC_PPN_ERROR;
-    size_t received = 0;
+    int index;
 
-    if (kc_ppn_header_field(
-            &fields, 1, "o", "/org/freedesktop/Notifications"
-        ) != KC_PPN_OK ||
-        kc_ppn_header_field(
-            &fields, 2, "s", "org.freedesktop.Notifications"
-        ) != KC_PPN_OK ||
-        kc_ppn_header_field(&fields, 3, "s", "Notify") != KC_PPN_OK ||
-        kc_ppn_header_field(
-            &fields, 6, "s", "org.freedesktop.Notifications"
-        ) != KC_PPN_OK ||
-        kc_ppn_header_field(&fields, 8, "g", "susssasa{sv}i") != KC_PPN_OK ||
-        kc_ppn_dbus_body(&body, notification) != KC_PPN_OK ||
-        fields.size > UINT32_MAX || body.size > UINT32_MAX) {
-        goto cleanup;
-    }
-
-    value = (uint32_t)body.size;
-    fixed[4] = (unsigned char)(value & 0xffU);
-    fixed[5] = (unsigned char)((value >> 8) & 0xffU);
-    fixed[6] = (unsigned char)((value >> 16) & 0xffU);
-    fixed[7] = (unsigned char)((value >> 24) & 0xffU);
-
-    value = 1;
-    fixed[8] = (unsigned char)(value & 0xffU);
-    fixed[9] = (unsigned char)((value >> 8) & 0xffU);
-    fixed[10] = (unsigned char)((value >> 16) & 0xffU);
-    fixed[11] = (unsigned char)((value >> 24) & 0xffU);
-
-    value = (uint32_t)fields.size;
-    fixed[12] = (unsigned char)(value & 0xffU);
-    fixed[13] = (unsigned char)((value >> 8) & 0xffU);
-    fixed[14] = (unsigned char)((value >> 16) & 0xffU);
-    fixed[15] = (unsigned char)((value >> 24) & 0xffU);
-
-    if (kc_ppn_buffer_append(&message, fixed, sizeof(fixed)) != KC_PPN_OK ||
-        kc_ppn_buffer_append(&message, fields.data, fields.size) != KC_PPN_OK ||
-        kc_ppn_buffer_align(&message, 8) != KC_PPN_OK ||
-        kc_ppn_buffer_append(&message, body.data, body.size) != KC_PPN_OK) {
+    if (kc_ppn_dbus_body(&body, notification) != KC_PPN_OK ||
+        kc_ppn_dbus_message(
+            &message,
+            2,
+            0,
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "Notify",
+            "org.freedesktop.Notifications",
+            "susssasa{sv}i",
+            &body
+        ) != KC_PPN_OK) {
         goto cleanup;
     }
 
@@ -534,35 +672,28 @@ static int kc_ppn_show_linux(const kc_ppn_notification_t *notification) {
     if (setsockopt(
             socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)
         ) != 0 ||
+        kc_ppn_dbus_hello(socket_fd) != KC_PPN_OK ||
         kc_ppn_socket_write(
             socket_fd, message.data, message.size
         ) != KC_PPN_OK) {
         goto cleanup;
     }
 
-    while (received < sizeof(reply)) {
-        ssize_t count = recv(
-            socket_fd,
-            reply + received,
-            sizeof(reply) - received,
-            0
-        );
-        if (count <= 0) {
-            goto cleanup;
+    for (index = 0; index < 4; index++) {
+        int type = kc_ppn_dbus_read_message(socket_fd);
+        if (type == 2) {
+            result = KC_PPN_OK;
+            break;
         }
-        received += (size_t)count;
+        if (type < 0 || type == 3) {
+            break;
+        }
     }
-
-    if (reply[0] != 'l' || reply[1] != 2) {
-        goto cleanup;
-    }
-    result = KC_PPN_OK;
 
 cleanup:
     if (socket_fd >= 0) {
         close(socket_fd);
     }
-    free(fields.data);
     free(body.data);
     free(message.data);
     return result;
