@@ -29,6 +29,148 @@ resolve_project() {
     return 1
 }
 
+# Returns the logical capability name for a libNAME.c project.
+# @param project_name Project directory basename.
+# @return 0 on success; the capability name is written to stdout.
+capability_name() {
+    local project_name="$1"
+    local stem
+
+    stem="${project_name%.c}"
+    printf '%s\n' "${stem#lib}"
+}
+
+# Computes the SHA-256 digest of one file.
+# @param file File path.
+# @return 0 on success; the digest is written to stdout.
+compute_sha256() {
+    local file="$1"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+    else
+        openssl dgst -sha256 "$file" | awk '{print $NF}'
+    fi
+}
+
+# Writes the expected file list for one compiled target.
+# @param project_dir Project directory.
+# @param target_dir Compiled target directory.
+# @param output_file Destination list file.
+# @return 0 on success.
+write_target_file_list() {
+    local project_dir="$1"
+    local target_dir="$2"
+    local output_file="$3"
+    local project_name name
+
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+
+    {
+        find "$target_dir" -maxdepth 1 -type f \
+            -name "lib$name.*" \
+            ! -name "*.sync-conflict-*" \
+            -printf '%f\n'
+        printf 'lib%s.h\n' "$name"
+    } | LC_ALL=C sort -u > "$output_file"
+}
+
+# Checks whether one target checksum is still current.
+# @param project_dir Project directory.
+# @param target_dir Compiled target directory.
+# @return 0 when current, 1 otherwise.
+target_checksum_is_current() {
+    local project_dir="$1"
+    local target_dir="$2"
+    local project_name name header checksum current_list stored_list
+
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+    header="$project_dir/src/lib$name.h"
+    checksum="$target_dir/SHA256SUMS"
+
+    [ -f "$checksum" ] || return 1
+    [ -f "$header" ] || return 1
+    [ "$header" -ot "$checksum" ] || return 1
+
+    if find "$target_dir" -maxdepth 1 -type f \
+        -name "lib$name.*" \
+        ! -name "*.sync-conflict-*" \
+        -newer "$checksum" -print -quit | grep -q .; then
+        return 1
+    fi
+
+    current_list=$(mktemp)
+    stored_list=$(mktemp)
+    write_target_file_list "$project_dir" "$target_dir" "$current_list"
+    awk '{print $2}' "$checksum" | LC_ALL=C sort -u > "$stored_list"
+
+    if cmp -s "$current_list" "$stored_list"; then
+        rm -f "$current_list" "$stored_list"
+        return 0
+    fi
+
+    rm -f "$current_list" "$stored_list"
+    return 1
+}
+
+# Updates one target checksum only when its inputs changed.
+# @param project_dir Project directory.
+# @param target_dir Compiled target directory.
+# @return 0 on success.
+update_target_checksum() {
+    local project_dir="$1"
+    local target_dir="$2"
+    local project_name name header checksum temporary artifact
+    local filename sha256
+
+    if target_checksum_is_current "$project_dir" "$target_dir"; then
+        return 0
+    fi
+
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+    header="$project_dir/src/lib$name.h"
+    checksum="$target_dir/SHA256SUMS"
+
+    [ -f "$header" ] || return 0
+
+    temporary=$(mktemp)
+    while IFS= read -r -d '' artifact; do
+        filename=$(basename "$artifact")
+        sha256=$(compute_sha256 "$artifact")
+        printf '%s  %s\n' "$sha256" "$filename" >> "$temporary"
+    done < <(
+        find "$target_dir" -maxdepth 1 -type f \
+            -name "lib$name.*" \
+            ! -name "*.sync-conflict-*" \
+            -print0 | sort -z
+    )
+
+    sha256=$(compute_sha256 "$header")
+    printf '%s  lib%s.h\n' "$sha256" "$name" >> "$temporary"
+    LC_ALL=C sort -u -k2,2 "$temporary" > "$checksum"
+    rm -f "$temporary"
+}
+
+# Updates checksums for all compiled targets of one project.
+# @param project_dir Project directory.
+# @return 0 on success.
+update_project_checksums() {
+    local project_dir="$1"
+    local target_dir
+
+    [ -d "$project_dir/bin" ] || return 0
+
+    for target_dir in "$project_dir/bin"/*/*; do
+        [ -d "$target_dir" ] || continue
+        update_target_checksum "$project_dir" "$target_dir"
+    done
+}
+
 # Builds one kclib project for every configured target.
 # @param project_dir Project directory.
 # @return 0 on success.
@@ -42,6 +184,7 @@ build_project() {
         cd "$project_dir"
         make all
     )
+    update_project_checksums "$project_dir"
 }
 
 # Dispatches one project build or all project builds.
