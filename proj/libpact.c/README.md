@@ -1,6 +1,6 @@
 # libpact.c - Persistent Scoped Trust
 
-`libpact.c` is a small C library for establishing persistent scoped trust
+`libpact.c` is a small C library for establishing persistent scoped trusted
 relationships and protecting binary messages with the Noise Protocol
 Framework. It does not implement transport; applications move invitations,
 confirmations, UIDs, and protected messages themselves.
