@@ -1,35 +1,35 @@
-# trust scripting API
+# pact scripting API
 
 Persistent scoped trust relationships and binary message protection.
 
 ## Lua
 
 ```lua
-local trust = trust.init()
+local pact = pact.init()
 
-local invitedUid, code = trust:invite()
+local invitedUid, code = pact:invite()
 
-local inviterUid, confirmation = trust:join(code)
+local inviterUid, confirmation = pact:join(code)
 
-local confirmedUid = trust:confirm(confirmation)
+local confirmedUid = pact:confirm(confirmation)
 
-local protected = trust:seal(invitedUid, messageBytes)
-local message = trust:unseal(invitedUid, protected)
+local protected = pact:seal(invitedUid, messageBytes)
+local message = pact:unseal(invitedUid, protected)
 
-trust:revoke(invitedUid)
-trust:close()
+pact:revoke(invitedUid)
+pact:close()
 ```
 
 `invite()` returns `uid, code`. `join(code)` returns `uid, confirmation`. `confirm(confirmation)` returns the confirmed UID.
 
 `seal(uid, bytes)` and `unseal(uid, bytes)` operate on arbitrary binary messages. Transport, ordering, retries, timeouts, and replay policy are outside this capability.
 
-Closing the trust object does not remove persistent relationships.
+Closing the pact object does not remove persistent relationships.
 
 ## JavaScript
 
 ```js
-const store = await trust.init();
+const store = await pact.init();
 
 const { uid: invitedUid, code } = await store.invite();
 
