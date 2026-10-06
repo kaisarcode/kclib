@@ -277,11 +277,7 @@ define macos_target
 		exit 1; \
 	fi
 	@cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
-	if [ -f "$$cache" ] && { \
-		! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache" || \
-		! grep -q '^CMAKE_AR:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar$$' "$$cache" || \
-		! grep -q '^CMAKE_RANLIB:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib$$' "$$cache"; \
-	}; then \
+	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache"; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
 	fi
 	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
