@@ -47,21 +47,17 @@ make
 
 ### Tests
 
-Build the native library and run the contract tests:
+Build the native library and run the tests:
 
 ```bash
 make
 make test
 ```
 
-The default tests do not display a notification. To exercise the native
-notification path in an interactive desktop session:
+`make test` exercises the public contract and displays a real native
+notification, so a desktop session is required.
 
-```bash
-PPN_TEST_NOTIFY=1 make test
-```
-
-To run the contract tests through Wine:
+To run the tests through Wine:
 
 ```bash
 make x86_64/windows
