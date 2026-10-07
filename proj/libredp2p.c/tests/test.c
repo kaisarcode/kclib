@@ -1348,7 +1348,7 @@ static int test_http_response(unsigned short port, const char *body,
     if (fd == TEST_SOCKET_INVALID) return 1;
     test_socket_timeout(fd, 2000U);
     n = snprintf(head, sizeof(head),
-        "POST /redp2p/ HTTP/1.1\r\nHost: %s\r\nContent-Length: %u\r\n"
+        "POST / HTTP/1.1\r\nHost: %s\r\nContent-Length: %u\r\n"
         "Content-Type: application/json\r\nConnection: close\r\n\r\n",
         TEST_HOST, (unsigned)body_len);
     if (n < 0 || (size_t)n >= sizeof(head) ||
@@ -3451,7 +3451,7 @@ static int test_http_request_from(const char *source, unsigned short port,
     if (fd == TEST_SOCKET_INVALID) return 1;
     test_socket_timeout(fd, 2000U);
     n = snprintf(head, sizeof(head),
-        "POST /redp2p/ HTTP/1.1\r\n"
+        "POST / HTTP/1.1\r\n"
         "Host: %s\r\n"
         "Content-Length: %u\r\n"
         "Content-Type: application/json\r\n"
@@ -3528,7 +3528,7 @@ static int test_http_send_and_close(unsigned short port, const char *body,
     if (fd == TEST_SOCKET_INVALID) return 1;
     test_socket_timeout(fd, 2000U);
     n = snprintf(head, sizeof(head),
-        "POST /redp2p/ HTTP/1.1\r\n"
+        "POST / HTTP/1.1\r\n"
         "Host: %s\r\n"
         "Content-Length: %u\r\n"
         "Content-Type: application/json\r\n"
@@ -4365,7 +4365,7 @@ static int case_kc_redp2p_serve_index(void) {
             test_http_request(port, too_many, used, 400,
                 "\"error\":\"bad_request\""));
     used = (size_t)snprintf(overlong_line, sizeof(overlong_line),
-        "POST /redp2p/ HTTP/1.1\r\nX-Filler: ");
+        "POST / HTTP/1.1\r\nX-Filler: ");
     for (i = (int)used; (size_t)i < sizeof(overlong_line); i++)
         overlong_line[i] = 'a';
     fail += expect_int("reject overlong request headers", 431,
@@ -4419,7 +4419,7 @@ static int case_kc_redp2p_serve_index(void) {
         429, "{\"ok\":false,\"error\":\"pending_limit_publisher\"}"));
     cooling_start = test_now_ms();
     used = (size_t)snprintf(incomplete_body, sizeof(incomplete_body),
-        "POST /redp2p/ HTTP/1.1\r\nContent-Length: 5\r\n\r\nab");
+        "POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nab");
     for (i = 0; i < TEST_HTTP_CONNECTIONS; i++)
         timeout_fds[i] = TEST_SOCKET_INVALID;
     for (i = 0; i < TEST_HTTP_CONNECTIONS; i++) {

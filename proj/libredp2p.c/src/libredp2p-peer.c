@@ -1142,7 +1142,7 @@ int redp2p_http_client(redp2p_t *ctx, const char *phase,
         return REDP2P_ERROR;
     }
     n = snprintf(head, sizeof(head),
-        "POST /redp2p/ HTTP/1.1\r\n"
+        "POST / HTTP/1.1\r\n"
         "Host: %s\r\n"
         "Content-Length: %u\r\n"
         "Content-Type: application/json\r\n"
