@@ -36,6 +36,7 @@ set(REDP2P_ENGINE_SOURCES
     src/libredp2p-core.c
     src/libredp2p-peer.c
     src/libredp2p-idx.c
+    src/libredp2p-idx-native.c
     src/libredp2p-pub.c
     src/libredp2p-con.c
     lib/monocypher/monocypher.c
@@ -66,7 +67,11 @@ if(NOT WIN32 AND NOT MSVC)
 endif()
 
 if(MINGW)
-    set(REDP2P_PRIVATE_HEADERS src/libredp2p-core.h src/libredp2p-peer.h)
+    set(REDP2P_PRIVATE_HEADERS
+        src/libredp2p-core.h
+        src/libredp2p-peer.h
+        src/libredp2p-idx.h
+    )
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${REDP2P_PRIVATE_HEADERS})
     set(REDP2P_PRIVATE_SYMBOLS)
     foreach(header IN LISTS REDP2P_PRIVATE_HEADERS)
