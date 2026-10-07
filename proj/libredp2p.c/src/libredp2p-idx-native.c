@@ -967,6 +967,11 @@ void redp2p_idx_native_punch_req(redp2p_t *ctx, redp2p_fd_t fd,
         redp2p_index_respond_error(fd, 404, "not_found");
         return;
     }
+    if (ctx->peers[peer_index].peer.transport != REDP2P_PROTO_TCP &&
+        ctx->peers[peer_index].peer.transport != REDP2P_PROTO_UDP) {
+        redp2p_index_respond_error(fd, 409, "unsupported_transport");
+        return;
+    }
     if (!json_object_has_value_of_type(req, "session", JSONString)) {
         redp2p_index_respond_error(fd, 400, "bad_request");
         return;
