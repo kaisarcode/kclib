@@ -116,6 +116,7 @@
             this._peer.close();
         }
     }
+
     /**
      * Validates a consumer connection response.
      * @return Validated connection response.

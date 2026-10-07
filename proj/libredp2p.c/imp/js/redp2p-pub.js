@@ -103,6 +103,7 @@
             this._peer.close();
         }
     }
+
     /**
      * Encodes bytes as hexadecimal.
      * @return Hexadecimal string.

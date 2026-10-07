@@ -14,21 +14,37 @@ final class Redp2pNative
     private const ADDR_MAX = 47;
     private const CANDIDATES_MAX = 8;
 
+    /**
+     * Returns the native transport key.
+     * @return Native transport name.
+     */
     public function key(): string
     {
         return 'native';
     }
 
+    /**
+     * Reports whether a publisher transport is native.
+     * @return Whether the transport is accepted.
+     */
     public function acceptsPublisherTransport(string $transport): bool
     {
         return $transport === 'tcp' || $transport === 'udp';
     }
 
+    /**
+     * Reports whether an operation belongs to this transport.
+     * @return Whether the operation is handled.
+     */
     public function handles(string $operation): bool
     {
         return $operation === 'punch_req' || $operation === 'punch_poll';
     }
 
+    /**
+     * Registers one native publisher.
+     * @return Index response payload.
+     */
     public function register(Redp2pIndex $index, \stdClass $request, string $id): array
     {
         $nonce = $index->requireHex($request, 'nonce', 64);
@@ -110,6 +126,10 @@ final class Redp2pNative
         );
     }
 
+    /**
+     * Refreshes one native publisher record.
+     * @return Index response payload.
+     */
     public function heartbeat(
         Redp2pIndex $index,
         \stdClass $request,
@@ -149,6 +169,10 @@ final class Redp2pNative
         return $updated ? $index->jsonOk() : $index->jsonError(403, 'invalid_proof');
     }
 
+    /**
+     * Exposes native publisher lookup metadata.
+     * @return Native lookup fields.
+     */
     public function lookup(Redp2pIndex $index, array $publisher): array
     {
         $data = $publisher['transport_data'];
@@ -160,6 +184,10 @@ final class Redp2pNative
         ];
     }
 
+    /**
+     * Dispatches a native transport operation.
+     * @return Index response payload.
+     */
     public function handle(
         Redp2pIndex $index,
         string $operation,
@@ -171,6 +199,10 @@ final class Redp2pNative
             : $this->handlePunchPoll($index, $request);
     }
 
+    /**
+     * Queues one native punch request.
+     * @return Index response payload.
+     */
     private function handlePunchReq(
         Redp2pIndex $index,
         \stdClass $request,
@@ -239,6 +271,10 @@ final class Redp2pNative
         }
     }
 
+    /**
+     * Collects pending native punch requests.
+     * @return Index response payload.
+     */
     private function handlePunchPoll(Redp2pIndex $index, \stdClass $request): array
     {
         [$result, $id] = $index->requireId($request, 'id');
@@ -252,10 +288,15 @@ final class Redp2pNative
         if (!$this->acceptsPublisherTransport((string)$publisher['transport'])) {
             return $index->jsonError(409, 'unsupported_transport');
         }
-        if ($seq <= (int)$publisher['seq'] || !hash_equals(
-            $this->controlProof((string)$publisher['key'], 'punch_poll', $id, $seq),
-            strtolower($proof)
-        )) {
+        $expected = $this->controlProof(
+            (string)$publisher['key'],
+            'punch_poll',
+            $id,
+            $seq
+        );
+        if ($seq <= (int)$publisher['seq'] ||
+            !hash_equals($expected, strtolower($proof)))
+        {
             return $index->jsonError(403, 'invalid_proof');
         }
         if (!$index->touchPublisher($id, $seq)) {
@@ -278,6 +319,10 @@ final class Redp2pNative
         return $index->jsonOk(['calls' => $calls], false);
     }
 
+    /**
+     * Extracts a native protocol and UDP port.
+     * @return Parsed pair or null fields on failure.
+     */
     private function requireProtoPort(\stdClass $request): array
     {
         if (!property_exists($request, 'proto') || !property_exists($request, 'udp_port')) {
@@ -291,6 +336,10 @@ final class Redp2pNative
         return $port === null ? [null, null] : [(int)$proto, $port];
     }
 
+    /**
+     * Validates one UDP port.
+     * @return Port or null when invalid.
+     */
     private function requirePort(mixed $value): ?int
     {
         if (!is_int($value) && !is_float($value)) return null;
@@ -302,6 +351,10 @@ final class Redp2pNative
         return (int)$number;
     }
 
+    /**
+     * Parses request candidates under native policy.
+     * @return Normalized candidates or an empty array.
+     */
     private function parseCandidates(\stdClass $request, string $field): array
     {
         if (!property_exists($request, $field)) return [true, []];
@@ -331,6 +384,10 @@ final class Redp2pNative
         return count($out) > self::CANDIDATES_MAX ? [false, []] : [true, $out];
     }
 
+    /**
+     * Checks whether one candidate destination is permitted.
+     * @return Whether the destination is valid.
+     */
     private function candidateDestAllowed(string $raw, int $port): bool
     {
         if ($port < 1) return false;
@@ -348,6 +405,10 @@ final class Redp2pNative
         return true;
     }
 
+    /**
+     * Normalizes one native candidate list.
+     * @return Normalized candidates.
+     */
     private function normalizeCandidates(array $candidates): array
     {
         usort($candidates, function (array $a, array $b): int {
@@ -369,6 +430,10 @@ final class Redp2pNative
         return array_values($unique);
     }
 
+    /**
+     * Merges the index-observed candidate.
+     * @return Updated candidates or null on failure.
+     */
     private function mergeObserved(array $candidates, string $peerAddress, int $udpPort): ?array
     {
         $raw = @inet_pton($peerAddress);
@@ -399,6 +464,10 @@ final class Redp2pNative
         return $this->normalizeCandidates($candidates);
     }
 
+    /**
+     * Decrypts a native registration secret.
+     * @return Secret or null when invalid.
+     */
     private function decryptRegistrationSecret(
         Redp2pIndex $index,
         string $nonce,
@@ -433,12 +502,20 @@ final class Redp2pNative
         }
     }
 
+    /**
+     * Validates one publisher control secret.
+     * @return Whether the secret is canonical.
+     */
     private function isControlSecret(string $secret): bool
     {
         return strlen($secret) === Redp2pIndex::KEY_SZ
             && preg_match('/\A[0-9A-Fa-f]{16}\z/D', $secret) === 1;
     }
 
+    /**
+     * Builds the native registration transcript.
+     * @return Canonical registration bytes.
+     */
     private function registrationMessage(
         Redp2pIndex $index,
         string $nonce,
@@ -470,6 +547,10 @@ final class Redp2pNative
         return $message . $solution;
     }
 
+    /**
+     * Builds one native control proof.
+     * @return Lowercase hexadecimal proof.
+     */
     private function controlProof(
         string $secret,
         string $op,
@@ -490,6 +571,10 @@ final class Redp2pNative
         return hash_hmac('sha256', $message, $secret);
     }
 
+    /**
+     * Validates one native session token.
+     * @return Whether the token is canonical.
+     */
     private function isSessionToken(string $token): bool
     {
         return strlen($token) >= 1 && strlen($token) <= 63

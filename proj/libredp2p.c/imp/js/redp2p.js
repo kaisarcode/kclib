@@ -23,6 +23,7 @@
             this.status = status;
         }
     }
+
     /**
      * Validates and normalizes an index URL.
      * @return Normalized URL.
@@ -73,6 +74,7 @@
             value.sdp.length > 0 &&
             value.sdp.length <= 49152;
     }
+
     /**
      * Sends an index protocol request.
      * @return Response payload.

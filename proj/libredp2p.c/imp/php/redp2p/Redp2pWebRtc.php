@@ -13,21 +13,37 @@ final class Redp2pWebRtc
 {
     private const MAX_SDP = 49152;
 
+    /**
+     * Returns the RTC transport key.
+     * @return RTC transport name.
+     */
     public function key(): string
     {
         return 'rtc';
     }
 
+    /**
+     * Reports whether a publisher transport is RTC.
+     * @return Whether the transport is accepted.
+     */
     public function acceptsPublisherTransport(string $transport): bool
     {
         return $transport === 'rtc';
     }
 
+    /**
+     * Reports whether an operation belongs to RTC signaling.
+     * @return Whether the operation is handled.
+     */
     public function handles(string $operation): bool
     {
         return in_array($operation, ['connect', 'poll', 'answer'], true);
     }
 
+    /**
+     * Registers one RTC publisher.
+     * @return Index response payload.
+     */
     public function register(Redp2pIndex $index, \stdClass $request, string $id): array
     {
         if (!property_exists($request, 'transport') || $request->transport !== 'rtc') {
@@ -82,6 +98,10 @@ final class Redp2pWebRtc
         );
     }
 
+    /**
+     * Refreshes one RTC publisher record.
+     * @return Index response payload.
+     */
     public function heartbeat(
         Redp2pIndex $index,
         \stdClass $request,
@@ -106,11 +126,19 @@ final class Redp2pWebRtc
             : $index->jsonError(403, 'invalid_proof');
     }
 
+    /**
+     * Provides RTC lookup metadata.
+     * @return RTC lookup fields.
+     */
     public function lookup(Redp2pIndex $index, array $publisher): array
     {
         return [];
     }
 
+    /**
+     * Dispatches one RTC signaling operation.
+     * @return Index response payload.
+     */
     public function handle(
         Redp2pIndex $index,
         string $operation,
@@ -127,6 +155,10 @@ final class Redp2pWebRtc
         };
     }
 
+    /**
+     * Queues one RTC offer.
+     * @return Index response payload.
+     */
     private function handleConnect(
         Redp2pIndex $index,
         \stdClass $request,
@@ -189,6 +221,10 @@ final class Redp2pWebRtc
         }
     }
 
+    /**
+     * Returns pending offers to an RTC publisher.
+     * @return Index response payload.
+     */
     private function handlePublisherPoll(
         Redp2pIndex $index,
         \stdClass $request
@@ -204,10 +240,15 @@ final class Redp2pWebRtc
         if (!$this->acceptsPublisherTransport((string)$publisher['transport'])) {
             return $index->jsonError(409, 'unsupported_transport');
         }
-        if ($seq <= (int)$publisher['seq'] || !hash_equals(
-            $index->simpleControlProof((string)$publisher['key'], 'poll', $id, $seq),
-            strtolower($proof)
-        )) {
+        $expected = $index->simpleControlProof(
+            (string)$publisher['key'],
+            'poll',
+            $id,
+            $seq
+        );
+        if ($seq <= (int)$publisher['seq'] ||
+            !hash_equals($expected, strtolower($proof)))
+        {
             return $index->jsonError(403, 'invalid_proof');
         }
         if (!$index->touchPublisher($id, $seq)) {
@@ -224,6 +265,10 @@ final class Redp2pWebRtc
         return $index->jsonOk(['connections' => $connections], false);
     }
 
+    /**
+     * Stores one RTC publisher answer.
+     * @return Index response payload.
+     */
     private function handleAnswer(Redp2pIndex $index, \stdClass $request): array
     {
         [$result, $id] = $index->requireId($request, 'id');
@@ -244,16 +289,16 @@ final class Redp2pWebRtc
             return $index->jsonError(409, 'unsupported_transport');
         }
         $digest = hash('sha256', $answer['type'] . "\n" . $answer['sdp']);
-        if ($seq <= (int)$publisher['seq'] || !hash_equals(
-            $index->simpleControlProof(
-                (string)$publisher['key'],
-                'answer',
-                $id,
-                $seq,
-                [$connection, $digest]
-            ),
-            strtolower($proof)
-        )) {
+        $expected = $index->simpleControlProof(
+            (string)$publisher['key'],
+            'answer',
+            $id,
+            $seq,
+            [$connection, $digest]
+        );
+        if ($seq <= (int)$publisher['seq'] ||
+            !hash_equals($expected, strtolower($proof)))
+        {
             return $index->jsonError(403, 'invalid_proof');
         }
         $lock = $index->beginPendingWrite();
@@ -278,6 +323,10 @@ final class Redp2pWebRtc
         }
     }
 
+    /**
+     * Returns an RTC answer to its consumer.
+     * @return Index response payload.
+     */
     private function handleConsumerPoll(
         Redp2pIndex $index,
         \stdClass $request
@@ -293,10 +342,10 @@ final class Redp2pWebRtc
         if ($pending === null || $pending['transport'] !== 'rtc') {
             return $index->jsonError(404, 'not_found');
         }
-        if (!is_string($pending['consumer_hash']) || !hash_equals(
-            $pending['consumer_hash'],
-            hash('sha256', $capability)
-        )) {
+        $capabilityHash = hash('sha256', $capability);
+        if (!is_string($pending['consumer_hash']) ||
+            !hash_equals($pending['consumer_hash'], $capabilityHash))
+        {
             return $index->jsonError(403, 'auth_failed');
         }
         $answer = $pending['response']['answer'] ?? null;
@@ -304,6 +353,10 @@ final class Redp2pWebRtc
         return $index->jsonOk(['answer' => $answer], false);
     }
 
+    /**
+     * Validates one RTC session description.
+     * @return Description or null when invalid.
+     */
     private function description(mixed $value, string $type): ?array
     {
         if (!($value instanceof \stdClass) || !property_exists($value, 'type') ||
@@ -315,6 +368,10 @@ final class Redp2pWebRtc
         return ['type' => $type, 'sdp' => $value->sdp];
     }
 
+    /**
+     * Builds the RTC registration transcript.
+     * @return Canonical registration bytes.
+     */
     private function registrationMessage(
         Redp2pIndex $index,
         string $nonce,
