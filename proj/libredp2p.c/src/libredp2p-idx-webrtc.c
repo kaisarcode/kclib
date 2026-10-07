@@ -428,7 +428,7 @@ void redp2p_idx_webrtc_connect(redp2p_t *ctx, redp2p_fd_t fd,
     json_object_set_string(out, "connection", connection);
     json_object_set_string(out, "capability", capability);
     json_object_set_number(out, "expires_at",
-        (double)(redp2p_now_s() + ctx->pending_ttl_s));
+        (double)((uint64_t)time(NULL) + ctx->pending_ttl_s));
     rtc_ok(fd, reply);
 }
 
