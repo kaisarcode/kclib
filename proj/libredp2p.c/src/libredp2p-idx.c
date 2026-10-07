@@ -1067,10 +1067,6 @@ static int redp2p_index_request_parse(redp2p_index_conn_t *conn,
 
     if (http_status_out) *http_status_out = 0;
     if (conn->buf_len <= 0) return 0;
-    if ((size_t)conn->buf_len >= conn->buf_cap - 1U) {
-        if (http_status_out) *http_status_out = 431;
-        return 1;
-    }
     conn->buf[conn->buf_len] = '\0';
     header_end = strstr(conn->buf, "\r\n\r\n");
     if (!header_end) {
