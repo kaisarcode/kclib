@@ -467,7 +467,10 @@ static void kc_redp2p_pub_emit(kc_redp2p_pub_t *pub,
     pub->receive(&input, pub->userdata);
 }
 
-/** Runs the direct publisher loopback adapter. */
+/**
+ * Runs the direct publisher loopback adapter.
+ * @return Platform thread return value.
+ */
 #ifdef _WIN32
 static DWORD WINAPI kc_redp2p_pub_adapter_worker(LPVOID arg)
 #else
@@ -576,7 +579,10 @@ static void *kc_redp2p_pub_adapter_worker(void *arg)
 #endif
 }
 
-/** Runs the direct consumer receive adapter. */
+/**
+ * Runs the direct consumer receive adapter.
+ * @return Platform thread return value.
+ */
 #ifdef _WIN32
 static DWORD WINAPI kc_redp2p_con_adapter_worker(LPVOID arg)
 #else

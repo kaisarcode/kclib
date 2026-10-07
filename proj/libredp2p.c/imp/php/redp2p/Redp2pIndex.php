@@ -46,6 +46,12 @@ final class Redp2pIndex
     /** @var array<string, object> */
     private array $transports = [];
 
+    /**
+     * Initializes the index with its database connection and options.
+     * @param PDO|array $db Database connection or connection configuration.
+     * @param array $options Index configuration.
+     * @return void
+     */
     public function __construct(PDO|array $db, array $options = [])
     {
         if (is_array($db)) {
@@ -70,6 +76,10 @@ final class Redp2pIndex
         $this->registerTransport(new Redp2pWebRtc());
     }
 
+    /**
+     * Serves the current HTTP request through the index.
+     * @return void
+     */
     public function serve(): void
     {
         $headers = function_exists('getallheaders') ? getallheaders() : [];
@@ -87,6 +97,14 @@ final class Redp2pIndex
         echo $res['body'];
     }
 
+    /**
+     * Handles an HTTP request for the index protocol.
+     * @param string $method HTTP request method.
+     * @param string $body HTTP request body.
+     * @param array $headers HTTP request headers.
+     * @param ?string $peerAddress Client network address.
+     * @return array HTTP response.
+     */
     public function handle(
         string $method,
         string $body,
@@ -139,12 +157,20 @@ final class Redp2pIndex
         }
     }
 
+    /**
+     * Removes expired publishers and pending requests.
+     * @return void
+     */
     public function prune(): void
     {
         $this->evictStale();
         $this->evictPending();
     }
 
+    /**
+     * Lists currently active publisher identifiers.
+     * @return array Active publisher identifiers.
+     */
     public function list(): array
     {
         $cutoff = time() - $this->ttl;
@@ -155,16 +181,31 @@ final class Redp2pIndex
         return array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN));
     }
 
+    /**
+     * Registers a protocol transport module.
+     * @param object $transport Transport module.
+     * @return void
+     */
     private function registerTransport(object $transport): void
     {
         $this->transports[$transport->key()] = $transport;
     }
 
+    /**
+     * Finds a registered transport by its key.
+     * @param string $key Transport key.
+     * @return ?object Registered transport or null.
+     */
     private function transportByKey(string $key): ?object
     {
         return $this->transports[$key] ?? null;
     }
 
+    /**
+     * Finds the transport module for a publisher transport name.
+     * @param string $transport Publisher transport name.
+     * @return ?object Matching transport or null.
+     */
     private function transportForPublisher(string $transport): ?object
     {
         foreach ($this->transports as $module) {
@@ -175,6 +216,13 @@ final class Redp2pIndex
         return null;
     }
 
+    /**
+     * Dispatches a transport-specific protocol operation.
+     * @param string $operation Requested operation.
+     * @param \stdClass $request Decoded request.
+     * @param ?string $peerAddress Client network address.
+     * @return array HTTP response.
+     */
     private function dispatchTransportOperation(
         string $operation,
         \stdClass $request,
@@ -188,6 +236,11 @@ final class Redp2pIndex
         return $this->jsonError(400, 'bad_request');
     }
 
+    /**
+     * Creates a signed challenge for a publisher.
+     * @param \stdClass $request Decoded request.
+     * @return array HTTP response.
+     */
     private function handleChallenge(\stdClass $request): array
     {
         [$result, $id] = $this->requireId($request, 'id');
@@ -215,6 +268,10 @@ final class Redp2pIndex
         ]);
     }
 
+    /**
+     * Registers a publisher through its selected transport.
+     * @return array HTTP response.
+     */
     private function handleRegister(\stdClass $request): array
     {
         [$result, $id] = $this->requireId($request, 'id');
@@ -230,6 +287,10 @@ final class Redp2pIndex
         return $transport->register($this, $request, $id);
     }
 
+    /**
+     * Refreshes a publisher registration.
+     * @return array HTTP response.
+     */
     private function handleHeartbeat(\stdClass $request): array
     {
         [$result, $id] = $this->requireId($request, 'id');
@@ -245,6 +306,10 @@ final class Redp2pIndex
         return $transport->heartbeat($this, $request, $id, $publisher);
     }
 
+    /**
+     * Looks up an active publisher.
+     * @return array HTTP response.
+     */
     private function handleLookup(\stdClass $request): array
     {
         [$result, $id] = $this->requireId($request, 'id');
@@ -270,6 +335,10 @@ final class Redp2pIndex
         ));
     }
 
+    /**
+     * Removes a registered publisher.
+     * @return array HTTP response.
+     */
     private function handleDeregister(\stdClass $request): array
     {
         [$result, $id] = $this->requireId($request, 'id');
@@ -313,6 +382,10 @@ final class Redp2pIndex
         }
     }
 
+    /**
+     * Stores a verified publisher registration.
+     * @return array Registration result.
+     */
     public function commitPublisherRegistration(
         string $id,
         string $secret,
@@ -340,6 +413,10 @@ final class Redp2pIndex
         };
     }
 
+    /**
+     * Adds a publisher record to the index.
+     * @return void
+     */
     private function addPublisher(
         string $id,
         string $secret,
@@ -379,6 +456,10 @@ final class Redp2pIndex
         return 'ok';
     }
 
+    /**
+     * Retrieves a publisher record by identifier.
+     * @return ?array Publisher record or null.
+     */
     public function publisher(string $id, bool $locked = false): ?array
     {
         $sql = 'SELECT id, key, seq, transport, transport_data, connect_credit,'
@@ -396,6 +477,10 @@ final class Redp2pIndex
         return $row;
     }
 
+    /**
+     * Updates a publisher record.
+     * @return bool Whether the record was updated.
+     */
     public function updatePublisher(
         string $id,
         int $seq,
@@ -412,6 +497,10 @@ final class Redp2pIndex
         return $st->rowCount() === 1;
     }
 
+    /**
+     * Updates a publisher heartbeat sequence.
+     * @return bool Whether the publisher was updated.
+     */
     public function touchPublisher(string $id, int $seq): bool
     {
         $st = $this->db->prepare(
@@ -422,6 +511,10 @@ final class Redp2pIndex
         return $st->rowCount() === 1;
     }
 
+    /**
+     * Creates a pending connection request.
+     * @return string Pending request identifier.
+     */
     public function pendingCreate(
         string $id,
         string $publisherId,
@@ -450,6 +543,10 @@ final class Redp2pIndex
         return true;
     }
 
+    /**
+     * Lists pending requests for a publisher.
+     * @return array Pending requests.
+     */
     public function pendingForPublisher(
         string $publisherId,
         string $transport,
@@ -477,6 +574,10 @@ final class Redp2pIndex
         return $rows;
     }
 
+    /**
+     * Retrieves a pending request by identifier.
+     * @return ?array Pending request or null.
+     */
     public function pending(string $id): ?array
     {
         $this->evictPending();
@@ -497,6 +598,10 @@ final class Redp2pIndex
         return $row;
     }
 
+    /**
+     * Records a response for a pending request.
+     * @return bool Whether the request was updated.
+     */
     public function pendingRespond(
         string $id,
         string $publisherId,
@@ -514,6 +619,10 @@ final class Redp2pIndex
         return $st->rowCount() === 1;
     }
 
+    /**
+     * Deletes multiple pending requests.
+     * @return void
+     */
     public function pendingDeleteMany(array $ids): void
     {
         if ($ids === []) return;
@@ -524,6 +633,10 @@ final class Redp2pIndex
         $st->execute($ids);
     }
 
+    /**
+     * Deletes a pending request.
+     * @return void
+     */
     public function pendingDelete(string $id): void
     {
         $st = $this->db->prepare(
@@ -532,6 +645,10 @@ final class Redp2pIndex
         $st->execute([$id]);
     }
 
+    /**
+     * Deletes pending requests for a publisher.
+     * @return void
+     */
     public function pendingDeleteByPublisher(string $publisherId): void
     {
         $st = $this->db->prepare(
@@ -540,6 +657,10 @@ final class Redp2pIndex
         $st->execute([$publisherId]);
     }
 
+    /**
+     * Checks the pending-request capacity for a publisher.
+     * @return ?array Capacity state or null.
+     */
     public function pendingCapacityAvailable(string $publisherId): ?array
     {
         $this->evictPending();
@@ -561,6 +682,10 @@ final class Redp2pIndex
         return null;
     }
 
+    /**
+     * Applies the connection rate limit.
+     * @return bool Whether the connection is allowed.
+     */
     public function allowConnectRate(
         string $peerAddress,
         string $publisherId,
@@ -639,6 +764,10 @@ final class Redp2pIndex
         return $allowed;
     }
 
+    /**
+     * Refills a rate-limit credit balance.
+     * @return float Updated credit balance.
+     */
     private function refillCredit(
         int $credit,
         int $updated,
@@ -651,6 +780,10 @@ final class Redp2pIndex
         return min($capacity, $credit + $elapsed * $rate);
     }
 
+    /**
+     * Begins a pending-request write transaction.
+     * @return string Transaction lock token.
+     */
     public function beginPendingWrite(): string
     {
         $driver = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
@@ -678,6 +811,10 @@ final class Redp2pIndex
         throw new \PDOException('unsupported PDO driver');
     }
 
+    /**
+     * Ends a pending-request write transaction.
+     * @return void
+     */
     public function endPendingWrite(string $lock, bool $commit): void
     {
         if ($lock === 'sqlite') {
@@ -691,18 +828,30 @@ final class Redp2pIndex
         throw new \PDOException('unsupported pending write lock');
     }
 
+    /**
+     * Validates and reads an identifier field.
+     * @return array Validation result and identifier.
+     */
     public function requireId(\stdClass $o, string $field): array
     {
         if (!$this->hasString($o, $field)) return [0, null];
         return $this->isValidId($o->$field) ? [1, $o->$field] : [-1, null];
     }
 
+    /**
+     * Validates and reads a hexadecimal field.
+     * @return ?string Hexadecimal value or null.
+     */
     public function requireHex(\stdClass $o, string $field, int $len): ?string
     {
         if (!$this->hasString($o, $field)) return null;
         return $this->isHexToken($o->$field, $len) ? $o->$field : null;
     }
 
+    /**
+     * Validates and reads a lowercase hexadecimal field.
+     * @return ?string Hexadecimal value or null.
+     */
     public function requireLowerHex(
         \stdClass $o,
         string $field,
@@ -713,6 +862,10 @@ final class Redp2pIndex
             ? $o->$field : null;
     }
 
+    /**
+     * Validates and reads a sequence number.
+     * @return ?int Sequence number or null.
+     */
     public function requireSequence(\stdClass $o): ?int
     {
         if (!property_exists($o, 'seq') || !is_int($o->seq) ||
@@ -722,11 +875,19 @@ final class Redp2pIndex
         return $o->seq;
     }
 
+    /**
+     * Reads a string field from a request.
+     * @return ?string Field value or null.
+     */
     public function getString(\stdClass $o, string $field): ?string
     {
         return $this->hasString($o, $field) ? $o->$field : null;
     }
 
+    /**
+     * Decodes a fixed-length hexadecimal value.
+     * @return ?string Decoded bytes or null.
+     */
     public function hexBytes(string $hex, int $length): ?string
     {
         if (strlen($hex) !== $length * 2 || !ctype_xdigit($hex)) return null;
@@ -734,6 +895,10 @@ final class Redp2pIndex
         return $bytes !== false && strlen($bytes) === $length ? $bytes : null;
     }
 
+    /**
+     * Validates and reads a timestamp field.
+     * @return ?int Timestamp or null.
+     */
     public function requireTimestamp(\stdClass $request, string $field): ?int
     {
         if (!property_exists($request, $field) ||
@@ -743,6 +908,10 @@ final class Redp2pIndex
         return $request->$field;
     }
 
+    /**
+     * Verifies a publisher challenge response.
+     * @return bool Whether the challenge is valid.
+     */
     public function verifyChallenge(
         string $nonce,
         int $issuedAt,
@@ -764,6 +933,10 @@ final class Redp2pIndex
         return hash_equals($expected, $mac);
     }
 
+    /**
+     * Verifies proof-of-work for a request.
+     * @return bool Whether the proof is valid.
+     */
     public function verifyPow(
         string $nonce,
         int $issuedAt,
@@ -779,6 +952,10 @@ final class Redp2pIndex
         return $this->leadingZeroBits($digest) >= $this->pow;
     }
 
+    /**
+     * Creates an admission proof.
+     * @return string Admission proof.
+     */
     public function admissionProof(string $password, string $message): string
     {
         return hash_hmac(
@@ -789,6 +966,10 @@ final class Redp2pIndex
         );
     }
 
+    /**
+     * Creates a proof for a control operation.
+     * @return string Control-operation proof.
+     */
     public function simpleControlProof(
         string $secret,
         string $op,
@@ -803,11 +984,19 @@ final class Redp2pIndex
         );
     }
 
+    /**
+     * Encodes an integer as unsigned 64-bit big-endian bytes.
+     * @return string Encoded bytes.
+     */
     public function u64be(int $value): string
     {
         return pack('N2', intdiv($value, 4294967296), $value % 4294967296);
     }
 
+    /**
+     * Derives an index secret key for a challenge.
+     * @return string Secret key bytes.
+     */
     public function indexSecretKey(
         string $nonce,
         int $issuedAt,
@@ -822,6 +1011,10 @@ final class Redp2pIndex
         );
     }
 
+    /**
+     * Builds a successful JSON response.
+     * @return array HTTP response.
+     */
     public function jsonOk(array $fields = [], bool $okFirst = true): array
     {
         $payload = $okFirst ? array_merge(['ok' => true], $fields)
@@ -831,6 +1024,10 @@ final class Redp2pIndex
         return $this->response(200, 'OK', 'application/json', $body);
     }
 
+    /**
+     * Builds an error JSON response.
+     * @return array HTTP response.
+     */
     public function jsonError(int $status, string $code): array
     {
         $body = json_encode(['ok' => false, 'error' => $code]);
@@ -843,6 +1040,10 @@ final class Redp2pIndex
         );
     }
 
+    /**
+     * Encodes fields covered by a challenge MAC.
+     * @return string MAC input bytes.
+     */
     private function challengeMacInput(
         string $nonce,
         int $issuedAt,
@@ -852,6 +1053,10 @@ final class Redp2pIndex
             . $this->u64be($expiresAt);
     }
 
+    /**
+     * Encodes fields covered by proof-of-work.
+     * @return string Proof-of-work input bytes.
+     */
     private function powInput(
         string $nonce,
         int $issuedAt,
@@ -864,6 +1069,10 @@ final class Redp2pIndex
             . $solution;
     }
 
+    /**
+     * Counts leading zero bits in binary data.
+     * @return int Leading zero-bit count.
+     */
     private function leadingZeroBits(string $bin): int
     {
         $total = 0;
@@ -884,6 +1093,10 @@ final class Redp2pIndex
         return $total;
     }
 
+    /**
+     * Sets the index admission password.
+     * @return void
+     */
     private function setPass(string $pass): void
     {
         if ($pass !== '' && !$this->isValidPassToken($pass)) {
@@ -892,6 +1105,10 @@ final class Redp2pIndex
         $this->pass = $pass;
     }
 
+    /**
+     * Sets the privileged publisher identifiers.
+     * @return void
+     */
     private function setVips($vips): void
     {
         $map = [];
@@ -937,6 +1154,10 @@ final class Redp2pIndex
         $this->vips = $map;
     }
 
+    /**
+     * Applies index configuration options.
+     * @return void
+     */
     private function applyOptions(array $options): void
     {
         $pass = $options['pass'] ?? '';
@@ -972,6 +1193,10 @@ final class Redp2pIndex
         $this->pow = $pow;
     }
 
+    /**
+     * Counts non-privileged publishers.
+     * @return int Publisher count.
+     */
     private function countNonVip(): int
     {
         if ($this->vips === []) {
@@ -989,11 +1214,19 @@ final class Redp2pIndex
         return (int)$st->fetchColumn();
     }
 
+    /**
+     * Retrieves the admission password for an identifier.
+     * @return string Admission password.
+     */
     private function getPass(string $id): string
     {
         return $this->vips[$id] ?? $this->pass;
     }
 
+    /**
+     * Removes stale publisher records.
+     * @return void
+     */
     private function evictStale(): void
     {
         $cutoff = time() - $this->ttl;
@@ -1009,6 +1242,10 @@ final class Redp2pIndex
         $st->execute([$cutoff]);
     }
 
+    /**
+     * Removes expired pending requests.
+     * @return void
+     */
     private function evictPending(): void
     {
         $st = $this->db->prepare(
@@ -1017,6 +1254,10 @@ final class Redp2pIndex
         $st->execute([time()]);
     }
 
+    /**
+     * Creates required database tables.
+     * @return void
+     */
     private function ensureSchema(): void
     {
         $this->db->exec(
@@ -1075,6 +1316,10 @@ final class Redp2pIndex
         }
     }
 
+    /**
+     * Loads or creates the challenge signing key.
+     * @return string Challenge signing key.
+     */
     private function loadChallengeKey(): string
     {
         $candidate = bin2hex(random_bytes(32));
@@ -1108,17 +1353,29 @@ final class Redp2pIndex
         return $key;
     }
 
+    /**
+     * Checks whether an identifier is valid.
+     * @return bool Whether the identifier is valid.
+     */
     private function isValidId(string $id): bool
     {
         return strlen($id) >= 1 && strlen($id) <= self::ID_MAX
             && preg_match('/^[A-Za-z0-9]+$/D', $id) === 1;
     }
 
+    /**
+     * Checks whether a token is hexadecimal with a fixed length.
+     * @return bool Whether the token is valid.
+     */
     private function isHexToken(string $token, int $len): bool
     {
         return strlen($token) === $len && ctype_xdigit($token);
     }
 
+    /**
+     * Checks whether a password token is valid.
+     * @return bool Whether the password token is valid.
+     */
     private function isValidPassToken(string $pass): bool
     {
         if (strlen($pass) > self::PASS_MAX) return false;
@@ -1129,11 +1386,19 @@ final class Redp2pIndex
         return true;
     }
 
+    /**
+     * Checks whether a request field is a string.
+     * @return bool Whether the field is a string.
+     */
     private function hasString(\stdClass $o, string $field): bool
     {
         return property_exists($o, $field) && is_string($o->$field);
     }
 
+    /**
+     * Checks whether HTTP headers contain a name.
+     * @return bool Whether the header is present.
+     */
     private function hasHeader(array $headers, string $name): bool
     {
         foreach ($headers as $key => $_) {
@@ -1142,6 +1407,10 @@ final class Redp2pIndex
         return false;
     }
 
+    /**
+     * Checks JSON text for duplicate top-level keys.
+     * @return bool Whether duplicate keys exist.
+     */
     private function hasDuplicateTopKeys(string $json): bool
     {
         $depth = 0;
@@ -1201,11 +1470,19 @@ final class Redp2pIndex
         return false;
     }
 
+    /**
+     * Builds a plain HTTP error response.
+     * @return array HTTP response.
+     */
     private function httpError(int $status, string $reason): array
     {
         return $this->response($status, $reason, 'text/plain', '');
     }
 
+    /**
+     * Builds an HTTP response structure.
+     * @return array HTTP response.
+     */
     private function response(
         int $status,
         string $reason,
@@ -1228,6 +1505,10 @@ final class Redp2pIndex
         ];
     }
 
+    /**
+     * Resolves a reason phrase for an HTTP status.
+     * @return string HTTP reason phrase.
+     */
     private function statusReason(int $status): string
     {
         return match ($status) {
