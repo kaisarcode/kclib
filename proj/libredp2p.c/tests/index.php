@@ -8,7 +8,7 @@
  */
 declare(strict_types=1);
 
-require __DIR__ . '/redp2p/Redp2pIndex.php';
+require __DIR__ . '../imp/php/Redp2pIndex.php';
 
 $server = new Redp2pIndex([
     'dsn' => 'sqlite:' . __DIR__ . '/redp2p.sqlite',
