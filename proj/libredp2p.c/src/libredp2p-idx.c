@@ -514,6 +514,8 @@ REDP2P_INTERNAL int redp2p_remove_peer(redp2p_t *ctx, const char *id) {
 
     idx = redp2p_find_peer(ctx, id);
     if (idx == SIZE_MAX) return REDP2P_ENOENT;
+    if (ctx->peers[idx].peer.transport == REDP2P_TRANSPORT_RTC)
+        redp2p_idx_webrtc_remove_publisher(ctx, id);
     if (idx < ctx->n_peers - 1) {
         memmove(&ctx->peers[idx], &ctx->peers[idx + 1],
             (ctx->n_peers - idx - 1) * sizeof(ctx->peers[0]));
@@ -547,6 +549,9 @@ static int redp2p_index_conn_add(redp2p_t *ctx, redp2p_fd_t fd,
         ctx->conns_cap = new_cap;
     }
     memset(&ctx->conns[ctx->n_conns], 0, sizeof(ctx->conns[ctx->n_conns]));
+    ctx->conns[ctx->n_conns].buf = malloc(REDP2P_HTTP_BUF_MAX + 1U);
+    if (!ctx->conns[ctx->n_conns].buf) return REDP2P_ERROR;
+    ctx->conns[ctx->n_conns].buf_cap = REDP2P_HTTP_BUF_MAX + 1U;
     ctx->conns[ctx->n_conns].fd = fd;
     ctx->conns[ctx->n_conns].ts = redp2p_now_ms();
     if (peer && (peer->ss_family == AF_INET || peer->ss_family == AF_INET6)) {
@@ -566,6 +571,7 @@ static int redp2p_index_conn_add(redp2p_t *ctx, redp2p_fd_t fd,
 static void redp2p_index_conn_remove(redp2p_t *ctx, int index) {
     if (index < 0 || index >= ctx->n_conns) return;
     REDP2P_FD_CLOSE(ctx->conns[index].fd);
+    free(ctx->conns[index].buf);
     ctx->conns[index] = ctx->conns[--ctx->n_conns];
 }
 
@@ -586,7 +592,7 @@ REDP2P_INTERNAL int redp2p_index_respond(redp2p_fd_t fd, int status,
 
     if (!value) return REDP2P_ERROR;
     size = json_serialization_size(value);
-    if (size == 0 || size > REDP2P_HTTP_BODY_MAX) {
+    if (size == 0 || size > REDP2P_HTTP_RESPONSE_MAX) {
         json_value_free(value);
         return REDP2P_EFULL;
     }
@@ -989,14 +995,35 @@ static void redp2p_index_dispatch(redp2p_t *ctx, redp2p_fd_t fd,
         return;
     }
     op = json_object_get_string(req, "op");
+    if (strlen(body) > REDP2P_HTTP_BODY_MAX && strcmp(op, "connect") != 0 &&
+        strcmp(op, "answer") != 0) {
+        json_value_free(value);
+        redp2p_http_write_response(fd, 413, "Payload Too Large", "text/plain",
+            "malformed");
+        return;
+    }
     if (strcmp(op, "challenge") == 0)
         redp2p_index_handle_challenge(ctx, fd, req);
+    else if (strcmp(op, "register") == 0 &&
+        json_object_has_value_of_type(req, "transport", JSONString) &&
+        strcmp(json_object_get_string(req, "transport"), "rtc") == 0)
+        redp2p_idx_webrtc_register(ctx, fd, req);
     else if (strcmp(op, "register") == 0)
         redp2p_idx_native_register(ctx, fd, req);
-    else if (strcmp(op, "heartbeat") == 0)
-        redp2p_idx_native_heartbeat(ctx, fd, req);
-    else if (strcmp(op, "lookup") == 0)
-        redp2p_idx_native_lookup(ctx, fd, req);
+    else if (strcmp(op, "heartbeat") == 0 || strcmp(op, "lookup") == 0) {
+        char id[REDP2P_ID_MAX + 1];
+        size_t index;
+        if (!redp2p_index_require_id_response(req, fd, id, sizeof(id))) {
+        } else if ((index = redp2p_find_peer(ctx, id)) == SIZE_MAX) {
+            redp2p_index_respond_error(fd, 404, "not_found");
+        } else if (ctx->peers[index].peer.transport == REDP2P_TRANSPORT_RTC) {
+            if (strcmp(op, "heartbeat") == 0)
+                redp2p_idx_webrtc_heartbeat(ctx, fd, req);
+            else redp2p_idx_webrtc_lookup(ctx, fd, req);
+        } else if (strcmp(op, "heartbeat") == 0) {
+            redp2p_idx_native_heartbeat(ctx, fd, req);
+        } else redp2p_idx_native_lookup(ctx, fd, req);
+    }
     else if (strcmp(op, "list") == 0)
         redp2p_index_handle_list(ctx, fd, req);
     else if (strcmp(op, "deregister") == 0)
@@ -1005,6 +1032,12 @@ static void redp2p_index_dispatch(redp2p_t *ctx, redp2p_fd_t fd,
         redp2p_idx_native_punch_req(ctx, fd, req, peer);
     else if (strcmp(op, "punch_poll") == 0)
         redp2p_idx_native_punch_poll(ctx, fd, req);
+    else if (strcmp(op, "connect") == 0)
+        redp2p_idx_webrtc_connect(ctx, fd, req, peer);
+    else if (strcmp(op, "poll") == 0)
+        redp2p_idx_webrtc_poll(ctx, fd, req);
+    else if (strcmp(op, "answer") == 0)
+        redp2p_idx_webrtc_answer(ctx, fd, req);
     else
         redp2p_index_respond_error(fd, 400, "bad_request");
     json_value_free(value);
@@ -1034,7 +1067,7 @@ static int redp2p_index_request_parse(redp2p_index_conn_t *conn,
 
     if (http_status_out) *http_status_out = 0;
     if (conn->buf_len <= 0) return 0;
-    if (conn->buf_len >= (int)sizeof(conn->buf) - 1) {
+    if ((size_t)conn->buf_len >= conn->buf_cap - 1U) {
         if (http_status_out) *http_status_out = 431;
         return 1;
     }
@@ -1302,7 +1335,7 @@ static void redp2p_index_process_connections(redp2p_index_runtime_t *runtime) {
     for (i = ctx->n_conns - 1; i >= 0; i--) {
         char method[16];
         char path[128];
-        char body[REDP2P_HTTP_BODY_MAX + 1];
+        char *body;
         int http_status;
         int nread;
 
@@ -1315,9 +1348,26 @@ static void redp2p_index_process_connections(redp2p_index_runtime_t *runtime) {
             continue;
         }
         if (!redp2p_index_poll_ready(runtime, ctx->conns[i].fd)) continue;
+        if ((size_t)ctx->conns[i].buf_len + 1U >= ctx->conns[i].buf_cap) {
+            size_t cap = ctx->conns[i].buf_cap * 2U;
+            char *grown;
+            size_t max = REDP2P_HTTP_BODY_RTC_MAX +
+                REDP2P_HTTP_LINE_MAX * REDP2P_HTTP_HEADERS_MAX + 1U;
+            if (cap > max) cap = max;
+            grown = cap > ctx->conns[i].buf_cap ? realloc(ctx->conns[i].buf,
+                cap) : NULL;
+            if (!grown) {
+                redp2p_lock(ctx);
+                redp2p_index_conn_remove(ctx, i);
+                redp2p_unlock(ctx);
+                continue;
+            }
+            ctx->conns[i].buf = grown;
+            ctx->conns[i].buf_cap = cap;
+        }
         nread = redp2p_sock_read(ctx->conns[i].fd,
             ctx->conns[i].buf + ctx->conns[i].buf_len,
-            (int)sizeof(ctx->conns[i].buf) - 1 - ctx->conns[i].buf_len);
+            (int)ctx->conns[i].buf_cap - 1 - ctx->conns[i].buf_len);
         if (nread <= 0) {
             redp2p_lock(ctx);
             redp2p_index_conn_remove(ctx, i);
@@ -1328,12 +1378,14 @@ static void redp2p_index_process_connections(redp2p_index_runtime_t *runtime) {
         ctx->conns[i].buf[ctx->conns[i].buf_len] = '\0';
         method[0] = '\0';
         path[0] = '\0';
+        body = malloc(REDP2P_HTTP_BODY_RTC_MAX + 1U);
+        if (!body) continue;
         body[0] = '\0';
         http_status = 0;
         redp2p_lock(ctx);
         if (redp2p_index_request_parse(&ctx->conns[i], method,
             (int)sizeof(method), path, (int)sizeof(path), body,
-            (int)sizeof(body), &http_status))
+            REDP2P_HTTP_BODY_RTC_MAX + 1, &http_status))
         {
             if (http_status == 0 && strcmp(method, "OPTIONS") == 0) {
                 redp2p_http_write_response(ctx->conns[i].fd, 204,
@@ -1352,6 +1404,7 @@ static void redp2p_index_process_connections(redp2p_index_runtime_t *runtime) {
             }
             redp2p_index_conn_remove(ctx, i);
         }
+        free(body);
         redp2p_unlock(ctx);
     }
 }

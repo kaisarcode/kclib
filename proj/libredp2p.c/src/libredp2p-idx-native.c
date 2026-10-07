@@ -858,7 +858,7 @@ static void redp2p_rate_refill(redp2p_rate_bucket_t *bucket, uint64_t now,
  * @param target Active publisher index.
  * @return 1 when allowed, 0 when limited, -1 on allocation or address failure.
  */
-static int redp2p_punch_rate_allow(redp2p_t *ctx,
+int redp2p_idx_native_rate_allow(redp2p_t *ctx,
     const struct sockaddr_storage *peer, size_t target)
 {
     unsigned char address[16] = {0};
@@ -990,7 +990,7 @@ void redp2p_idx_native_punch_req(redp2p_t *ctx, redp2p_fd_t fd,
         return;
     }
     memcpy(session, session_str, strlen(session_str) + 1);
-    rate_result = redp2p_punch_rate_allow(ctx, peer, peer_index);
+    rate_result = redp2p_idx_native_rate_allow(ctx, peer, peer_index);
     if (rate_result != 1) {
         redp2p_index_respond_error(fd, rate_result == 0 ? 429 : 500,
             rate_result == 0 ? "rate_limited" : "internal");

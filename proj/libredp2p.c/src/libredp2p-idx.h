@@ -56,5 +56,24 @@ REDP2P_INTERNAL void redp2p_idx_native_punch_req(redp2p_t *ctx,
 REDP2P_INTERNAL void redp2p_idx_native_punch_poll(redp2p_t *ctx,
     redp2p_fd_t fd, JSON_Object *req);
 REDP2P_INTERNAL void redp2p_idx_native_prune(redp2p_t *ctx);
+REDP2P_INTERNAL int redp2p_idx_native_rate_allow(redp2p_t *ctx,
+    const struct sockaddr_storage *peer, size_t target);
+
+REDP2P_INTERNAL void redp2p_idx_webrtc_register(redp2p_t *ctx,
+    redp2p_fd_t fd, JSON_Object *req);
+REDP2P_INTERNAL void redp2p_idx_webrtc_heartbeat(redp2p_t *ctx,
+    redp2p_fd_t fd, JSON_Object *req);
+REDP2P_INTERNAL void redp2p_idx_webrtc_lookup(redp2p_t *ctx,
+    redp2p_fd_t fd, JSON_Object *req);
+REDP2P_INTERNAL void redp2p_idx_webrtc_connect(redp2p_t *ctx,
+    redp2p_fd_t fd, JSON_Object *req, const struct sockaddr_storage *peer);
+REDP2P_INTERNAL void redp2p_idx_webrtc_poll(redp2p_t *ctx,
+    redp2p_fd_t fd, JSON_Object *req);
+REDP2P_INTERNAL void redp2p_idx_webrtc_answer(redp2p_t *ctx,
+    redp2p_fd_t fd, JSON_Object *req);
+REDP2P_INTERNAL void redp2p_idx_webrtc_prune(redp2p_t *ctx);
+REDP2P_INTERNAL void redp2p_idx_webrtc_remove_publisher(redp2p_t *ctx,
+    const char *id);
+REDP2P_INTERNAL void redp2p_idx_webrtc_destroy(redp2p_t *ctx);
 
 #endif

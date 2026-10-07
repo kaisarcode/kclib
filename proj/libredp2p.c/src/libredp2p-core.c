@@ -12,6 +12,7 @@
 #endif
 
 #include "libredp2p-core.h"
+#include "libredp2p-idx.h"
 
 #include "monocypher.h"
 #include "parson.h"
@@ -1324,6 +1325,7 @@ int redp2p_context_create(redp2p_t **out) {
     ctx->pending_calls = NULL;
     ctx->pending_calls_cap = 0;
     ctx->n_pending_calls = 0;
+    ctx->rtc = NULL;
     ctx->max_consumers_per_publisher = REDP2P_MAX_CONSUMERS_PER_PUBLISHER;
     ctx->prune_interval_s = REDP2P_PRUNE_INTERVAL_S;
     ctx->etimeout_sec = REDP2P_ETIMEOUT_SEC;
@@ -1399,8 +1401,10 @@ int redp2p_context_destroy(redp2p_t *ctx) {
     int i;
     if (!ctx) return REDP2P_ERROR;
     if (ctx->conns) {
-        for (i = 0; i < ctx->n_conns; i++)
+        for (i = 0; i < ctx->n_conns; i++) {
             REDP2P_FD_CLOSE(ctx->conns[i].fd);
+            free(ctx->conns[i].buf);
+        }
         free(ctx->conns);
     }
     if (ctx->vips)
@@ -1413,6 +1417,7 @@ int redp2p_context_destroy(redp2p_t *ctx) {
         crypto_wipe(ctx->pending_calls,
             ctx->pending_calls_cap * sizeof(ctx->pending_calls[0]));
     free(ctx->pending_calls);
+    redp2p_idx_webrtc_destroy(ctx);
     free(ctx->rate_sources);
 #ifdef _WIN32
     DeleteCriticalSection(&ctx->mutex);

@@ -133,9 +133,12 @@ typedef struct json_object_t JSON_Object;
 #define REDP2P_HTTP_LINE_MAX      256
 #define REDP2P_HTTP_HEADERS_MAX    32
 #define REDP2P_HTTP_BODY_MAX     REDP2P_BUF
+#define REDP2P_HTTP_BODY_RTC_MAX 65536U
+#define REDP2P_HTTP_RESPONSE_MAX 262144U
 #define REDP2P_HTTP_TIMEOUT_S       5
 #define REDP2P_HTTP_BUF_MAX (REDP2P_HTTP_LINE_MAX * REDP2P_HTTP_HEADERS_MAX + \
     REDP2P_HTTP_BODY_MAX + 128)
+#define REDP2P_TRANSPORT_RTC 3
 
 typedef struct {
     uint32_t state[8];
@@ -166,12 +169,15 @@ typedef struct {
  */
 typedef struct {
     redp2p_fd_t fd;
-    char buf[REDP2P_HTTP_BUF_MAX + 1];
+    char *buf;
+    size_t buf_cap;
     int buf_len;
     uint64_t ts;
     struct sockaddr_storage peer_addr;
     socklen_t peer_addr_len;
 } redp2p_index_conn_t;
+
+typedef struct redp2p_rtc_state redp2p_rtc_state_t;
 
 /**
  * Stores token credit in thousandths and its monotonic accounting time.
@@ -269,6 +275,7 @@ struct redp2p {
     redp2p_pending_call_t *pending_calls;
     size_t pending_calls_cap;
     int n_pending_calls;
+    redp2p_rtc_state_t *rtc;
     size_t max_consumers_per_publisher;
     _Atomic int stop_requested;
     redp2p_fd_t wake_write_fd;

@@ -37,6 +37,7 @@ set(REDP2P_ENGINE_SOURCES
     src/libredp2p-peer.c
     src/libredp2p-idx.c
     src/libredp2p-idx-native.c
+    src/libredp2p-idx-webrtc.c
     src/libredp2p-pub.c
     src/libredp2p-con.c
     lib/monocypher/monocypher.c
