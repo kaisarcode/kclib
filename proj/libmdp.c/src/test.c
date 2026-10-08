@@ -199,7 +199,8 @@ static int case_kc_mdp_ansi(void) {
             "Text **bold** *italic* `code` and ~~gone~~.\n\n"
             "1. first\n2. second\n\n"
             "- [ ] todo\n- [x] done\n\n"
-            "| Name | Value |\n| --- | --- |\n| one | two |\n\n"
+            "| Name | Value |\n| --- | --- |\n"
+            "| one | two |\n| longer-name | 7 |\n\n"
             "> quote\n\n"
             "```c\nint x = 1;\n```\n"));
 
@@ -219,10 +220,11 @@ static int case_kc_mdp_ansi(void) {
             strstr(first, "  1. first\n  2. second\n") != NULL);
         fail += expect_true("ansi renders task list",
             strstr(first, "  ☐ todo\n  ☑ done\n") != NULL);
-        fail += expect_true("ansi renders table semantics",
+        fail += expect_true("ansi aligns table columns",
             strstr(first,
-                "\x1b[1mName │ Value\x1b[22m\n"
-                "one │ two\n") != NULL);
+                "\x1b[1mName        │ Value\x1b[22m\n"
+                "one         │ two  \n"
+                "longer-name │ 7    \n\n") != NULL);
         fail += expect_true("ansi renders quote without markdown marker",
             strstr(first,
                 "\x1b[2mquote\n\n\x1b[22m\n") != NULL);
