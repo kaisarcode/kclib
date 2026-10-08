@@ -1,6 +1,6 @@
 /**
  * libmdp.c - Markdown Parser
- * Summary: Core implementation for the mdp library.
+ * Summary: Shared Markdown parser and document lifecycle for mdp.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -12,53 +12,35 @@
 #define _XOPEN_SOURCE 700
 #endif
 
+#define KC_MDP_PRIVATE
 #include "libmdp.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-#define MDP_OK     0
-#define MDP_ERROR -1
-
 struct kc_mdp {
     char *body;
     char *meta;
     char *html;
+    char *ansi;
 };
-
-#ifdef _WIN32
-#  ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#  endif
-#  include <windows.h>
-#endif
-
-/**
- * Growable output buffer for rendered results.
- */
-typedef struct {
-    unsigned char *data;
-    size_t len;
-    size_t cap;
-    int oom;
-} mdp_buf_t;
 
 /**
  * Appends bytes to a growable output buffer.
- * The buffer stays NUL-terminated after every append. On allocation
- * failure the oom flag latches and later writes are ignored.
+ * The buffer stays NUL-terminated after every append.
  * @param buf Target buffer.
  * @param data Bytes to append.
  * @param len Byte count.
  * @return None.
  */
-static void mdp_buf_write(mdp_buf_t *buf, const void *data, size_t len) {
+void kc_mdp_buf_write(mdp_buf_t *buf, const void *data, size_t len) {
     if (buf->oom || len == 0) {
         return;
     }
     if (buf->len + len + 1 > buf->cap) {
         size_t cap = buf->cap ? buf->cap : 256;
         unsigned char *grown;
+
         while (cap < buf->len + len + 1) {
             cap *= 2;
         }
@@ -81,9 +63,9 @@ static void mdp_buf_write(mdp_buf_t *buf, const void *data, size_t len) {
  * @param text String to append.
  * @return None.
  */
-static void mdp_buf_puts(mdp_buf_t *buf, const char *text) {
+void kc_mdp_buf_puts(mdp_buf_t *buf, const char *text) {
     if (text) {
-        mdp_buf_write(buf, text, strlen(text));
+        kc_mdp_buf_write(buf, text, strlen(text));
     }
 }
 
@@ -93,8 +75,8 @@ static void mdp_buf_puts(mdp_buf_t *buf, const char *text) {
  * @param c Byte to append.
  * @return None.
  */
-static void mdp_buf_putc(mdp_buf_t *buf, char c) {
-    mdp_buf_write(buf, &c, 1);
+void kc_mdp_buf_putc(mdp_buf_t *buf, char c) {
+    kc_mdp_buf_write(buf, &c, 1);
 }
 
 /**
@@ -110,7 +92,6 @@ static char *kc_mdp_dup(const char *start, size_t len) {
     if (!out) {
         return NULL;
     }
-
     memcpy(out, start, len);
     out[len] = '\0';
     return out;
@@ -121,7 +102,7 @@ static char *kc_mdp_dup(const char *start, size_t len) {
  * @param src Document source string.
  * @param meta Receives allocated metadata buffer.
  * @param body Receives allocated body buffer.
- * @return MDP_OK on success, or MDP_ERROR on allocation failure.
+ * @return MDP_OK on success, MDP_ERROR on allocation failure.
  */
 static int kc_mdp_split(const char *src, char **meta, char **body) {
     const char *head_end;
@@ -159,7 +140,6 @@ static int kc_mdp_split(const char *src, char **meta, char **body) {
 
     free(*meta);
     free(*body);
-
     *meta = kc_mdp_dup(head_end, meta_len);
     *body = kc_mdp_dup(body_start, strlen(body_start));
     if (!*meta || !*body) {
@@ -167,41 +147,15 @@ static int kc_mdp_split(const char *src, char **meta, char **body) {
         free(*body);
         return MDP_ERROR;
     }
-
     return MDP_OK;
 }
 
 /**
- * Writes HTML-escaped bytes to an output buffer.
- * @param out Target buffer.
- * @param text Source text.
- * @param len Byte count.
- * @return None.
- */
-static void kc_mdp_escape(mdp_buf_t *out, const char *text, size_t len) {
-    size_t i;
-
-    for (i = 0; i < len; i++) {
-        if (text[i] == '&') {
-            mdp_buf_puts(out, "&amp;");
-        } else if (text[i] == '<') {
-            mdp_buf_puts(out, "&lt;");
-        } else if (text[i] == '>') {
-            mdp_buf_puts(out, "&gt;");
-        } else if (text[i] == '"') {
-            mdp_buf_puts(out, "&quot;");
-        } else {
-            mdp_buf_putc(out, text[i]);
-        }
-    }
-}
-
-/**
- * Finds the closing character for a simple span, respecting backslash escapes.
+ * Finds a closing delimiter while respecting backslash escapes.
  * @param text Source buffer.
- * @param start Index after the opener.
- * @param close Character to match.
- * @return Index of closer, or (size_t)-1 if not found.
+ * @param start Search start offset.
+ * @param close Closing character.
+ * @return Closing offset or (size_t)-1 when absent.
  */
 static size_t kc_mdp_find_close(const char *text, size_t start, char close) {
     size_t i = start;
@@ -216,15 +170,14 @@ static size_t kc_mdp_find_close(const char *text, size_t start, char close) {
         }
         i++;
     }
-
     return (size_t)-1;
 }
 
 /**
- * Finds the closing bracket for a label, supporting one level of nesting.
+ * Finds a closing label bracket with nested bracket awareness.
  * @param text Source buffer.
- * @param start Index after the opening bracket.
- * @return Index of closer, or (size_t)-1 if not found.
+ * @param start Offset after the opening bracket.
+ * @return Closing offset or (size_t)-1 when absent.
  */
 static size_t kc_mdp_find_label_end(const char *text, size_t start) {
     size_t i = start;
@@ -245,7 +198,6 @@ static size_t kc_mdp_find_label_end(const char *text, size_t start) {
         }
         i++;
     }
-
     return (size_t)-1;
 }
 
@@ -254,7 +206,7 @@ static size_t kc_mdp_find_label_end(const char *text, size_t start) {
  * @param a First sequence.
  * @param b Second sequence.
  * @param n Byte count.
- * @return 0 when equal, non-zero otherwise.
+ * @return Zero when equal, non-zero otherwise.
  */
 static int kc_mdp_casecmp(const char *a, const char *b, size_t n) {
     size_t i;
@@ -262,6 +214,7 @@ static int kc_mdp_casecmp(const char *a, const char *b, size_t n) {
     for (i = 0; i < n; i++) {
         char ca = a[i];
         char cb = b[i];
+
         if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + 32);
         if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + 32);
         if (ca != cb) return 1;
@@ -270,10 +223,10 @@ static int kc_mdp_casecmp(const char *a, const char *b, size_t n) {
 }
 
 /**
- * Scans a raw HTML token starting at the given opening angle bracket.
+ * Scans a raw HTML token starting at an opening angle bracket.
  * @param text Source buffer.
- * @param i Index of the opening '<'.
- * @return Index after the closing '>', or (size_t)-1 when not valid HTML.
+ * @param i Opening bracket offset.
+ * @return Offset after the tag or (size_t)-1 when invalid.
  */
 static size_t kc_mdp_scan_html_tag(const char *text, size_t i) {
     size_t j = i + 1;
@@ -283,7 +236,6 @@ static size_t kc_mdp_scan_html_tag(const char *text, size_t i) {
     if (!text[j]) {
         return (size_t)-1;
     }
-
     if (text[j] == '!') {
         if (text[j + 1] == '-' && text[j + 2] == '-') {
             k = j + 3;
@@ -300,7 +252,6 @@ static size_t kc_mdp_scan_html_tag(const char *text, size_t i) {
         }
         return text[j] ? j + 1 : (size_t)-1;
     }
-
     if (text[j] == '/') {
         j++;
     }
@@ -311,8 +262,7 @@ static size_t kc_mdp_scan_html_tag(const char *text, size_t i) {
     j++;
     while (text[j] && ((text[j] >= 'a' && text[j] <= 'z') ||
         (text[j] >= 'A' && text[j] <= 'Z') ||
-        (text[j] >= '0' && text[j] <= '9') ||
-        text[j] == '-')) {
+        (text[j] >= '0' && text[j] <= '9') || text[j] == '-')) {
         j++;
     }
     if (!text[j] || (text[j] != '>' && text[j] != '/' &&
@@ -335,10 +285,10 @@ static size_t kc_mdp_scan_html_tag(const char *text, size_t i) {
 }
 
 /**
- * Whether the tag name opens a block-level HTML element.
+ * Reports whether an HTML tag name is block-level for mdp purposes.
  * @param name Tag name.
  * @param len Tag name byte count.
- * @return Non-zero for block-level tags, zero otherwise.
+ * @return Non-zero for recognized block tags.
  */
 static int kc_mdp_is_block_tag(const char *name, size_t len) {
     static const char *const tags[] = {
@@ -364,11 +314,11 @@ static int kc_mdp_is_block_tag(const char *name, size_t len) {
 }
 
 /**
- * Returns the block-level tag name a line opens with, or NULL.
+ * Returns the block-level tag name opened by a line.
  * @param line Line text.
- * @param len Byte count.
- * @param name_len Receives the returned tag name byte count.
- * @return Pointer to the tag name, or NULL when not a raw HTML block.
+ * @param len Line byte count.
+ * @param name_len Receives tag name byte count.
+ * @return Pointer to tag name or NULL.
  */
 static const char *kc_mdp_html_block_name(const char *line, size_t len,
     size_t *name_len) {
@@ -391,14 +341,11 @@ static const char *kc_mdp_html_block_name(const char *line, size_t len,
     j++;
     while (j < len && ((line[j] >= 'a' && line[j] <= 'z') ||
         (line[j] >= 'A' && line[j] <= 'Z') ||
-        (line[j] >= '0' && line[j] <= '9') ||
-        line[j] == '-')) {
+        (line[j] >= '0' && line[j] <= '9') || line[j] == '-')) {
         j++;
     }
-    if (kc_mdp_scan_html_tag(line, i) == (size_t)-1) {
-        return NULL;
-    }
-    if (!kc_mdp_is_block_tag(line + start, j - start)) {
+    if (kc_mdp_scan_html_tag(line, i) == (size_t)-1 ||
+        !kc_mdp_is_block_tag(line + start, j - start)) {
         return NULL;
     }
     if (name_len) {
@@ -408,225 +355,208 @@ static const char *kc_mdp_html_block_name(const char *line, size_t len,
 }
 
 /**
- * Whether a line contains the closing tag for a raw HTML block.
+ * Reports whether a line contains a matching HTML closing tag.
  * @param line Line text.
- * @param len Byte count.
- * @param name Block tag name.
- * @param name_len Block tag name byte count.
- * @return Non-zero when the closing tag is present, zero otherwise.
+ * @param len Line byte count.
+ * @param name Tag name.
+ * @param name_len Tag name byte count.
+ * @return Non-zero when a closing tag is present.
  */
 static int kc_mdp_has_close(const char *line, size_t len, const char *name,
     size_t name_len) {
     size_t i;
 
     for (i = 0; i + name_len + 3 <= len; i++) {
-        if (line[i] != '<' || line[i + 1] != '/') {
-            continue;
-        }
-        if (kc_mdp_casecmp(line + i + 2, name, name_len) != 0) {
-            continue;
-        }
-        if (line[i + 2 + name_len] == '>') {
+        if (line[i] == '<' && line[i + 1] == '/' &&
+            kc_mdp_casecmp(line + i + 2, name, name_len) == 0 &&
+            line[i + 2 + name_len] == '>') {
             return 1;
         }
     }
     return 0;
 }
 
-static void kc_mdp_inline(mdp_buf_t *out, const char *text);
+static void kc_mdp_inline(mdp_buf_t *out, const kc_mdp_renderer_t *renderer,
+    const char *text);
 
 /**
- * Renders a link label with inline Markdown support.
+ * Renders a link label through the shared inline parser.
  * @param out Target buffer.
+ * @param renderer Active renderer.
  * @param text Source text.
- * @param start Start offset.
- * @param len Byte count.
+ * @param start Label start offset.
+ * @param len Label byte count.
  * @return None.
  */
-static void kc_mdp_link_label(mdp_buf_t *out, const char *text, size_t start, size_t len) {
-    char *label;
+static void kc_mdp_link_label(mdp_buf_t *out,
+    const kc_mdp_renderer_t *renderer, const char *text, size_t start,
+    size_t len) {
+    char *label = kc_mdp_dup(text + start, len);
 
-    label = kc_mdp_dup(text + start, len);
     if (!label) {
+        out->oom = 1;
         return;
     }
-
-    kc_mdp_inline(out, label);
+    kc_mdp_inline(out, renderer, label);
     free(label);
 }
 
 /**
- * Renders inline Markdown formatting for a text span.
+ * Parses and renders inline Markdown through the selected renderer.
  * @param out Target buffer.
- * @param text Source text.
+ * @param renderer Active renderer.
+ * @param text Inline Markdown source.
  * @return None.
  */
-static void kc_mdp_inline(mdp_buf_t *out, const char *text) {
+static void kc_mdp_inline(mdp_buf_t *out, const kc_mdp_renderer_t *renderer,
+    const char *text) {
     size_t i = 0;
     size_t j;
     size_t mid;
     size_t close;
 
     while (text[i]) {
-        if (text[i] == '~' && text[i + 1] == '~' && text[i + 2] && text[i + 2] != ' ') {
+        if (text[i] == '~' && text[i + 1] == '~' && text[i + 2] &&
+            text[i + 2] != ' ') {
             j = i + 2;
             while (text[j] && !(text[j] == '~' && text[j + 1] == '~')) {
                 j++;
             }
             if (text[j] && j > i + 2 && text[j - 1] != ' ') {
-                mdp_buf_puts(out, "<del>");
-                kc_mdp_escape(out, text + i + 2, j - i - 2);
-                mdp_buf_puts(out, "</del>");
+                renderer->strike_open(out);
+                renderer->text(out, text + i + 2, j - i - 2);
+                renderer->strike_close(out);
                 i = j + 2;
                 continue;
             }
         }
-
-        if (text[i] == '*' && text[i + 1] == '*' && text[i + 2] && text[i + 2] != ' ') {
-            j = i + 1;
+        if (text[i] == '*' && text[i + 1] == '*' && text[i + 2] &&
+            text[i + 2] != ' ') {
+            j = i + 2;
             while (text[j] && !(text[j] == '*' && text[j + 1] == '*')) {
                 j++;
             }
-            if (text[j] == '*' && text[j + 1] == '*' && j > i + 2 && text[j - 1] != ' ') {
-                mdp_buf_puts(out, "<strong>");
-                kc_mdp_escape(out, text + i + 2, j - i - 2);
-                mdp_buf_puts(out, "</strong>");
+            if (text[j] && j > i + 2 && text[j - 1] != ' ') {
+                renderer->strong_open(out);
+                renderer->text(out, text + i + 2, j - i - 2);
+                renderer->strong_close(out);
                 i = j + 2;
                 continue;
             }
         }
-
-        if (text[i] == '*' && text[i + 1] && text[i + 1] != '*' && text[i + 1] != ' ') {
+        if (text[i] == '*' && text[i + 1] && text[i + 1] != '*' &&
+            text[i + 1] != ' ') {
             j = i + 1;
             while (text[j] && text[j] != '*') {
                 j++;
             }
             if (text[j] == '*' && j > i + 1 && text[j - 1] != ' ') {
-                mdp_buf_puts(out, "<em>");
-                kc_mdp_escape(out, text + i + 1, j - i - 1);
-                mdp_buf_puts(out, "</em>");
+                renderer->em_open(out);
+                renderer->text(out, text + i + 1, j - i - 1);
+                renderer->em_close(out);
                 i = j + 1;
                 continue;
             }
         }
+        if (text[i] == '[' && text[i + 1] == '!' && text[i + 2] == '[') {
+            size_t img_mid = kc_mdp_find_label_end(text, i + 3);
+            size_t img_close = img_mid != (size_t)-1 && text[img_mid + 1] == '('
+                ? kc_mdp_find_close(text, img_mid + 2, ')') : (size_t)-1;
+            size_t lnk_close = img_close != (size_t)-1 &&
+                text[img_close + 1] == ']' && text[img_close + 2] == '('
+                ? kc_mdp_find_close(text, img_close + 3, ')') : (size_t)-1;
 
+            if (img_mid != (size_t)-1 && img_close != (size_t)-1 &&
+                lnk_close != (size_t)-1) {
+                renderer->link_open(out, text + img_close + 3,
+                    lnk_close - img_close - 3);
+                renderer->image(out, text + i + 3, img_mid - i - 3,
+                    text + img_mid + 2, img_close - img_mid - 2);
+                renderer->link_close(out);
+                i = lnk_close + 1;
+                continue;
+            }
+        }
         if (text[i] == '!' && text[i + 1] == '[') {
             mid = kc_mdp_find_label_end(text, i + 2);
             close = mid != (size_t)-1 && text[mid + 1] == '('
-                ? kc_mdp_find_close(text, mid + 2, ')')
-                : (size_t)-1;
+                ? kc_mdp_find_close(text, mid + 2, ')') : (size_t)-1;
             if (mid != (size_t)-1 && close != (size_t)-1) {
-                mdp_buf_puts(out, "<img src=\"");
-                kc_mdp_escape(out, text + mid + 2, close - mid - 2);
-                mdp_buf_puts(out, "\" alt=\"");
-                kc_mdp_escape(out, text + i + 2, mid - i - 2);
-                mdp_buf_puts(out, "\">");
+                renderer->image(out, text + i + 2, mid - i - 2,
+                    text + mid + 2, close - mid - 2);
                 i = close + 1;
                 continue;
             }
         }
-
         if (text[i] == '`') {
             j = i + 1;
             while (text[j] && text[j] != '`') {
                 j++;
             }
             if (text[j] == '`') {
-                mdp_buf_puts(out, "<code>");
-                kc_mdp_escape(out, text + i + 1, j - i - 1);
-                mdp_buf_puts(out, "</code>");
+                renderer->code_inline(out, text + i + 1, j - i - 1);
                 i = j + 1;
                 continue;
             }
         }
-
-        if (text[i] == '[' && text[i + 1] == '!' && text[i + 2] == '[') {
-            size_t img_mid = kc_mdp_find_label_end(text, i + 3);
-            size_t img_close = img_mid != (size_t)-1 && text[img_mid + 1] == '('
-                ? kc_mdp_find_close(text, img_mid + 2, ')')
-                : (size_t)-1;
-            size_t lnk_close = img_close != (size_t)-1 &&
-                text[img_close + 1] == ']' &&
-                text[img_close + 2] == '('
-                    ? kc_mdp_find_close(text, img_close + 3, ')')
-                    : (size_t)-1;
-
-            if (img_mid != (size_t)-1 && img_close != (size_t)-1 && lnk_close != (size_t)-1) {
-                mdp_buf_puts(out, "<a href=\"");
-                kc_mdp_escape(out, text + img_close + 3, lnk_close - img_close - 3);
-                mdp_buf_puts(out, "\"><img src=\"");
-                kc_mdp_escape(out, text + img_mid + 2, img_close - img_mid - 2);
-                mdp_buf_puts(out, "\" alt=\"");
-                kc_mdp_escape(out, text + i + 3, img_mid - i - 3);
-                mdp_buf_puts(out, "\"></a>");
-                i = lnk_close + 1;
-                continue;
-            }
-        }
-
         if (text[i] == '[') {
             mid = kc_mdp_find_label_end(text, i + 1);
             close = mid != (size_t)-1 && text[mid + 1] == '('
-                ? kc_mdp_find_close(text, mid + 2, ')')
-                : (size_t)-1;
+                ? kc_mdp_find_close(text, mid + 2, ')') : (size_t)-1;
             if (mid != (size_t)-1 && close != (size_t)-1) {
-                mdp_buf_puts(out, "<a href=\"");
-                kc_mdp_escape(out, text + mid + 2, close - mid - 2);
-                mdp_buf_puts(out, "\">");
-                kc_mdp_link_label(out, text, i + 1, mid - i - 1);
-                mdp_buf_puts(out, "</a>");
+                renderer->link_open(out, text + mid + 2, close - mid - 2);
+                kc_mdp_link_label(out, renderer, text, i + 1, mid - i - 1);
+                renderer->link_close(out);
                 i = close + 1;
                 continue;
             }
         }
-
         if (text[i] == '<') {
             size_t tag_end = kc_mdp_scan_html_tag(text, i);
+
             if (tag_end != (size_t)-1) {
-                mdp_buf_write(out, text + i, tag_end - i);
+                renderer->raw_inline(out, text + i, tag_end - i);
                 i = tag_end;
                 continue;
             }
         }
-
-        kc_mdp_escape(out, text + i, 1);
+        renderer->text(out, text + i, 1);
         i++;
     }
 }
 
 /**
- * Flushes a pending paragraph buffer wrapped in <p> tags.
- * @param out Target stream.
- * @param par Pointer to the paragraph buffer.
+ * Flushes a pending paragraph through the selected renderer.
+ * @param out Target buffer.
+ * @param renderer Active renderer.
+ * @param par Pointer to paragraph buffer.
  * @return None.
  */
-static void kc_mdp_flush(mdp_buf_t *out, char **par) {
+static void kc_mdp_flush(mdp_buf_t *out, const kc_mdp_renderer_t *renderer,
+    char **par) {
     if (!*par || !**par) {
         return;
     }
-
-    mdp_buf_puts(out, "<p>");
-    kc_mdp_inline(out, *par);
-    mdp_buf_puts(out, "</p>\n");
+    renderer->paragraph_open(out);
+    kc_mdp_inline(out, renderer, *par);
+    renderer->paragraph_close(out);
     (*par)[0] = '\0';
 }
 
 /**
- * Appends a line into a paragraph buffer with a space separator.
- * @param par Pointer to the allocated paragraph buffer.
- * @param line Line to append.
- * @return MDP_OK on success, or MDP_ERROR on allocation failure.
+ * Appends a source line to a paragraph buffer.
+ * @param par Pointer to allocated paragraph buffer.
+ * @param line Line text.
+ * @return MDP_OK on success, MDP_ERROR on allocation failure.
  */
 static int kc_mdp_join(char **par, const char *line) {
     size_t old = *par ? strlen(*par) : 0;
     size_t add = strlen(line);
-    char *grown;
+    char *grown = (char *)realloc(*par, old + add + 2);
 
-    grown = (char *)realloc(*par, old + add + 2);
     if (!grown) {
         return MDP_ERROR;
     }
-
     *par = grown;
     if (old) {
         (*par)[old++] = ' ';
@@ -637,82 +567,94 @@ static int kc_mdp_join(char **par, const char *line) {
 
 /**
  * Closes an open list context.
- * @param out Target stream.
- * @param in_list Pointer to list state: 1 for ul, 2 for ol.
+ * @param out Target buffer.
+ * @param renderer Active renderer.
+ * @param in_list Pointer to list state: 1 unordered, 2 ordered.
  * @return None.
  */
-static void kc_mdp_close_list(mdp_buf_t *out, int *in_list) {
-    if (*in_list == 1) {
-        mdp_buf_puts(out, "</ul>\n");
-    } else if (*in_list == 2) {
-        mdp_buf_puts(out, "</ol>\n");
+static void kc_mdp_close_list(mdp_buf_t *out,
+    const kc_mdp_renderer_t *renderer, int *in_list) {
+    if (*in_list) {
+        renderer->list_close(out, *in_list == 2);
+        *in_list = 0;
     }
-    *in_list = 0;
 }
 
 /**
- * Closes open block contexts.
- * @param out Target stream.
+ * Closes open list and blockquote contexts.
+ * @param out Target buffer.
+ * @param renderer Active renderer.
  * @param in_list Pointer to list state.
- * @param in_quote Pointer to quote state.
+ * @param in_quote Pointer to blockquote state.
  * @return None.
  */
-static void kc_mdp_close_blocks(mdp_buf_t *out, int *in_list, int *in_quote) {
-    kc_mdp_close_list(out, in_list);
-
+static void kc_mdp_close_blocks(mdp_buf_t *out,
+    const kc_mdp_renderer_t *renderer, int *in_list, int *in_quote) {
+    kc_mdp_close_list(out, renderer, in_list);
     if (*in_quote) {
-        mdp_buf_puts(out, "</blockquote>\n");
+        renderer->quote_close(out);
         *in_quote = 0;
     }
 }
 
 /**
- * Returns the content offset for an ordered list item.
+ * Parses an ordered list marker.
  * @param s Line text.
- * @return Content offset, or zero when the line is not an ordered item.
+ * @param number Receives source item number.
+ * @return Content offset or zero when not ordered-list syntax.
  */
-static size_t kc_mdp_ordered_item(const char *s) {
+static size_t kc_mdp_ordered_item(const char *s, unsigned int *number) {
     size_t i = 0;
+    unsigned int value = 0;
 
     if (!(s[i] >= '0' && s[i] <= '9')) {
         return 0;
     }
     while (s[i] >= '0' && s[i] <= '9') {
+        value = value * 10U + (unsigned int)(s[i] - '0');
         i++;
     }
     if (s[i] != '.' || s[i + 1] != ' ') {
         return 0;
     }
+    if (number) {
+        *number = value;
+    }
     return i + 2;
 }
 
 /**
- * Renders a list item, optionally recognizing a task marker.
- * @param out Target stream.
- * @param text Item content.
- * @param tasks Non-zero to recognize [ ], [x], and [X] task markers.
+ * Renders one parsed list item.
+ * @param out Target buffer.
+ * @param renderer Active renderer.
+ * @param text Item source text.
+ * @param ordered Non-zero for ordered lists.
+ * @param number Source ordered item number.
+ * @param tasks Non-zero to recognize task markers.
  * @return None.
  */
-static void kc_mdp_list_item(mdp_buf_t *out, const char *text, int tasks) {
-    mdp_buf_puts(out, "<li>");
-    if (tasks && text[0] == '[' && text[1] && text[2] == ']' && text[3] == ' ' &&
+static void kc_mdp_list_item(mdp_buf_t *out,
+    const kc_mdp_renderer_t *renderer, const char *text, int ordered,
+    unsigned int number, int tasks) {
+    int task_state = -1;
+    size_t len = strlen(text);
+
+    if (tasks && len >= 4 && text[0] == '[' && text[2] == ']' &&
+        text[3] == ' ' &&
         (text[1] == ' ' || text[1] == 'x' || text[1] == 'X')) {
-        mdp_buf_puts(out, "<input type=\"checkbox\" disabled");
-        if (text[1] == 'x' || text[1] == 'X') {
-            mdp_buf_puts(out, " checked");
-        }
-        mdp_buf_puts(out, "> ");
+        task_state = text[1] == ' ' ? 0 : 1;
         text += 4;
     }
-    kc_mdp_inline(out, text);
-    mdp_buf_puts(out, "</li>\n");
+    renderer->list_item_open(out, ordered, number, task_state);
+    kc_mdp_inline(out, renderer, text);
+    renderer->list_item_close(out);
 }
 
 /**
- * Checks whether a line is a Markdown table separator row.
+ * Reports whether a line is a Markdown table separator row.
  * @param s Line text.
  * @param len Byte count.
- * @return Non-zero if the line is a separator, zero otherwise.
+ * @return Non-zero for valid separator syntax.
  */
 static int kc_mdp_is_sep(const char *s, size_t len) {
     size_t i, cs, ce, j;
@@ -721,140 +663,100 @@ static int kc_mdp_is_sep(const char *s, size_t len) {
     if (!len || s[0] != '|') {
         return 0;
     }
-
     i = 1;
     while (i <= len) {
-        while (i < len && s[i] == ' ') {
-            i++;
-        }
+        while (i < len && s[i] == ' ') i++;
         cs = i;
-        while (i < len && s[i] != '|') {
-            i++;
-        }
+        while (i < len && s[i] != '|') i++;
         ce = i;
-        while (ce > cs && s[ce - 1] == ' ') {
-            ce--;
-        }
+        while (ce > cs && s[ce - 1] == ' ') ce--;
         if (cs == ce) {
-            if (i >= len) {
-                break;
-            }
+            if (i >= len) break;
             return 0;
         }
         j = cs;
-        if (j < ce && s[j] == ':') {
-            j++;
-        }
-        if (j >= ce || s[j] != '-') {
-            return 0;
-        }
-        while (j < ce && s[j] == '-') {
-            j++;
-        }
-        if (j < ce && s[j] == ':') {
-            j++;
-        }
-        if (j != ce) {
-            return 0;
-        }
+        if (j < ce && s[j] == ':') j++;
+        if (j >= ce || s[j] != '-') return 0;
+        while (j < ce && s[j] == '-') j++;
+        if (j < ce && s[j] == ':') j++;
+        if (j != ce) return 0;
         cells++;
-        if (i < len) {
-            i++;
-        }
+        if (i < len) i++;
     }
-
     return cells > 0;
 }
 
 /**
- * Renders one table row with the given cell tag.
- * @param out Target stream.
+ * Parses and renders one Markdown table row.
+ * @param out Target buffer.
+ * @param renderer Active renderer.
  * @param s Row text.
  * @param len Byte count.
- * @param tag Cell tag name (th or td).
- * @return MDP_OK on success, or MDP_ERROR on allocation failure.
+ * @param header Non-zero for a header row.
+ * @return MDP_OK on success, MDP_ERROR on allocation failure.
  */
-static int kc_mdp_table_row(mdp_buf_t *out, const char *s, size_t len, const char *tag) {
+static int kc_mdp_table_row(mdp_buf_t *out,
+    const kc_mdp_renderer_t *renderer, const char *s, size_t len, int header) {
     size_t i, cs, ce;
+    int first = 1;
     char *cell;
 
-    mdp_buf_puts(out, "<tr>");
+    renderer->table_row_open(out, header);
     i = (len > 0 && s[0] == '|') ? 1 : 0;
-
     while (i < len) {
-        while (i < len && s[i] == ' ') {
-            i++;
-        }
+        while (i < len && s[i] == ' ') i++;
         cs = i;
-        while (i < len && s[i] != '|') {
-            i++;
-        }
+        while (i < len && s[i] != '|') i++;
         ce = i;
-        while (ce > cs && s[ce - 1] == ' ') {
-            ce--;
-        }
-        if (cs == ce && i >= len) {
-            break;
-        }
-        mdp_buf_puts(out, "<");
-        mdp_buf_puts(out, tag);
-        mdp_buf_puts(out, ">");
+        while (ce > cs && s[ce - 1] == ' ') ce--;
+        if (cs == ce && i >= len) break;
+        renderer->table_cell_open(out, header, first);
         if (cs < ce) {
             cell = kc_mdp_dup(s + cs, ce - cs);
             if (!cell) {
-                mdp_buf_puts(out, "</tr>\n");
+                out->oom = 1;
                 return MDP_ERROR;
             }
-            kc_mdp_inline(out, cell);
+            kc_mdp_inline(out, renderer, cell);
             free(cell);
         }
-        mdp_buf_puts(out, "</");
-        mdp_buf_puts(out, tag);
-        mdp_buf_puts(out, ">");
-        if (i < len) {
-            i++;
-        }
+        renderer->table_cell_close(out, header);
+        first = 0;
+        if (i < len) i++;
     }
-
-    mdp_buf_puts(out, "</tr>\n");
+    renderer->table_row_close(out, header);
     return MDP_OK;
 }
 
 /**
- * Opens a fenced code block and applies an optional language class.
- * @param out Target stream.
+ * Extracts an optional fenced-code language identifier.
  * @param line Fence line.
  * @param len Fence line byte count.
+ * @param language Receives language start pointer.
+ * @param language_len Receives language byte count.
  * @return None.
  */
-static void kc_mdp_open_code(mdp_buf_t *out, const char *line, size_t len) {
+static void kc_mdp_code_language(const char *line, size_t len,
+    const char **language, size_t *language_len) {
     size_t start = 3;
     size_t end;
 
-    while (start < len && (line[start] == ' ' || line[start] == '\t')) {
-        start++;
-    }
+    while (start < len && (line[start] == ' ' || line[start] == '\t')) start++;
     end = start;
-    while (end < len && line[end] != ' ' && line[end] != '\t') {
-        end++;
-    }
-
-    mdp_buf_puts(out, "<pre><code");
-    if (end > start) {
-        mdp_buf_puts(out, " class=\"language-");
-        kc_mdp_escape(out, line + start, end - start);
-        mdp_buf_putc(out, '"');
-    }
-    mdp_buf_putc(out, '>');
+    while (end < len && line[end] != ' ' && line[end] != '\t') end++;
+    *language = line + start;
+    *language_len = end - start;
 }
 
 /**
- * Renders a Markdown body string as an HTML fragment to a stream.
- * @param out Target stream.
+ * Parses Markdown once and emits semantic events to a renderer backend.
  * @param body Markdown body text.
- * @return MDP_OK on success, or MDP_ERROR on allocation failure.
+ * @param out Target output buffer.
+ * @param renderer Rendering backend callbacks.
+ * @return MDP_OK on success, MDP_ERROR on allocation failure.
  */
-static int kc_mdp_render(mdp_buf_t *out, const char *body) {
+int kc_mdp_parse(const char *body, mdp_buf_t *out,
+    const kc_mdp_renderer_t *renderer) {
     const char *line = body;
     char *par = kc_mdp_dup("", 0);
     int in_list = 0;
@@ -874,13 +776,11 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
         char *tmp;
         int reprocess;
 
-        while (len && line[len - 1] == '\r') {
-            len--;
-        }
-
+        while (len && line[len - 1] == '\r') len--;
         tmp = kc_mdp_dup(line, len);
         if (!tmp) {
             free(table_hdr);
+            free(in_html);
             free(par);
             return MDP_ERROR;
         }
@@ -888,26 +788,25 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
         do {
             int level = 0;
             size_t ordered = 0;
+            unsigned int ordered_number = 0;
             reprocess = 0;
 
             if (in_code) {
                 if (len >= 3 && strncmp(tmp, "```", 3) == 0) {
-                    mdp_buf_puts(out, "</code></pre>\n");
+                    renderer->code_close(out);
                     in_code = 0;
                 } else {
-                    kc_mdp_escape(out, tmp, len);
-                    mdp_buf_putc(out, '\n');
+                    renderer->code_text(out, tmp, len);
                 }
             } else if (in_html) {
-                mdp_buf_write(out, tmp, len);
-                mdp_buf_putc(out, '\n');
+                renderer->raw_block(out, tmp, len);
                 if (kc_mdp_has_close(tmp, len, in_html, strlen(in_html))) {
                     free(in_html);
                     in_html = NULL;
                 }
             } else if (!len) {
                 if (in_table == 2) {
-                    mdp_buf_puts(out, "</tbody>\n</table>\n");
+                    renderer->table_close(out);
                     in_table = 0;
                 } else if (in_table == 1) {
                     if (kc_mdp_join(&par, table_hdr) != MDP_OK) {
@@ -919,34 +818,34 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
                     free(table_hdr);
                     table_hdr = NULL;
                     in_table = 0;
-                    kc_mdp_flush(out, &par);
-                    kc_mdp_close_blocks(out, &in_list, &in_quote);
+                    kc_mdp_flush(out, renderer, &par);
+                    kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
                 } else {
-                    kc_mdp_flush(out, &par);
-                    kc_mdp_close_blocks(out, &in_list, &in_quote);
+                    kc_mdp_flush(out, renderer, &par);
+                    kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
                 }
             } else if (in_table == 1 && kc_mdp_is_sep(tmp, len)) {
-                kc_mdp_flush(out, &par);
-                kc_mdp_close_blocks(out, &in_list, &in_quote);
-                mdp_buf_puts(out, "<table>\n<thead>\n");
-                if (kc_mdp_table_row(out, table_hdr, strlen(table_hdr), "th") != MDP_OK) {
+                kc_mdp_flush(out, renderer, &par);
+                kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
+                renderer->table_open(out);
+                if (kc_mdp_table_row(out, renderer, table_hdr,
+                    strlen(table_hdr), 1) != MDP_OK) {
                     free(tmp);
                     free(table_hdr);
                     free(par);
                     return MDP_ERROR;
                 }
-                mdp_buf_puts(out, "</thead>\n<tbody>\n");
                 free(table_hdr);
                 table_hdr = NULL;
                 in_table = 2;
             } else if (in_table == 2 && tmp[0] == '|') {
-                if (kc_mdp_table_row(out, tmp, len, "td") != MDP_OK) {
+                if (kc_mdp_table_row(out, renderer, tmp, len, 0) != MDP_OK) {
                     free(tmp);
                     free(par);
                     return MDP_ERROR;
                 }
             } else if (in_table == 2) {
-                mdp_buf_puts(out, "</tbody>\n</table>\n");
+                renderer->table_close(out);
                 in_table = 0;
                 reprocess = 1;
             } else if (in_table == 1) {
@@ -959,27 +858,31 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
                 free(table_hdr);
                 table_hdr = NULL;
                 in_table = 0;
-                kc_mdp_flush(out, &par);
+                kc_mdp_flush(out, renderer, &par);
                 reprocess = 1;
             } else if (len >= 3 && strncmp(tmp, "```", 3) == 0) {
-                kc_mdp_flush(out, &par);
-                kc_mdp_close_blocks(out, &in_list, &in_quote);
-                kc_mdp_open_code(out, tmp, len);
+                const char *language;
+                size_t language_len;
+
+                kc_mdp_flush(out, renderer, &par);
+                kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
+                kc_mdp_code_language(tmp, len, &language, &language_len);
+                renderer->code_open(out, language, language_len);
                 in_code = 1;
-            } else if (len == 3 && (strncmp(tmp, "---", 3) == 0 || strncmp(tmp, "***", 3) == 0)) {
-                kc_mdp_flush(out, &par);
-                kc_mdp_close_blocks(out, &in_list, &in_quote);
-                mdp_buf_puts(out, "<hr>\n");
+            } else if (len == 3 &&
+                (strncmp(tmp, "---", 3) == 0 || strncmp(tmp, "***", 3) == 0)) {
+                kc_mdp_flush(out, renderer, &par);
+                kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
+                renderer->horizontal_rule(out);
             } else {
                 const char *html_name;
                 size_t html_name_len = 0;
 
                 html_name = kc_mdp_html_block_name(tmp, len, &html_name_len);
                 if (html_name) {
-                    kc_mdp_flush(out, &par);
-                    kc_mdp_close_blocks(out, &in_list, &in_quote);
-                    mdp_buf_write(out, tmp, len);
-                    mdp_buf_putc(out, '\n');
+                    kc_mdp_flush(out, renderer, &par);
+                    kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
+                    renderer->raw_block(out, tmp, len);
                     in_html = kc_mdp_dup(html_name, html_name_len);
                     if (!in_html) {
                         free(tmp);
@@ -991,58 +894,54 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
                         in_html = NULL;
                     }
                 } else {
-                    while (tmp[level] == '#' && level < 6) {
-                        level++;
-                    }
-                    ordered = kc_mdp_ordered_item(tmp);
+                    while (tmp[level] == '#' && level < 6) level++;
+                    ordered = kc_mdp_ordered_item(tmp, &ordered_number);
 
                     if (level && tmp[level] == ' ') {
-                        kc_mdp_flush(out, &par);
-                        kc_mdp_close_blocks(out, &in_list, &in_quote);
-                        mdp_buf_puts(out, "<h");
-                        mdp_buf_putc(out, (char)('0' + level));
-                        mdp_buf_puts(out, ">");
-                        kc_mdp_inline(out, tmp + level + 1);
-                        mdp_buf_puts(out, "</h");
-                        mdp_buf_putc(out, (char)('0' + level));
-                        mdp_buf_puts(out, ">\n");
+                        kc_mdp_flush(out, renderer, &par);
+                        kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
+                        renderer->heading_open(out, level);
+                        kc_mdp_inline(out, renderer, tmp + level + 1);
+                        renderer->heading_close(out, level);
                     } else if (tmp[0] == '>' && tmp[1] == ' ') {
-                        kc_mdp_flush(out, &par);
-                        kc_mdp_close_list(out, &in_list);
+                        kc_mdp_flush(out, renderer, &par);
+                        kc_mdp_close_list(out, renderer, &in_list);
                         if (!in_quote) {
-                            mdp_buf_puts(out, "<blockquote>\n");
+                            renderer->quote_open(out);
                             in_quote = 1;
                         }
-                        mdp_buf_puts(out, "<p>");
-                        kc_mdp_inline(out, tmp + 2);
-                        mdp_buf_puts(out, "</p>\n");
-                    } else if ((tmp[0] == '-' || tmp[0] == '*') && tmp[1] == ' ') {
-                        kc_mdp_flush(out, &par);
+                        renderer->paragraph_open(out);
+                        kc_mdp_inline(out, renderer, tmp + 2);
+                        renderer->paragraph_close(out);
+                    } else if ((tmp[0] == '-' || tmp[0] == '*') &&
+                        tmp[1] == ' ') {
+                        kc_mdp_flush(out, renderer, &par);
                         if (in_quote) {
-                            mdp_buf_puts(out, "</blockquote>\n");
+                            renderer->quote_close(out);
                             in_quote = 0;
                         }
                         if (in_list != 1) {
-                            kc_mdp_close_list(out, &in_list);
-                            mdp_buf_puts(out, "<ul>\n");
+                            kc_mdp_close_list(out, renderer, &in_list);
+                            renderer->list_open(out, 0);
                             in_list = 1;
                         }
-                        kc_mdp_list_item(out, tmp + 2, 1);
+                        kc_mdp_list_item(out, renderer, tmp + 2, 0, 0, 1);
                     } else if (ordered) {
-                        kc_mdp_flush(out, &par);
+                        kc_mdp_flush(out, renderer, &par);
                         if (in_quote) {
-                            mdp_buf_puts(out, "</blockquote>\n");
+                            renderer->quote_close(out);
                             in_quote = 0;
                         }
                         if (in_list != 2) {
-                            kc_mdp_close_list(out, &in_list);
-                            mdp_buf_puts(out, "<ol>\n");
+                            kc_mdp_close_list(out, renderer, &in_list);
+                            renderer->list_open(out, 1);
                             in_list = 2;
                         }
-                        kc_mdp_list_item(out, tmp + ordered, 0);
+                        kc_mdp_list_item(out, renderer, tmp + ordered, 1,
+                            ordered_number, 0);
                     } else if (tmp[0] == '|') {
-                        kc_mdp_flush(out, &par);
-                        kc_mdp_close_blocks(out, &in_list, &in_quote);
+                        kc_mdp_flush(out, renderer, &par);
+                        kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
                         table_hdr = kc_mdp_dup(tmp, len);
                         if (!table_hdr) {
                             free(tmp);
@@ -1051,7 +950,7 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
                         }
                         in_table = 1;
                     } else {
-                        kc_mdp_close_blocks(out, &in_list, &in_quote);
+                        kc_mdp_close_blocks(out, renderer, &in_list, &in_quote);
                         if (kc_mdp_join(&par, tmp) != MDP_OK) {
                             free(tmp);
                             free(par);
@@ -1066,25 +965,41 @@ static int kc_mdp_render(mdp_buf_t *out, const char *body) {
         line = end ? end + 1 : line + len;
     }
 
-    kc_mdp_flush(out, &par);
-    kc_mdp_close_list(out, &in_list);
-    if (in_quote) {
-        mdp_buf_puts(out, "</blockquote>\n");
-    }
-    if (in_code) {
-        mdp_buf_puts(out, "</code></pre>\n");
-    }
+    kc_mdp_flush(out, renderer, &par);
+    kc_mdp_close_list(out, renderer, &in_list);
+    if (in_quote) renderer->quote_close(out);
+    if (in_code) renderer->code_close(out);
     if (in_table == 2) {
-        mdp_buf_puts(out, "</tbody>\n</table>\n");
+        renderer->table_close(out);
     } else if (in_table == 1 && table_hdr && *table_hdr) {
-        mdp_buf_puts(out, "<p>");
-        kc_mdp_inline(out, table_hdr);
-        mdp_buf_puts(out, "</p>\n");
+        renderer->paragraph_open(out);
+        kc_mdp_inline(out, renderer, table_hdr);
+        renderer->paragraph_close(out);
     }
     free(table_hdr);
     free(in_html);
     free(par);
-    return MDP_OK;
+    return out->oom ? MDP_ERROR : MDP_OK;
+}
+
+/**
+ * Finalizes one renderer output buffer as an owned string.
+ * @param buf Render buffer.
+ * @return Owned NUL-terminated result or NULL on failure.
+ */
+static char *kc_mdp_finish(mdp_buf_t *buf) {
+    if (buf->oom) {
+        free(buf->data);
+        return NULL;
+    }
+    if (!buf->data) {
+        buf->data = (unsigned char *)malloc(1);
+        if (!buf->data) {
+            return NULL;
+        }
+        buf->data[0] = '\0';
+    }
+    return (char *)buf->data;
 }
 
 /**
@@ -1103,22 +1018,18 @@ int kc_mdp_open(kc_mdp_t **out, const char *input) {
         return KC_MDP_ERROR;
     }
     *out = NULL;
-
     if (!input) {
         return KC_MDP_ERROR;
     }
-
     if (kc_mdp_split(input, &meta, &body) != MDP_OK) {
         return KC_MDP_ERROR;
     }
-
     mdp = (kc_mdp_t *)calloc(1, sizeof(kc_mdp_t));
     if (!mdp) {
         free(meta);
         free(body);
         return KC_MDP_ERROR;
     }
-
     mdp->meta = meta;
     mdp->body = body;
     *out = mdp;
@@ -1133,31 +1044,34 @@ int kc_mdp_open(kc_mdp_t **out, const char *input) {
 const char *kc_mdp_html(kc_mdp_t *mdp) {
     mdp_buf_t buf;
 
-    if (!mdp) {
-        return NULL;
-    }
-
-    if (mdp->html) {
-        return mdp->html;
-    }
-
+    if (!mdp) return NULL;
+    if (mdp->html) return mdp->html;
     memset(&buf, 0, sizeof(buf));
-
-    if (kc_mdp_render(&buf, mdp->body) != MDP_OK || buf.oom) {
+    if (kc_mdp_render_html(mdp->body, &buf) != MDP_OK) {
         free(buf.data);
         return NULL;
     }
-
-    if (!buf.data) {
-        buf.data = (unsigned char *)malloc(1);
-        if (!buf.data) {
-            return NULL;
-        }
-        buf.data[0] = '\0';
-    }
-
-    mdp->html = (char *)buf.data;
+    mdp->html = kc_mdp_finish(&buf);
     return mdp->html;
+}
+
+/**
+ * Render and cache the document body for an ANSI terminal.
+ * @param mdp Document returned by kc_mdp_open().
+ * @return Cached NUL-terminated ANSI text, or NULL on failure.
+ */
+const char *kc_mdp_ansi(kc_mdp_t *mdp) {
+    mdp_buf_t buf;
+
+    if (!mdp) return NULL;
+    if (mdp->ansi) return mdp->ansi;
+    memset(&buf, 0, sizeof(buf));
+    if (kc_mdp_render_ansi(mdp->body, &buf) != MDP_OK) {
+        free(buf.data);
+        return NULL;
+    }
+    mdp->ansi = kc_mdp_finish(&buf);
+    return mdp->ansi;
 }
 
 /**
@@ -1184,10 +1098,8 @@ const char *kc_mdp_meta(const kc_mdp_t *mdp) {
  * @return None.
  */
 void kc_mdp_close(kc_mdp_t *mdp) {
-    if (!mdp) {
-        return;
-    }
-
+    if (!mdp) return;
+    free(mdp->ansi);
     free(mdp->html);
     free(mdp->body);
     free(mdp->meta);

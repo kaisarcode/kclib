@@ -1,13 +1,13 @@
 # libmdp.c - Markdown Parser
 
-`libmdp.c` parses Markdown text, extracts optional YAML frontmatter, and renders the body as an HTML fragment through a reusable C library.
+`libmdp.c` parses Markdown text, extracts optional YAML frontmatter, and renders the same parsed Markdown semantics through HTML or ANSI terminal backends.
 
 ---
 ## Public API
 
 The reusable API models one parsed Markdown document. Frontmatter is split from
-the body once when the document is opened, then the same instance exposes its
-body, metadata, and cached HTML representation.
+the body once when the document is opened. HTML is the default presentation
+backend, while ANSI provides terminal output from the same Markdown parser.
 
 ```c
 #include "libmdp.h"
@@ -18,10 +18,11 @@ if (kc_mdp_open(&mark, source) == KC_MDP_OK) {
     const char *body = kc_mdp_body(mark);
     const char *meta = kc_mdp_meta(mark);
     const char *html = kc_mdp_html(mark);
+    const char *ansi = kc_mdp_ansi(mark);
 
-/* Use body, meta, and html while mark is alive. */
+    /* Use body, meta, html, and ansi while mark is alive. */
 
-kc_mdp_close(mark);
+    kc_mdp_close(mark);
 }
 ```
 
@@ -30,17 +31,23 @@ The public lifecycle is:
 - `kc_mdp_open()` creates one persistent document and performs the frontmatter/body split once.
 - `kc_mdp_body()` returns the stored body view without reparsing.
 - `kc_mdp_meta()` returns the stored raw frontmatter view without reparsing.
-- `kc_mdp_html()` renders the stored body on first use and caches the HTML for later calls.
-- `kc_mdp_close()` releases the document, including cached HTML.
+- `kc_mdp_html()` renders through the HTML backend on first use and caches the result.
+- `kc_mdp_ansi()` renders through the ANSI terminal backend on first use and caches the result.
+- `kc_mdp_close()` releases the document and both cached renderings.
 - `kc_mdp_version()` returns the library build version.
 
-Empty body, metadata, or HTML results are returned as empty strings.
+Empty body, metadata, HTML, or ANSI results are returned as empty strings.
+
+Internally, Markdown syntax is interpreted once by the shared parser. Render
+backends receive semantic events such as headings, emphasis, lists, tables,
+quotes, links, and code blocks. This keeps HTML and ANSI support aligned without
+maintaining two Markdown interpreters.
 
 ---
 
 ### Frontmatter
 
-An optional metadata block delimited by `---` at the top of the document is supported. The block content is raw text accessible via `--meta` and is excluded from body rendering.
+An optional metadata block delimited by `---` at the top of the document is supported. The block content is raw text and is excluded from body rendering.
 
 ```text
 ---
@@ -76,18 +83,21 @@ Both LF and CRLF line endings are supported in the frontmatter delimiter.
 | Fenced code language | ` ```c ` ... ` ``` ` |
 | Table | Pipe rows with a separator row such as `| --- | --- |` |
 | Horizontal rule | `---` or `***` |
-| Raw HTML | `<tag>` pass-through outside code blocks |
+| Raw HTML | `<tag>` outside code blocks |
 
-Fenced code language identifiers are emitted as a `language-NAME` class on the
-`<code>` element. Task lists are rendered as disabled checkbox inputs so the
-result remains display-only HTML.
+Both renderers consume the same recognized Markdown features. The HTML backend
+emits structural HTML. The ANSI backend removes Markdown syntax and renders the
+same semantics using terminal styling and text conventions: headings use ANSI
+emphasis, inline code uses inverse video, links use OSC 8 hyperlinks, lists use
+terminal markers, task lists use checkbox glyphs, tables use terminal column
+separators, and fenced code is displayed as an indented dim block.
 
-Raw HTML tags, comments, and block-level elements are passed through to the
-output when they appear outside a fenced code block. Inside a fenced code block
-all HTML remains escaped as literal text. Content between a block-level opening
-tag (`<div>`, `<details>`, `<table>`, `<iframe>`, and similar) and its matching
-closing tag is emitted without Markdown processing. Text that only resembles
-HTML, such as `2 < 3` or `<3`, stays escaped.
+Fenced code language identifiers are emitted as a `language-NAME` class by the
+HTML backend. The ANSI backend consumes the language metadata but does not print
+it as visible Markdown syntax.
+
+Raw HTML is passed through by the HTML backend. The ANSI backend omits HTML tags
+and emits visible raw-block text where possible.
 
 ---
 ## Build
@@ -124,8 +134,8 @@ make test wasm
 ```
 
 - Artifact: `bin/wasm32/wasm/libmdp.wasm`
-- Exports: `kc_mdp_open`, `kc_mdp_close`, `kc_mdp_html`, `kc_mdp_body`, `kc_mdp_meta`, `kc_mdp_version`
-`wasm32/wasm` is included in `make all`.
+- Exports: `kc_mdp_open`, `kc_mdp_close`, `kc_mdp_html`, `kc_mdp_ansi`, `kc_mdp_body`, `kc_mdp_meta`, `kc_mdp_version`
+- `wasm32/wasm` is included in `make all`.
 
 ### Multiarch Builds
 

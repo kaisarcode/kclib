@@ -1,0 +1,139 @@
+<h1>libmdp.c - Markdown Parser</h1>
+<p><code>libmdp.c</code> parses Markdown text, extracts optional YAML frontmatter, and renders the same parsed Markdown semantics through HTML or ANSI terminal backends.</p>
+<hr>
+<h2>Public API</h2>
+<p>The reusable API models one parsed Markdown document. Frontmatter is split from the body once when the document is opened. HTML is the default presentation backend, while ANSI provides terminal output from the same Markdown parser.</p>
+<pre><code class="language-c">#include &quot;libmdp.h&quot;
+
+kc_mdp_t *mark = NULL;
+
+if (kc_mdp_open(&amp;mark, source) == KC_MDP_OK) {
+    const char *body = kc_mdp_body(mark);
+    const char *meta = kc_mdp_meta(mark);
+    const char *html = kc_mdp_html(mark);
+    const char *ansi = kc_mdp_ansi(mark);
+
+    /* Use body, meta, html, and ansi while mark is alive. */
+
+    kc_mdp_close(mark);
+}
+</code></pre>
+<p>The public lifecycle is:</p>
+<ul>
+<li><code>kc_mdp_open()</code> creates one persistent document and performs the frontmatter/body split once.</li>
+<li><code>kc_mdp_body()</code> returns the stored body view without reparsing.</li>
+<li><code>kc_mdp_meta()</code> returns the stored raw frontmatter view without reparsing.</li>
+<li><code>kc_mdp_html()</code> renders through the HTML backend on first use and caches the result.</li>
+<li><code>kc_mdp_ansi()</code> renders through the ANSI terminal backend on first use and caches the result.</li>
+<li><code>kc_mdp_close()</code> releases the document and both cached renderings.</li>
+<li><code>kc_mdp_version()</code> returns the library build version.</li>
+</ul>
+<p>Empty body, metadata, HTML, or ANSI results are returned as empty strings.</p>
+<p>Internally, Markdown syntax is interpreted once by the shared parser. Render backends receive semantic events such as headings, emphasis, lists, tables, quotes, links, and code blocks. This keeps HTML and ANSI support aligned without maintaining two Markdown interpreters.</p>
+<hr>
+<h3>Frontmatter</h3>
+<p>An optional metadata block delimited by <code>---</code> at the top of the document is supported. The block content is raw text and is excluded from body rendering.</p>
+<pre><code class="language-text">---
+title: My Page
+date: 2026-05-07
+---
+
+# My Page
+</code></pre>
+<p>Both LF and CRLF line endings are supported in the frontmatter delimiter.</p>
+<hr>
+<h3>Supported Markdown</h3>
+<table>
+<thead>
+<tr><th>Feature</th><th>Syntax</th></tr>
+</thead>
+<tbody>
+<tr><td>Headings</td><td><code># H1</code> through <code>###### H6</code></td></tr>
+<tr><td>Paragraph</td><td>Plain text lines</td></tr>
+<tr><td>Bold</td><td><code>**text**</code></td></tr>
+<tr><td>Italic</td><td><code>*text*</code></td></tr>
+<tr><td>Strikethrough</td><td><code>~~text~~</code></td></tr>
+<tr><td>Inline code</td><td><code></code> <code>code</code> <code></code></td></tr>
+<tr><td>Link</td><td><code>[label](url)</code></td></tr>
+<tr><td>Image</td><td><code>![alt](url)</code></td></tr>
+<tr><td>Linked image</td><td><code>[![alt](img)](url)</code></td></tr>
+<tr><td>Unordered list</td><td><code>- item</code> or <code>* item</code></td></tr>
+<tr><td>Ordered list</td><td><code>1. item</code></td></tr>
+<tr><td>Task list</td><td><code>- [ ] item</code> or <code>- [x] item</code></td></tr>
+<tr><td>Blockquote</td><td><code>&gt; text</code></td></tr>
+<tr><td>Fenced code block</td><td><code> </code><code></code> <code> ... </code> <code></code><code> </code></td></tr>
+<tr><td>Fenced code language</td><td><code> </code><code></code>c <code> ... </code> <code></code><code> </code></td></tr>
+<tr><td>Table</td><td>Pipe rows with a separator row such as `</td><td>---</td><td>---</td><td>`</td></tr>
+<tr><td>Horizontal rule</td><td><code>---</code> or <code>***</code></td></tr>
+<tr><td>Raw HTML</td><td><code>&lt;tag&gt;</code> outside code blocks</td></tr>
+</tbody>
+</table>
+<p>Both renderers consume the same recognized Markdown features. The HTML backend emits structural HTML. The ANSI backend removes Markdown syntax and renders the same semantics using terminal styling and text conventions: headings use ANSI emphasis, inline code uses inverse video, links use OSC 8 hyperlinks, lists use terminal markers, task lists use checkbox glyphs, tables use terminal column separators, and fenced code is displayed as an indented dim block.</p>
+<p>Fenced code language identifiers are emitted as a <code>language-NAME</code> class by the HTML backend. The ANSI backend consumes the language metadata but does not print it as visible Markdown syntax.</p>
+<p>Raw HTML is passed through by the HTML backend. The ANSI backend omits HTML tags and emits visible raw-block text where possible.</p>
+<hr>
+<h2>Build</h2>
+<p>Compiled artifacts are generated under <code>bin/{arch}/{platform}/</code> for the host architecture running the build.</p>
+<pre><code class="language-bash">make
+</code></pre>
+<h3>Tests</h3>
+<p>The portable test entry point is <code>make test</code>. Build project artifacts first, then run tests.</p>
+<pre><code class="language-bash">make
+make test
+</code></pre>
+<p>To run through Wine:</p>
+<pre><code class="language-bash">make x86_64/windows
+make test wine
+</code></pre>
+<h3>WebAssembly (Emscripten)</h3>
+<pre><code class="language-bash">make wasm32/wasm
+make test wasm
+</code></pre>
+<ul>
+<li>Artifact: <code>bin/wasm32/wasm/libmdp.wasm</code></li>
+<li>Exports: <code>kc_mdp_open</code>, <code>kc_mdp_close</code>, <code>kc_mdp_html</code>, <code>kc_mdp_ansi</code>, <code>kc_mdp_body</code>, <code>kc_mdp_meta</code>, <code>kc_mdp_version</code></li>
+<li><code>wasm32/wasm</code> is included in <code>make all</code>.</li>
+</ul>
+<h3>Multiarch Builds</h3>
+<p>A plain <code>make</code> builds only the current host architecture. <code>make all</code> builds all configured targets.</p>
+<pre><code class="language-bash">make all
+</code></pre>
+<hr>
+<h2>Development Requirements</h2>
+<h3>Build Tools</h3>
+<ul>
+<li><code>make</code> (GNU Make)</li>
+<li><code>cmake</code> &gt;= 3.14</li>
+<li><code>ninja</code></li>
+<li><code>gcc</code> or <code>clang</code> (C11 compatible)</li>
+</ul>
+<h3>Optional Cross-Compilation SDKs</h3>
+<p>Required only for the corresponding targets:</p>
+<ul>
+<li>MinGW for Windows cross-compilation.</li>
+<li><code>wine</code> for Windows tests on Linux.</li>
+<li>Emscripten SDK and Node.js for WebAssembly builds and tests.</li>
+<li>Other cross-compilation toolchains are required only by enabled targets.</li>
+</ul>
+<h3>System Libraries</h3>
+<p>Linux:</p>
+<ul>
+<li><code>libpthread</code></li>
+<li><code>libm</code></li>
+</ul>
+<p>Windows (MSVC or MinGW):</p>
+<ul>
+<li>No additional system libraries required.</li>
+</ul>
+<p>macOS / iOS:</p>
+<ul>
+<li>No additional system libraries required.</li>
+</ul>
+<hr>
+<h2>Beta Notice</h2>
+<p>This is a beta project tested only on Debian x86_64. It was created out of a personal need for these libraries, but no guarantees are provided regarding its stability or future support. You are free to test it, use it, and modify it as you please.</p>
+<p>If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Please note that I do not accept pull requests; the goal is to avoid long-term dependency on platforms like GitHub, and I do not maintain fixed infrastructure to guarantee long-term stability for these projects.</p>
+<hr>
+<h2>License</h2>
+<p><a href="https://www.gnu.org/licenses/gpl-3.0.html"><img src="https://www.gnu.org/graphics/gplv3-127x51.png" alt="GPLv3"></a></p>
+<p>This project is distributed under the <strong>GNU General Public License version 3 (GPLv3)</strong>.</p>

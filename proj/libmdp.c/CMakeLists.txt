@@ -28,7 +28,11 @@ else()
     add_compile_options(/O2 /W3 /WX)
 endif()
 
-set(MDP_SOURCES src/libmdp.c)
+set(MDP_SOURCES
+    src/libmdp.c
+    src/libmdp-html.c
+    src/libmdp-ansi.c
+)
 
 set_source_files_properties(src/libmdp.c PROPERTIES
     COMPILE_DEFINITIONS KC_MDP_BUILD_VERSION=${MDP_BUILD_VERSION}
@@ -44,7 +48,7 @@ if(EMSCRIPTEN)
     target_link_options(mdp_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_mdp_open,_kc_mdp_html,_kc_mdp_body,_kc_mdp_meta,_kc_mdp_close,_kc_mdp_version
+        -sEXPORTED_FUNCTIONS=_kc_mdp_open,_kc_mdp_html,_kc_mdp_ansi,_kc_mdp_body,_kc_mdp_meta,_kc_mdp_close,_kc_mdp_version
     )
 endif()
 
