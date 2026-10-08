@@ -338,7 +338,7 @@ it has no role in established peer application traffic.
 Pending state is coordination metadata only and never contains application
 payloads.
 
-# Native transport
+## Native transport
 
 ## Native model
 
@@ -473,7 +473,7 @@ traffic.
 For Native TCP, TURN still carries REDP2P/KCP datagrams. TCP sockets, TCP FIN,
 half-close, and EOF are endpoint semantics rather than peer transport packets.
 
-# WebRTC transport
+## WebRTC transport
 
 ## WebRTC model
 
@@ -620,7 +620,7 @@ Native candidate object format.
 
 TURN credentials are peer configuration and are not index credentials.
 
-# Interoperability rules
+## Interoperability rules
 
 An implementation is REDP2P-compatible when it preserves the observable
 protocol behavior for the roles and transport families it implements.
@@ -634,11 +634,11 @@ In particular:
 - transport-specific operations must reject publishers from another family;
 - the index must never become an application-data relay;
 - challenge, registration, admission, and control proofs must remain wire
-  compatible;
+    compatible;
 - publisher sequences must remain strictly monotonic;
 - temporary connection state must remain bounded and expire;
 - `lookup` must expose enough transport information for a consumer to select or
-  validate the correct connection family.
+    validate the correct connection family.
 
 The C and PHP indexes are therefore interchangeable at the index-protocol
 boundary, while C Native peers and browser WebRTC peers remain intentionally
