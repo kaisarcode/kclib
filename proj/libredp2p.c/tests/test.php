@@ -340,7 +340,10 @@ function testServeIndex(): void
 
     $dbPath = getenv('REDP2P_TEST_DB');
     if (!is_string($dbPath) || $dbPath === '') {
-        $dbPath = __DIR__ . '/redp2p.sqlite';
+        http_response_code(500);
+        header('Content-Type: application/json');
+        echo '{"ok":false,"error":"test_configuration"}';
+        return;
     }
     $server = new \KaisarCode\Redp2pIndex([
         'dsn' => 'sqlite:' . $dbPath,
@@ -434,11 +437,8 @@ if (!is_string($resultToken)) $resultToken = '';
     <div id="screen"><div class="prompt">$ php test.php</div></div>
 </div>
 
-<script src="../imp/js/redp2p.js"></script>
-<script src="../imp/js/redp2p-pub.js"></script>
-<script src="../imp/js/redp2p-con.js"></script>
-<script>
-"use strict";
+<script type="module">
+import RedP2P from "../imp/redp2p.js";
 
 (async () => {
     const screen = document.getElementById("screen");
@@ -749,7 +749,8 @@ if (!is_string($resultToken)) $resultToken = '';
             assert(globalThis.crypto && crypto.subtle,
                 "Web Crypto unavailable");
             assert(typeof fetch === "function", "Fetch unavailable");
-            assert(globalThis.RedP2P && typeof RedP2P.pub === "function" &&
+            assert(globalThis.RedP2P === RedP2P &&
+                typeof RedP2P.pub === "function" &&
                 typeof RedP2P.con === "function", "REDP2P runtime unavailable");
         });
 
