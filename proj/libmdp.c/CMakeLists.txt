@@ -28,17 +28,6 @@ else()
     add_compile_options(/O2 /W3 /WX)
 endif()
 
-configure_file(
-    src/libmdp-internal.h
-    ${CMAKE_CURRENT_BINARY_DIR}/libmdp_internal.h
-    COPYONLY
-)
-
-set(MDP_INCLUDE_DIRS
-    src
-    ${CMAKE_CURRENT_BINARY_DIR}
-)
-
 set(MDP_SOURCES
     src/libmdp.c
     src/libmdp-html.c
@@ -51,7 +40,7 @@ set_source_files_properties(src/libmdp.c PROPERTIES
 
 if(EMSCRIPTEN)
     add_executable(mdp_wasm ${MDP_SOURCES})
-    target_include_directories(mdp_wasm PRIVATE ${MDP_INCLUDE_DIRS})
+    target_include_directories(mdp_wasm PRIVATE src)
     set_target_properties(mdp_wasm PROPERTIES
         OUTPUT_NAME "libmdp"
         SUFFIX ".wasm"
@@ -66,12 +55,12 @@ endif()
 if(NOT MDP_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     add_library(mdp_static STATIC ${MDP_SOURCES})
     set_target_properties(mdp_static PROPERTIES OUTPUT_NAME "mdp")
-    target_include_directories(mdp_static PRIVATE ${MDP_INCLUDE_DIRS})
+    target_include_directories(mdp_static PRIVATE src)
 
     add_library(mdp_shared SHARED ${MDP_SOURCES})
     set_target_properties(mdp_shared PROPERTIES OUTPUT_NAME "mdp")
     set_target_properties(mdp_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-    target_include_directories(mdp_shared PRIVATE ${MDP_INCLUDE_DIRS})
+    target_include_directories(mdp_shared PRIVATE src)
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(mdp_shared pthread m)
@@ -83,9 +72,7 @@ if(MDP_BUILD_TESTS)
 
     if(EMSCRIPTEN)
         add_executable(mdp_contract_test src/test.c ${MDP_SOURCES})
-        target_include_directories(
-            mdp_contract_test PRIVATE ${MDP_INCLUDE_DIRS}
-        )
+        target_include_directories(mdp_contract_test PRIVATE src)
     else()
         if(MDP_TEST_SHARED_LIBRARY)
             add_library(mdp_test_shared SHARED IMPORTED)
@@ -103,12 +90,8 @@ if(MDP_BUILD_TESTS)
         endif()
 
         add_executable(mdp_contract_test src/test.c)
-        target_include_directories(
-            mdp_contract_test PRIVATE ${MDP_INCLUDE_DIRS}
-        )
-        target_link_libraries(
-            mdp_contract_test PRIVATE ${MDP_TEST_SHARED_TARGET}
-        )
+        target_include_directories(mdp_contract_test PRIVATE src)
+        target_link_libraries(mdp_contract_test PRIVATE ${MDP_TEST_SHARED_TARGET})
 
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(mdp_contract_test PRIVATE m)
