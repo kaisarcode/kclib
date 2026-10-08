@@ -254,7 +254,39 @@ static void ansi_pad(mdp_buf_t *out, size_t count) {
 }
 
 /**
- * Renders all stored table rows with aligned column widths.
+ * Writes a repeated table style token.
+ * @param out Target buffer.
+ * @param token Token to repeat.
+ * @param count Repeat count.
+ * @return None.
+ */
+static void ansi_repeat(mdp_buf_t *out, const char *token, size_t count) {
+    while (count--) {
+        kc_mdp_buf_puts(out, token);
+    }
+}
+
+/**
+ * Renders one horizontal table border.
+ * @param out Target buffer.
+ * @param widths Visible column widths.
+ * @param columns Column count.
+ * @return None.
+ */
+static void ansi_table_border(mdp_buf_t *out, const size_t *widths,
+    size_t columns) {
+    size_t c;
+
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_CORNER);
+    for (c = 0; c < columns; c++) {
+        ansi_repeat(out, KC_MDP_STYLE_TABLE_HORIZONTAL, widths[c] + 2);
+        kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_CORNER);
+    }
+    kc_mdp_buf_putc(out, '\n');
+}
+
+/**
+ * Renders all stored table rows with aligned monospace borders.
  * @param out Target buffer.
  * @return None.
  */
@@ -285,12 +317,16 @@ static void ansi_render_table(mdp_buf_t *out) {
             }
         }
     }
+
+    ansi_table_border(out, widths, columns);
     for (r = 0; r < state->count; r++) {
         ansi_row_t *row = &state->rows[r];
 
+        kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_VERTICAL);
         for (c = 0; c < columns; c++) {
             size_t width = 0;
 
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_PADDING);
             if (c < row->count) {
                 if (row->header) {
                     kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_HEADER_OPEN);
@@ -302,12 +338,15 @@ static void ansi_render_table(mdp_buf_t *out) {
                 width = row->cells[c].width;
             }
             ansi_pad(out, widths[c] - width);
-            if (c + 1 < columns) {
-                kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_SEPARATOR);
-            }
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_PADDING);
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_VERTICAL);
         }
         kc_mdp_buf_putc(out, '\n');
+        if (row->header) {
+            ansi_table_border(out, widths, columns);
+        }
     }
+    ansi_table_border(out, widths, columns);
     free(widths);
 }
 
