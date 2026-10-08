@@ -63,15 +63,24 @@ Both LF and CRLF line endings are supported in the frontmatter delimiter.
 | Paragraph | Plain text lines |
 | Bold | `**text**` |
 | Italic | `*text*` |
+| Strikethrough | `~~text~~` |
 | Inline code | `` `code` `` |
 | Link | `[label](url)` |
 | Image | `![alt](url)` |
 | Linked image | `[![alt](img)](url)` |
 | Unordered list | `- item` or `* item` |
+| Ordered list | `1. item` |
+| Task list | `- [ ] item` or `- [x] item` |
 | Blockquote | `> text` |
 | Fenced code block | ` ``` ` ... ` ``` ` |
+| Fenced code language | ` ```c ` ... ` ``` ` |
+| Table | Pipe rows with a separator row such as `| --- | --- |` |
 | Horizontal rule | `---` or `***` |
 | Raw HTML | `<tag>` pass-through outside code blocks |
+
+Fenced code language identifiers are emitted as a `language-NAME` class on the
+`<code>` element. Task lists are rendered as disabled checkbox inputs so the
+result remains display-only HTML.
 
 Raw HTML tags, comments, and block-level elements are passed through to the
 output when they appear outside a fenced code block. Inside a fenced code block
