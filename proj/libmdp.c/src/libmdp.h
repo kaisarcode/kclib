@@ -32,12 +32,21 @@ int kc_mdp_open(kc_mdp_t **out, const char *input);
 
 /**
  * Render and cache the document body as an HTML fragment.
- * The returned pointer belongs to the document and remains valid until
- * kc_mdp_close().
+ * HTML is the default presentation backend for mdp. The returned pointer
+ * belongs to the document and remains valid until kc_mdp_close().
  * @param mdp Document returned by kc_mdp_open().
  * @return Cached NUL-terminated HTML fragment, or NULL on failure.
  */
 const char *kc_mdp_html(kc_mdp_t *mdp);
+
+/**
+ * Render and cache the document body as ANSI terminal text.
+ * The ANSI backend consumes the same parsed Markdown semantics as HTML. The
+ * returned pointer belongs to the document and remains valid until close.
+ * @param mdp Document returned by kc_mdp_open().
+ * @return Cached NUL-terminated ANSI terminal text, or NULL on failure.
+ */
+const char *kc_mdp_ansi(kc_mdp_t *mdp);
 
 /**
  * Return the document body after recognized frontmatter.
