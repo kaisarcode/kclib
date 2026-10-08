@@ -199,7 +199,12 @@ static int case_kc_mdp_ansi(void) {
             "Text **bold** *italic* `code` and ~~gone~~.\n\n"
             "1. first\n2. second\n\n"
             "- [ ] todo\n- [x] done\n\n"
-            "| Name | Value |\n| --- | --- |\n| one | two |\n\n"
+            "| Name | Value |\n| --- | --- |\n"
+            "| one | two |\n| longer-name | 7 |\n"
+            "| code | `| x | y |` |\n"
+            "| inline | `` `code` `` |\n"
+            "| fence | ```` ``` ... ``` ```` |\n"
+            "| fence-lang | ```` ```c ... ``` ```` |\n\n"
             "> quote\n\n"
             "```c\nint x = 1;\n```\n"));
 
@@ -219,18 +224,24 @@ static int case_kc_mdp_ansi(void) {
             strstr(first, "  1. first\n  2. second\n") != NULL);
         fail += expect_true("ansi renders task list",
             strstr(first, "  ☐ todo\n  ☑ done\n") != NULL);
-        fail += expect_true("ansi renders table semantics",
-            strstr(first,
-                "\x1b[1mName │ Value\x1b[22m\n"
-                "one │ two\n") != NULL);
+        fail += expect_true("ansi renders boxed table",
+            strstr(first, "+-") != NULL && strstr(first, "-+\n") != NULL);
+        fail += expect_true("ansi keeps header borders normal weight",
+            strstr(first, "\x1b[22m") != NULL && strstr(first, "| ") != NULL);
+        fail += expect_true("ansi keeps code pipes in one table cell",
+            strstr(first, "\x1b[2m| x | y |\x1b[22m") != NULL);
+        fail += expect_true("ansi preserves inline-code backticks",
+            strstr(first, "\x1b[2m `code` \x1b[22m") != NULL);
+        fail += expect_true("ansi preserves fenced-code backticks",
+            strstr(first, "\x1b[2m ``` ... ``` \x1b[22m") != NULL);
+        fail += expect_true("ansi preserves fenced language backticks",
+            strstr(first, "\x1b[2m ```c ... ``` \x1b[22m") != NULL);
         fail += expect_true("ansi renders quote without markdown marker",
             strstr(first,
                 "\x1b[2mquote\n\n\x1b[22m\n") != NULL);
         fail += expect_true("ansi renders fenced code without fences",
             strstr(first,
                 "\x1b[2m  int x = 1;\n\x1b[22m\n\n") != NULL);
-        fail += expect_true("ansi contains no fenced code marker",
-            strstr(first, "```") == NULL);
         second = kc_mdp_ansi(mdp);
         fail += expect_true("ansi reuses cached result", second == first);
     }
@@ -254,7 +265,12 @@ static int case_kc_mdp_extensions(void) {
         kc_mdp_open(&mdp,
             "1. one\n2. two\n\n"
             "```c\nint main(void) {}\n```\n\n"
-            "| Name | Value |\n| --- | --- |\n| one | two |\n\n"
+            "| Name | Value |\n| --- | --- |\n"
+            "| one | two |\n"
+            "| code | `| --- | --- |` |\n"
+            "| inline | `` `code` `` |\n"
+            "| fence | ```` ``` ... ``` ```` |\n"
+            "| fence-lang | ```` ```c ... ``` ```` |\n\n"
             "- [ ] todo\n- [x] done\n\n"
             "~~removed~~\n"));
 
@@ -268,10 +284,17 @@ static int case_kc_mdp_extensions(void) {
                 "<pre><code class=\"language-c\">int main(void) {}\n"
                 "</code></pre>\n") != NULL);
         fail += expect_true("renders tables",
+            strstr(html, "<table>\n<thead>\n") != NULL &&
+            strstr(html, "</tbody>\n</table>\n") != NULL);
+        fail += expect_true("table code pipes stay in one HTML cell",
             strstr(html,
-                "<table>\n<thead>\n<tr><th>Name</th><th>Value</th></tr>\n"
-                "</thead>\n<tbody>\n<tr><td>one</td><td>two</td></tr>\n"
-                "</tbody>\n</table>\n") != NULL);
+                "<td><code>| --- | --- |</code></td>") != NULL);
+        fail += expect_true("HTML preserves inline-code backticks",
+            strstr(html, "<td><code> `code` </code></td>") != NULL);
+        fail += expect_true("HTML preserves fenced-code backticks",
+            strstr(html, "<td><code> ``` ... ``` </code></td>") != NULL);
+        fail += expect_true("HTML preserves fenced language backticks",
+            strstr(html, "<td><code> ```c ... ``` </code></td>") != NULL);
         fail += expect_true("renders unchecked task",
             strstr(html,
                 "<li><input type=\"checkbox\" disabled> todo</li>\n") != NULL);

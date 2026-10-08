@@ -79,8 +79,8 @@ Both LF and CRLF line endings are supported in the frontmatter delimiter.
 | Ordered list | `1. item` |
 | Task list | `- [ ] item` or `- [x] item` |
 | Blockquote | `> text` |
-| Fenced code block | ` ``` ` ... ` ``` ` |
-| Fenced code language | ` ```c ` ... ` ``` ` |
+| Fenced code block | ```` ``` ... ``` ```` |
+| Fenced code language | ```` ```c ... ``` ```` |
 | Table | Pipe rows with a separator row such as `| --- | --- |` |
 | Horizontal rule | `---` or `***` |
 | Raw HTML | `<tag>` outside code blocks |
@@ -88,9 +88,13 @@ Both LF and CRLF line endings are supported in the frontmatter delimiter.
 Both renderers consume the same recognized Markdown features. The HTML backend
 emits structural HTML. The ANSI backend removes Markdown syntax and renders the
 same semantics using terminal styling and text conventions: headings use ANSI
-emphasis, inline code uses inverse video, links use OSC 8 hyperlinks, lists use
-terminal markers, task lists use checkbox glyphs, tables use terminal column
-separators, and fenced code is displayed as an indented dim block.
+emphasis, inline and fenced code use dim styling, links use OSC 8 hyperlinks,
+lists use terminal markers, task lists use checkbox glyphs, and tables use
+aligned monospace borders.
+
+Code spans may use longer backtick delimiters to include literal backticks in
+their content. For example, `` `code` `` displays the inline-code Markdown
+syntax itself, while ```` ```c ... ``` ```` displays fenced-code syntax.
 
 Fenced code language identifiers are emitted as a `language-NAME` class by the
 HTML backend. The ANSI backend consumes the language metadata but does not print

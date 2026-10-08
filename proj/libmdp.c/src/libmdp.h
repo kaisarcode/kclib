@@ -91,6 +91,7 @@ typedef struct {
     size_t len;
     size_t cap;
     int oom;
+    void *renderer_data;
 } mdp_buf_t;
 
 typedef struct {
