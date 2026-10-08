@@ -12,8 +12,8 @@
 #define _XOPEN_SOURCE 700
 #endif
 
+#define KC_MDP_PRIVATE
 #include "libmdp.h"
-#include "libmdp_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
