@@ -174,6 +174,47 @@ static size_t kc_mdp_find_close(const char *text, size_t start, char close) {
 }
 
 /**
+ * Counts one consecutive run of backticks.
+ * @param text Source buffer.
+ * @param start First backtick offset.
+ * @return Number of consecutive backticks.
+ */
+static size_t kc_mdp_backtick_run(const char *text, size_t start) {
+    size_t len = 0;
+
+    while (text[start + len] == '`') {
+        len++;
+    }
+    return len;
+}
+
+/**
+ * Finds a closing backtick run matching an opening run exactly.
+ * @param text Source buffer.
+ * @param start Search start offset.
+ * @param run Opening backtick run length.
+ * @return Closing offset or (size_t)-1 when absent.
+ */
+static size_t kc_mdp_find_backtick_close(const char *text, size_t start,
+    size_t run) {
+    size_t i = start;
+
+    while (text[i]) {
+        if (text[i] == '`') {
+            size_t found = kc_mdp_backtick_run(text, i);
+
+            if (found == run) {
+                return i;
+            }
+            i += found;
+            continue;
+        }
+        i++;
+    }
+    return (size_t)-1;
+}
+
+/**
  * Finds a closing label bracket with nested bracket awareness.
  * @param text Source buffer.
  * @param start Offset after the opening bracket.
@@ -489,13 +530,12 @@ static void kc_mdp_inline(mdp_buf_t *out, const kc_mdp_renderer_t *renderer,
             }
         }
         if (text[i] == '`') {
-            j = i + 1;
-            while (text[j] && text[j] != '`') {
-                j++;
-            }
-            if (text[j] == '`') {
-                renderer->code_inline(out, text + i + 1, j - i - 1);
-                i = j + 1;
+            size_t run = kc_mdp_backtick_run(text, i);
+
+            j = kc_mdp_find_backtick_close(text, i + run, run);
+            if (j != (size_t)-1) {
+                renderer->code_inline(out, text + i + run, j - i - run);
+                i = j + run;
                 continue;
             }
         }
@@ -695,12 +735,24 @@ static int kc_mdp_is_sep(const char *s, size_t len) {
  */
 static size_t kc_mdp_table_cell_end(const char *s, size_t start, size_t len) {
     size_t i = start;
-    int in_code = 0;
 
     while (i < len) {
+        if (s[i] == '\\' && i + 1 < len) {
+            i += 2;
+            continue;
+        }
         if (s[i] == '`') {
-            in_code = !in_code;
-        } else if (s[i] == '|' && !in_code) {
+            size_t run = kc_mdp_backtick_run(s, i);
+            size_t close = kc_mdp_find_backtick_close(s, i + run, run);
+
+            if (close != (size_t)-1 && close < len) {
+                i = close + run;
+                continue;
+            }
+            i += run;
+            continue;
+        }
+        if (s[i] == '|') {
             break;
         }
         i++;
