@@ -7,7 +7,8 @@
  * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
-#include "libmdp-internal.h"
+#define KC_MDP_PRIVATE
+#include "libmdp.h"
 
 /**
  * Writes HTML-escaped text.
