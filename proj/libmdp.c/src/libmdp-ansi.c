@@ -9,6 +9,7 @@
 
 #define KC_MDP_PRIVATE
 #include "libmdp.h"
+#include "style.h"
 
 #include <stdio.h>
 
@@ -29,7 +30,7 @@ static void ansi_text(mdp_buf_t *out, const char *text, size_t len) {
  * @return None.
  */
 static void ansi_strong_open(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[1m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_STRONG_OPEN);
 }
 
 /**
@@ -38,7 +39,7 @@ static void ansi_strong_open(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_strong_close(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[22m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_STRONG_CLOSE);
 }
 
 /**
@@ -47,7 +48,7 @@ static void ansi_strong_close(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_em_open(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[3m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_EM_OPEN);
 }
 
 /**
@@ -56,7 +57,7 @@ static void ansi_em_open(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_em_close(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[23m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_EM_CLOSE);
 }
 
 /**
@@ -65,7 +66,7 @@ static void ansi_em_close(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_strike_open(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[9m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_STRIKE_OPEN);
 }
 
 /**
@@ -74,20 +75,20 @@ static void ansi_strike_open(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_strike_close(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[29m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_STRIKE_CLOSE);
 }
 
 /**
- * Renders inline code using inverse video.
+ * Renders inline code using the configured terminal style.
  * @param out Target buffer.
  * @param text Code text.
  * @param len Byte count.
  * @return None.
  */
 static void ansi_code_inline(mdp_buf_t *out, const char *text, size_t len) {
-    kc_mdp_buf_puts(out, "\x1b[7m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_CODE_INLINE_OPEN);
     kc_mdp_buf_write(out, text, len);
-    kc_mdp_buf_puts(out, "\x1b[27m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_CODE_INLINE_CLOSE);
 }
 
 /**
@@ -98,6 +99,7 @@ static void ansi_code_inline(mdp_buf_t *out, const char *text, size_t len) {
  * @return None.
  */
 static void ansi_link_open(mdp_buf_t *out, const char *url, size_t len) {
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_LINK_OPEN);
     kc_mdp_buf_puts(out, "\x1b]8;;");
     kc_mdp_buf_write(out, url, len);
     kc_mdp_buf_puts(out, "\x1b\\");
@@ -110,6 +112,7 @@ static void ansi_link_open(mdp_buf_t *out, const char *url, size_t len) {
  */
 static void ansi_link_close(mdp_buf_t *out) {
     kc_mdp_buf_puts(out, "\x1b]8;;\x1b\\");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_LINK_CLOSE);
 }
 
 /**
@@ -158,7 +161,7 @@ static void ansi_raw_inline(mdp_buf_t *out, const char *text, size_t len) {
  * @return None.
  */
 static void ansi_paragraph_open(mdp_buf_t *out) {
-    (void)out;
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_COLOR_TEXT);
 }
 
 /**
@@ -167,7 +170,8 @@ static void ansi_paragraph_open(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_paragraph_close(mdp_buf_t *out) {
-    kc_mdp_buf_putc(out, '\n');
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_COLOR_RESET);
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_PARAGRAPH_GAP);
 }
 
 /**
@@ -177,10 +181,8 @@ static void ansi_paragraph_close(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_heading_open(mdp_buf_t *out, int level) {
-    kc_mdp_buf_puts(out, "\x1b[1m");
-    if (level <= 2) {
-        kc_mdp_buf_puts(out, "\x1b[4m");
-    }
+    (void)level;
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_HEADING_OPEN);
 }
 
 /**
@@ -190,10 +192,9 @@ static void ansi_heading_open(mdp_buf_t *out, int level) {
  * @return None.
  */
 static void ansi_heading_close(mdp_buf_t *out, int level) {
-    if (level <= 2) {
-        kc_mdp_buf_puts(out, "\x1b[24m");
-    }
-    kc_mdp_buf_puts(out, "\x1b[22m\n");
+    (void)level;
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_HEADING_CLOSE);
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_HEADING_GAP);
 }
 
 /**
@@ -202,7 +203,7 @@ static void ansi_heading_close(mdp_buf_t *out, int level) {
  * @return None.
  */
 static void ansi_quote_open(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[2m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_QUOTE_OPEN);
 }
 
 /**
@@ -211,7 +212,8 @@ static void ansi_quote_open(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_quote_close(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[22m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_QUOTE_CLOSE);
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_QUOTE_GAP);
 }
 
 /**
@@ -232,8 +234,8 @@ static void ansi_list_open(mdp_buf_t *out, int ordered) {
  * @return None.
  */
 static void ansi_list_close(mdp_buf_t *out, int ordered) {
-    (void)out;
     (void)ordered;
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_LIST_GAP);
 }
 
 /**
@@ -249,14 +251,14 @@ static void ansi_list_item_open(mdp_buf_t *out, int ordered,
     char number_buf[32];
 
     if (task_state == 0) {
-        kc_mdp_buf_puts(out, "  ☐ ");
+        kc_mdp_buf_puts(out, KC_MDP_STYLE_TASK_OFF);
     } else if (task_state == 1) {
-        kc_mdp_buf_puts(out, "  ☑ ");
+        kc_mdp_buf_puts(out, KC_MDP_STYLE_TASK_ON);
     } else if (ordered) {
         snprintf(number_buf, sizeof(number_buf), "  %u. ", number);
         kc_mdp_buf_puts(out, number_buf);
     } else {
-        kc_mdp_buf_puts(out, "  • ");
+        kc_mdp_buf_puts(out, KC_MDP_STYLE_LIST_BULLET);
     }
 }
 
@@ -279,7 +281,7 @@ static void ansi_list_item_close(mdp_buf_t *out) {
 static void ansi_code_open(mdp_buf_t *out, const char *language, size_t len) {
     (void)language;
     (void)len;
-    kc_mdp_buf_puts(out, "\x1b[2m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_CODE_BLOCK_OPEN);
 }
 
 /**
@@ -290,7 +292,7 @@ static void ansi_code_open(mdp_buf_t *out, const char *language, size_t len) {
  * @return None.
  */
 static void ansi_code_text(mdp_buf_t *out, const char *text, size_t len) {
-    kc_mdp_buf_puts(out, "  ");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_CODE_INDENT);
     kc_mdp_buf_write(out, text, len);
     kc_mdp_buf_putc(out, '\n');
 }
@@ -301,7 +303,8 @@ static void ansi_code_text(mdp_buf_t *out, const char *text, size_t len) {
  * @return None.
  */
 static void ansi_code_close(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out, "\x1b[22m");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_CODE_BLOCK_CLOSE);
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_CODE_BLOCK_GAP);
 }
 
 /**
@@ -310,8 +313,8 @@ static void ansi_code_close(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_horizontal_rule(mdp_buf_t *out) {
-    kc_mdp_buf_puts(out,
-        "────────────────────────────────────────\n");
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_HORIZONTAL_RULE);
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_HORIZONTAL_RULE_GAP);
 }
 
 /**
@@ -329,7 +332,7 @@ static void ansi_table_open(mdp_buf_t *out) {
  * @return None.
  */
 static void ansi_table_close(mdp_buf_t *out) {
-    (void)out;
+    kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_GAP);
 }
 
 /**
@@ -340,7 +343,7 @@ static void ansi_table_close(mdp_buf_t *out) {
  */
 static void ansi_table_row_open(mdp_buf_t *out, int header) {
     if (header) {
-        kc_mdp_buf_puts(out, "\x1b[1m");
+        kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_HEADER_OPEN);
     }
 }
 
@@ -352,7 +355,7 @@ static void ansi_table_row_open(mdp_buf_t *out, int header) {
  */
 static void ansi_table_row_close(mdp_buf_t *out, int header) {
     if (header) {
-        kc_mdp_buf_puts(out, "\x1b[22m");
+        kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_HEADER_CLOSE);
     }
     kc_mdp_buf_putc(out, '\n');
 }
@@ -367,7 +370,7 @@ static void ansi_table_row_close(mdp_buf_t *out, int header) {
 static void ansi_table_cell_open(mdp_buf_t *out, int header, int first) {
     (void)header;
     if (!first) {
-        kc_mdp_buf_puts(out, " │ ");
+        kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_SEPARATOR);
     }
 }
 
