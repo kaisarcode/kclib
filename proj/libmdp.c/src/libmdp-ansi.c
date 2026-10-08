@@ -288,23 +288,23 @@ static void ansi_render_table(mdp_buf_t *out) {
     for (r = 0; r < state->count; r++) {
         ansi_row_t *row = &state->rows[r];
 
-        if (row->header) {
-            kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_HEADER_OPEN);
-        }
         for (c = 0; c < columns; c++) {
             size_t width = 0;
 
             if (c < row->count) {
+                if (row->header) {
+                    kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_HEADER_OPEN);
+                }
                 kc_mdp_buf_puts(out, row->cells[c].text);
+                if (row->header) {
+                    kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_HEADER_CLOSE);
+                }
                 width = row->cells[c].width;
             }
             ansi_pad(out, widths[c] - width);
             if (c + 1 < columns) {
                 kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_SEPARATOR);
             }
-        }
-        if (row->header) {
-            kc_mdp_buf_puts(out, KC_MDP_STYLE_TABLE_HEADER_CLOSE);
         }
         kc_mdp_buf_putc(out, '\n');
     }
