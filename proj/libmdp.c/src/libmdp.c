@@ -687,6 +687,28 @@ static int kc_mdp_is_sep(const char *s, size_t len) {
 }
 
 /**
+ * Finds the next real table-cell delimiter outside inline code.
+ * @param s Row text.
+ * @param start Search start offset.
+ * @param len Row byte count.
+ * @return Delimiter offset or len when no delimiter remains.
+ */
+static size_t kc_mdp_table_cell_end(const char *s, size_t start, size_t len) {
+    size_t i = start;
+    int in_code = 0;
+
+    while (i < len) {
+        if (s[i] == '`') {
+            in_code = !in_code;
+        } else if (s[i] == '|' && !in_code) {
+            break;
+        }
+        i++;
+    }
+    return i;
+}
+
+/**
  * Parses and renders one Markdown table row.
  * @param out Target buffer.
  * @param renderer Active renderer.
@@ -706,7 +728,7 @@ static int kc_mdp_table_row(mdp_buf_t *out,
     while (i < len) {
         while (i < len && s[i] == ' ') i++;
         cs = i;
-        while (i < len && s[i] != '|') i++;
+        i = kc_mdp_table_cell_end(s, i, len);
         ce = i;
         while (ce > cs && s[ce - 1] == ' ') ce--;
         if (cs == ce && i >= len) break;
