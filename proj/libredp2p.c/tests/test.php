@@ -455,7 +455,10 @@ import RedP2P from "../imp/redp2p.js";
     let passed = 0;
     let failed = 0;
 
-    /** Appends one terminal line. */
+    /**
+     * Appends one terminal line.
+     * @return None.
+     */
     function write(text, className = "info") {
         const line = document.createElement("div");
         line.className = className;
@@ -464,7 +467,10 @@ import RedP2P from "../imp/redp2p.js";
         window.scrollTo(0, document.body.scrollHeight);
     }
 
-    /** Records one test result. */
+    /**
+     * Records one test result.
+     * @return None.
+     */
     function report(ok, name, detail = "") {
         results.push({ok, name, detail});
         if (ok) {
@@ -492,12 +498,18 @@ import RedP2P from "../imp/redp2p.js";
         }
     }
 
-    /** Throws when a test invariant is false. */
+    /**
+     * Throws when a test invariant is false.
+     * @return None.
+     */
     function assert(condition, message) {
         if (!condition) throw new Error(message);
     }
 
-    /** Converts received binary data to a byte view. */
+    /**
+     * Converts received binary data to a byte view.
+     * @return Byte view.
+     */
     function bytes(value) {
         if (value instanceof ArrayBuffer) return new Uint8Array(value);
         if (ArrayBuffer.isView(value)) {
@@ -506,7 +518,10 @@ import RedP2P from "../imp/redp2p.js";
         throw new Error("expected binary payload");
     }
 
-    /** Compares text or binary payloads exactly. */
+    /**
+     * Compares text or binary payloads exactly.
+     * @return Whether both payloads are equal.
+     */
     function samePayload(expected, actual) {
         if (typeof expected === "string") {
             return typeof actual === "string" && expected === actual;
@@ -520,7 +535,10 @@ import RedP2P from "../imp/redp2p.js";
         return true;
     }
 
-    /** Creates deterministic binary test data. */
+    /**
+     * Creates deterministic binary test data.
+     * @return Binary payload.
+     */
     function binaryPayload(size, seed = 17) {
         const data = new Uint8Array(size);
         for (let i = 0; i < data.length; i += 1) {
@@ -547,7 +565,10 @@ import RedP2P from "../imp/redp2p.js";
         return {response, value};
     }
 
-    /** Removes one disconnected client from its publisher labels. */
+    /**
+     * Removes one disconnected client from its publisher labels.
+     * @return None.
+     */
     function removePublisherClient(state, client) {
         state.clients.delete(client);
         for (const [label, current] of state.clientsByLabel.entries()) {
@@ -593,7 +614,10 @@ import RedP2P from "../imp/redp2p.js";
         return state;
     }
 
-    /** Rejects all pending receives for one consumer. */
+    /**
+     * Rejects all pending receives for one consumer.
+     * @return None.
+     */
     function rejectConsumerWaiters(state, error) {
         while (state.waiters.length > 0) {
             const waiter = state.waiters.shift();
@@ -602,7 +626,10 @@ import RedP2P from "../imp/redp2p.js";
         }
     }
 
-    /** Waits for the next application message on one consumer. */
+    /**
+     * Waits for the next application message on one consumer.
+     * @return Pending received payload.
+     */
     function nextConsumerMessage(state, timeoutMs = 15000) {
         if (state.buffered.length > 0) {
             return Promise.resolve(state.buffered.shift());
@@ -680,7 +707,10 @@ import RedP2P from "../imp/redp2p.js";
         return state;
     }
 
-    /** Closes one consumer capability once. */
+    /**
+     * Closes one consumer capability once.
+     * @return None.
+     */
     function closeConsumer(state) {
         if (!state || state.closed) return;
         state.closed = true;
@@ -688,7 +718,10 @@ import RedP2P from "../imp/redp2p.js";
         rejectConsumerWaiters(state, new Error(`${state.label} closed`));
     }
 
-    /** Returns currently open consumers. */
+    /**
+     * Returns currently open consumers.
+     * @return Open consumer states.
+     */
     function activeConsumers() {
         return consumers.filter(state => !state.closed);
     }
