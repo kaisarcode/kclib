@@ -60,12 +60,55 @@ typedef struct {
     void (*raw_block)(mdp_buf_t *out, const char *text, size_t len);
 } kc_mdp_renderer_t;
 
+/**
+ * Appends bytes to an internal growable render buffer.
+ * @param buf Target buffer.
+ * @param data Bytes to append.
+ * @param len Byte count.
+ * @return None.
+ */
 void kc_mdp_buf_write(mdp_buf_t *buf, const void *data, size_t len);
+
+/**
+ * Appends a NUL-terminated string to an internal render buffer.
+ * @param buf Target buffer.
+ * @param text String to append.
+ * @return None.
+ */
 void kc_mdp_buf_puts(mdp_buf_t *buf, const char *text);
+
+/**
+ * Appends one byte to an internal render buffer.
+ * @param buf Target buffer.
+ * @param c Byte to append.
+ * @return None.
+ */
 void kc_mdp_buf_putc(mdp_buf_t *buf, char c);
+
+/**
+ * Parses Markdown and emits semantic events to one renderer.
+ * @param body Markdown body text.
+ * @param out Target output buffer.
+ * @param renderer Renderer callback table.
+ * @return MDP_OK on success, MDP_ERROR on failure.
+ */
 int kc_mdp_parse(const char *body, mdp_buf_t *out,
     const kc_mdp_renderer_t *renderer);
+
+/**
+ * Renders a Markdown body through the HTML backend.
+ * @param body Markdown body text.
+ * @param out Target output buffer.
+ * @return MDP_OK on success, MDP_ERROR on failure.
+ */
 int kc_mdp_render_html(const char *body, mdp_buf_t *out);
+
+/**
+ * Renders a Markdown body through the ANSI backend.
+ * @param body Markdown body text.
+ * @param out Target output buffer.
+ * @return MDP_OK on success, MDP_ERROR on failure.
+ */
 int kc_mdp_render_ansi(const char *body, mdp_buf_t *out);
 
 #endif
