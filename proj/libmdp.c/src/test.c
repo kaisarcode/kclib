@@ -104,7 +104,6 @@ static int case_kc_mdp_open(void) {
     fail += expect_int("open rejects NULL input", KC_MDP_ERROR,
         kc_mdp_open(&mdp, NULL));
     fail += expect_true("failed open clears output", mdp == NULL);
-
     fail += expect_int("open accepts document", KC_MDP_OK,
         kc_mdp_open(&mdp, input));
     fail += expect_true("open returns document", mdp != NULL);
@@ -133,9 +132,7 @@ static int case_kc_mdp_html(void) {
     kc_mdp_t *mdp = NULL;
     int fail = 0;
 
-    fail += expect_true("html rejects NULL document",
-        kc_mdp_html(NULL) == NULL);
-
+    fail += expect_true("html rejects NULL document", kc_mdp_html(NULL) == NULL);
     fail += expect_int("open composite document", KC_MDP_OK,
         kc_mdp_open(&mdp,
             "---\ntitle: Home\n---\n# Hello\n\n"
@@ -155,8 +152,7 @@ static int case_kc_mdp_html(void) {
         fail += expect_true("html renders list",
             strstr(first, "<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n") != NULL);
         fail += expect_true("html renders blockquote",
-            strstr(first,
-                "<blockquote>\n<p>quote</p>\n</blockquote>\n") != NULL);
+            strstr(first, "<blockquote>\n<p>quote</p>\n</blockquote>\n") != NULL);
         fail += expect_true("html escapes fenced code",
             strstr(first, "<pre><code>&lt;a&gt;\n</code></pre>\n") != NULL);
         fail += expect_true("html renders horizontal rule",
@@ -165,16 +161,13 @@ static int case_kc_mdp_html(void) {
             strstr(first, "<div>\n*raw*\n</div>\n") != NULL);
         fail += expect_true("html excludes frontmatter",
             strstr(first, "title: Home") == NULL);
-
         second = kc_mdp_html(mdp);
         fail += expect_true("html reuses cached result", second == first);
     }
-
     kc_mdp_close(mdp);
 
     mdp = NULL;
-    fail += expect_int("open empty document", KC_MDP_OK,
-        kc_mdp_open(&mdp, ""));
+    fail += expect_int("open empty document", KC_MDP_OK, kc_mdp_open(&mdp, ""));
     first = mdp ? kc_mdp_html(mdp) : NULL;
     fail += expect_true("html empty returns non-NULL", first != NULL);
     if (first != NULL) {
@@ -184,6 +177,60 @@ static int case_kc_mdp_html(void) {
 
     case_result(fail, "kc_mdp_html",
         "renders once and caches the supported Markdown contract");
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests ANSI rendering from the same Markdown parser semantics.
+ * @return 0 when the case passes, 1 otherwise.
+ */
+static int case_kc_mdp_ansi(void) {
+    const char *first;
+    const char *second;
+    kc_mdp_t *mdp = NULL;
+    int fail = 0;
+
+    fail += expect_true("ansi rejects NULL document", kc_mdp_ansi(NULL) == NULL);
+    fail += expect_int("open ANSI document", KC_MDP_OK,
+        kc_mdp_open(&mdp,
+            "## Subtitle\n\n"
+            "Text **bold** *italic* `code` and ~~gone~~.\n\n"
+            "1. first\n2. second\n\n"
+            "- [ ] todo\n- [x] done\n\n"
+            "| Name | Value |\n| --- | --- |\n| one | two |\n\n"
+            "> quote\n\n"
+            "```c\nint x = 1;\n```\n"));
+
+    first = mdp ? kc_mdp_ansi(mdp) : NULL;
+    fail += expect_true("ansi returns non-NULL", first != NULL);
+    if (first != NULL) {
+        fail += expect_true("ansi removes heading markers",
+            strstr(first, "## Subtitle") == NULL);
+        fail += expect_true("ansi styles heading",
+            strstr(first, "\x1b[1m\x1b[4mSubtitle\x1b[24m\x1b[22m\n") != NULL);
+        fail += expect_true("ansi styles inline Markdown",
+            strstr(first,
+                "Text \x1b[1mbold\x1b[22m \x1b[3mitalic\x1b[23m "
+                "\x1b[7mcode\x1b[27m and \x1b[9mgone\x1b[29m.") != NULL);
+        fail += expect_true("ansi renders ordered list",
+            strstr(first, "  1. first\n  2. second\n") != NULL);
+        fail += expect_true("ansi renders task list",
+            strstr(first, "  ☐ todo\n  ☑ done\n") != NULL);
+        fail += expect_true("ansi renders table semantics",
+            strstr(first, "\x1b[1mName │ Value\x1b[22m\none │ two\n") != NULL);
+        fail += expect_true("ansi renders quote without markdown marker",
+            strstr(first, "\x1b[2mquote\n\x1b[22m") != NULL);
+        fail += expect_true("ansi renders fenced code without fences",
+            strstr(first, "\x1b[2m  int x = 1;\n\x1b[22m") != NULL);
+        fail += expect_true("ansi contains no fenced code marker",
+            strstr(first, "```") == NULL);
+        second = kc_mdp_ansi(mdp);
+        fail += expect_true("ansi reuses cached result", second == first);
+    }
+    kc_mdp_close(mdp);
+
+    case_result(fail, "kc_mdp_ansi",
+        "renders terminal output through the shared Markdown parser");
     return fail == 0 ? 0 : 1;
 }
 
@@ -218,8 +265,7 @@ static int case_kc_mdp_extensions(void) {
                 "</thead>\n<tbody>\n<tr><td>one</td><td>two</td></tr>\n"
                 "</tbody>\n</table>\n") != NULL);
         fail += expect_true("renders unchecked task",
-            strstr(html,
-                "<li><input type=\"checkbox\" disabled> todo</li>\n") != NULL);
+            strstr(html, "<li><input type=\"checkbox\" disabled> todo</li>\n") != NULL);
         fail += expect_true("renders checked task",
             strstr(html,
                 "<li><input type=\"checkbox\" disabled checked> done</li>\n") != NULL);
@@ -243,9 +289,7 @@ static int case_kc_mdp_body(void) {
     const char *second;
     int fail = 0;
 
-    fail += expect_true("body rejects NULL document",
-        kc_mdp_body(NULL) == NULL);
-
+    fail += expect_true("body rejects NULL document", kc_mdp_body(NULL) == NULL);
     fail += expect_int("open LF frontmatter", KC_MDP_OK,
         kc_mdp_open(&mdp, "---\ntitle: Home\n---\n# Hello"));
     first = mdp ? kc_mdp_body(mdp) : NULL;
@@ -269,8 +313,7 @@ static int case_kc_mdp_body(void) {
     kc_mdp_close(mdp);
 
     mdp = NULL;
-    fail += expect_int("open empty body", KC_MDP_OK,
-        kc_mdp_open(&mdp, ""));
+    fail += expect_int("open empty body", KC_MDP_OK, kc_mdp_open(&mdp, ""));
     fail += expect_string("body empty returns empty string",
         "", mdp ? kc_mdp_body(mdp) : NULL);
     kc_mdp_close(mdp);
@@ -290,15 +333,12 @@ static int case_kc_mdp_meta(void) {
     const char *second;
     int fail = 0;
 
-    fail += expect_true("meta rejects NULL document",
-        kc_mdp_meta(NULL) == NULL);
-
+    fail += expect_true("meta rejects NULL document", kc_mdp_meta(NULL) == NULL);
     fail += expect_int("open LF metadata", KC_MDP_OK,
         kc_mdp_open(&mdp, "---\ntitle: Home\n---\n# Hello"));
     first = mdp ? kc_mdp_meta(mdp) : NULL;
     second = mdp ? kc_mdp_meta(mdp) : NULL;
-    fail += expect_string("meta LF returns raw frontmatter",
-        "title: Home", first);
+    fail += expect_string("meta LF returns raw frontmatter", "title: Home", first);
     fail += expect_true("meta returns stable view", second == first);
     kc_mdp_close(mdp);
 
@@ -340,10 +380,9 @@ static int case_kc_mdp_close(void) {
         kc_mdp_open(&mdp, "# Hello"));
     fail += expect_true("document allocated for close", mdp != NULL);
     if (mdp != NULL) {
-        fail += expect_true("html can be cached before close",
-            kc_mdp_html(mdp) != NULL);
+        fail += expect_true("html can be cached before close", kc_mdp_html(mdp) != NULL);
+        fail += expect_true("ansi can be cached before close", kc_mdp_ansi(mdp) != NULL);
     }
-
     kc_mdp_close(mdp);
     kc_mdp_close(NULL);
 
@@ -372,10 +411,11 @@ static int case_kc_mdp_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 7;
+    test_case_total = 8;
     test_case_current = 0;
     run_case(&rc, case_kc_mdp_open);
     run_case(&rc, case_kc_mdp_html);
+    run_case(&rc, case_kc_mdp_ansi);
     run_case(&rc, case_kc_mdp_extensions);
     run_case(&rc, case_kc_mdp_body);
     run_case(&rc, case_kc_mdp_meta);
@@ -400,6 +440,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_mdp_open") == 0) return case_kc_mdp_open();
     if (strcmp(argv[1], "kc_mdp_html") == 0) return case_kc_mdp_html();
+    if (strcmp(argv[1], "kc_mdp_ansi") == 0) return case_kc_mdp_ansi();
     if (strcmp(argv[1], "kc_mdp_extensions") == 0) return case_kc_mdp_extensions();
     if (strcmp(argv[1], "kc_mdp_body") == 0) return case_kc_mdp_body();
     if (strcmp(argv[1], "kc_mdp_meta") == 0) return case_kc_mdp_meta();
