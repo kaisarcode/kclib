@@ -412,7 +412,7 @@ static size_t kc_mdp_ordered_item(const char *s) {
 
 static void kc_mdp_list_item(mdp_buf_t *out, const char *text, int tasks) {
     mdp_buf_puts(out, "<li>");
-    if (tasks && text[0] == '[' && text[2] == ']' && text[3] == ' ' &&
+    if (tasks && text[0] == '[' && text[1] && text[2] == ']' && text[3] == ' ' &&
         (text[1] == ' ' || text[1] == 'x' || text[1] == 'X')) {
         mdp_buf_puts(out, "<input type=\"checkbox\" disabled");
         if (text[1] == 'x' || text[1] == 'X') mdp_buf_puts(out, " checked");
