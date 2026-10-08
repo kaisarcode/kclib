@@ -1,3 +1,12 @@
+/**
+ * libmdp_internal.h - Markdown Parser Internals
+ * Summary: Shared semantic renderer contract for mdp backends.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+
 #ifndef KC_MDP_INTERNAL_H
 #define KC_MDP_INTERNAL_H
 
