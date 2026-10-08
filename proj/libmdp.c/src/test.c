@@ -223,14 +223,14 @@ static int case_kc_mdp_ansi(void) {
             strstr(first, "  ☐ todo\n  ☑ done\n") != NULL);
         fail += expect_true("ansi aligns table columns",
             strstr(first,
-                "\x1b[1mName\x1b[22m       │ "
+                "\x1b[1mName\x1b[22m        │ "
                 "\x1b[1mValue\x1b[22m    \n"
-                "one        │ two      \n"
+                "one         │ two      \n"
                 "longer-name │ 7        \n"
-                "code       │ \x1b[2m| x | y |\x1b[22m\n\n") != NULL);
+                "code        │ \x1b[2m| x | y |\x1b[22m\n\n") != NULL);
         fail += expect_true("ansi keeps header separator normal weight",
             strstr(first,
-                "\x1b[22m       │ \x1b[1mValue") != NULL);
+                "\x1b[22m        │ \x1b[1mValue") != NULL);
         fail += expect_true("ansi keeps code pipes in one table cell",
             strstr(first, "│ \x1b[2m| x | y |\x1b[22m\n") != NULL);
         fail += expect_true("ansi renders quote without markdown marker",
