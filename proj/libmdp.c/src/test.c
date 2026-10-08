@@ -200,7 +200,8 @@ static int case_kc_mdp_ansi(void) {
             "1. first\n2. second\n\n"
             "- [ ] todo\n- [x] done\n\n"
             "| Name | Value |\n| --- | --- |\n"
-            "| one | two |\n| longer-name | 7 |\n\n"
+            "| one | two |\n| longer-name | 7 |\n"
+            "| code | `| x | y |` |\n\n"
             "> quote\n\n"
             "```c\nint x = 1;\n```\n"));
 
@@ -222,9 +223,16 @@ static int case_kc_mdp_ansi(void) {
             strstr(first, "  ☐ todo\n  ☑ done\n") != NULL);
         fail += expect_true("ansi aligns table columns",
             strstr(first,
-                "\x1b[1mName        │ Value\x1b[22m\n"
-                "one         │ two  \n"
-                "longer-name │ 7    \n\n") != NULL);
+                "\x1b[1mName\x1b[22m       │ "
+                "\x1b[1mValue\x1b[22m    \n"
+                "one        │ two      \n"
+                "longer-name │ 7        \n"
+                "code       │ \x1b[2m| x | y |\x1b[22m\n\n") != NULL);
+        fail += expect_true("ansi keeps header separator normal weight",
+            strstr(first,
+                "\x1b[22m       │ \x1b[1mValue") != NULL);
+        fail += expect_true("ansi keeps code pipes in one table cell",
+            strstr(first, "│ \x1b[2m| x | y |\x1b[22m\n") != NULL);
         fail += expect_true("ansi renders quote without markdown marker",
             strstr(first,
                 "\x1b[2mquote\n\n\x1b[22m\n") != NULL);
@@ -256,7 +264,9 @@ static int case_kc_mdp_extensions(void) {
         kc_mdp_open(&mdp,
             "1. one\n2. two\n\n"
             "```c\nint main(void) {}\n```\n\n"
-            "| Name | Value |\n| --- | --- |\n| one | two |\n\n"
+            "| Name | Value |\n| --- | --- |\n"
+            "| one | two |\n"
+            "| code | `| --- | --- |` |\n\n"
             "- [ ] todo\n- [x] done\n\n"
             "~~removed~~\n"));
 
@@ -273,7 +283,11 @@ static int case_kc_mdp_extensions(void) {
             strstr(html,
                 "<table>\n<thead>\n<tr><th>Name</th><th>Value</th></tr>\n"
                 "</thead>\n<tbody>\n<tr><td>one</td><td>two</td></tr>\n"
+                "<tr><td>code</td><td><code>| --- | --- |</code></td></tr>\n"
                 "</tbody>\n</table>\n") != NULL);
+        fail += expect_true("table code pipes stay in one HTML cell",
+            strstr(html,
+                "<td><code>| --- | --- |</code></td>") != NULL);
         fail += expect_true("renders unchecked task",
             strstr(html,
                 "<li><input type=\"checkbox\" disabled> todo</li>\n") != NULL);
