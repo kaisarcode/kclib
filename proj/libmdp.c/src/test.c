@@ -209,31 +209,26 @@ static int case_kc_mdp_ansi(void) {
         fail += expect_true("ansi removes heading markers",
             strstr(first, "## Subtitle") == NULL);
         fail += expect_true("ansi styles heading",
-            strstr(first,
-                "\x1b[36m\x1b[1mSubtitle\x1b[22m\x1b[39m\n\n") != NULL);
+            strstr(first, "\x1b[1mSubtitle\x1b[22m\n\n") != NULL);
         fail += expect_true("ansi styles inline Markdown",
             strstr(first,
                 "Text \x1b[1mbold\x1b[22m \x1b[3mitalic\x1b[23m "
-                "\x1b[33m\x1b[7mcode\x1b[27m\x1b[39m and "
-                "\x1b[9mgone\x1b[29m.\x1b[39m\n\n") != NULL);
+                "\x1b[2mcode\x1b[22m and "
+                "\x1b[9mgone\x1b[29m.\n\n") != NULL);
         fail += expect_true("ansi renders ordered list",
             strstr(first, "  1. first\n  2. second\n") != NULL);
         fail += expect_true("ansi renders task list",
-            strstr(first,
-                "\x1b[36m  ☐ \x1b[39mtodo\n"
-                "\x1b[36m  ☑ \x1b[39mdone\n") != NULL);
+            strstr(first, "  ☐ todo\n  ☑ done\n") != NULL);
         fail += expect_true("ansi renders table semantics",
             strstr(first,
-                "\x1b[1mName │ Value\x1b[22m\x1b[39m\n"
+                "\x1b[1mName │ Value\x1b[22m\n"
                 "one │ two\n") != NULL);
         fail += expect_true("ansi renders quote without markdown marker",
             strstr(first,
-                "\x1b[90m\x1b[2mquote\x1b[39m\n\n"
-                "\x1b[22m\x1b[39m\n") != NULL);
+                "\x1b[2mquote\n\n\x1b[22m\n") != NULL);
         fail += expect_true("ansi renders fenced code without fences",
             strstr(first,
-                "\x1b[33m\x1b[2m  int x = 1;\n"
-                "\x1b[22m\x1b[39m\n\n") != NULL);
+                "\x1b[2m  int x = 1;\n\x1b[22m\n\n") != NULL);
         fail += expect_true("ansi contains no fenced code marker",
             strstr(first, "```") == NULL);
         second = kc_mdp_ansi(mdp);
