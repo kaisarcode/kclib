@@ -221,18 +221,22 @@ static int case_kc_mdp_ansi(void) {
             strstr(first, "  1. first\n  2. second\n") != NULL);
         fail += expect_true("ansi renders task list",
             strstr(first, "  ☐ todo\n  ☑ done\n") != NULL);
-        fail += expect_true("ansi aligns table columns",
+        fail += expect_true("ansi renders boxed table",
             strstr(first,
-                "\x1b[1mName\x1b[22m        │ "
-                "\x1b[1mValue\x1b[22m    \n"
-                "one         │ two      \n"
-                "longer-name │ 7        \n"
-                "code        │ \x1b[2m| x | y |\x1b[22m\n\n") != NULL);
-        fail += expect_true("ansi keeps header separator normal weight",
+                "+-------------+-----------+\n"
+                "| \x1b[1mName\x1b[22m        | "
+                "\x1b[1mValue\x1b[22m     |\n"
+                "+-------------+-----------+\n"
+                "| one         | two       |\n"
+                "| longer-name | 7         |\n"
+                "| code        | \x1b[2m| x | y |\x1b[22m |\n"
+                "+-------------+-----------+\n\n") != NULL);
+        fail += expect_true("ansi keeps header borders normal weight",
             strstr(first,
-                "\x1b[22m        │ \x1b[1mValue") != NULL);
+                "\x1b[22m        | \x1b[1mValue") != NULL);
         fail += expect_true("ansi keeps code pipes in one table cell",
-            strstr(first, "│ \x1b[2m| x | y |\x1b[22m\n") != NULL);
+            strstr(first,
+                "| code        | \x1b[2m| x | y |\x1b[22m |\n") != NULL);
         fail += expect_true("ansi renders quote without markdown marker",
             strstr(first,
                 "\x1b[2mquote\n\n\x1b[22m\n") != NULL);
