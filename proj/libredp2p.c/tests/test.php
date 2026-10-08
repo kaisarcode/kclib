@@ -485,7 +485,10 @@ import RedP2P from "../imp/redp2p.js";
         );
     }
 
-    /** Executes one test without aborting the remaining suite. */
+    /**
+     * Executes one test without aborting the remaining suite.
+     * @return Test success.
+     */
     async function test(name, callback) {
         try {
             await callback();
@@ -547,7 +550,10 @@ import RedP2P from "../imp/redp2p.js";
         return data;
     }
 
-    /** Reads a JSON response from the local test index. */
+    /**
+     * Reads a JSON response from the local test index.
+     * @return Response and JSON body.
+     */
     async function indexRequest(body) {
         const response = await fetch(index, {
             method: "POST",
@@ -576,7 +582,10 @@ import RedP2P from "../imp/redp2p.js";
         }
     }
 
-    /** Starts one echo publisher used by the integration suite. */
+    /**
+     * Starts one echo publisher used by the integration suite.
+     * @return Publisher state.
+     */
     async function createPublisher(id) {
         const state = {
             id,
@@ -645,7 +654,10 @@ import RedP2P from "../imp/redp2p.js";
         });
     }
 
-    /** Sends one message and waits for the publisher echo. */
+    /**
+     * Sends one message and waits for the publisher echo.
+     * @return Echoed payload.
+     */
     async function roundtrip(state, payload, timeoutMs = 15000) {
         const reply = nextConsumerMessage(state, timeoutMs);
         try {
@@ -661,7 +673,10 @@ import RedP2P from "../imp/redp2p.js";
         return reply;
     }
 
-    /** Connects one labeled consumer and binds it to its publisher client. */
+    /**
+     * Connects one labeled consumer and binds it to its publisher client.
+     * @return Consumer state.
+     */
     async function createConsumer(publisherId, label) {
         const state = {
             publisherId,
@@ -726,7 +741,10 @@ import RedP2P from "../imp/redp2p.js";
         return consumers.filter(state => !state.closed);
     }
 
-    /** Delivers one payload directly from publisher to consumer. */
+    /**
+     * Delivers one payload directly from publisher to consumer.
+     * @return Received payload.
+     */
     async function publisherToConsumer(state, payload) {
         const publisher = publishers.get(state.publisherId);
         assert(publisher, `${state.label} publisher unavailable`);
@@ -737,7 +755,10 @@ import RedP2P from "../imp/redp2p.js";
         return received;
     }
 
-    /** Closes every resource still owned by the test page. */
+    /**
+     * Closes every resource still owned by the test page.
+     * @return None.
+     */
     async function cleanup() {
         for (const state of activeConsumers()) {
             try {
@@ -754,7 +775,10 @@ import RedP2P from "../imp/redp2p.js";
         await Promise.all(closing);
     }
 
-    /** Posts the final suite result back to the CLI harness. */
+    /**
+     * Posts the final suite result back to the CLI harness.
+     * @return None.
+     */
     async function submitResult() {
         const endpoint = new URL(location.pathname, location.href);
         endpoint.searchParams.set("result", "1");

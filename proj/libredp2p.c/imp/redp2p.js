@@ -131,7 +131,10 @@ async function waitIce(peer, timeoutMs = 15000) {
         let timeout = null;
         let finished = false;
 
-        /** Removes ICE wait resources. */
+        /**
+         * Removes ICE wait resources.
+         * @return None.
+         */
         const cleanup = () => {
             if (timeout !== null) {
                 clearTimeout(timeout);
@@ -140,7 +143,10 @@ async function waitIce(peer, timeoutMs = 15000) {
             peer.removeEventListener("icegatheringstatechange", changed);
         };
 
-        /** Resolves ICE wait once. */
+        /**
+         * Resolves ICE wait once.
+         * @return None.
+         */
         const finish = () => {
             if (finished) {
                 return;
@@ -150,14 +156,20 @@ async function waitIce(peer, timeoutMs = 15000) {
             resolve();
         };
 
-        /** Handles the end-of-candidates notification. */
+        /**
+         * Handles the end-of-candidates notification.
+         * @return None.
+         */
         const candidateChanged = event => {
             if (event.candidate === null) {
                 finish();
             }
         };
 
-        /** Handles gathering state changes. */
+        /**
+         * Handles gathering state changes.
+         * @return None.
+         */
         const changed = () => {
             if (peer.iceGatheringState === "complete") {
                 finish();
@@ -558,7 +570,10 @@ class RedP2PClient {
 
         channel.binaryType = "arraybuffer";
 
-        /** Reports an opened channel. */
+        /**
+         * Reports an opened channel.
+         * @return None.
+         */
         const connected = () => {
             if (this._connect) {
                 this._connect(this);
@@ -1212,13 +1227,19 @@ async function waitChannel(channel, timeoutMs = 30000) {
             ));
         }, timeoutMs);
 
-        /** Resolves an opened channel wait. */
+        /**
+         * Resolves an opened channel wait.
+         * @return None.
+         */
         const opened = () => {
             cleanup();
             resolve();
         };
 
-        /** Rejects a failed channel wait. */
+        /**
+         * Rejects a failed channel wait.
+         * @return None.
+         */
         const failed = () => {
             cleanup();
             reject(new RedP2PError(
@@ -1227,7 +1248,10 @@ async function waitChannel(channel, timeoutMs = 30000) {
             ));
         };
 
-        /** Removes channel wait resources. */
+        /**
+         * Removes channel wait resources.
+         * @return None.
+         */
         const cleanup = () => {
             clearTimeout(timeout);
             channel.removeEventListener("open", opened);
