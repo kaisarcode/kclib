@@ -1,0 +1,179 @@
+/**
+ * style.h - Markdown ANSI presentation style
+ * Summary: Configurable terminal colors, attributes, and block spacing.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+
+#ifndef KC_MDP_STYLE_H
+#define KC_MDP_STYLE_H
+
+#ifndef KC_MDP_STYLE_COLOR_HEADING
+#define KC_MDP_STYLE_COLOR_HEADING "\x1b[36m"
+#endif
+
+#ifndef KC_MDP_STYLE_COLOR_TEXT
+#define KC_MDP_STYLE_COLOR_TEXT ""
+#endif
+
+#ifndef KC_MDP_STYLE_COLOR_LINK
+#define KC_MDP_STYLE_COLOR_LINK "\x1b[34m"
+#endif
+
+#ifndef KC_MDP_STYLE_COLOR_CODE
+#define KC_MDP_STYLE_COLOR_CODE "\x1b[33m"
+#endif
+
+#ifndef KC_MDP_STYLE_COLOR_QUOTE
+#define KC_MDP_STYLE_COLOR_QUOTE "\x1b[90m"
+#endif
+
+#ifndef KC_MDP_STYLE_COLOR_TABLE
+#define KC_MDP_STYLE_COLOR_TABLE ""
+#endif
+
+#ifndef KC_MDP_STYLE_COLOR_TASK
+#define KC_MDP_STYLE_COLOR_TASK "\x1b[36m"
+#endif
+
+#ifndef KC_MDP_STYLE_COLOR_RESET
+#define KC_MDP_STYLE_COLOR_RESET "\x1b[39m"
+#endif
+
+#ifndef KC_MDP_STYLE_STRONG_OPEN
+#define KC_MDP_STYLE_STRONG_OPEN "\x1b[1m"
+#endif
+
+#ifndef KC_MDP_STYLE_STRONG_CLOSE
+#define KC_MDP_STYLE_STRONG_CLOSE "\x1b[22m"
+#endif
+
+#ifndef KC_MDP_STYLE_EM_OPEN
+#define KC_MDP_STYLE_EM_OPEN "\x1b[3m"
+#endif
+
+#ifndef KC_MDP_STYLE_EM_CLOSE
+#define KC_MDP_STYLE_EM_CLOSE "\x1b[23m"
+#endif
+
+#ifndef KC_MDP_STYLE_STRIKE_OPEN
+#define KC_MDP_STYLE_STRIKE_OPEN "\x1b[9m"
+#endif
+
+#ifndef KC_MDP_STYLE_STRIKE_CLOSE
+#define KC_MDP_STYLE_STRIKE_CLOSE "\x1b[29m"
+#endif
+
+#ifndef KC_MDP_STYLE_CODE_INLINE_OPEN
+#define KC_MDP_STYLE_CODE_INLINE_OPEN \
+    KC_MDP_STYLE_COLOR_CODE "\x1b[7m"
+#endif
+
+#ifndef KC_MDP_STYLE_CODE_INLINE_CLOSE
+#define KC_MDP_STYLE_CODE_INLINE_CLOSE \
+    "\x1b[27m" KC_MDP_STYLE_COLOR_RESET
+#endif
+
+#ifndef KC_MDP_STYLE_HEADING_OPEN
+#define KC_MDP_STYLE_HEADING_OPEN \
+    KC_MDP_STYLE_COLOR_HEADING KC_MDP_STYLE_STRONG_OPEN
+#endif
+
+#ifndef KC_MDP_STYLE_HEADING_CLOSE
+#define KC_MDP_STYLE_HEADING_CLOSE \
+    KC_MDP_STYLE_STRONG_CLOSE KC_MDP_STYLE_COLOR_RESET
+#endif
+
+#ifndef KC_MDP_STYLE_QUOTE_OPEN
+#define KC_MDP_STYLE_QUOTE_OPEN KC_MDP_STYLE_COLOR_QUOTE "\x1b[2m"
+#endif
+
+#ifndef KC_MDP_STYLE_QUOTE_CLOSE
+#define KC_MDP_STYLE_QUOTE_CLOSE "\x1b[22m" KC_MDP_STYLE_COLOR_RESET
+#endif
+
+#ifndef KC_MDP_STYLE_CODE_BLOCK_OPEN
+#define KC_MDP_STYLE_CODE_BLOCK_OPEN KC_MDP_STYLE_COLOR_CODE "\x1b[2m"
+#endif
+
+#ifndef KC_MDP_STYLE_CODE_BLOCK_CLOSE
+#define KC_MDP_STYLE_CODE_BLOCK_CLOSE \
+    "\x1b[22m" KC_MDP_STYLE_COLOR_RESET
+#endif
+
+#ifndef KC_MDP_STYLE_TABLE_HEADER_OPEN
+#define KC_MDP_STYLE_TABLE_HEADER_OPEN \
+    KC_MDP_STYLE_COLOR_TABLE KC_MDP_STYLE_STRONG_OPEN
+#endif
+
+#ifndef KC_MDP_STYLE_TABLE_HEADER_CLOSE
+#define KC_MDP_STYLE_TABLE_HEADER_CLOSE \
+    KC_MDP_STYLE_STRONG_CLOSE KC_MDP_STYLE_COLOR_RESET
+#endif
+
+#ifndef KC_MDP_STYLE_LINK_OPEN
+#define KC_MDP_STYLE_LINK_OPEN KC_MDP_STYLE_COLOR_LINK
+#endif
+
+#ifndef KC_MDP_STYLE_LINK_CLOSE
+#define KC_MDP_STYLE_LINK_CLOSE KC_MDP_STYLE_COLOR_RESET
+#endif
+
+#ifndef KC_MDP_STYLE_PARAGRAPH_GAP
+#define KC_MDP_STYLE_PARAGRAPH_GAP "\n\n"
+#endif
+
+#ifndef KC_MDP_STYLE_HEADING_GAP
+#define KC_MDP_STYLE_HEADING_GAP "\n\n"
+#endif
+
+#ifndef KC_MDP_STYLE_LIST_GAP
+#define KC_MDP_STYLE_LIST_GAP "\n"
+#endif
+
+#ifndef KC_MDP_STYLE_QUOTE_GAP
+#define KC_MDP_STYLE_QUOTE_GAP "\n"
+#endif
+
+#ifndef KC_MDP_STYLE_CODE_BLOCK_GAP
+#define KC_MDP_STYLE_CODE_BLOCK_GAP "\n\n"
+#endif
+
+#ifndef KC_MDP_STYLE_TABLE_GAP
+#define KC_MDP_STYLE_TABLE_GAP "\n"
+#endif
+
+#ifndef KC_MDP_STYLE_HORIZONTAL_RULE_GAP
+#define KC_MDP_STYLE_HORIZONTAL_RULE_GAP "\n"
+#endif
+
+#ifndef KC_MDP_STYLE_LIST_BULLET
+#define KC_MDP_STYLE_LIST_BULLET "  • "
+#endif
+
+#ifndef KC_MDP_STYLE_TASK_OFF
+#define KC_MDP_STYLE_TASK_OFF \
+    KC_MDP_STYLE_COLOR_TASK "  ☐ " KC_MDP_STYLE_COLOR_RESET
+#endif
+
+#ifndef KC_MDP_STYLE_TASK_ON
+#define KC_MDP_STYLE_TASK_ON \
+    KC_MDP_STYLE_COLOR_TASK "  ☑ " KC_MDP_STYLE_COLOR_RESET
+#endif
+
+#ifndef KC_MDP_STYLE_CODE_INDENT
+#define KC_MDP_STYLE_CODE_INDENT "  "
+#endif
+
+#ifndef KC_MDP_STYLE_TABLE_SEPARATOR
+#define KC_MDP_STYLE_TABLE_SEPARATOR " │ "
+#endif
+
+#ifndef KC_MDP_STYLE_HORIZONTAL_RULE
+#define KC_MDP_STYLE_HORIZONTAL_RULE \
+    "────────────────────────────────────────\n"
+#endif
+
+#endif
