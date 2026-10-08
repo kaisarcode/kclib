@@ -175,25 +175,61 @@ static void ansi_paragraph_close(mdp_buf_t *out) {
 }
 
 /**
- * Opens a terminal heading style.
+ * Opens a terminal heading style for one Markdown level.
  * @param out Target buffer.
  * @param level Heading level.
  * @return None.
  */
 static void ansi_heading_open(mdp_buf_t *out, int level) {
-    (void)level;
-    kc_mdp_buf_puts(out, KC_MDP_STYLE_HEADING_OPEN);
+    switch (level) {
+        case 1:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H1_OPEN);
+            break;
+        case 2:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H2_OPEN);
+            break;
+        case 3:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H3_OPEN);
+            break;
+        case 4:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H4_OPEN);
+            break;
+        case 5:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H5_OPEN);
+            break;
+        default:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H6_OPEN);
+            break;
+    }
 }
 
 /**
- * Closes a terminal heading style.
+ * Closes a terminal heading style for one Markdown level.
  * @param out Target buffer.
  * @param level Heading level.
  * @return None.
  */
 static void ansi_heading_close(mdp_buf_t *out, int level) {
-    (void)level;
-    kc_mdp_buf_puts(out, KC_MDP_STYLE_HEADING_CLOSE);
+    switch (level) {
+        case 1:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H1_CLOSE);
+            break;
+        case 2:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H2_CLOSE);
+            break;
+        case 3:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H3_CLOSE);
+            break;
+        case 4:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H4_CLOSE);
+            break;
+        case 5:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H5_CLOSE);
+            break;
+        default:
+            kc_mdp_buf_puts(out, KC_MDP_STYLE_H6_CLOSE);
+            break;
+    }
     kc_mdp_buf_puts(out, KC_MDP_STYLE_HEADING_GAP);
 }
 
