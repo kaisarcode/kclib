@@ -231,11 +231,11 @@ static int case_kc_mdp_ansi(void) {
         fail += expect_true("ansi keeps code pipes in one table cell",
             strstr(first, "\x1b[2m| x | y |\x1b[22m") != NULL);
         fail += expect_true("ansi preserves inline-code backticks",
-            strstr(first, "\x1b[2m`code`\x1b[22m") != NULL);
+            strstr(first, "\x1b[2m `code` \x1b[22m") != NULL);
         fail += expect_true("ansi preserves fenced-code backticks",
-            strstr(first, "\x1b[2m``` ... ```\x1b[22m") != NULL);
+            strstr(first, "\x1b[2m ``` ... ``` \x1b[22m") != NULL);
         fail += expect_true("ansi preserves fenced language backticks",
-            strstr(first, "\x1b[2m```c ... ```\x1b[22m") != NULL);
+            strstr(first, "\x1b[2m ```c ... ``` \x1b[22m") != NULL);
         fail += expect_true("ansi renders quote without markdown marker",
             strstr(first,
                 "\x1b[2mquote\n\n\x1b[22m\n") != NULL);
@@ -290,11 +290,11 @@ static int case_kc_mdp_extensions(void) {
             strstr(html,
                 "<td><code>| --- | --- |</code></td>") != NULL);
         fail += expect_true("HTML preserves inline-code backticks",
-            strstr(html, "<td><code>`code`</code></td>") != NULL);
+            strstr(html, "<td><code> `code` </code></td>") != NULL);
         fail += expect_true("HTML preserves fenced-code backticks",
-            strstr(html, "<td><code>``` ... ```</code></td>") != NULL);
+            strstr(html, "<td><code> ``` ... ``` </code></td>") != NULL);
         fail += expect_true("HTML preserves fenced language backticks",
-            strstr(html, "<td><code>```c ... ```</code></td>") != NULL);
+            strstr(html, "<td><code> ```c ... ``` </code></td>") != NULL);
         fail += expect_true("renders unchecked task",
             strstr(html,
                 "<li><input type=\"checkbox\" disabled> todo</li>\n") != NULL);
