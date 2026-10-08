@@ -20,6 +20,13 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+/**
+ * Prints one canonical test-case result line.
+ * @param fail Nonzero when the case failed.
+ * @param name Canonical test-case name.
+ * @param description Human-readable test-case description.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *description) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, description);
@@ -27,11 +34,23 @@ static void case_result(int fail, const char *name, const char *description) {
 
 typedef int (*case_fn)(void);
 
+/**
+ * Executes one test case and accumulates its result.
+ * @param rc Aggregate failed-case count.
+ * @param fn Test-case function to execute.
+ * @return None.
+ */
 static void run_case(int *rc, case_fn fn) {
     test_case_current++;
     *rc += fn();
 }
 
+/**
+ * Verifies one boolean test expectation.
+ * @param name Expectation description.
+ * @param condition Nonzero when the expectation is satisfied.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_true(const char *name, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", name);
@@ -40,6 +59,13 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
+/**
+ * Verifies one integer test expectation.
+ * @param name Expectation description.
+ * @param expected Expected integer value.
+ * @param actual Actual integer value.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_int(const char *name, int expected, int actual) {
     if (expected != actual) {
         printf("[FAIL] %s: expected %d, got %d\n", name, expected, actual);
@@ -48,6 +74,13 @@ static int expect_int(const char *name, int expected, int actual) {
     return 0;
 }
 
+/**
+ * Verifies one string test expectation.
+ * @param name Expectation description.
+ * @param expected Expected string value.
+ * @param actual Actual string value.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_string(const char *name, const char *expected, const char *actual) {
     if (!actual || strcmp(expected, actual) != 0) {
         printf("[FAIL] %s: expected '%s', got '%s'\n", name, expected,
@@ -57,6 +90,10 @@ static int expect_string(const char *name, const char *expected, const char *act
     return 0;
 }
 
+/**
+ * Tests document creation and one-time split ownership.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_open(void) {
     char input[] = "---\ntitle: Home\n---\n# Hello";
     kc_mdp_t *mdp = NULL;
@@ -86,6 +123,10 @@ static int case_kc_mdp_open(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests cached Markdown-to-HTML rendering.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_html(void) {
     const char *first;
     const char *second;
@@ -146,6 +187,10 @@ static int case_kc_mdp_html(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests prioritized practical Markdown extensions.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_extensions(void) {
     const char *html;
     kc_mdp_t *mdp = NULL;
@@ -188,6 +233,10 @@ static int case_kc_mdp_extensions(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests body access through the persistent document.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_body(void) {
     kc_mdp_t *mdp = NULL;
     const char *first;
@@ -231,6 +280,10 @@ static int case_kc_mdp_body(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests frontmatter access through the persistent document.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_meta(void) {
     kc_mdp_t *mdp = NULL;
     const char *first;
@@ -275,6 +328,10 @@ static int case_kc_mdp_meta(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests document release through the public API.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_close(void) {
     kc_mdp_t *mdp = NULL;
     int fail = 0;
@@ -295,6 +352,10 @@ static int case_kc_mdp_close(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests the public build-version query.
+ * @return 0 when the case passes, 1 otherwise.
+ */
 static int case_kc_mdp_version(void) {
     int fail = 0;
 
@@ -304,6 +365,10 @@ static int case_kc_mdp_version(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Runs the complete portable mdp test suite.
+ * @return Number of failed test cases.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -320,6 +385,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Dispatches the requested test case.
+ * @param argc Command-line argument count.
+ * @param argv Command-line argument vector.
+ * @return 0 on success, nonzero on failure.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
