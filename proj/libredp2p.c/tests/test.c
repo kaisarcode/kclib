@@ -170,12 +170,12 @@ static _Atomic int test_direct_connected;
  * @param userdata Unused.
  * @return None.
  */
-static void test_direct_pub_connect(kc_redp2p_client_t *client, void *userdata)
+static void test_direct_pub_connect(redp2p_client_t *client, void *userdata)
 {
     (void)userdata;
     if (!client) return;
     atomic_store(&test_direct_connected, 1);
-    (void)kc_redp2p_client_respond(client, "ready", 5);
+    (void)redp2p_client_respond(client, "ready", 5);
 }
 
 /**
@@ -184,12 +184,12 @@ static void test_direct_pub_connect(kc_redp2p_client_t *client, void *userdata)
  * @param userdata Unused.
  * @return None.
  */
-static void test_direct_pub_receive(const kc_redp2p_pub_input_t *input,
+static void test_direct_pub_receive(const redp2p_pub_input_t *input,
     void *userdata)
 {
     (void)userdata;
     if (!input || !input->client) return;
-    (void)kc_redp2p_client_respond(input->client, input->data, input->size);
+    (void)redp2p_client_respond(input->client, input->data, input->size);
 }
 
 /**
@@ -860,8 +860,8 @@ static int test_pow_failing_solution(const unsigned char nonce[32],
  * deterministic C/PHP vector covers the byte-exact canonical encoding.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_register_mutations(void) {
-    const char *name = "kc_redp2p_register_mutations";
+static int case_redp2p_register_mutations(void) {
+    const char *name = "redp2p_register_mutations";
     const char *detail =
         "authenticated registration rejects tampered and stale challenges";
     const char *candidates_base =
@@ -954,8 +954,8 @@ static int case_kc_redp2p_register_mutations(void) {
  * Verifies C index admission passwords, case sensitivity, and error ordering.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_register_admission(void) {
-    const char *name = "kc_redp2p_register_admission";
+static int case_redp2p_register_admission(void) {
+    const char *name = "redp2p_register_admission";
     const char *detail = "global and VIP admission proofs are exact and opaque";
     const char *secret = "0123456789abcdef";
     const char *candidates =
@@ -1037,8 +1037,8 @@ static int case_kc_redp2p_register_admission(void) {
  * Verifies authenticated encrypted secrets retain the control-secret grammar.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_register_secret_validation(void) {
-    const char *name = "kc_redp2p_register_secret_validation";
+static int case_redp2p_register_secret_validation(void) {
+    const char *name = "redp2p_register_secret_validation";
     const char *detail = "decrypted malformed control secrets fail authentication";
     const char *ids[] = {"nonhexsecret", "nulsecret", "malformedsecret"};
     unsigned char secrets[3][REDP2P_KEY_SZ] = {
@@ -1080,8 +1080,8 @@ static int case_kc_redp2p_register_secret_validation(void) {
  * Verifies candidate validation runs before proof-of-work on a hard index.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_register_order(void) {
-    const char *name = "kc_redp2p_register_order";
+static int case_redp2p_register_order(void) {
+    const char *name = "redp2p_register_order";
     const char *detail = "register rejects malformed candidates before PoW auth";
     test_index_t index;
     char nonce_hex[65], mac_hex[65], body[2048], response[4096];
@@ -1137,8 +1137,8 @@ static int case_kc_redp2p_register_order(void) {
  * Tests the fixed cross-language registration wire vector.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_register_vector(void) {
-    const char *name = "kc_redp2p_register_vector";
+static int case_redp2p_register_vector(void) {
+    const char *name = "redp2p_register_vector";
     const char *detail = "registration bytes match the shared C/PHP vector";
     const char *id = "vector";
     const char *secret = "0123456789abcdef";
@@ -1311,7 +1311,7 @@ static void test_port_requirement(unsigned int offset, int *tcp, int *udp) {
     {
         anchor = 400U;
         *tcp = offset >= anchor && offset <= anchor + 2U;
-    } else if (strcmp(test_case_name, "kc_redp2p_api") == 0) {
+    } else if (strcmp(test_case_name, "redp2p_api") == 0) {
         *tcp = offset >= 410U && offset <= 412U;
     } else if (strcmp(test_case_name, "redp2p_test_deregister_persisted_publisher") == 0) {
         *tcp = offset >= 60U && offset <= 62U;
@@ -3698,11 +3698,11 @@ static int test_has_publisher(test_publishers_t *publishers, const char *id) {
 }
 
 /**
- * Tests kc_redp2p_candidate_type_values.
+ * Tests redp2p_candidate_type_values.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_candidate_type_values(void) {
-    const char *name = "kc_redp2p_candidate_type_values";
+static int case_redp2p_candidate_type_values(void) {
+    const char *name = "redp2p_candidate_type_values";
     const char *detail = "candidate type values preserve public ordering";
     int fail;
 
@@ -3720,8 +3720,8 @@ static int case_kc_redp2p_candidate_type_values(void) {
  * keeping observed candidates server-derived.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_index_srflx_candidates(void) {
-    const char *name = "kc_redp2p_index_srflx_candidates";
+static int case_redp2p_index_srflx_candidates(void) {
+    const char *name = "redp2p_index_srflx_candidates";
     const char *detail =
         "index accepts srflx candidates and rejects client-observed entries";
     redp2p_candidate_t candidates[REDP2P_PEER_CANDIDATES_MAX];
@@ -3751,12 +3751,12 @@ static int case_kc_redp2p_index_srflx_candidates(void) {
 }
 
 /**
- * Tests kc_redp2p_open.
+ * Tests redp2p_open.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_open(void) {
+static int case_redp2p_open(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_open";
+    const char *name = "redp2p_open";
     const char *detail = "open validates and allocates context";
     int fail;
 
@@ -3771,12 +3771,12 @@ static int case_kc_redp2p_open(void) {
 }
 
 /**
- * Tests kc_redp2p_close.
+ * Tests redp2p_close.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_close(void) {
+static int case_redp2p_close(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_close";
+    const char *name = "redp2p_close";
     const char *detail = "close releases context";
     int fail;
 
@@ -3789,12 +3789,12 @@ static int case_kc_redp2p_close(void) {
 }
 
 /**
- * Tests kc_redp2p_stop.
+ * Tests redp2p_stop.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_stop(void) {
+static int case_redp2p_stop(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_stop";
+    const char *name = "redp2p_stop";
     const char *detail = "stop is idempotent on context";
     int fail;
 
@@ -3812,13 +3812,13 @@ static int case_kc_redp2p_stop(void) {
 }
 
 /**
- * Tests kc_redp2p_version.
+ * Tests redp2p_version.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_version(void) {
-    const char *name = "kc_redp2p_version";
+static int case_redp2p_version(void) {
+    const char *name = "redp2p_version";
     const char *detail = "public version API returns the generated build version";
-    uint64_t version = kc_redp2p_version();
+    uint64_t version = redp2p_version();
     int fail;
 
     fail = expect_true("version is available", version != 0);
@@ -3827,47 +3827,47 @@ static int case_kc_redp2p_version(void) {
 }
 
 /**
- * Tests kc_redp2p_strerror.
+ * Tests redp2p_strerror.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_strerror(void) {
-    const char *name = "kc_redp2p_strerror";
+static int case_redp2p_strerror(void) {
+    const char *name = "redp2p_strerror";
     const char *detail = "strerror maps codes to messages";
     int fail;
 
     fail = 0;
-    fail += expect_string("OK text", "OK", kc_redp2p_strerror(KC_REDP2P_OK));
+    fail += expect_string("OK text", "OK", redp2p_strerror(REDP2P_OK));
     fail += expect_string("ERROR text", "general error",
-        kc_redp2p_strerror(KC_REDP2P_ERROR));
+        redp2p_strerror(REDP2P_ERROR));
     fail += expect_string("ENET text", "network error",
-        kc_redp2p_strerror(KC_REDP2P_ENET));
+        redp2p_strerror(REDP2P_ENET));
     fail += expect_string("ENOENT text", "publisher not found",
-        kc_redp2p_strerror(KC_REDP2P_ENOENT));
+        redp2p_strerror(REDP2P_ENOENT));
     fail += expect_string("ETIMEOUT text", "timeout",
-        kc_redp2p_strerror(KC_REDP2P_ETIMEOUT));
+        redp2p_strerror(REDP2P_ETIMEOUT));
     fail += expect_string("EFULL text", "index capacity reached",
-        kc_redp2p_strerror(KC_REDP2P_EFULL));
+        redp2p_strerror(REDP2P_EFULL));
     fail += expect_string("EINVAL text", "invalid argument",
-        kc_redp2p_strerror(KC_REDP2P_EINVAL));
+        redp2p_strerror(REDP2P_EINVAL));
     fail += expect_string("EPROTO text", "protocol error",
-        kc_redp2p_strerror(KC_REDP2P_EPROTO));
+        redp2p_strerror(REDP2P_EPROTO));
     fail += expect_string("EAUTH text", "authentication failed",
-        kc_redp2p_strerror(KC_REDP2P_EAUTH));
+        redp2p_strerror(REDP2P_EAUTH));
     fail += expect_string("EPUNCH text", "direct connectivity failed",
-        kc_redp2p_strerror(KC_REDP2P_EPUNCH));
+        redp2p_strerror(REDP2P_EPUNCH));
     fail += expect_string("EEXIST text", "publisher already registered",
-        kc_redp2p_strerror(KC_REDP2P_EEXIST));
-    fail += expect_string("unknown text", "unknown error", kc_redp2p_strerror(999));
+        redp2p_strerror(REDP2P_EEXIST));
+    fail += expect_string("unknown text", "unknown error", redp2p_strerror(999));
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
 }
 
 /**
- * Tests kc_redp2p_is_valid_id.
+ * Tests redp2p_is_valid_id.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_is_valid_id(void) {
-    const char *name = "kc_redp2p_is_valid_id";
+static int case_redp2p_is_valid_id(void) {
+    const char *name = "redp2p_is_valid_id";
     const char *detail = "publisher id validation enforces strict ids";
     int fail;
 
@@ -3885,11 +3885,11 @@ static int case_kc_redp2p_is_valid_id(void) {
 }
 
 /**
- * Tests kc_redp2p_is_valid_pass_token.
+ * Tests redp2p_is_valid_pass_token.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_is_valid_pass_token(void) {
-    const char *name = "kc_redp2p_is_valid_pass_token";
+static int case_redp2p_is_valid_pass_token(void) {
+    const char *name = "redp2p_is_valid_pass_token";
     const char *detail = "pass token validation accepts ordinary password bytes";
     char too_long[REDP2P_PASS_MAX + 2];
     int fail;
@@ -4011,10 +4011,10 @@ static int test_punch_rate_limits(unsigned short port)
 }
 
 /**
- * Tests kc_redp2p_serve_index.
+ * Tests redp2p_serve_index.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_serve_index(void) {
+static int case_redp2p_serve_index(void) {
     test_index_t index;
     test_publisher_t first;
     test_publisher_t second;
@@ -4033,7 +4033,7 @@ static int case_kc_redp2p_serve_index(void) {
     size_t used;
     unsigned int cooling_elapsed;
     int i;
-    const char *name = "kc_redp2p_serve_index";
+    const char *name = "redp2p_serve_index";
     const char *detail = "serve index responds to control requests";
     int fail;
 
@@ -4562,15 +4562,15 @@ static int case_kc_redp2p_serve_index(void) {
 }
 
 /**
- * Tests kc_redp2p_wait.
+ * Tests redp2p_wait.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_wait(void) {
+static int case_redp2p_wait(void) {
     test_index_t index;
     test_publisher_t publisher;
     redp2p_t *ctx;
     unsigned short base;
-    const char *name = "kc_redp2p_wait";
+    const char *name = "redp2p_wait";
     const char *detail = "wait blocks until publisher is ready";
     int fail;
 
@@ -4605,10 +4605,10 @@ static int case_kc_redp2p_wait(void) {
 }
 
 /**
- * Tests kc_redp2p_connect.
+ * Tests redp2p_connect.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_connect(void) {
+static int case_redp2p_connect(void) {
     test_control_stub_t stub;
     test_index_t index;
     test_publisher_t publisher;
@@ -4616,7 +4616,7 @@ static int case_kc_redp2p_connect(void) {
     redp2p_t *ctx;
     unsigned short base;
     int stub_started;
-    const char *name = "kc_redp2p_connect";
+    const char *name = "redp2p_connect";
     const char *detail = "connect punches through to publisher";
     int fail;
 
@@ -4748,8 +4748,8 @@ static int test_udp_tunnel_case(void)
  * Tests plaintext UDP datagrams and MTU enforcement.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_udp_tunnel(void) {
-    const char *name = "kc_redp2p_udp_tunnel";
+static int case_redp2p_udp_tunnel(void) {
+    const char *name = "redp2p_udp_tunnel";
     const char *detail = "udp tunnel preserves datagrams";
     int fail = test_udp_tunnel_case();
     case_result(fail, name, detail);
@@ -4943,8 +4943,8 @@ static int test_tcp_tunnel_case(void)
  * Tests TCP stream through the public API.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_tcp_stream(void) {
-    const char *name = "kc_redp2p_tcp_stream";
+static int case_redp2p_tcp_stream(void) {
+    const char *name = "redp2p_tcp_stream";
     const char *detail = "tcp stream transfers bytes end to end";
     int fail = test_tcp_tunnel_case();
     case_result(fail, name, detail);
@@ -5202,7 +5202,7 @@ cleanup:
  * (15s) with the default eviction timeout (120s).
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_heartbeat_refresh(void) {
+static int case_redp2p_heartbeat_refresh(void) {
     test_index_t index;
     test_publisher_t publisher;
     char names[2][128];
@@ -5211,7 +5211,7 @@ static int case_kc_redp2p_heartbeat_refresh(void) {
     size_t state_len;
     int count;
     unsigned short base;
-    const char *name = "kc_redp2p_heartbeat";
+    const char *name = "redp2p_heartbeat";
     const char *detail = "heartbeat refreshes session state";
     int fail;
 
@@ -5258,7 +5258,7 @@ static int case_kc_redp2p_heartbeat_refresh(void) {
  * Tests publisher sequence advancement after a lost heartbeat response.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_lost_response(void) {
+static int case_redp2p_lost_response(void) {
     test_publisher_control_stub_t stub;
     test_publisher_t publisher;
 #ifndef _WIN32
@@ -5271,7 +5271,7 @@ static int case_kc_redp2p_lost_response(void) {
 #endif
     unsigned short base;
     unsigned int elapsed;
-    const char *name = "kc_redp2p_lost_response";
+    const char *name = "redp2p_lost_response";
     const char *detail = "publisher advances sequence after lost response";
     int publisher_started;
     int stub_started;
@@ -5357,10 +5357,10 @@ cleanup:
 }
 
 /**
- * Tests kc_redp2p_list_publishers.
+ * Tests redp2p_list_publishers.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_list_publishers(void) {
+static int case_redp2p_list_publishers(void) {
     test_index_t index;
     test_publisher_t publisher;
     test_publisher_t replacement;
@@ -5369,7 +5369,7 @@ static int case_kc_redp2p_list_publishers(void) {
     char duplicate_port[32];
     char foreign_state_dir[768];
     unsigned short base;
-    const char *name = "kc_redp2p_list_publishers";
+    const char *name = "redp2p_list_publishers";
     const char *detail = "list publishers reports registered services";
     int fail;
 
@@ -5454,9 +5454,9 @@ static int case_kc_redp2p_list_publishers(void) {
  * Tests context-owned error detail lifetime and clearing.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_get_error(void) {
+static int case_redp2p_get_error(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_get_error";
+    const char *name = "redp2p_get_error";
     const char *detail = "get error captures context error detail";
     int fail;
 
@@ -5478,12 +5478,12 @@ static int case_kc_redp2p_get_error(void) {
 }
 
 /**
- * Tests kc_redp2p_set_seats.
+ * Tests redp2p_set_seats.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_seats(void) {
+static int case_redp2p_set_seats(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_seats";
+    const char *name = "redp2p_set_seats";
     const char *detail = "set seats configures capacity with bounds";
     int fail;
     size_t max_peer_count;
@@ -5502,12 +5502,12 @@ static int case_kc_redp2p_set_seats(void) {
 }
 
 /**
- * Tests kc_redp2p_set_max_consumers_per_publisher.
+ * Tests redp2p_set_max_consumers_per_publisher.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_max_consumers_per_publisher(void) {
+static int case_redp2p_set_max_consumers_per_publisher(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_max_consumers_per_publisher";
+    const char *name = "redp2p_set_max_consumers_per_publisher";
     const char *detail = "set max consumers per publisher configures a per-publisher safety window";
     int fail;
 
@@ -5527,12 +5527,12 @@ static int case_kc_redp2p_set_max_consumers_per_publisher(void) {
 }
 
 /**
- * Tests kc_redp2p_set_pow.
+ * Tests redp2p_set_pow.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_pow(void) {
+static int case_redp2p_set_pow(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_pow";
+    const char *name = "redp2p_set_pow";
     const char *detail = "set pow validates difficulty values";
     int fail;
 
@@ -5547,12 +5547,12 @@ static int case_kc_redp2p_set_pow(void) {
 }
 
 /**
- * Tests kc_redp2p_set_port.
+ * Tests redp2p_set_port.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_port(void) {
+static int case_redp2p_set_port(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_port";
+    const char *name = "redp2p_set_port";
     const char *detail = "set port validates bind port";
     int fail;
 
@@ -5567,12 +5567,12 @@ static int case_kc_redp2p_set_port(void) {
 }
 
 /**
- * Tests kc_redp2p_set_protocol.
+ * Tests redp2p_set_protocol.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_protocol(void) {
+static int case_redp2p_set_protocol(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_protocol";
+    const char *name = "redp2p_set_protocol";
     const char *detail = "set protocol validates transport mode";
     int fail;
 
@@ -5590,12 +5590,12 @@ static int case_kc_redp2p_set_protocol(void) {
 }
 
 /**
- * Tests kc_redp2p_set_pass.
+ * Tests redp2p_set_pass.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_pass(void) {
+static int case_redp2p_set_pass(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_pass";
+    const char *name = "redp2p_set_pass";
     const char *detail = "set pass validates pass token input";
     int fail;
 
@@ -5616,13 +5616,13 @@ static int case_kc_redp2p_set_pass(void) {
 }
 
 /**
- * Tests kc_redp2p_set_vip.
+ * Tests redp2p_set_vip.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_vip(void) {
+static int case_redp2p_set_vip(void) {
     redp2p_t *ctx;
     char err[128];
-    const char *name = "kc_redp2p_set_vip";
+    const char *name = "redp2p_set_vip";
     const char *detail = "set vip reserves vip seat";
     int fail;
 
@@ -5652,12 +5652,12 @@ static int case_kc_redp2p_set_vip(void) {
 }
 
 /**
- * Tests kc_redp2p_set_stun_url.
+ * Tests redp2p_set_stun_url.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_stun_url(void) {
+static int case_redp2p_set_stun_url(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_stun_url";
+    const char *name = "redp2p_set_stun_url";
     const char *detail = "set stun url validates stun address";
     int fail;
 
@@ -5681,9 +5681,9 @@ static int case_kc_redp2p_set_stun_url(void) {
  * Tests optional TURN configuration.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_turn_url(void) {
+static int case_redp2p_set_turn_url(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_turn_url";
+    const char *name = "redp2p_set_turn_url";
     const char *detail = "TURN remains optional and validates relay settings";
     int fail;
 
@@ -5712,12 +5712,12 @@ static int case_kc_redp2p_set_turn_url(void) {
 }
 
 /**
- * Tests kc_redp2p_set_stream_faults.
+ * Tests redp2p_set_stream_faults.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_stream_faults(void) {
+static int case_redp2p_set_stream_faults(void) {
     redp2p_t *ctx;
-    const char *name = "kc_redp2p_set_stream_faults";
+    const char *name = "redp2p_set_stream_faults";
     const char *detail = "stream fault settings clear stale error detail";
     int fail;
 
@@ -5739,18 +5739,18 @@ static int case_kc_redp2p_set_stream_faults(void) {
 }
 
 /**
- * Tests kc_redp2p_set_state_dir API and key persistence with a custom
+ * Tests redp2p_set_state_dir API and key persistence with a custom
  * directory.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_set_state_dir(void) {
+static int case_redp2p_set_state_dir(void) {
     redp2p_t *ctx;
     test_index_t index;
     test_publisher_t publisher;
     char custom_base[768];
     char keys_subdir[PATH_MAX];
     unsigned short base;
-    const char *name = "kc_redp2p_set_state_dir";
+    const char *name = "redp2p_set_state_dir";
     const char *detail = "set state dir configures state location";
     int fail;
 
@@ -5826,19 +5826,19 @@ static int case_kc_redp2p_set_state_dir(void) {
  * Groups the stateless query and validation API cases into one top-level case.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_validation(void) {
+static int case_redp2p_validation(void) {
     int fail = 0;
     int grouped = test_grouped;
 
     test_grouped = 1;
-    fail += case_kc_redp2p_candidate_type_values();
-    fail += case_kc_redp2p_index_srflx_candidates();
-    fail += case_kc_redp2p_version();
-    fail += case_kc_redp2p_strerror();
-    fail += case_kc_redp2p_is_valid_id();
-    fail += case_kc_redp2p_is_valid_pass_token();
+    fail += case_redp2p_candidate_type_values();
+    fail += case_redp2p_index_srflx_candidates();
+    fail += case_redp2p_version();
+    fail += case_redp2p_strerror();
+    fail += case_redp2p_is_valid_id();
+    fail += case_redp2p_is_valid_pass_token();
     test_grouped = grouped;
-    case_result(fail, "kc_redp2p_validation",
+    case_result(fail, "redp2p_validation",
         "candidate, version, strerror, and token validation helpers");
     return fail == 0 ? 0 : 1;
 }
@@ -5847,17 +5847,17 @@ static int case_kc_redp2p_validation(void) {
  * Groups the context lifecycle and error-detail cases into one top-level case.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_context(void) {
+static int case_redp2p_context(void) {
     int fail = 0;
     int grouped = test_grouped;
 
     test_grouped = 1;
-    fail += case_kc_redp2p_open();
-    fail += case_kc_redp2p_close();
-    fail += case_kc_redp2p_stop();
-    fail += case_kc_redp2p_get_error();
+    fail += case_redp2p_open();
+    fail += case_redp2p_close();
+    fail += case_redp2p_stop();
+    fail += case_redp2p_get_error();
     test_grouped = grouped;
-    case_result(fail, "kc_redp2p_context",
+    case_result(fail, "redp2p_context",
         "context lifecycle and error detail");
     return fail == 0 ? 0 : 1;
 }
@@ -5866,23 +5866,23 @@ static int case_kc_redp2p_context(void) {
  * Groups the trivial context setter validation cases into one top-level case.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_setters(void) {
+static int case_redp2p_setters(void) {
     int fail = 0;
     int grouped = test_grouped;
 
     test_grouped = 1;
-    fail += case_kc_redp2p_set_seats();
-    fail += case_kc_redp2p_set_max_consumers_per_publisher();
-    fail += case_kc_redp2p_set_pow();
-    fail += case_kc_redp2p_set_port();
-    fail += case_kc_redp2p_set_protocol();
-    fail += case_kc_redp2p_set_pass();
-    fail += case_kc_redp2p_set_vip();
-    fail += case_kc_redp2p_set_stun_url();
-    fail += case_kc_redp2p_set_turn_url();
-    fail += case_kc_redp2p_set_stream_faults();
+    fail += case_redp2p_set_seats();
+    fail += case_redp2p_set_max_consumers_per_publisher();
+    fail += case_redp2p_set_pow();
+    fail += case_redp2p_set_port();
+    fail += case_redp2p_set_protocol();
+    fail += case_redp2p_set_pass();
+    fail += case_redp2p_set_vip();
+    fail += case_redp2p_set_stun_url();
+    fail += case_redp2p_set_turn_url();
+    fail += case_redp2p_set_stream_faults();
     test_grouped = grouped;
-    case_result(fail, "kc_redp2p_setters",
+    case_result(fail, "redp2p_setters",
         "setters enforce transport and capacity bounds");
     return fail == 0 ? 0 : 1;
 }
@@ -5891,18 +5891,18 @@ static int case_kc_redp2p_setters(void) {
  * Groups the registration proof, tampering, and ordering contract cases.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_register(void) {
+static int case_redp2p_register(void) {
     int fail = 0;
     int grouped = test_grouped;
 
     test_grouped = 1;
-    fail += case_kc_redp2p_register_vector();
-    fail += case_kc_redp2p_register_mutations();
-    fail += case_kc_redp2p_register_admission();
-    fail += case_kc_redp2p_register_secret_validation();
-    fail += case_kc_redp2p_register_order();
+    fail += case_redp2p_register_vector();
+    fail += case_redp2p_register_mutations();
+    fail += case_redp2p_register_admission();
+    fail += case_redp2p_register_secret_validation();
+    fail += case_redp2p_register_order();
     test_grouped = grouped;
-    case_result(fail, "kc_redp2p_register",
+    case_result(fail, "redp2p_register",
         "registration proof, tampering, and ordering contract");
     return fail == 0 ? 0 : 1;
 }
@@ -5911,15 +5911,15 @@ static int case_kc_redp2p_register(void) {
  * Groups the publisher heartbeat session cases into one top-level case.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_heartbeat(void) {
+static int case_redp2p_heartbeat(void) {
     int fail = 0;
     int grouped = test_grouped;
 
     test_grouped = 1;
-    fail += case_kc_redp2p_heartbeat_refresh();
-    fail += case_kc_redp2p_lost_response();
+    fail += case_redp2p_heartbeat_refresh();
+    fail += case_redp2p_lost_response();
     test_grouped = grouped;
-    case_result(fail, "kc_redp2p_heartbeat",
+    case_result(fail, "redp2p_heartbeat",
         "heartbeat refreshes session and reports lost responses");
     return fail == 0 ? 0 : 1;
 }
@@ -6031,7 +6031,7 @@ static int test_rtc_control_proof(const char *secret, const char *op,
  * Verifies the browser RTC lifecycle against the native C index.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_rtc_index(void)
+static int case_redp2p_rtc_index(void)
 {
     const char *id = "rtcsite";
     const char *secret = "0123456789abcdef";
@@ -6173,7 +6173,7 @@ static int case_kc_redp2p_rtc_index(void)
     }
 
     test_index_stop(&index);
-    case_result(fail, "kc_redp2p_rtc_index",
+    case_result(fail, "redp2p_rtc_index",
         "native index coordinates browser RTC signaling and transport routing");
     return fail == 0 ? 0 : 1;
 }
@@ -6259,8 +6259,8 @@ typedef struct {
 } test_direct_api_state_t;
 
 typedef struct {
-    kc_redp2p_pub_t *pub;
-    kc_redp2p_con_t *con;
+    redp2p_pub_t *pub;
+    redp2p_con_t *con;
     _Atomic int closed;
 } test_direct_close_state_t;
 
@@ -6273,9 +6273,9 @@ unsigned short redp2p_test_api_port_value(void);
 
 #ifdef REDP2P_TESTING
 typedef struct {
-    kc_redp2p_pub_t *pub;
-    kc_redp2p_con_t *con;
-    kc_redp2p_client_t *client;
+    redp2p_pub_t *pub;
+    redp2p_con_t *con;
+    redp2p_client_t *client;
     const char *index;
     _Atomic int done;
     _Atomic int result;
@@ -6298,7 +6298,7 @@ typedef struct {
 TEST_API_THREAD(test_direct_send_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
-    atomic_store(&state->result, kc_redp2p_con_send(state->con, "x", 1));
+    atomic_store(&state->result, redp2p_con_send(state->con, "x", 1));
     atomic_store(&state->done, 1);
     TEST_API_THREAD_RETURN();
 }
@@ -6312,7 +6312,7 @@ TEST_API_THREAD(test_direct_send_thread)
 TEST_API_THREAD(test_direct_con_close_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
-    kc_redp2p_con_close(state->con);
+    redp2p_con_close(state->con);
     atomic_store(&state->done, 1);
     TEST_API_THREAD_RETURN();
 }
@@ -6327,7 +6327,7 @@ TEST_API_THREAD(test_direct_respond_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
     atomic_store(&state->result,
-        kc_redp2p_client_respond(state->client, "y", 1));
+        redp2p_client_respond(state->client, "y", 1));
     atomic_store(&state->done, 1);
     TEST_API_THREAD_RETURN();
 }
@@ -6342,7 +6342,7 @@ TEST_API_THREAD(test_direct_respond_thread)
 TEST_API_THREAD(test_direct_client_close_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
-    kc_redp2p_client_close(state->client);
+    redp2p_client_close(state->client);
     atomic_store(&state->done, 1);
     TEST_API_THREAD_RETURN();
 }
@@ -6356,7 +6356,7 @@ TEST_API_THREAD(test_direct_client_close_thread)
 TEST_API_THREAD(test_direct_pub_close_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
-    kc_redp2p_pub_close(state->pub);
+    redp2p_pub_close(state->pub);
     atomic_store(&state->done, 1);
     TEST_API_THREAD_RETURN();
 }
@@ -6370,14 +6370,14 @@ TEST_API_THREAD(test_direct_pub_close_thread)
 TEST_API_THREAD(test_direct_con_create_thread)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)arg;
-    kc_redp2p_con_options_t options;
-    kc_redp2p_con_t *con = NULL;
+    redp2p_con_options_t options;
+    redp2p_con_t *con = NULL;
     int result;
 
     memset(&options, 0, sizeof(options));
     options.id = "retryport";
     options.index = state->index;
-    result = kc_redp2p_con(&con, &options);
+    result = redp2p_con(&con, &options);
     state->con = con;
     atomic_store(&state->result, result);
     atomic_store(&state->done, 1);
@@ -6394,7 +6394,7 @@ TEST_API_THREAD(test_direct_con_create_thread)
  * @param userdata Direct race state.
  * @return None.
  */
-static void test_direct_capture_client(const kc_redp2p_pub_input_t *input,
+static void test_direct_capture_client(const redp2p_pub_input_t *input,
     void *userdata)
 {
     test_direct_race_state_t *state = (test_direct_race_state_t *)userdata;
@@ -6412,14 +6412,14 @@ static void test_direct_capture_client(const kc_redp2p_pub_input_t *input,
  * @param userdata Direct close state.
  * @return None.
  */
-static void test_direct_pub_self_close(const kc_redp2p_pub_input_t *input,
+static void test_direct_pub_self_close(const redp2p_pub_input_t *input,
     void *userdata)
 {
     test_direct_close_state_t *state =
         (test_direct_close_state_t *)userdata;
 
     if (!input || !state || !state->pub) return;
-    kc_redp2p_pub_close(state->pub);
+    redp2p_pub_close(state->pub);
     state->pub = NULL;
     atomic_store(&state->closed, 1);
 }
@@ -6431,12 +6431,12 @@ static void test_direct_pub_self_close(const kc_redp2p_pub_input_t *input,
  * @param userdata Unused.
  * @return None.
  */
-static void test_direct_close_echo(const kc_redp2p_pub_input_t *input,
+static void test_direct_close_echo(const redp2p_pub_input_t *input,
     void *userdata)
 {
     (void)userdata;
     if (!input || !input->client) return;
-    (void)kc_redp2p_client_respond(input->client, input->data, input->size);
+    (void)redp2p_client_respond(input->client, input->data, input->size);
 }
 
 /**
@@ -6456,7 +6456,7 @@ static void test_direct_con_self_close(const void *data, size_t size,
     (void)data;
     (void)size;
     if (!state || !state->con) return;
-    kc_redp2p_con_close(state->con);
+    redp2p_con_close(state->con);
     state->con = NULL;
     atomic_store(&state->closed, 1);
 }
@@ -6467,7 +6467,7 @@ static void test_direct_con_self_close(const void *data, size_t size,
  * @param userdata Direct test state.
  * @return None.
  */
-static void test_direct_api_pub_receive(const kc_redp2p_pub_input_t *input,
+static void test_direct_api_pub_receive(const redp2p_pub_input_t *input,
     void *userdata)
 {
     test_direct_api_state_t *state = (test_direct_api_state_t *)userdata;
@@ -6481,7 +6481,7 @@ static void test_direct_api_pub_receive(const kc_redp2p_pub_input_t *input,
     }
     atomic_store(&state->publisher_received, 1);
     atomic_store(&state->respond_status,
-        kc_redp2p_client_respond(input->client, "pong", 4));
+        redp2p_client_respond(input->client, "pong", 4));
 }
 
 /**
@@ -7026,16 +7026,16 @@ static int test_turn_stop(test_turn_stub_t *turn)
 static int test_turn_api_roundtrip(int protocol, const char *id,
     const char *index, const char *turn_url)
 {
-    kc_redp2p_pub_t *pub = NULL;
-    kc_redp2p_con_t *con = NULL;
-    kc_redp2p_pub_options_t pub_options;
-    kc_redp2p_con_options_t con_options;
+    redp2p_pub_t *pub = NULL;
+    redp2p_con_t *con = NULL;
+    redp2p_pub_options_t pub_options;
+    redp2p_con_options_t con_options;
     test_direct_api_state_t state;
     uint64_t deadline;
     int fail = 0;
 
     memset(&state, 0, sizeof(state));
-    atomic_store(&state.respond_status, KC_REDP2P_ERROR);
+    atomic_store(&state.respond_status, REDP2P_ERROR);
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = id;
     pub_options.index = index;
@@ -7045,8 +7045,8 @@ static int test_turn_api_roundtrip(int protocol, const char *id,
     pub_options.turn_pass = "pass";
     pub_options.receive = test_direct_api_pub_receive;
     pub_options.userdata = &state;
-    fail += expect_int("TURN pub create", KC_REDP2P_OK,
-        kc_redp2p_pub(&pub, &pub_options));
+    fail += expect_int("TURN pub create", REDP2P_OK,
+        redp2p_pub(&pub, &pub_options));
 
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = id;
@@ -7057,11 +7057,11 @@ static int test_turn_api_roundtrip(int protocol, const char *id,
     con_options.receive = test_direct_api_con_receive;
     con_options.userdata = &state;
     if (fail == 0)
-        fail += expect_int("TURN con create", KC_REDP2P_OK,
-            kc_redp2p_con(&con, &con_options));
+        fail += expect_int("TURN con create", REDP2P_OK,
+            redp2p_con(&con, &con_options));
     if (fail == 0)
-        fail += expect_int("TURN public send", KC_REDP2P_OK,
-            kc_redp2p_con_send(con, "ping", 4));
+        fail += expect_int("TURN public send", REDP2P_OK,
+            redp2p_con_send(con, "ping", 4));
 
     deadline = redp2p_now_ms() + 10000U;
     while (fail == 0 && atomic_load(&state.consumer_received) == 0 &&
@@ -7070,13 +7070,13 @@ static int test_turn_api_roundtrip(int protocol, const char *id,
 
     fail += expect_int("TURN publisher receive", 1,
         atomic_load(&state.publisher_received));
-    fail += expect_int("TURN respond", KC_REDP2P_OK,
+    fail += expect_int("TURN respond", REDP2P_OK,
         atomic_load(&state.respond_status));
     fail += expect_int("TURN consumer receive", 1,
         atomic_load(&state.consumer_received));
 
-    kc_redp2p_con_close(con);
-    kc_redp2p_pub_close(pub);
+    redp2p_con_close(con);
+    redp2p_pub_close(pub);
     return fail == 0 ? 0 : 1;
 }
 
@@ -7090,11 +7090,11 @@ static int test_turn_api_roundtrip(int protocol, const char *id,
 static int test_turn_api_overlapping_tcp(const char *index,
     const char *turn_url)
 {
-    kc_redp2p_pub_t *pub = NULL;
-    kc_redp2p_con_t *con1 = NULL;
-    kc_redp2p_con_t *con2 = NULL;
-    kc_redp2p_pub_options_t pub_options;
-    kc_redp2p_con_options_t con_options;
+    redp2p_pub_t *pub = NULL;
+    redp2p_con_t *con1 = NULL;
+    redp2p_con_t *con2 = NULL;
+    redp2p_pub_options_t pub_options;
+    redp2p_con_options_t con_options;
     unsigned char payload[REDP2P_BUF * 8];
     int fail;
 
@@ -7103,12 +7103,12 @@ static int test_turn_api_overlapping_tcp(const char *index,
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "turnoverlap";
     pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.protocol = REDP2P_TCP;
     pub_options.turn = turn_url;
     pub_options.turn_user = "user";
     pub_options.turn_pass = "pass";
-    fail += expect_int("TURN overlap pub create", KC_REDP2P_OK,
-        kc_redp2p_pub(&pub, &pub_options));
+    fail += expect_int("TURN overlap pub create", REDP2P_OK,
+        redp2p_pub(&pub, &pub_options));
 
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = "turnoverlap";
@@ -7117,18 +7117,18 @@ static int test_turn_api_overlapping_tcp(const char *index,
     con_options.turn_user = "user";
     con_options.turn_pass = "pass";
     if (fail == 0)
-        fail += expect_int("TURN overlap con1 create", KC_REDP2P_OK,
-            kc_redp2p_con(&con1, &con_options));
+        fail += expect_int("TURN overlap con1 create", REDP2P_OK,
+            redp2p_con(&con1, &con_options));
     if (fail == 0)
-        fail += expect_int("TURN overlap con1 traffic", KC_REDP2P_OK,
-            kc_redp2p_con_send(con1, payload, sizeof(payload)));
+        fail += expect_int("TURN overlap con1 traffic", REDP2P_OK,
+            redp2p_con_send(con1, payload, sizeof(payload)));
     if (fail == 0)
-        fail += expect_int("TURN overlap con2 create", KC_REDP2P_OK,
-            kc_redp2p_con(&con2, &con_options));
+        fail += expect_int("TURN overlap con2 create", REDP2P_OK,
+            redp2p_con(&con2, &con_options));
 
-    kc_redp2p_con_close(con2);
-    kc_redp2p_con_close(con1);
-    kc_redp2p_pub_close(pub);
+    redp2p_con_close(con2);
+    redp2p_con_close(con1);
+    redp2p_pub_close(pub);
     return fail == 0 ? 0 : 1;
 }
 
@@ -7137,10 +7137,10 @@ static int test_turn_api_overlapping_tcp(const char *index,
  * Summary: Supports the local relay stub or its API roundtrip checks.
  * @return Test helper result or matching state.
  */
-static int case_kc_redp2p_turn_api(void)
+static int case_redp2p_turn_api(void)
 {
-    kc_redp2p_idx_t *idx = NULL;
-    kc_redp2p_idx_options_t idx_options;
+    redp2p_idx_t *idx = NULL;
+    redp2p_idx_options_t idx_options;
     test_turn_stub_t turn;
     char index[320];
     char turn_url[128];
@@ -7165,8 +7165,8 @@ static int case_kc_redp2p_turn_api(void)
     idx_options.port = index_port;
     idx_options.max_consumers = 32;
     if (fail == 0)
-        fail += expect_int("TURN index", KC_REDP2P_OK,
-            kc_redp2p_idx(&idx, &idx_options));
+        fail += expect_int("TURN index", REDP2P_OK,
+            redp2p_idx(&idx, &idx_options));
 
     snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)index_port);
     snprintf(turn_url, sizeof(turn_url), "turn:127.0.0.1:%u",
@@ -7176,7 +7176,7 @@ static int case_kc_redp2p_turn_api(void)
         test_setenv("REDP2P_FORCE_TURN", NULL));
     relayed_before = atomic_load(&turn.relayed_count);
     if (fail == 0)
-        fail += test_turn_api_roundtrip(KC_REDP2P_UDP, "turndirect", index,
+        fail += test_turn_api_roundtrip(REDP2P_UDP, "turndirect", index,
             turn_url);
     fail += expect_int("direct path preferred when TURN is configured",
         relayed_before, atomic_load(&turn.relayed_count));
@@ -7185,10 +7185,10 @@ static int case_kc_redp2p_turn_api(void)
         fail += expect_int("force TURN path", 0,
             test_setenv("REDP2P_FORCE_TURN", "1"));
     if (fail == 0)
-        fail += test_turn_api_roundtrip(KC_REDP2P_UDP, "turnudp", index,
+        fail += test_turn_api_roundtrip(REDP2P_UDP, "turnudp", index,
             turn_url);
     if (fail == 0)
-        fail += test_turn_api_roundtrip(KC_REDP2P_TCP, "turntcp", index,
+        fail += test_turn_api_roundtrip(REDP2P_TCP, "turntcp", index,
             turn_url);
     if (fail == 0)
         fail += expect_int("delay TURN overlap punch poll", 0,
@@ -7214,16 +7214,16 @@ static int case_kc_redp2p_turn_api(void)
         atomic_load(&turn.relayed_count) > 0);
 
     test_setenv("REDP2P_FORCE_TURN", NULL);
-    kc_redp2p_idx_close(idx);
+    redp2p_idx_close(idx);
     fail += test_turn_stop(&turn);
-    case_result(fail, "kc_redp2p_turn_api",
+    case_result(fail, "redp2p_turn_api",
         "TURN is fallback-only and public TCP/UDP APIs roundtrip through a simulated relay");
     return fail == 0 ? 0 : 1;
 }
 
 /**
  * Exercises one native protocol through the capability-level direct data API.
- * @param protocol KC_REDP2P_TCP or KC_REDP2P_UDP.
+ * @param protocol REDP2P_TCP or REDP2P_UDP.
  * @param id Publisher identifier.
  * @param index Index endpoint.
  * @return 0 on success, 1 on failure.
@@ -7231,17 +7231,17 @@ static int case_kc_redp2p_turn_api(void)
 static int test_direct_api_roundtrip(int protocol, const char *id,
     const char *index)
 {
-    kc_redp2p_pub_t *pub = NULL;
-    kc_redp2p_con_t *con = NULL;
-    kc_redp2p_pub_options_t pub_options;
-    kc_redp2p_con_options_t con_options;
+    redp2p_pub_t *pub = NULL;
+    redp2p_con_t *con = NULL;
+    redp2p_pub_options_t pub_options;
+    redp2p_con_options_t con_options;
     test_direct_api_state_t state;
     uint64_t deadline;
     int fail = 0;
     int status;
 
     memset(&state, 0, sizeof(state));
-    atomic_store(&state.respond_status, KC_REDP2P_ERROR);
+    atomic_store(&state.respond_status, REDP2P_ERROR);
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = id;
     pub_options.index = index;
@@ -7249,8 +7249,8 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
     pub_options.receive = test_direct_api_pub_receive;
     pub_options.userdata = &state;
 
-    status = kc_redp2p_pub(&pub, &pub_options);
-    fail += expect_int("direct pub create", KC_REDP2P_OK, status);
+    status = redp2p_pub(&pub, &pub_options);
+    fail += expect_int("direct pub create", REDP2P_OK, status);
     fail += expect_true("direct pub handle", pub != NULL);
 
     memset(&con_options, 0, sizeof(con_options));
@@ -7259,13 +7259,13 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
     con_options.receive = test_direct_api_con_receive;
     con_options.userdata = &state;
     if (fail == 0) {
-        status = kc_redp2p_con(&con, &con_options);
-        fail += expect_int("direct con create", KC_REDP2P_OK, status);
+        status = redp2p_con(&con, &con_options);
+        fail += expect_int("direct con create", REDP2P_OK, status);
         fail += expect_true("direct con handle", con != NULL);
     }
     if (fail == 0) {
-        status = kc_redp2p_con_send(con, "ping", 4);
-        fail += expect_int("direct send", KC_REDP2P_OK, status);
+        status = redp2p_con_send(con, "ping", 4);
+        fail += expect_int("direct send", REDP2P_OK, status);
     }
     deadline = redp2p_now_ms() + 10000U;
     while (fail == 0 && atomic_load(&state.consumer_received) == 0 &&
@@ -7274,13 +7274,13 @@ static int test_direct_api_roundtrip(int protocol, const char *id,
 
     fail += expect_int("direct publisher receive", 1,
         atomic_load(&state.publisher_received));
-    fail += expect_int("direct respond", KC_REDP2P_OK,
+    fail += expect_int("direct respond", REDP2P_OK,
         atomic_load(&state.respond_status));
     fail += expect_int("direct consumer receive", 1,
         atomic_load(&state.consumer_received));
 
-    kc_redp2p_con_close(con);
-    kc_redp2p_pub_close(pub);
+    redp2p_con_close(con);
+    redp2p_pub_close(pub);
     return fail == 0 ? 0 : 1;
 }
 
@@ -7310,12 +7310,12 @@ static int test_direct_api_wait_hook(uint64_t timeout_ms)
 static int test_direct_api_con_close_race(const char *index)
 {
 #ifdef REDP2P_TESTING
-    kc_redp2p_pub_options_t pub_options;
-    kc_redp2p_con_options_t con_options;
+    redp2p_pub_options_t pub_options;
+    redp2p_con_options_t con_options;
     test_direct_race_state_t send_state;
     test_direct_race_state_t close_state;
-    kc_redp2p_pub_t *pub = NULL;
-    kc_redp2p_con_t *con = NULL;
+    redp2p_pub_t *pub = NULL;
+    redp2p_con_t *con = NULL;
     test_thread_t send_thread;
     test_thread_t close_thread;
     int send_started = 0;
@@ -7325,17 +7325,17 @@ static int test_direct_api_con_close_race(const char *index)
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "racecon";
     pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_UDP;
+    pub_options.protocol = REDP2P_UDP;
     pub_options.receive = test_direct_close_echo;
-    fail += expect_int("race con pub", KC_REDP2P_OK,
-        kc_redp2p_pub(&pub, &pub_options));
+    fail += expect_int("race con pub", REDP2P_OK,
+        redp2p_pub(&pub, &pub_options));
 
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = "racecon";
     con_options.index = index;
     if (fail == 0)
-        fail += expect_int("race con create", KC_REDP2P_OK,
-            kc_redp2p_con(&con, &con_options));
+        fail += expect_int("race con create", REDP2P_OK,
+            redp2p_con(&con, &con_options));
 
     memset(&send_state, 0, sizeof(send_state));
     memset(&close_state, 0, sizeof(close_state));
@@ -7367,8 +7367,8 @@ static int test_direct_api_con_close_race(const char *index)
         fail += expect_int("con close completes", 1,
             atomic_load(&close_state.done));
 
-    if (!close_started && con) kc_redp2p_con_close(con);
-    kc_redp2p_pub_close(pub);
+    if (!close_started && con) redp2p_con_close(con);
+    redp2p_pub_close(pub);
     redp2p_test_api_io_hold(0);
     return fail == 0 ? 0 : 1;
 #else
@@ -7387,13 +7387,13 @@ static int test_direct_api_con_close_race(const char *index)
 static int test_direct_api_pub_close_race(const char *index, int close_client)
 {
 #ifdef REDP2P_TESTING
-    kc_redp2p_pub_options_t pub_options;
-    kc_redp2p_con_options_t con_options;
+    redp2p_pub_options_t pub_options;
+    redp2p_con_options_t con_options;
     test_direct_race_state_t capture;
     test_direct_race_state_t io_state;
     test_direct_race_state_t close_state;
-    kc_redp2p_pub_t *pub = NULL;
-    kc_redp2p_con_t *con = NULL;
+    redp2p_pub_t *pub = NULL;
+    redp2p_con_t *con = NULL;
     test_thread_t io_thread;
     test_thread_t close_thread;
     uint64_t deadline;
@@ -7405,21 +7405,21 @@ static int test_direct_api_pub_close_race(const char *index, int close_client)
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = close_client ? "raceclientclose" : "racerespond";
     pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.protocol = REDP2P_TCP;
     pub_options.receive = test_direct_capture_client;
     pub_options.userdata = &capture;
-    fail += expect_int("race pub create", KC_REDP2P_OK,
-        kc_redp2p_pub(&pub, &pub_options));
+    fail += expect_int("race pub create", REDP2P_OK,
+        redp2p_pub(&pub, &pub_options));
 
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = pub_options.id;
     con_options.index = index;
     if (fail == 0)
-        fail += expect_int("race pub con", KC_REDP2P_OK,
-            kc_redp2p_con(&con, &con_options));
+        fail += expect_int("race pub con", REDP2P_OK,
+            redp2p_con(&con, &con_options));
     if (fail == 0)
-        fail += expect_int("race capture send", KC_REDP2P_OK,
-            kc_redp2p_con_send(con, "x", 1));
+        fail += expect_int("race capture send", REDP2P_OK,
+            redp2p_con_send(con, "x", 1));
 
     deadline = redp2p_now_ms() + 5000U;
     while (fail == 0 && !atomic_load(&capture.done) &&
@@ -7458,8 +7458,8 @@ static int test_direct_api_pub_close_race(const char *index, int close_client)
         fail += expect_int("pub close completes", 1,
             atomic_load(&close_state.done));
 
-    kc_redp2p_con_close(con);
-    if (!close_started && pub) kc_redp2p_pub_close(pub);
+    redp2p_con_close(con);
+    if (!close_started && pub) redp2p_pub_close(pub);
     redp2p_test_api_io_hold(0);
     return fail == 0 ? 0 : 1;
 #else
@@ -7478,9 +7478,9 @@ static int test_direct_api_pub_close_race(const char *index, int close_client)
 static int test_direct_api_port_retry(const char *index)
 {
 #ifdef REDP2P_TESTING
-    kc_redp2p_pub_options_t pub_options;
+    redp2p_pub_options_t pub_options;
     test_direct_race_state_t state;
-    kc_redp2p_pub_t *pub = NULL;
+    redp2p_pub_t *pub = NULL;
     test_thread_t con_thread;
     test_socket_t blocker = TEST_SOCKET_INVALID;
     int con_started = 0;
@@ -7493,14 +7493,14 @@ static int test_direct_api_port_retry(const char *index)
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "retryport";
     pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.protocol = REDP2P_TCP;
     pub_options.receive = test_direct_close_echo;
-    fail += expect_int("retry pub create", KC_REDP2P_OK,
-        kc_redp2p_pub(&pub, &pub_options));
+    fail += expect_int("retry pub create", REDP2P_OK,
+        redp2p_pub(&pub, &pub_options));
 
     memset(&state, 0, sizeof(state));
     state.index = index;
-    atomic_store(&state.result, KC_REDP2P_ERROR);
+    atomic_store(&state.result, REDP2P_ERROR);
     redp2p_test_api_port_hold(1);
     if (fail == 0) {
         int rc = test_thread_start(&con_thread,
@@ -7540,12 +7540,12 @@ static int test_direct_api_port_retry(const char *index)
     redp2p_test_api_port_hold(0);
     if (con_started) fail += test_thread_join(con_thread);
     if (con_started)
-        fail += expect_int("retry consumer succeeds", KC_REDP2P_OK,
+        fail += expect_int("retry consumer succeeds", REDP2P_OK,
             atomic_load(&state.result));
 
     if (blocker != TEST_SOCKET_INVALID) test_socket_close(blocker);
-    if (state.con) kc_redp2p_con_close(state.con);
-    kc_redp2p_pub_close(pub);
+    if (state.con) redp2p_con_close(state.con);
+    redp2p_pub_close(pub);
     redp2p_test_api_port_hold(0);
     return fail == 0 ? 0 : 1;
 #else
@@ -7562,11 +7562,11 @@ static int test_direct_api_port_retry(const char *index)
  */
 static int test_direct_api_self_close(const char *index)
 {
-    kc_redp2p_pub_options_t pub_options;
-    kc_redp2p_con_options_t con_options;
+    redp2p_pub_options_t pub_options;
+    redp2p_con_options_t con_options;
     test_direct_close_state_t state;
-    kc_redp2p_pub_t *pub;
-    kc_redp2p_con_t *con;
+    redp2p_pub_t *pub;
+    redp2p_con_t *con;
     uint64_t deadline;
     int fail;
     int status;
@@ -7578,23 +7578,23 @@ static int test_direct_api_self_close(const char *index)
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "selfclosepub";
     pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.protocol = REDP2P_TCP;
     pub_options.receive = test_direct_pub_self_close;
     pub_options.userdata = &state;
-    status = kc_redp2p_pub(&pub, &pub_options);
-    fail += expect_int("self-close pub create", KC_REDP2P_OK, status);
+    status = redp2p_pub(&pub, &pub_options);
+    fail += expect_int("self-close pub create", REDP2P_OK, status);
     state.pub = pub;
 
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = "selfclosepub";
     con_options.index = index;
     if (fail == 0) {
-        status = kc_redp2p_con(&con, &con_options);
-        fail += expect_int("self-close pub con", KC_REDP2P_OK, status);
+        status = redp2p_con(&con, &con_options);
+        fail += expect_int("self-close pub con", REDP2P_OK, status);
     }
     if (fail == 0)
-        fail += expect_int("self-close pub send", KC_REDP2P_OK,
-            kc_redp2p_con_send(con, "x", 1));
+        fail += expect_int("self-close pub send", REDP2P_OK,
+            redp2p_con_send(con, "x", 1));
 
     deadline = redp2p_now_ms() + 5000U;
     while (fail == 0 && !atomic_load(&state.closed) &&
@@ -7602,8 +7602,8 @@ static int test_direct_api_self_close(const char *index)
         test_sleep_ms(10U);
     fail += expect_int("publisher closes from callback", 1,
         atomic_load(&state.closed));
-    kc_redp2p_con_close(con);
-    if (state.pub) kc_redp2p_pub_close(state.pub);
+    redp2p_con_close(con);
+    if (state.pub) redp2p_pub_close(state.pub);
 
     pub = NULL;
     con = NULL;
@@ -7611,10 +7611,10 @@ static int test_direct_api_self_close(const char *index)
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "selfclosecon";
     pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.protocol = REDP2P_TCP;
     pub_options.receive = test_direct_close_echo;
-    status = kc_redp2p_pub(&pub, &pub_options);
-    fail += expect_int("self-close con pub", KC_REDP2P_OK, status);
+    status = redp2p_pub(&pub, &pub_options);
+    fail += expect_int("self-close con pub", REDP2P_OK, status);
 
     memset(&con_options, 0, sizeof(con_options));
     con_options.id = "selfclosecon";
@@ -7622,13 +7622,13 @@ static int test_direct_api_self_close(const char *index)
     con_options.receive = test_direct_con_self_close;
     con_options.userdata = &state;
     if (fail == 0) {
-        status = kc_redp2p_con(&con, &con_options);
-        fail += expect_int("self-close con create", KC_REDP2P_OK, status);
+        status = redp2p_con(&con, &con_options);
+        fail += expect_int("self-close con create", REDP2P_OK, status);
         state.con = con;
     }
     if (fail == 0)
-        fail += expect_int("self-close con send", KC_REDP2P_OK,
-            kc_redp2p_con_send(con, "x", 1));
+        fail += expect_int("self-close con send", REDP2P_OK,
+            redp2p_con_send(con, "x", 1));
 
     deadline = redp2p_now_ms() + 5000U;
     while (fail == 0 && !atomic_load(&state.closed) &&
@@ -7636,8 +7636,8 @@ static int test_direct_api_self_close(const char *index)
         test_sleep_ms(10U);
     fail += expect_int("consumer closes from callback", 1,
         atomic_load(&state.closed));
-    if (state.con) kc_redp2p_con_close(state.con);
-    kc_redp2p_pub_close(pub);
+    if (state.con) redp2p_con_close(state.con);
+    redp2p_pub_close(pub);
     return fail == 0 ? 0 : 1;
 }
 
@@ -7645,10 +7645,10 @@ static int test_direct_api_self_close(const char *index)
  * Exercises direct receive/respond/send for TCP and UDP without public ports.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_direct_api(void)
+static int case_redp2p_direct_api(void)
 {
-    kc_redp2p_idx_t *idx = NULL;
-    kc_redp2p_idx_options_t idx_options;
+    redp2p_idx_t *idx = NULL;
+    redp2p_idx_options_t idx_options;
     char index[320];
     char local_ip[INET_ADDRSTRLEN];
     unsigned short port;
@@ -7662,14 +7662,14 @@ static int case_kc_redp2p_direct_api(void)
     idx_options.port = port;
     idx_options.max_consumers = 32;
     if (fail == 0)
-        fail += expect_int("direct API index", KC_REDP2P_OK,
-            kc_redp2p_idx(&idx, &idx_options));
+        fail += expect_int("direct API index", REDP2P_OK,
+            redp2p_idx(&idx, &idx_options));
 
     snprintf(index, sizeof(index), "%s:%u", local_ip, (unsigned)port);
     if (fail == 0)
-        fail += test_direct_api_roundtrip(KC_REDP2P_TCP, "directtcp", index);
+        fail += test_direct_api_roundtrip(REDP2P_TCP, "directtcp", index);
     if (fail == 0)
-        fail += test_direct_api_roundtrip(KC_REDP2P_UDP, "directudp", index);
+        fail += test_direct_api_roundtrip(REDP2P_UDP, "directudp", index);
     if (fail == 0)
         fail += test_direct_api_self_close(index);
     if (fail == 0)
@@ -7681,8 +7681,8 @@ static int case_kc_redp2p_direct_api(void)
     if (fail == 0)
         fail += test_direct_api_port_retry(index);
 
-    kc_redp2p_idx_close(idx);
-    case_result(fail, "kc_redp2p_direct_api",
+    redp2p_idx_close(idx);
+    case_result(fail, "redp2p_direct_api",
         "native TCP and UDP support direct receive/respond/send");
     return fail == 0 ? 0 : 1;
 }
@@ -7691,19 +7691,19 @@ static int case_kc_redp2p_direct_api(void)
  * Exercises the normalized public idx/pub/con capability API end to end.
  * @return 0 on success, 1 on failure.
  */
-static int case_kc_redp2p_api(void)
+static int case_redp2p_api(void)
 {
-    const char *name = "kc_redp2p_api";
+    const char *name = "redp2p_api";
     const char *detail =
         "idx owns the explicit port while pub/con expose peer channels and data";
     const unsigned char payload[] = "redp2p-public-api";
-    kc_redp2p_idx_t *idx;
-    kc_redp2p_pub_t *pub;
-    kc_redp2p_con_t *con;
-    kc_redp2p_idx_entry_t *entries;
-    kc_redp2p_idx_options_t idx_options;
-    kc_redp2p_pub_options_t pub_options;
-    kc_redp2p_con_options_t con_options;
+    redp2p_idx_t *idx;
+    redp2p_pub_t *pub;
+    redp2p_con_t *con;
+    redp2p_idx_entry_t *entries;
+    redp2p_idx_options_t idx_options;
+    redp2p_pub_options_t pub_options;
+    redp2p_con_options_t con_options;
     char index[320];
     char local_ip[INET_ADDRSTRLEN];
     unsigned short idx_port;
@@ -7727,13 +7727,13 @@ static int case_kc_redp2p_api(void)
     idx_options.port = idx_port;
     idx_options.max_consumers = 32;
     if (fail == 0) {
-        status = kc_redp2p_idx(&idx, &idx_options);
-        fail += expect_int("public idx create", KC_REDP2P_OK, status);
+        status = redp2p_idx(&idx, &idx_options);
+        fail += expect_int("public idx create", REDP2P_OK, status);
         fail += expect_true("public idx handle", idx != NULL);
     }
     if (fail == 0) {
-        status = kc_redp2p_idx_list(idx, &entries, &count);
-        fail += expect_int("public empty list", KC_REDP2P_OK, status);
+        status = redp2p_idx_list(idx, &entries, &count);
+        fail += expect_int("public empty list", REDP2P_OK, status);
         fail += expect_true("public empty list count", count == 0);
         fail += expect_true("public empty list pointer", entries == NULL);
     }
@@ -7744,21 +7744,21 @@ static int case_kc_redp2p_api(void)
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "echo";
     pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_TCP;
+    pub_options.protocol = REDP2P_TCP;
     pub_options.connect = test_direct_pub_connect;
     pub_options.receive = test_direct_pub_receive;
     if (fail == 0) {
-        status = kc_redp2p_pub(&pub, &pub_options);
-        fail += expect_int("public TCP pub create", KC_REDP2P_OK, status);
+        status = redp2p_pub(&pub, &pub_options);
+        fail += expect_int("public TCP pub create", REDP2P_OK, status);
         fail += expect_true("public TCP pub handle", pub != NULL);
     }
     if (fail == 0) {
-        status = kc_redp2p_idx_list(idx, &entries, &count);
-        fail += expect_int("public populated list", KC_REDP2P_OK, status);
+        status = redp2p_idx_list(idx, &entries, &count);
+        fail += expect_int("public populated list", REDP2P_OK, status);
         fail += expect_true("public populated list count", count == 1);
         fail += expect_true("public populated list id",
             entries != NULL && strcmp(entries[0].id, "echo") == 0);
-        kc_redp2p_free(entries);
+        redp2p_free(entries);
         entries = NULL;
         count = 0;
     }
@@ -7768,8 +7768,8 @@ static int case_kc_redp2p_api(void)
     con_options.index = index;
     con_options.receive = test_direct_con_receive;
     if (fail == 0) {
-        status = kc_redp2p_con(&con, &con_options);
-        fail += expect_int("public TCP con create", KC_REDP2P_OK, status);
+        status = redp2p_con(&con, &con_options);
+        fail += expect_int("public TCP con create", REDP2P_OK, status);
         fail += expect_true("public TCP con handle", con != NULL);
     }
     if (fail == 0) {
@@ -7792,8 +7792,8 @@ static int case_kc_redp2p_api(void)
         memset(&test_direct_receive, 0, sizeof(test_direct_receive));
     }
     if (fail == 0) {
-        status = kc_redp2p_con_send(con, payload, sizeof(payload));
-        fail += expect_int("public TCP send", KC_REDP2P_OK, status);
+        status = redp2p_con_send(con, payload, sizeof(payload));
+        fail += expect_int("public TCP send", REDP2P_OK, status);
     }
     if (fail == 0) {
         uint64_t deadline = test_now_ms() + 10000U;
@@ -7806,9 +7806,9 @@ static int case_kc_redp2p_api(void)
             memcmp(test_direct_receive.data, payload, sizeof(payload)) == 0);
     }
 
-    kc_redp2p_con_close(con);
+    redp2p_con_close(con);
     con = NULL;
-    kc_redp2p_pub_close(pub);
+    redp2p_pub_close(pub);
     pub = NULL;
 
     memset(&test_direct_receive, 0, sizeof(test_direct_receive));
@@ -7816,12 +7816,12 @@ static int case_kc_redp2p_api(void)
     memset(&pub_options, 0, sizeof(pub_options));
     pub_options.id = "echoudp";
     pub_options.index = index;
-    pub_options.protocol = KC_REDP2P_UDP;
+    pub_options.protocol = REDP2P_UDP;
     pub_options.connect = test_direct_pub_connect;
     pub_options.receive = test_direct_pub_receive;
     if (fail == 0) {
-        status = kc_redp2p_pub(&pub, &pub_options);
-        fail += expect_int("public UDP pub create", KC_REDP2P_OK, status);
+        status = redp2p_pub(&pub, &pub_options);
+        fail += expect_int("public UDP pub create", REDP2P_OK, status);
     }
 
     memset(&con_options, 0, sizeof(con_options));
@@ -7829,8 +7829,8 @@ static int case_kc_redp2p_api(void)
     con_options.index = index;
     con_options.receive = test_direct_con_receive;
     if (fail == 0) {
-        status = kc_redp2p_con(&con, &con_options);
-        fail += expect_int("public UDP con create", KC_REDP2P_OK, status);
+        status = redp2p_con(&con, &con_options);
+        fail += expect_int("public UDP con create", REDP2P_OK, status);
     }
     if (fail == 0) {
         uint64_t deadline = test_now_ms() + 5000U;
@@ -7852,8 +7852,8 @@ static int case_kc_redp2p_api(void)
         memset(&test_direct_receive, 0, sizeof(test_direct_receive));
     }
     if (fail == 0) {
-        status = kc_redp2p_con_send(con, payload, sizeof(payload));
-        fail += expect_int("public UDP send", KC_REDP2P_OK, status);
+        status = redp2p_con_send(con, payload, sizeof(payload));
+        fail += expect_int("public UDP send", REDP2P_OK, status);
     }
     if (fail == 0) {
         uint64_t deadline = test_now_ms() + 10000U;
@@ -7866,16 +7866,16 @@ static int case_kc_redp2p_api(void)
             memcmp(test_direct_receive.data, payload, sizeof(payload)) == 0);
     }
 
-    kc_redp2p_con_close(con);
-    kc_redp2p_pub_close(pub);
-    kc_redp2p_idx_close(idx);
+    redp2p_con_close(con);
+    redp2p_pub_close(pub);
+    redp2p_idx_close(idx);
 
     fail += expect_string("public strerror OK", "OK",
-        kc_redp2p_strerror(KC_REDP2P_OK));
-    kc_redp2p_free(NULL);
-    kc_redp2p_con_close(NULL);
-    kc_redp2p_pub_close(NULL);
-    kc_redp2p_idx_close(NULL);
+        redp2p_strerror(REDP2P_OK));
+    redp2p_free(NULL);
+    redp2p_con_close(NULL);
+    redp2p_pub_close(NULL);
+    redp2p_idx_close(NULL);
 
     case_result(fail, name, detail);
     return fail == 0 ? 0 : 1;
@@ -7889,24 +7889,24 @@ static int case_all(void) {
     int rc = 0;
     test_case_total = 18;
     test_case_current = 0;
-    run_case(&rc, case_kc_redp2p_validation);
-    run_case(&rc, case_kc_redp2p_register);
-    run_case(&rc, case_kc_redp2p_context);
-    run_case(&rc, case_kc_redp2p_setters);
-    run_case(&rc, case_kc_redp2p_set_state_dir);
-    run_case(&rc, case_kc_redp2p_serve_index);
-    run_case(&rc, case_kc_redp2p_wait);
-    run_case(&rc, case_kc_redp2p_connect);
-    run_case(&rc, case_kc_redp2p_heartbeat);
-    run_case(&rc, case_kc_redp2p_rtc_index);
+    run_case(&rc, case_redp2p_validation);
+    run_case(&rc, case_redp2p_register);
+    run_case(&rc, case_redp2p_context);
+    run_case(&rc, case_redp2p_setters);
+    run_case(&rc, case_redp2p_set_state_dir);
+    run_case(&rc, case_redp2p_serve_index);
+    run_case(&rc, case_redp2p_wait);
+    run_case(&rc, case_redp2p_connect);
+    run_case(&rc, case_redp2p_heartbeat);
+    run_case(&rc, case_redp2p_rtc_index);
     run_case(&rc, case_redp2p_protocol_ttl);
-    run_case(&rc, case_kc_redp2p_udp_tunnel);
-    run_case(&rc, case_kc_redp2p_tcp_stream);
+    run_case(&rc, case_redp2p_udp_tunnel);
+    run_case(&rc, case_redp2p_tcp_stream);
     run_case(&rc, case_redp2p_persisted_deregister);
-    run_case(&rc, case_kc_redp2p_list_publishers);
-    run_case(&rc, case_kc_redp2p_api);
-    run_case(&rc, case_kc_redp2p_direct_api);
-    run_case(&rc, case_kc_redp2p_turn_api);
+    run_case(&rc, case_redp2p_list_publishers);
+    run_case(&rc, case_redp2p_api);
+    run_case(&rc, case_redp2p_direct_api);
+    run_case(&rc, case_redp2p_turn_api);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -7918,24 +7918,24 @@ static int case_all(void) {
  */
 static int dispatch_case(const char *name) {
     if (strcmp(name, "all") == 0) return case_all();
-    if (strcmp(name, "kc_redp2p_validation") == 0) return case_kc_redp2p_validation();
-    if (strcmp(name, "kc_redp2p_register") == 0) return case_kc_redp2p_register();
-    if (strcmp(name, "kc_redp2p_context") == 0) return case_kc_redp2p_context();
-    if (strcmp(name, "kc_redp2p_setters") == 0) return case_kc_redp2p_setters();
-    if (strcmp(name, "kc_redp2p_set_state_dir") == 0) return case_kc_redp2p_set_state_dir();
-    if (strcmp(name, "kc_redp2p_serve_index") == 0) return case_kc_redp2p_serve_index();
-    if (strcmp(name, "kc_redp2p_wait") == 0) return case_kc_redp2p_wait();
-    if (strcmp(name, "kc_redp2p_connect") == 0) return case_kc_redp2p_connect();
-    if (strcmp(name, "kc_redp2p_heartbeat") == 0) return case_kc_redp2p_heartbeat();
-    if (strcmp(name, "kc_redp2p_rtc_index") == 0) return case_kc_redp2p_rtc_index();
-    if (strcmp(name, "kc_redp2p_ttl_expiry") == 0) return case_redp2p_protocol_ttl();
-    if (strcmp(name, "kc_redp2p_udp_tunnel") == 0) return case_kc_redp2p_udp_tunnel();
-    if (strcmp(name, "kc_redp2p_tcp_stream") == 0) return case_kc_redp2p_tcp_stream();
+    if (strcmp(name, "redp2p_validation") == 0) return case_redp2p_validation();
+    if (strcmp(name, "redp2p_register") == 0) return case_redp2p_register();
+    if (strcmp(name, "redp2p_context") == 0) return case_redp2p_context();
+    if (strcmp(name, "redp2p_setters") == 0) return case_redp2p_setters();
+    if (strcmp(name, "redp2p_set_state_dir") == 0) return case_redp2p_set_state_dir();
+    if (strcmp(name, "redp2p_serve_index") == 0) return case_redp2p_serve_index();
+    if (strcmp(name, "redp2p_wait") == 0) return case_redp2p_wait();
+    if (strcmp(name, "redp2p_connect") == 0) return case_redp2p_connect();
+    if (strcmp(name, "redp2p_heartbeat") == 0) return case_redp2p_heartbeat();
+    if (strcmp(name, "redp2p_rtc_index") == 0) return case_redp2p_rtc_index();
+    if (strcmp(name, "redp2p_ttl_expiry") == 0) return case_redp2p_protocol_ttl();
+    if (strcmp(name, "redp2p_udp_tunnel") == 0) return case_redp2p_udp_tunnel();
+    if (strcmp(name, "redp2p_tcp_stream") == 0) return case_redp2p_tcp_stream();
     if (strcmp(name, "redp2p_persisted_deregister") == 0) return case_redp2p_persisted_deregister();
-    if (strcmp(name, "kc_redp2p_list_publishers") == 0) return case_kc_redp2p_list_publishers();
-    if (strcmp(name, "kc_redp2p_api") == 0) return case_kc_redp2p_api();
-    if (strcmp(name, "kc_redp2p_direct_api") == 0) return case_kc_redp2p_direct_api();
-    if (strcmp(name, "kc_redp2p_turn_api") == 0) return case_kc_redp2p_turn_api();
+    if (strcmp(name, "redp2p_list_publishers") == 0) return case_redp2p_list_publishers();
+    if (strcmp(name, "redp2p_api") == 0) return case_redp2p_api();
+    if (strcmp(name, "redp2p_direct_api") == 0) return case_redp2p_direct_api();
+    if (strcmp(name, "redp2p_turn_api") == 0) return case_redp2p_turn_api();
     fprintf(stderr, "unknown test case: %s\n", name);
     return 2;
 }

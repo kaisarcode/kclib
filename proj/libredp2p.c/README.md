@@ -30,15 +30,15 @@ library capability with an explicit port.
 A publisher registers an ID and is notified when a peer channel is established.
 Incoming bytes are delivered to its receive callback together with the client
 that sent them. The publisher can send bytes back with
-`kc_redp2p_client_respond()`.
+`redp2p_client_respond()`.
 
-A consumer connects by publisher ID. A successful `kc_redp2p_con()` returns an
+A consumer connects by publisher ID. A successful `redp2p_con()` returns an
 established peer channel; the application can immediately send with
-`kc_redp2p_con_send()`, and incoming bytes are delivered to its receive
+`redp2p_con_send()`, and incoming bytes are delivered to its receive
 callback.
 
 Live publisher and consumer handles may update the optional STUN or TURN
-configuration with `kc_redp2p_pub_set()` and `kc_redp2p_con_set()`. A TURN
+configuration with `redp2p_pub_set()` and `redp2p_con_set()`. A TURN
 update applies the TURN URL, username, and password together. Temporary relay
 credentials can be rotated without replacing the public handle or discarding an
 active allocation on the same TURN endpoint. Changing the TURN endpoint while
