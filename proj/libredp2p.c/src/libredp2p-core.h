@@ -19,23 +19,8 @@
 
 typedef struct redp2p redp2p_t;
 
-#define REDP2P_OK       KC_REDP2P_OK
-#define REDP2P_ERROR    KC_REDP2P_ERROR
-#define REDP2P_ENET     KC_REDP2P_ENET
-#define REDP2P_ENOENT   KC_REDP2P_ENOENT
-#define REDP2P_ETIMEOUT KC_REDP2P_ETIMEOUT
-#define REDP2P_EFULL    KC_REDP2P_EFULL
-#define REDP2P_EINVAL   KC_REDP2P_EINVAL
-#define REDP2P_EPROTO   KC_REDP2P_EPROTO
-#define REDP2P_EAUTH    KC_REDP2P_EAUTH
-#define REDP2P_EPUNCH   KC_REDP2P_EPUNCH
-#define REDP2P_EEXIST   KC_REDP2P_EEXIST
-#define REDP2P_EUNSUPPORTED KC_REDP2P_EUNSUPPORTED
-
-#define REDP2P_ID_MAX KC_REDP2P_ID_MAX
-#define REDP2P_PORT_DEFAULT KC_REDP2P_PORT_DEFAULT
-#define REDP2P_PROTO_TCP KC_REDP2P_TCP
-#define REDP2P_PROTO_UDP KC_REDP2P_UDP
+#define REDP2P_PROTO_TCP REDP2P_TCP
+#define REDP2P_PROTO_UDP REDP2P_UDP
 
 #define REDP2P_ADDR_MAX 47
 #define REDP2P_BUF 4096
@@ -787,7 +772,6 @@ REDP2P_INTERNAL int redp2p_test_index_parse_request_candidates(
 REDP2P_INTERNAL int redp2p_context_create(redp2p_t **out);
 REDP2P_INTERNAL int redp2p_context_destroy(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_context_request_stop(redp2p_t *ctx);
-REDP2P_INTERNAL uint64_t redp2p_version(void);
 REDP2P_INTERNAL const char *redp2p_get_error(redp2p_t *ctx);
 REDP2P_INTERNAL int redp2p_is_valid_id(const char *id);
 REDP2P_INTERNAL int redp2p_is_valid_pass_token(const char *pass);
