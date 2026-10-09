@@ -50,7 +50,10 @@ set(REDP2P_SOURCES
     ${REDP2P_ENGINE_SOURCES}
 )
 
-set_source_files_properties(src/libredp2p-core.c PROPERTIES
+set_source_files_properties(
+    src/libredp2p-api.c
+    src/libredp2p-core.c
+    PROPERTIES
     COMPILE_DEFINITIONS REDP2P_BUILD_VERSION=${REDP2P_BUILD_VERSION}
 )
 

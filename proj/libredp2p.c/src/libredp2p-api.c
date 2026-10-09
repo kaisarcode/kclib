@@ -44,6 +44,14 @@ typedef struct {
     int result;
 } redp2p_runtime_t;
 
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t redp2p_version(void) {
+    return (uint64_t)REDP2P_BUILD_VERSION;
+}
+
 struct redp2p_idx {
     redp2p_runtime_t runtime;
     char host[256];
