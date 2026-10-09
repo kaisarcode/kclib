@@ -178,14 +178,6 @@ static int redp2p_parse_size(const char *text, size_t *out) {
 }
 
 /**
- * Returns the build version generated at compile time.
- * @return Unix timestamp for the current build.
- */
-uint64_t redp2p_version(void) {
-    return (uint64_t)REDP2P_BUILD_VERSION;
-}
-
-/**
  * Sha256 transform.
  * @return Status code.
  */
