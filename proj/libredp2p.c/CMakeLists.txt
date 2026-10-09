@@ -38,8 +38,8 @@ set(REDP2P_ENGINE_SOURCES
     src/libredp2p-idx.c
     src/libredp2p-idx-native.c
     src/libredp2p-idx-webrtc.c
-    src/libredp2p-pub.c
-    src/libredp2p-con.c
+    src/libredp2p-pub-native.c
+    src/libredp2p-con-native.c
     lib/monocypher/monocypher.c
     lib/kcp/ikcp.c
     lib/parson/parson.c
