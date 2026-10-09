@@ -21,6 +21,14 @@ buildable, usable, and distributable. Composition between capabilities belongs
 in consumers, applications, processes, or explicit higher-level tooling rather
 than through kclib-to-kclib dependencies.
 
+## Source control
+
+Use the existing `devel` branch for normal development work.
+
+Do not create a new branch, remote branch, tag, or other Git ref unless the user
+explicitly asks for that specific source-control action. Never create a branch
+implicitly as part of implementing, testing, reviewing, or preparing a change.
+
 ## Project form
 
 Prefer:
