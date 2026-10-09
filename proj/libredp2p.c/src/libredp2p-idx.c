@@ -60,20 +60,36 @@ typedef struct {
     void (*prune)(redp2p_t *ctx);
 } redp2p_index_transport_t;
 
+/**
+ * Reports whether a transport uses the native index protocol.
+ * @return 1 when native, 0 otherwise.
+ */
 static int redp2p_index_native_accepts(int transport) {
     return transport == REDP2P_PROTO_TCP || transport == REDP2P_PROTO_UDP;
 }
 
+/**
+ * Reports whether an operation uses native index handling.
+ * @return 1 when handled, 0 otherwise.
+ */
 static int redp2p_index_native_handles(const char *operation) {
     return strcmp(operation, "punch_req") == 0 ||
         strcmp(operation, "punch_poll") == 0;
 }
 
+/**
+ * Reports whether a native operation accepts a large request body.
+ * @return 1 when large bodies are accepted, 0 otherwise.
+ */
 static int redp2p_index_native_large_body(const char *operation) {
     (void)operation;
     return 0;
 }
 
+/**
+ * Dispatches a native index operation.
+ * @return None.
+ */
 static void redp2p_index_native_handle(redp2p_t *ctx, redp2p_fd_t fd,
     const char *operation, JSON_Object *req,
     const struct sockaddr_storage *peer)
@@ -84,21 +100,37 @@ static void redp2p_index_native_handle(redp2p_t *ctx, redp2p_fd_t fd,
         redp2p_idx_native_punch_poll(ctx, fd, req);
 }
 
+/**
+ * Reports whether a transport uses the WebRTC index protocol.
+ * @return 1 when WebRTC, 0 otherwise.
+ */
 static int redp2p_index_webrtc_accepts(int transport) {
     return transport == REDP2P_TRANSPORT_RTC;
 }
 
+/**
+ * Reports whether an operation uses WebRTC index handling.
+ * @return 1 when handled, 0 otherwise.
+ */
 static int redp2p_index_webrtc_handles(const char *operation) {
     return strcmp(operation, "connect") == 0 ||
         strcmp(operation, "poll") == 0 ||
         strcmp(operation, "answer") == 0;
 }
 
+/**
+ * Reports whether a WebRTC operation accepts a large request body.
+ * @return 1 when large bodies are accepted, 0 otherwise.
+ */
 static int redp2p_index_webrtc_large_body(const char *operation) {
     return strcmp(operation, "connect") == 0 ||
         strcmp(operation, "answer") == 0;
 }
 
+/**
+ * Dispatches a WebRTC index operation.
+ * @return None.
+ */
 static void redp2p_index_webrtc_handle(redp2p_t *ctx, redp2p_fd_t fd,
     const char *operation, JSON_Object *req,
     const struct sockaddr_storage *peer)
@@ -142,6 +174,10 @@ static const redp2p_index_transport_t *const REDP2P_INDEX_TRANSPORTS[] = {
     &REDP2P_INDEX_WEBRTC_TRANSPORT
 };
 
+/**
+ * Finds index transport operations by protocol key.
+ * @return Matching transport or NULL.
+ */
 static const redp2p_index_transport_t *redp2p_index_transport_by_key(
     const char *key)
 {
@@ -156,6 +192,10 @@ static const redp2p_index_transport_t *redp2p_index_transport_by_key(
     return NULL;
 }
 
+/**
+ * Finds index transport operations by transport value.
+ * @return Matching transport or NULL.
+ */
 static const redp2p_index_transport_t *redp2p_index_transport_for_value(
     int transport)
 {
@@ -170,6 +210,10 @@ static const redp2p_index_transport_t *redp2p_index_transport_for_value(
     return NULL;
 }
 
+/**
+ * Finds index transport operations by operation name.
+ * @return Matching transport or NULL.
+ */
 static const redp2p_index_transport_t *redp2p_index_transport_for_operation(
     const char *operation)
 {
@@ -184,6 +228,10 @@ static const redp2p_index_transport_t *redp2p_index_transport_for_operation(
     return NULL;
 }
 
+/**
+ * Reports whether an operation accepts a large request body.
+ * @return 1 when large bodies are accepted, 0 otherwise.
+ */
 static int redp2p_index_operation_large_body(const char *operation) {
     const redp2p_index_transport_t *transport;
 
@@ -191,6 +239,10 @@ static int redp2p_index_operation_large_body(const char *operation) {
     return transport && transport->large_body(operation);
 }
 
+/**
+ * Prunes expired transport-specific index state.
+ * @return None.
+ */
 static void redp2p_index_prune_transports(redp2p_t *ctx) {
     size_t i;
 
