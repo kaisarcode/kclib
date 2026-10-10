@@ -42,7 +42,6 @@ index is the summary, not the contract.
 | [`netl`](https://github.com/kaisarcode/kclib/tree/master/proj/libnetl.c) | Maintains named TCP or UDP listeners and delivers incoming traffic to consumers. | Listening and serving on the network. |
 | [`nets`](https://github.com/kaisarcode/kclib/tree/master/proj/libnets.c) | Exchanges data with a TCP or UDP destination. | Connecting to a remote host and exchanging data. |
 | [`dmn`](https://github.com/kaisarcode/kclib/tree/master/proj/libdmn.c) | Maintains named resident processes and exchanges data through local IPC. | Persistent subprocess with a message channel. |
-| [`redp2p`](https://github.com/kaisarcode/kclib/tree/master/proj/libredp2p.c) | Creates direct P2P tunnels for publishing or consuming TCP/UDP services. | Peer-to-peer connectivity. |
 
 ## System and UI
 
