@@ -94,6 +94,7 @@ static int open_test(
     options.height = &height;
     options.hidden = hidden;
     options.unlist = unlist;
+    options.allow_file = 1;
     if (kc_wvw_open(out, &options) != KC_WVW_OK) {
         kc_wvw_close(*out);
         *out = NULL;
@@ -194,11 +195,10 @@ static void case_kc_wvw_bridge(void) {
         bridge.methods = methods;
         bridge.method_count = 1;
         bridge.callback = bridge_callback;
-        bridge.allow_file = 1;
         ok =
             kc_wvw_add_init_script(
                 wvw, "window.__wvw_test = true;") == KC_WVW_OK &&
-            kc_wvw_enable_bridge(wvw, &bridge) == KC_WVW_OK &&
+            kc_wvw_set_bridge_methods(wvw, &bridge) == KC_WVW_OK &&
             kc_wvw_post_bridge_event(
                 wvw, "{\"type\":\"test\"}") == KC_WVW_OK;
     }

@@ -55,9 +55,13 @@ const char *kc_wvw_get_error(const kc_wvw_t *wvw);
 
 int kc_wvw_navigate(kc_wvw_t *wvw, const char *url);
 int kc_wvw_add_init_script(kc_wvw_t *wvw, const char *javascript);
-int kc_wvw_enable_bridge(
+int kc_wvw_set_bridge_methods(
     kc_wvw_t *wvw,
     const kc_wvw_bridge_options_t *options
+);
+int kc_wvw_set_executables(
+    kc_wvw_t *wvw,
+    const kc_wvw_exec_options_t *options
 );
 int kc_wvw_post_bridge_event(kc_wvw_t *wvw, const char *json);
 
@@ -103,8 +107,9 @@ Boolean window properties use `is_*`.
 
 ### Native Bridge
 
-The bridge is disabled by default. Applications can install document-start
-JavaScript and expose a fixed method whitelist to trusted content.
+`NativeBridge` is permanent infrastructure for trusted content. Built-in window
+methods and `NativeBridge.exec(args)` always exist; application methods remain
+an explicit fixed whitelist.
 
 ```c
 static int app_bridge(
@@ -133,19 +138,30 @@ const char *methods[] = { "get_version" };
 kc_wvw_bridge_options_t bridge = {
     .methods = methods,
     .method_count = 1,
-    .callback = app_bridge,
-    .allow_file = 1
+    .callback = app_bridge
 };
 
 kc_wvw_add_init_script(wvw, "window.APP_VERSION = '1.0';");
-kc_wvw_enable_bridge(wvw, &bridge);
+kc_wvw_set_bridge_methods(wvw, &bridge);
 ```
 
 Bridge callbacks return JSON responses for exposed methods.
 
-When the bridge is active, navigation is restricted to trusted origins.
-`file:`, `data:`, and localhost access are controlled by the corresponding
-bridge options.
+`file:`, `data:`, and localhost access are controlled by `allow_file`,
+`allow_data`, and `allow_localhost` in `kc_wvw_options_t`; origin restrictions
+apply to every built-in and custom bridge method.
+
+Executables are explicit and are addressed only by registered basename:
+
+```c
+const char *paths[] = { "/usr/local/bin/demo" };
+kc_wvw_exec_options_t executables = { paths, 1 };
+kc_wvw_set_executables(wvw, &executables);
+```
+
+```js
+NativeBridge.exec(["demo", "Kaisar"]);
+```
 
 ### Window Options
 

@@ -50,6 +50,9 @@ typedef struct {
     const int *no_focus;
     const int *hidden;
     const int *unlist;
+    int allow_file;
+    int allow_data;
+    int allow_localhost;
 } kc_wvw_options_t;
 
 typedef struct {
@@ -57,10 +60,12 @@ typedef struct {
     size_t method_count;
     kc_wvw_bridge_callback_t callback;
     void *userdata;
-    int allow_file;
-    int allow_data;
-    int allow_localhost;
 } kc_wvw_bridge_options_t;
+
+typedef struct {
+    const char *const *paths;
+    size_t count;
+} kc_wvw_exec_options_t;
 
 /**
  * Open one operational native WebView window.
@@ -97,14 +102,29 @@ int kc_wvw_navigate(kc_wvw_t *wvw, const char *url);
 int kc_wvw_add_init_script(kc_wvw_t *wvw, const char *javascript);
 
 /**
- * Enable one native bridge with a fixed method whitelist.
+ * Set explicitly exposed application bridge methods.
  * The method list, callback and userdata are retained logically until close;
  * method names are copied by the library.
  * @param wvw WebView handle.
  * @param options Bridge configuration.
  * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
  */
-int kc_wvw_enable_bridge(kc_wvw_t *wvw, const kc_wvw_bridge_options_t *options);
+int kc_wvw_set_bridge_methods(
+    kc_wvw_t *wvw,
+    const kc_wvw_bridge_options_t *options
+);
+
+/**
+ * Set the executable paths available to NativeBridge.exec.
+ * Each path is exposed by its basename and is copied by the library.
+ * @param wvw WebView handle.
+ * @param options Executable whitelist, or an empty whitelist.
+ * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_set_executables(
+    kc_wvw_t *wvw,
+    const kc_wvw_exec_options_t *options
+);
 
 /**
  * Deliver one JSON value as a nativebridge event detail.
