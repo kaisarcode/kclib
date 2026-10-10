@@ -267,24 +267,32 @@ define macos_target
 		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
 		exit 1; \
 	fi
-	@cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
-	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache"; then \
+	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
+	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
+	export OSXCROSS_TARGET=darwin25.1 && \
+	export OSXCROSS_SDK=$(MACOSX_SDK) && \
+	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
+	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
+	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache" || ! grep -q '^CMAKE_AR:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar$$' "$$cache" || ! grep -q '^CMAKE_RANLIB:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib$$' "$$cache"; }; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
-	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/macos' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
-		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos \
+	fi && \
+	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(1)/macos' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-macos \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Darwin \
 			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
 			-DDEMO_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
+			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
 			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 			-G Ninja -Wno-dev > /dev/null; \
-	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,)
-	@echo "OK $(1)/macos"
+	fi && \
+	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
+	echo "OK $(1)/macos"
 endef
 
 x86_64/macos:
