@@ -213,6 +213,11 @@ sync_target() {
     done < "$target_dir/SHA256SUMS"
 
     cp "$header" "$dist_target/lib$name.h"
+
+    [ -f "$project_dir/LICENSE" ] &&
+        cp "$project_dir/LICENSE" "$dist_target/LICENSE"
+    [ -f "$project_dir/COPYING" ] &&
+        cp "$project_dir/COPYING" "$dist_target/COPYING"
 }
 
 # Removes distributed targets that no longer exist in bin.
