@@ -111,6 +111,6 @@ and modify it.
 
 ## License
 
-[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+[![LGPLv3](https://www.gnu.org/graphics/lgplv3-147x51.png)](https://www.gnu.org/licenses/lgpl-3.0.html)
 
-This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
+This project is distributed under the **GNU Lesser General Public License version 3 (LGPLv3)**.
