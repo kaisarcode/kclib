@@ -162,4 +162,4 @@ and Makefile.
 
 The projects are beta software and are validated primarily on Debian x86_64,
 although many include targets for other architectures and platforms. They are
-distributed under GPLv3; consult each project for its exact terms.
+distributed under LGPLv3; consult each project for its exact terms.

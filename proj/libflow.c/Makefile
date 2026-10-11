@@ -3,7 +3,7 @@
 ##
 ## Author:  KaisarCode
 ## Website: https://kaisarcode.com
-## License: https://www.gnu.org/licenses/gpl-3.0.html
+## License: https://www.gnu.org/licenses/lgpl-3.0.html
 ANDROID_HOME  ?= $(HOME)/.local/share/android-sdk
 NDK_VERSION   ?= 27.2.12479018
 NDK_DIR := $(ANDROID_HOME)/ndk/$(NDK_VERSION)

@@ -3,7 +3,7 @@
 # Summary: Publishes library artifacts into dist with checksums and a manifest.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
-# License: GNU General Public License v3.0
+# License: GNU Lesser General Public License v3.0
 
 set -e
 
