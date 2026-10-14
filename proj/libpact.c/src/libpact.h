@@ -20,6 +20,7 @@ extern "C" {
 typedef struct kc_pact kc_pact_t;
 
 #define KC_PACT_OK 0
+#define KC_PACT_INCOMPLETE 1
 #define KC_PACT_ERROR -1
 
 #define KC_PACT_UID_SIZE 36
@@ -105,6 +106,27 @@ int kc_pact_confirm(kc_pact_t *trust, const char *confirmation,
 int kc_pact_seal(kc_pact_t *trust, const char *uid,
     const void *message, size_t message_size,
     void **out_data, size_t *out_size);
+
+/**
+ * Determines the total size of one protected message from its authenticated
+ * encrypted length record.
+ *
+ * This is transport-agnostic. Callers that receive arbitrary stream chunks may
+ * accumulate bytes and call this function until KC_PACT_OK is returned. The
+ * returned size may be greater than data_size; the remaining bytes can then be
+ * collected before calling kc_pact_unseal().
+ *
+ * @param trust Trust context.
+ * @param uid Local destination UID from the application envelope.
+ * @param data Available leading bytes of a protected blob.
+ * @param data_size Number of bytes currently available.
+ * @param out_size Destination total protected blob byte count.
+ * @return KC_PACT_OK when the size is known, KC_PACT_INCOMPLETE when more
+ *         leading bytes are required, or KC_PACT_ERROR on invalid input or
+ *         authentication failure.
+ */
+int kc_pact_size(kc_pact_t *trust, const char *uid,
+    const void *data, size_t data_size, size_t *out_size);
 
 /**
  * Authenticates and decrypts one message addressed to a local UID.
