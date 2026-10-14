@@ -191,6 +191,11 @@ static void kc_pow_sha256_transform(kc_pow_sha256_t *ctx,
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
 }
 
+/**
+ * Initializes a SHA-256 context.
+ * @param ctx Context to initialize.
+ * @return None.
+ */
 static void kc_pow_sha256_init(kc_pow_sha256_t *ctx) {
     static const uint32_t initial[8] = {
         0x6a09e667U,0xbb67ae85U,0x3c6ef372U,0xa54ff53aU,
@@ -201,6 +206,13 @@ static void kc_pow_sha256_init(kc_pow_sha256_t *ctx) {
     ctx->block_size = 0;
 }
 
+/**
+ * Updates a SHA-256 context with input data.
+ * @param ctx Context to update.
+ * @param data Input data.
+ * @param size Data size in bytes.
+ * @return None.
+ */
 static void kc_pow_sha256_update(kc_pow_sha256_t *ctx,
     const unsigned char *data, size_t size) {
     while (size > 0) {
@@ -218,6 +230,12 @@ static void kc_pow_sha256_update(kc_pow_sha256_t *ctx,
     }
 }
 
+/**
+ * Finalizes a SHA-256 context and produces the digest.
+ * @param ctx Context to finalize.
+ * @param digest Output buffer for 32-byte digest.
+ * @return None.
+ */
 static void kc_pow_sha256_final(kc_pow_sha256_t *ctx,
     unsigned char digest[KC_POW_SHA256_DIGEST_SIZE]) {
     uint64_t bits = ctx->bit_count + ((uint64_t)ctx->block_size * 8U);
@@ -236,6 +254,15 @@ static void kc_pow_sha256_final(kc_pow_sha256_t *ctx,
     for (i = 0; i < 8; ++i) kc_pow_store32be(digest + i * 4U, ctx->state[i]);
 }
 
+/**
+ * Computes SHA-256 of two concatenated buffers.
+ * @param a First buffer.
+ * @param a_size First buffer size.
+ * @param b Second buffer.
+ * @param b_size Second buffer size.
+ * @param digest Output buffer for 32-byte digest.
+ * @return None.
+ */
 static void kc_pow_sha256(const unsigned char *a, size_t a_size,
     const unsigned char *b, size_t b_size,
     unsigned char digest[KC_POW_SHA256_DIGEST_SIZE]) {
@@ -247,12 +274,24 @@ static void kc_pow_sha256(const unsigned char *a, size_t a_size,
 }
 
 #ifdef _WIN32
+/**
+ * Fills a buffer with cryptographically random bytes (Windows).
+ * @param buf Output buffer.
+ * @param size Buffer size.
+ * @return 0 on success, -1 on failure.
+ */
 static int kc_pow_random(unsigned char *buf, size_t size) {
     if (!buf || size > 0xFFFFFFFFU) return -1;
     return BCryptGenRandom(NULL, buf, (ULONG)size,
         BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 ? 0 : -1;
 }
 #elif defined(__EMSCRIPTEN__)
+/**
+ * Fills a buffer with cryptographically random bytes (Emscripten).
+ * @param buf Output buffer.
+ * @param size Buffer size.
+ * @return 0 on success, -1 on failure.
+ */
 static int kc_pow_random(unsigned char *buf, size_t size) {
     size_t done = 0;
     if (!buf) return -1;
@@ -265,6 +304,12 @@ static int kc_pow_random(unsigned char *buf, size_t size) {
     return 0;
 }
 #else
+/**
+ * Fills a buffer with cryptographically random bytes (Unix).
+ * @param buf Output buffer.
+ * @param size Buffer size.
+ * @return 0 on success, -1 on failure.
+ */
 static int kc_pow_random(unsigned char *buf, size_t size) {
     FILE *f;
     size_t done = 0;
@@ -283,6 +328,13 @@ static int kc_pow_random(unsigned char *buf, size_t size) {
 }
 #endif
 
+/**
+ * Writes a libpow header to a buffer.
+ * @param out Output buffer (at least 8 bytes).
+ * @param kind Entity kind (challenge or solution).
+ * @param size Total entity size.
+ * @return 0 on success, -1 on failure.
+ */
 static int kc_pow_header(unsigned char *out, unsigned kind, unsigned size) {
     if (!out || size > 0xFFFFU) return -1;
     out[0] = 'K'; out[1] = 'P'; out[2] = 'W'; out[3] = KC_POW_VERSION;
@@ -292,6 +344,13 @@ static int kc_pow_header(unsigned char *out, unsigned kind, unsigned size) {
     return 0;
 }
 
+/**
+ * Validates a libpow entity and returns its expected size.
+ * @param data Entity data.
+ * @param data_size Data size.
+ * @param out_size Output for expected total size.
+ * @return KC_POW_OK on success, error code otherwise.
+ */
 int kc_pow_size(const void *data, size_t data_size, size_t *out_size) {
     const unsigned char *p = (const unsigned char *)data;
     size_t expected;
@@ -314,6 +373,14 @@ int kc_pow_size(const void *data, size_t data_size, size_t *out_size) {
     return KC_POW_OK;
 }
 
+/**
+ * Parses and validates a libpow entity of exact expected size and kind.
+ * @param data Entity data.
+ * @param data_size Data size.
+ * @param kind Expected entity kind.
+ * @param expected Expected total size.
+ * @return 0 on success, -1 on failure.
+ */
 static int kc_pow_parse_exact(const void *data, size_t data_size,
     unsigned kind, size_t expected) {
     const unsigned char *p = (const unsigned char *)data;
@@ -323,6 +390,10 @@ static int kc_pow_parse_exact(const void *data, size_t data_size,
     return 0;
 }
 
+/**
+ * Allocates a HashWX context, preferring compiled backend.
+ * @return Allocated context or NULL on failure.
+ */
 static hashwx_ctx *kc_pow_hashwx_alloc(void) {
     hashwx_ctx *ctx;
 #ifdef __EMSCRIPTEN__
@@ -335,6 +406,13 @@ static hashwx_ctx *kc_pow_hashwx_alloc(void) {
     return ctx;
 }
 
+/**
+ * Derives a HashWX seed from challenge and nonce group.
+ * @param challenge 32-byte challenge.
+ * @param nonce Nonce value.
+ * @param seed Output 32-byte seed.
+ * @return None.
+ */
 static void kc_pow_hashwx_seed(const unsigned char challenge[32], uint64_t nonce,
     unsigned char seed[32]) {
     unsigned char group[8];
@@ -342,6 +420,14 @@ static void kc_pow_hashwx_seed(const unsigned char challenge[32], uint64_t nonce
     kc_pow_sha256(challenge, 32U, group, sizeof(group), seed);
 }
 
+/**
+ * Computes a HashWX hash value for a given nonce.
+ * @param ctx HashWX context.
+ * @param challenge 32-byte challenge.
+ * @param nonce Nonce value.
+ * @param out_hash Output hash value.
+ * @return 0 on success, -1 on failure.
+ */
 static int kc_pow_hash_value(hashwx_ctx *ctx,
     const unsigned char challenge[32], uint64_t nonce, uint64_t *out_hash) {
     unsigned char seed[32];
@@ -353,10 +439,21 @@ static int kc_pow_hash_value(hashwx_ctx *ctx,
     return 0;
 }
 
+/**
+ * Returns the library build version.
+ * @return Build version number.
+ */
 uint64_t kc_pow_version(void) {
     return (uint64_t)KC_POW_BUILD_VERSION;
 }
 
+/**
+ * Generates a new proof-of-work challenge.
+ * @param effort Difficulty effort (higher = easier).
+ * @param out_challenge Output challenge pointer (caller must free).
+ * @param out_size Output challenge size.
+ * @return KC_POW_OK on success, error code otherwise.
+ */
 int kc_pow_challenge(uint64_t effort, void **out_challenge, size_t *out_size) {
     unsigned char *blob;
     uint64_t target;
@@ -384,6 +481,14 @@ int kc_pow_challenge(uint64_t effort, void **out_challenge, size_t *out_size) {
     return KC_POW_OK;
 }
 
+/**
+ * Solves a proof-of-work challenge by finding a valid nonce.
+ * @param challenge Challenge data.
+ * @param challenge_size Challenge size.
+ * @param out_solution Output solution pointer (caller must free).
+ * @param out_size Output solution size.
+ * @return KC_POW_OK on success, error code otherwise.
+ */
 int kc_pow_solve(const void *challenge, size_t challenge_size,
     void **out_solution, size_t *out_size) {
     const unsigned char *c = (const unsigned char *)challenge;
@@ -430,6 +535,14 @@ int kc_pow_solve(const void *challenge, size_t challenge_size,
     return KC_POW_OK;
 }
 
+/**
+ * Verifies a proof-of-work solution against a challenge.
+ * @param challenge Challenge data.
+ * @param challenge_size Challenge size.
+ * @param solution Solution data.
+ * @param solution_size Solution size.
+ * @return KC_POW_OK if valid, KC_POW_INVALID if invalid, error code otherwise.
+ */
 int kc_pow_verify(const void *challenge, size_t challenge_size,
     const void *solution, size_t solution_size) {
     const unsigned char *c = (const unsigned char *)challenge;
@@ -458,6 +571,11 @@ int kc_pow_verify(const void *challenge, size_t challenge_size,
     return hash < target ? KC_POW_OK : KC_POW_INVALID;
 }
 
+/**
+ * Frees memory allocated by libpow functions.
+ * @param ptr Pointer to free (may be NULL).
+ * @return None.
+ */
 void kc_pow_free(void *ptr) {
     free(ptr);
 }
