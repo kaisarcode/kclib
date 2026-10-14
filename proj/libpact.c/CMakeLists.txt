@@ -34,6 +34,7 @@ endif()
 
 set(PACT_SOURCES
     src/libpact.c
+    src/size.c
     lib/monocypher/monocypher.c
 )
 
