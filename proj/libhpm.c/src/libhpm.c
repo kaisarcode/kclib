@@ -231,24 +231,39 @@ static int hpm_wait_readable(hpm_socket_t fd, uint64_t timeout_ms)
  * @param first First socket.
  * @param second Second socket.
  * @param timeout_ms Timeout in milliseconds.
- * @param out_index Ready socket index.
+ * @param out_mask Readiness bit mask (bit 0 = first, bit 1 = second).
  * @return 1 if readable, 0 on timeout, -1 on error.
  */
 static int hpm_wait_any(hpm_socket_t first, hpm_socket_t second,
-    uint64_t timeout_ms, int *out_index)
+    uint64_t timeout_ms, int *out_mask)
 {
     fd_set readfds;
     struct timeval tv;
     int rc;
 #ifndef _WIN32
-    hpm_socket_t maximum = first > second ? first : second;
+    hpm_socket_t maximum = HPM_INVALID_SOCKET;
 #endif
 
-    if (!out_index) return -1;
-    *out_index = -1;
+    if (!out_mask) return -1;
+    *out_mask = 0;
     FD_ZERO(&readfds);
-    if (first != HPM_INVALID_SOCKET) FD_SET(first, &readfds);
-    if (second != HPM_INVALID_SOCKET) FD_SET(second, &readfds);
+    if (first != HPM_INVALID_SOCKET) {
+        FD_SET(first, &readfds);
+#ifndef _WIN32
+        maximum = first;
+#endif
+    }
+    if (second != HPM_INVALID_SOCKET) {
+        FD_SET(second, &readfds);
+#ifndef _WIN32
+        if (maximum == HPM_INVALID_SOCKET || second > maximum) maximum = second;
+#endif
+    }
+#ifndef _WIN32
+    if (maximum == HPM_INVALID_SOCKET) return -1;
+#else
+    if (first == HPM_INVALID_SOCKET && second == HPM_INVALID_SOCKET) return -1;
+#endif
     tv.tv_sec = (long)(timeout_ms / 1000ULL);
     tv.tv_usec = (long)((timeout_ms % 1000ULL) * 1000ULL);
 #ifdef _WIN32
@@ -257,8 +272,10 @@ static int hpm_wait_any(hpm_socket_t first, hpm_socket_t second,
     rc = select(maximum + 1, &readfds, NULL, NULL, &tv);
 #endif
     if (rc > 0) {
-        *out_index = first != HPM_INVALID_SOCKET && FD_ISSET(first, &readfds) ?
-            0 : 1;
+        if (first != HPM_INVALID_SOCKET && FD_ISSET(first, &readfds))
+            *out_mask |= 1;
+        if (second != HPM_INVALID_SOCKET && FD_ISSET(second, &readfds))
+            *out_mask |= 2;
         return 1;
     }
     if (rc == 0) return 0;
@@ -405,6 +422,15 @@ static hpm_socket_t hpm_bind_socket(const kc_hpm_options_t *options, int family)
     for (it = result; it; it = it->ai_next) {
         fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
         if (fd == HPM_INVALID_SOCKET) continue;
+        if (it->ai_family == AF_INET6) {
+            int v6only = 1;
+            if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
+                (const char *)&v6only, (hpm_socklen_t)sizeof(v6only)) != 0) {
+                hpm_socket_close(fd);
+                fd = HPM_INVALID_SOCKET;
+                continue;
+            }
+        }
         if (bind(fd, it->ai_addr, (hpm_socklen_t)it->ai_addrlen) == 0) break;
         hpm_socket_close(fd);
         fd = HPM_INVALID_SOCKET;
@@ -541,16 +567,21 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
     timeout_ms = options->timeout_ms ? options->timeout_ms : HPM_DEFAULT_TIMEOUT_MS;
     deadline = hpm_deadline(hpm_now_ms(), timeout_ms);
 
-    while (hpm_now_ms() < deadline) {
+    while (hpm_now_ms() < deadline && chosen < 0) {
         uint64_t now = hpm_now_ms();
         uint64_t remaining;
         uint64_t wait_ms;
         int ready;
+        int ready_mask = 0;
+        int ready_socket;
 
         if (last_probe == 0 || now - last_probe >= HPM_PROBE_INTERVAL_MS) {
-            for (i = 0; i < candidate_count; ++i) if (candidates[i].socket_index >= 0)
-                (void)hpm_send_probe(fds[candidates[i].socket_index], &candidates[i].addr,
-                    candidates[i].addr_len, HPM_PACKET_HELLO, nonce);
+            for (i = 0; i < candidate_count; ++i) {
+                if (candidates[i].socket_index >= 0)
+                    (void)hpm_send_probe(fds[candidates[i].socket_index],
+                        &candidates[i].addr, candidates[i].addr_len,
+                        HPM_PACKET_HELLO, nonce);
+            }
             last_probe = now;
         }
 
@@ -559,28 +590,30 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
         remaining = deadline - now;
         wait_ms = remaining < HPM_PROBE_INTERVAL_MS ?
             remaining : HPM_PROBE_INTERVAL_MS;
-        ready = hpm_wait_any(fds[0], fds[1], wait_ms, &chosen);
+        ready = hpm_wait_any(fds[0], fds[1], wait_ms, &ready_mask);
         if (ready < 0) {
             status = KC_HPM_ENET;
             goto done;
         }
-        if (ready > 0) {
+        if (ready == 0) continue;
+
+        for (ready_socket = 0; ready_socket < 2 && chosen < 0; ++ready_socket) {
             unsigned char packet[256];
             struct sockaddr_storage source;
             hpm_socklen_t source_len = (hpm_socklen_t)sizeof(source);
             int received;
-            int ready_socket = chosen;
-            chosen = -1;
-            received = (int)recvfrom(fds[ready_socket], (char *)packet, (int)sizeof(packet),
-                0, (struct sockaddr *)&source, &source_len);
             int index;
             unsigned type;
             uint64_t packet_nonce;
 
+            if ((ready_mask & (1 << ready_socket)) == 0) continue;
+            received = (int)recvfrom(fds[ready_socket], (char *)packet,
+                (int)sizeof(packet), 0, (struct sockaddr *)&source, &source_len);
             if (received <= 0) continue;
             index = hpm_candidate_index(candidates, candidate_count, &source);
-            if (index < 0 || !hpm_parse_packet(packet, (size_t)received,
-                &type, &packet_nonce)) continue;
+            if (index < 0 || candidates[index].socket_index != ready_socket ||
+                !hpm_parse_packet(packet, (size_t)received,
+                    &type, &packet_nonce)) continue;
 
             if (type == HPM_PACKET_HELLO) {
                 candidates[index].saw_hello = 1;
@@ -591,10 +624,8 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
                 candidates[index].saw_ack = 1;
             }
 
-            if (candidates[index].saw_hello && candidates[index].saw_ack) {
+            if (candidates[index].saw_hello && candidates[index].saw_ack)
                 chosen = index;
-                break;
-            }
         }
     }
 
@@ -605,9 +636,9 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
 
     for (i = 0; i < 3U; ++i) {
         if (candidates[chosen].peer_nonce != 0)
-            (void)hpm_send_probe(fds[candidates[chosen].socket_index], &candidates[chosen].addr,
-                candidates[chosen].addr_len, HPM_PACKET_ACK,
-                candidates[chosen].peer_nonce);
+            (void)hpm_send_probe(fds[candidates[chosen].socket_index],
+                &candidates[chosen].addr, candidates[chosen].addr_len,
+                HPM_PACKET_ACK, candidates[chosen].peer_nonce);
     }
 
     fd = fds[candidates[chosen].socket_index];
@@ -721,10 +752,8 @@ int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
         {
             unsigned type;
             uint64_t probe_nonce;
-            if (hpm_parse_packet(buffer, (size_t)received, &type, &probe_nonce) &&
-                ((type == HPM_PACKET_HELLO && probe_nonce == path->peer_nonce) ||
-                (type == HPM_PACKET_ACK && probe_nonce == path->local_nonce))) {
-                if (type == HPM_PACKET_HELLO) {
+            if (hpm_parse_packet(buffer, (size_t)received, &type, &probe_nonce)) {
+                if (type == HPM_PACKET_HELLO && probe_nonce == path->peer_nonce) {
                     unsigned char ack[HPM_PACKET_SIZE];
                     hpm_make_packet(ack, HPM_PACKET_ACK, probe_nonce);
                     (void)send(path->fd, (const char *)ack,

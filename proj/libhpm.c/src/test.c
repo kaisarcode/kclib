@@ -17,12 +17,25 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 typedef HANDLE test_thread_t;
+typedef SOCKET test_socket_t;
+typedef int test_socklen_t;
+#define TEST_INVALID_SOCKET INVALID_SOCKET
+#define test_socket_close closesocket
 #else
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <pthread.h>
+#include <sys/socket.h>
 #include <unistd.h>
 typedef pthread_t test_thread_t;
+typedef int test_socket_t;
+typedef socklen_t test_socklen_t;
+#define TEST_INVALID_SOCKET (-1)
+#define test_socket_close close
 #endif
 
 static int test_case_total = 0;
@@ -35,13 +48,6 @@ typedef struct {
     int status;
 } test_side_t;
 
-/**
- * Prints a test case result.
- * @param fail Failure flag.
- * @param name Test case name.
- * @param detail Test case detail.
- * @return None.
- */
 static void case_result(int fail, const char *name, const char *detail)
 {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
@@ -54,12 +60,6 @@ static void run_case(int *rc, int (*fn)(void))
     *rc += fn();
 }
 
-/**
- * Checks a condition and reports failure.
- * @param name Test name.
- * @param condition Condition to check.
- * @return 0 on pass, 1 on fail.
- */
 static int expect_true(const char *name, int condition)
 {
     if (!condition) {
@@ -69,19 +69,14 @@ static int expect_true(const char *name, int condition)
     return 0;
 }
 
+static void test_skip(const char *name)
+{
+    printf("[SKIP] %s\n", name);
+}
+
 #ifdef _WIN32
-/**
- * Thread function for connect test (Windows).
- * @param arg Test side data.
- * @return 0.
- */
 static DWORD WINAPI test_connect_thread(LPVOID arg)
 #else
-/**
- * Thread function for connect test (POSIX).
- * @param arg Test side data.
- * @return NULL.
- */
 static void *test_connect_thread(void *arg)
 #endif
 {
@@ -94,29 +89,117 @@ static void *test_connect_thread(void *arg)
 #endif
 }
 
-/**
- * Returns a base port for testing derived from process ID.
- * @return Base port number.
- */
-static unsigned short test_base_port(void)
+static int test_socket_runtime_start(void)
 {
 #ifdef _WIN32
-    unsigned long pid = GetCurrentProcessId();
+    WSADATA wsa;
+    return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
 #else
-    unsigned long pid = (unsigned long)getpid();
+    return 1;
 #endif
-    return (unsigned short)(35000U + (pid % 12000U));
 }
 
-/**
- * Establishes a pair of connected paths for testing.
- * @param a_path Output path A.
- * @param b_path Output path B.
- * @return 0 on success, 1 on failure.
- */
+static void test_socket_runtime_stop(void)
+{
+#ifdef _WIN32
+    WSACleanup();
+#endif
+}
+
+static unsigned short test_ephemeral_port(int family)
+{
+    test_socket_t fd = TEST_INVALID_SOCKET;
+    unsigned short port = 0;
+
+    if (!test_socket_runtime_start()) return 0;
+    fd = socket(family, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd == TEST_INVALID_SOCKET) goto done;
+
+    if (family == AF_INET) {
+        struct sockaddr_in addr;
+        test_socklen_t addr_len = (test_socklen_t)sizeof(addr);
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_port = 0;
+        if (bind(fd, (const struct sockaddr *)&addr, addr_len) != 0) goto done;
+        if (getsockname(fd, (struct sockaddr *)&addr, &addr_len) != 0) goto done;
+        port = ntohs(addr.sin_port);
+    } else if (family == AF_INET6) {
+        struct sockaddr_in6 addr;
+        test_socklen_t addr_len = (test_socklen_t)sizeof(addr);
+        int v6only = 1;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin6_family = AF_INET6;
+        addr.sin6_port = 0;
+        if (inet_pton(AF_INET6, "::1", &addr.sin6_addr) != 1) goto done;
+        if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
+            (const char *)&v6only, (test_socklen_t)sizeof(v6only)) != 0)
+            goto done;
+        if (bind(fd, (const struct sockaddr *)&addr, addr_len) != 0) goto done;
+        if (getsockname(fd, (struct sockaddr *)&addr, &addr_len) != 0) goto done;
+        port = ntohs(addr.sin6_port);
+    }
+
+done:
+    if (fd != TEST_INVALID_SOCKET) test_socket_close(fd);
+    test_socket_runtime_stop();
+    return port;
+}
+
+static int test_port_pair(int family, unsigned short *a, unsigned short *b)
+{
+    unsigned attempt;
+    if (!a || !b) return 0;
+    *a = 0;
+    *b = 0;
+    for (attempt = 0; attempt < 16U; ++attempt) {
+        *a = test_ephemeral_port(family);
+        *b = test_ephemeral_port(family);
+        if (*a != 0 && *b != 0 && *a != *b) return 1;
+    }
+    *a = 0;
+    *b = 0;
+    return 0;
+}
+
+static int test_start_pair(test_side_t *a, test_side_t *b,
+    kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
+{
+    test_thread_t a_thread;
+    test_thread_t b_thread;
+    int started_a = 0;
+    int started_b = 0;
+
+#ifdef _WIN32
+    b_thread = CreateThread(NULL, 0, test_connect_thread, b, 0, NULL);
+    started_b = b_thread != NULL;
+    a_thread = CreateThread(NULL, 0, test_connect_thread, a, 0, NULL);
+    started_a = a_thread != NULL;
+    if (started_a) WaitForSingleObject(a_thread, INFINITE);
+    if (started_b) WaitForSingleObject(b_thread, INFINITE);
+    if (started_a) CloseHandle(a_thread);
+    if (started_b) CloseHandle(b_thread);
+#else
+    started_b = pthread_create(&b_thread, NULL, test_connect_thread, b) == 0;
+    started_a = pthread_create(&a_thread, NULL, test_connect_thread, a) == 0;
+    if (started_a) pthread_join(a_thread, NULL);
+    if (started_b) pthread_join(b_thread, NULL);
+#endif
+
+    if (started_a && started_b && a->status == KC_HPM_OK &&
+        b->status == KC_HPM_OK && a->path && b->path) {
+        *a_path = a->path;
+        *b_path = b->path;
+        return 0;
+    }
+    kc_hpm_close(a->path);
+    kc_hpm_close(b->path);
+    return 1;
+}
+
 static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
 {
-    unsigned short base = test_base_port();
     unsigned attempt;
 
     *a_path = NULL;
@@ -125,17 +208,18 @@ static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
         test_side_t a;
         test_side_t b;
         kc_hpm_endpoint_t a_peers[2];
-        test_thread_t a_thread;
-        test_thread_t b_thread;
-        unsigned short a_port = (unsigned short)(base + attempt * 2U);
-        unsigned short b_port = (unsigned short)(a_port + 1U);
-        int started_a = 0;
-        int started_b = 0;
+        unsigned short a_port;
+        unsigned short b_port;
+        unsigned short bad_port;
+
+        if (!test_port_pair(AF_INET, &a_port, &b_port)) return 1;
+        bad_port = test_ephemeral_port(AF_INET);
+        if (bad_port == 0 || bad_port == a_port || bad_port == b_port) continue;
 
         memset(&a, 0, sizeof(a));
         memset(&b, 0, sizeof(b));
         a_peers[0].host = "127.0.0.1";
-        a_peers[0].port = (unsigned short)(b_port + 1000U);
+        a_peers[0].port = bad_port;
         a_peers[1].host = "127.0.0.1";
         a_peers[1].port = b_port;
         a.options.host = "127.0.0.1";
@@ -151,37 +235,90 @@ static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
         b.options.peer_count = 1;
         b.options.timeout_ms = 1500;
 
-#ifdef _WIN32
-        b_thread = CreateThread(NULL, 0, test_connect_thread, &b, 0, NULL);
-        started_b = b_thread != NULL;
-        a_thread = CreateThread(NULL, 0, test_connect_thread, &a, 0, NULL);
-        started_a = a_thread != NULL;
-        if (started_a) WaitForSingleObject(a_thread, INFINITE);
-        if (started_b) WaitForSingleObject(b_thread, INFINITE);
-        if (started_a) CloseHandle(a_thread);
-        if (started_b) CloseHandle(b_thread);
-#else
-        started_b = pthread_create(&b_thread, NULL, test_connect_thread, &b) == 0;
-        started_a = pthread_create(&a_thread, NULL, test_connect_thread, &a) == 0;
-        if (started_a) pthread_join(a_thread, NULL);
-        if (started_b) pthread_join(b_thread, NULL);
-#endif
-        if (started_a && started_b && a.status == KC_HPM_OK &&
-            b.status == KC_HPM_OK && a.path && b.path) {
-            *a_path = a.path;
-            *b_path = b.path;
-            return 0;
-        }
-        kc_hpm_close(a.path);
-        kc_hpm_close(b.path);
+        if (test_start_pair(&a, &b, a_path, b_path) == 0) return 0;
     }
     return 1;
 }
 
-/**
- * Test case for kc_hpm_connect.
- * @return 0 on pass, 1 on fail.
- */
+static int test_pair_ipv6(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
+{
+    unsigned attempt;
+
+    *a_path = NULL;
+    *b_path = NULL;
+    for (attempt = 0; attempt < 4U; ++attempt) {
+        test_side_t a;
+        test_side_t b;
+        unsigned short a_port;
+        unsigned short b_port;
+
+        if (!test_port_pair(AF_INET6, &a_port, &b_port)) return 2;
+        memset(&a, 0, sizeof(a));
+        memset(&b, 0, sizeof(b));
+        a.peer.host = "::1";
+        a.peer.port = b_port;
+        a.options.host = "::1";
+        a.options.port = a_port;
+        a.options.peers = &a.peer;
+        a.options.peer_count = 1;
+        a.options.timeout_ms = 1500;
+        b.peer.host = "::1";
+        b.peer.port = a_port;
+        b.options.host = "::1";
+        b.options.port = b_port;
+        b.options.peers = &b.peer;
+        b.options.peer_count = 1;
+        b.options.timeout_ms = 1500;
+
+        if (test_start_pair(&a, &b, a_path, b_path) == 0) return 0;
+    }
+    return 1;
+}
+
+static int test_pair_mixed(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
+{
+    unsigned attempt;
+
+    *a_path = NULL;
+    *b_path = NULL;
+    if (test_ephemeral_port(AF_INET6) == 0) return 2;
+
+    for (attempt = 0; attempt < 4U; ++attempt) {
+        test_side_t a;
+        test_side_t b;
+        kc_hpm_endpoint_t a_peers[2];
+        unsigned short a_port;
+        unsigned short b_port;
+        unsigned short dead_v6_port;
+
+        if (!test_port_pair(AF_INET, &a_port, &b_port)) return 1;
+        dead_v6_port = test_ephemeral_port(AF_INET6);
+        if (dead_v6_port == 0) return 2;
+
+        memset(&a, 0, sizeof(a));
+        memset(&b, 0, sizeof(b));
+        a_peers[0].host = "::1";
+        a_peers[0].port = dead_v6_port;
+        a_peers[1].host = "127.0.0.1";
+        a_peers[1].port = b_port;
+        a.options.host = NULL;
+        a.options.port = a_port;
+        a.options.peers = a_peers;
+        a.options.peer_count = 2;
+        a.options.timeout_ms = 1500;
+        b.peer.host = "127.0.0.1";
+        b.peer.port = a_port;
+        b.options.host = "127.0.0.1";
+        b.options.port = b_port;
+        b.options.peers = &b.peer;
+        b.options.peer_count = 1;
+        b.options.timeout_ms = 1500;
+
+        if (test_start_pair(&a, &b, a_path, b_path) == 0) return 0;
+    }
+    return 1;
+}
+
 static int case_kc_hpm_connect(void)
 {
     const char *name = "kc_hpm_connect";
@@ -191,6 +328,9 @@ static int case_kc_hpm_connect(void)
     kc_hpm_options_t invalid;
     kc_hpm_endpoint_t peer;
     kc_hpm_options_t timeout_options;
+    unsigned short timeout_port;
+    int ipv6_rc;
+    int mixed_rc;
     int fail = 0;
 
     memset(&invalid, 0, sizeof(invalid));
@@ -213,17 +353,20 @@ static int case_kc_hpm_connect(void)
     peer.port = 0;
     fail += expect_true("rejects invalid port",
         kc_hpm_connect(&a, &invalid) == KC_HPM_ENET);
+
+    timeout_port = test_ephemeral_port(AF_INET);
     memset(&timeout_options, 0, sizeof(timeout_options));
-    peer.port = (unsigned short)(test_base_port() + 1000U);
+    peer.port = timeout_port;
     timeout_options.host = "127.0.0.1";
     timeout_options.peers = &peer;
     timeout_options.peer_count = 1;
     timeout_options.timeout_ms = 30;
     a = (kc_hpm_path_t *)(uintptr_t)1;
-    fail += expect_true("unreachable peer times out",
+    fail += expect_true("unreachable peer times out", timeout_port != 0 &&
         kc_hpm_connect(&a, &timeout_options) == KC_HPM_ETIMEOUT);
     fail += expect_true("failure clears path", a == NULL);
-    fail += expect_true("loopback pair establishes", test_pair(&a, &b) == 0);
+
+    fail += expect_true("IPv4 loopback pair establishes", test_pair(&a, &b) == 0);
     if (a && b) {
         fail += expect_true("A reports local host", kc_hpm_local_host(a) != NULL);
         fail += expect_true("A reports local port", kc_hpm_local_port(a) != 0);
@@ -236,14 +379,35 @@ static int case_kc_hpm_connect(void)
     }
     kc_hpm_close(a);
     kc_hpm_close(b);
+    a = NULL;
+    b = NULL;
+
+    ipv6_rc = test_pair_ipv6(&a, &b);
+    if (ipv6_rc == 2) {
+        test_skip("IPv6 loopback unavailable");
+    } else {
+        fail += expect_true("IPv6 loopback pair establishes", ipv6_rc == 0);
+    }
+    kc_hpm_close(a);
+    kc_hpm_close(b);
+    a = NULL;
+    b = NULL;
+
+    mixed_rc = test_pair_mixed(&a, &b);
+    if (mixed_rc == 2) {
+        test_skip("mixed IPv4/IPv6 requires IPv6 loopback");
+    } else {
+        fail += expect_true("mixed-family list reaches viable IPv4 peer",
+            mixed_rc == 0 && a && b &&
+            kc_hpm_peer_port(a) == kc_hpm_local_port(b));
+    }
+    kc_hpm_close(a);
+    kc_hpm_close(b);
+
     case_result(fail, name, detail);
     return fail ? 1 : 0;
 }
 
-/**
- * Test case for kc_hpm_datagrams.
- * @return 0 on pass, 1 on fail.
- */
 static int case_kc_hpm_datagrams(void)
 {
     const char *name = "kc_hpm_datagrams";
@@ -256,6 +420,10 @@ static int case_kc_hpm_datagrams(void)
     unsigned char control_like[16] = {
         'K', 'C', 'H', 'P', 'M', '1', 1, 1,
         0, 0, 0, 0, 0, 0, 0, 1
+    };
+    unsigned char stale_control[16] = {
+        'K', 'C', 'H', 'P', 'M', '1', 1, 0,
+        0, 0, 0, 0, 0, 0, 0, 0
     };
     unsigned char large[32768];
     unsigned i;
@@ -272,6 +440,8 @@ static int case_kc_hpm_datagrams(void)
             data && size == 5 && memcmp(data, "hello", 5) == 0);
         kc_hpm_free(data);
         data = NULL;
+        size = 0;
+
         fail += expect_true("control-sized application datagram succeeds",
             kc_hpm_send(a, control_like, sizeof(control_like)) == KC_HPM_OK);
         fail += expect_true("control-like application datagram is delivered",
@@ -281,6 +451,18 @@ static int case_kc_hpm_datagrams(void)
         kc_hpm_free(data);
         data = NULL;
         size = 0;
+
+        fail += expect_true("stale control packet can be sent",
+            kc_hpm_send(a, stale_control, sizeof(stale_control)) == KC_HPM_OK);
+        fail += expect_true("application data after stale control can be sent",
+            kc_hpm_send(a, "after-stale", 11) == KC_HPM_OK);
+        fail += expect_true("stale control does not leak to application",
+            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            size == 11 && memcmp(data, "after-stale", 11) == 0);
+        kc_hpm_free(data);
+        data = NULL;
+        size = 0;
+
         fail += expect_true("reverse send succeeds",
             kc_hpm_send(b, binary, sizeof(binary)) == KC_HPM_OK);
         fail += expect_true("reverse binary receive succeeds",
@@ -290,11 +472,16 @@ static int case_kc_hpm_datagrams(void)
         kc_hpm_free(data);
         data = NULL;
         size = 0;
-        fail += expect_true("empty datagram succeeds", kc_hpm_send(a, NULL, 0) == KC_HPM_OK);
+
+        fail += expect_true("empty datagram succeeds",
+            kc_hpm_send(a, NULL, 0) == KC_HPM_OK);
         fail += expect_true("empty datagram is preserved",
-            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK && data && size == 0);
+            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            data && size == 0);
         kc_hpm_free(data);
         data = NULL;
+        size = 0;
+
         for (i = 0; i < sizeof(large); ++i) large[i] = (unsigned char)i;
         fail += expect_true("large datagram succeeds",
             kc_hpm_send(a, large, sizeof(large)) == KC_HPM_OK);
@@ -303,6 +490,10 @@ static int case_kc_hpm_datagrams(void)
             size == sizeof(large) && memcmp(data, large, sizeof(large)) == 0);
         kc_hpm_free(data);
         data = NULL;
+        size = 0;
+
+        fail += expect_true("datagram above API maximum is rejected",
+            kc_hpm_send(a, large, 65536U) == KC_HPM_EINVAL);
         fail += expect_true("first consecutive datagram succeeds",
             kc_hpm_send(a, "one", 3) == KC_HPM_OK);
         fail += expect_true("second consecutive datagram succeeds",
@@ -317,6 +508,8 @@ static int case_kc_hpm_datagrams(void)
             size == 3 && memcmp(data, "two", 3) == 0);
         kc_hpm_free(data);
         data = NULL;
+        size = 0;
+
         fail += expect_true("invalid send data is rejected",
             kc_hpm_send(a, NULL, 1) == KC_HPM_EINVAL);
         fail += expect_true("invalid receive output is rejected",
@@ -332,10 +525,6 @@ static int case_kc_hpm_datagrams(void)
     return fail ? 1 : 0;
 }
 
-/**
- * Test case for kc_hpm_lifecycle.
- * @return 0 on pass, 1 on fail.
- */
 static int case_kc_hpm_lifecycle(void)
 {
     const char *name = "kc_hpm_lifecycle";
@@ -361,6 +550,7 @@ static int case_kc_hpm_lifecycle(void)
         kc_hpm_send(NULL, "x", 1) == KC_HPM_ECLOSED);
     fail += expect_true("closed path rejects receive",
         kc_hpm_receive(NULL, NULL, NULL, 1) == KC_HPM_EINVAL);
+
     fail += expect_true("first independent pair establishes",
         test_pair(&first_a, &first_b) == 0);
     kc_hpm_close(first_a);
@@ -368,7 +558,7 @@ static int case_kc_hpm_lifecycle(void)
     fail += expect_true("second independent pair establishes",
         test_pair(&second_a, &second_b) == 0);
     fail += expect_true("second pair has current endpoint",
-        second_a && kc_hpm_local_port(second_a) != 0 &&
+        second_a && second_b && kc_hpm_local_port(second_a) != 0 &&
         kc_hpm_peer_port(second_a) == kc_hpm_local_port(second_b));
     kc_hpm_close(second_a);
     kc_hpm_close(second_b);
@@ -377,10 +567,6 @@ static int case_kc_hpm_lifecycle(void)
     return fail ? 1 : 0;
 }
 
-/**
- * Runs all test cases.
- * @return Number of failures.
- */
 static int case_all(void)
 {
     int rc = 0;
@@ -393,12 +579,6 @@ static int case_all(void)
     return rc;
 }
 
-/**
- * Test program entry point.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return Exit status.
- */
 int main(int argc, char **argv)
 {
     if (argc != 2) {
