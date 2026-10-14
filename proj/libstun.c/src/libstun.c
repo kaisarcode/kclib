@@ -1,0 +1,345 @@
+/**
+ * libstun.c - STUN-discovered UDP mappings.
+ * Summary: Discovers and preserves an externally observed UDP mapping.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/lgpl-3.0.html
+ */
+
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+#include "libstun.h"
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <bcrypt.h>
+typedef SOCKET kc_sock_t;
+typedef int kc_socklen_t;
+#define KC_BAD_SOCKET INVALID_SOCKET
+#define kc_close_socket closesocket
+#else
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+typedef int kc_sock_t;
+typedef socklen_t kc_socklen_t;
+#define KC_BAD_SOCKET (-1)
+#define kc_close_socket close
+#endif
+#ifndef NI_MAXHOST
+#define NI_MAXHOST 1025
+#endif
+#ifndef KC_STUN_BUILD_VERSION
+#define KC_STUN_BUILD_VERSION 0
+#endif
+#define STUN_PORT 3478U
+#define STUN_TIMEOUT 3000ULL
+#define STUN_MAGIC 0x2112A442U
+#define STUN_BINDING 0x0001U
+#define STUN_SUCCESS 0x0101U
+#define STUN_XOR_MAPPED 0x0020U
+#define STUN_MAX 65535U
+
+struct kc_stun_mapping {
+    kc_sock_t fd;
+    struct sockaddr_storage server;
+    kc_socklen_t server_len;
+    int family;
+    char local_host[NI_MAXHOST];
+    unsigned short local_port;
+    char mapped_host[NI_MAXHOST];
+    unsigned short mapped_port;
+    unsigned char refresh_id[12];
+    int refresh_pending;
+#ifdef _WIN32
+    int wsa;
+#endif
+};
+
+static uint16_t rd16(const unsigned char *p) { return (uint16_t)((p[0] << 8) | p[1]); }
+static uint32_t rd32(const unsigned char *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
+static void wr16(unsigned char *p, uint16_t v) { p[0] = (unsigned char)(v >> 8); p[1] = (unsigned char)v; }
+static uint64_t now_ms(void) {
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+    return clock_gettime(CLOCK_MONOTONIC, &ts) == 0 ?
+        (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL : 0;
+#endif
+}
+static uint64_t deadline_ms(uint64_t timeout) { uint64_t n = now_ms(); return UINT64_MAX - n < timeout ? UINT64_MAX : n + timeout; }
+static uint64_t remaining_ms(uint64_t deadline) { uint64_t n = now_ms(); return n >= deadline ? 0 : deadline - n; }
+static int runtime_start(void) {
+#ifdef _WIN32
+    WSADATA wsa; return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
+#else
+    return 1;
+#endif
+}
+static void runtime_stop(void) {
+#ifdef _WIN32
+    WSACleanup();
+#endif
+}
+static int random_bytes(unsigned char *out, size_t n) {
+#ifdef _WIN32
+    return n <= ULONG_MAX && BCryptGenRandom(NULL, out, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#else
+    int fd = open("/dev/urandom", O_RDONLY);
+    size_t off = 0;
+    if (fd < 0) return 0;
+    while (off < n) {
+        ssize_t got = read(fd, out + off, n - off);
+        if (got > 0) off += (size_t)got;
+        else if (got < 0 && errno == EINTR) continue;
+        else { close(fd); return 0; }
+    }
+    close(fd); return 1;
+#endif
+}
+static int parse_server(const char *text, char host[NI_MAXHOST], unsigned short *port) {
+    const char *p, *end, *colon = NULL, *s;
+    char tmp[16], *tail;
+    unsigned long v;
+    int colons = 0;
+    size_t n;
+    if (!text || !*text || !port) return 0;
+    p = strncmp(text, "stun:", 5) == 0 ? text + 5 : text;
+    if (!*p) return 0;
+    *port = STUN_PORT;
+    if (*p == '[') {
+        end = strchr(p + 1, ']');
+        if (!end || end == p + 1) return 0;
+        n = (size_t)(end - p - 1);
+        if (n >= NI_MAXHOST) return 0;
+        memcpy(host, p + 1, n); host[n] = 0;
+        if (!end[1]) return 1;
+        if (end[1] != ':' || !end[2]) return 0;
+        p = end + 2;
+    } else {
+        for (s = p; *s; ++s) if (*s == ':') { colon = s; ++colons; }
+        if (colons == 1) {
+            n = (size_t)(colon - p);
+            if (!n || n >= NI_MAXHOST || !colon[1]) return 0;
+            memcpy(host, p, n); host[n] = 0; p = colon + 1;
+        } else {
+            n = strlen(p); if (!n || n >= NI_MAXHOST) return 0;
+            memcpy(host, p, n + 1); return 1;
+        }
+    }
+    n = strlen(p); if (!n || n >= sizeof(tmp)) return 0;
+    memcpy(tmp, p, n + 1); v = strtoul(tmp, &tail, 10);
+    if (*tail || !v || v > 65535UL) return 0;
+    *port = (unsigned short)v; return 1;
+}
+static int endpoint_equal(const struct sockaddr_storage *a, const struct sockaddr_storage *b) {
+    if (a->ss_family != b->ss_family) return 0;
+    if (a->ss_family == AF_INET) {
+        const struct sockaddr_in *x = (const struct sockaddr_in *)a, *y = (const struct sockaddr_in *)b;
+        return x->sin_port == y->sin_port && x->sin_addr.s_addr == y->sin_addr.s_addr;
+    }
+    if (a->ss_family == AF_INET6) {
+        const struct sockaddr_in6 *x = (const struct sockaddr_in6 *)a, *y = (const struct sockaddr_in6 *)b;
+        return x->sin6_port == y->sin6_port && x->sin6_scope_id == y->sin6_scope_id && memcmp(&x->sin6_addr, &y->sin6_addr, sizeof(x->sin6_addr)) == 0;
+    }
+    return 0;
+}
+static int endpoint_text(const struct sockaddr_storage *a, kc_socklen_t len, char host[NI_MAXHOST], unsigned short *port) {
+    char service[16], *tail;
+    unsigned long v;
+    if (getnameinfo((const struct sockaddr *)a, len, host, NI_MAXHOST, service, sizeof(service), NI_NUMERICHOST | NI_NUMERICSERV) != 0) return 0;
+    v = strtoul(service, &tail, 10); if (*tail || v > 65535UL) return 0;
+    *port = (unsigned short)v; return 1;
+}
+static kc_sock_t bind_udp(const char *host, unsigned short port, int family) {
+    struct addrinfo hints, *list = NULL, *it;
+    char service[16]; kc_sock_t fd = KC_BAD_SOCKET;
+    memset(&hints, 0, sizeof(hints)); hints.ai_family = family; hints.ai_socktype = SOCK_DGRAM; hints.ai_protocol = IPPROTO_UDP; hints.ai_flags = AI_PASSIVE;
+    snprintf(service, sizeof(service), "%u", port);
+    if (getaddrinfo(host && *host ? host : NULL, service, &hints, &list) != 0) return KC_BAD_SOCKET;
+    for (it = list; it; it = it->ai_next) {
+        fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol); if (fd == KC_BAD_SOCKET) continue;
+        if (it->ai_family == AF_INET6) { int one = 1; if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&one, (kc_socklen_t)sizeof(one)) != 0) { kc_close_socket(fd); fd = KC_BAD_SOCKET; continue; } }
+        if (bind(fd, it->ai_addr, (kc_socklen_t)it->ai_addrlen) == 0) break;
+        kc_close_socket(fd); fd = KC_BAD_SOCKET;
+    }
+    freeaddrinfo(list); return fd;
+}
+static int wait_readable(kc_sock_t fd, uint64_t ms, int infinite) {
+    fd_set set; struct timeval tv, *p = NULL; int rc;
+    FD_ZERO(&set); FD_SET(fd, &set);
+    if (!infinite) { tv.tv_sec = (long)(ms / 1000ULL); tv.tv_usec = (long)((ms % 1000ULL) * 1000ULL); p = &tv; }
+#ifdef _WIN32
+    rc = select(0, &set, NULL, NULL, p);
+#else
+    rc = select(fd + 1, &set, NULL, NULL, p);
+#endif
+    if (rc >= 0) return rc ? 1 : 0;
+#ifdef _WIN32
+    return WSAGetLastError() == WSAEINTR ? 0 : -1;
+#else
+    return errno == EINTR ? 0 : -1;
+#endif
+}
+static int resolve_peer(const char *host, unsigned short port, int family, struct sockaddr_storage *out, kc_socklen_t *len) {
+    struct addrinfo hints, *list = NULL, *it; char service[16]; int ok = 0;
+    memset(&hints, 0, sizeof(hints)); hints.ai_family = family; hints.ai_socktype = SOCK_DGRAM; hints.ai_protocol = IPPROTO_UDP;
+    snprintf(service, sizeof(service), "%u", port);
+    if (getaddrinfo(host, service, &hints, &list) != 0) return 0;
+    for (it = list; it; it = it->ai_next) if (it->ai_addrlen > 0 && (size_t)it->ai_addrlen <= sizeof(*out)) { memset(out, 0, sizeof(*out)); memcpy(out, it->ai_addr, (size_t)it->ai_addrlen); *len = (kc_socklen_t)it->ai_addrlen; ok = 1; break; }
+    freeaddrinfo(list); return ok;
+}
+static void make_request(unsigned char out[20], const unsigned char id[12]) {
+    memset(out, 0, 20); wr16(out, STUN_BINDING); out[4] = 0x21; out[5] = 0x12; out[6] = 0xa4; out[7] = 0x42; memcpy(out + 8, id, 12);
+}
+static int send_binding(kc_stun_mapping_t *m, unsigned char id[12]) {
+    unsigned char packet[20]; int n;
+    if (!random_bytes(id, 12)) return KC_STUN_ENET;
+    make_request(packet, id);
+#ifdef _WIN32
+    n = sendto(m->fd, (const char *)packet, 20, 0, (const struct sockaddr *)&m->server, m->server_len);
+#else
+    n = (int)sendto(m->fd, packet, 20, 0, (const struct sockaddr *)&m->server, m->server_len);
+#endif
+    return n == 20 ? KC_STUN_OK : KC_STUN_ENET;
+}
+static int parse_response(const unsigned char *p, size_t n, const unsigned char id[12], char host[NI_MAXHOST], unsigned short *port) {
+    size_t end, off; uint16_t len;
+    if (n < 20 || (p[0] & 0xc0U) || rd16(p) != STUN_SUCCESS || rd32(p + 4) != STUN_MAGIC || memcmp(p + 8, id, 12)) return 0;
+    len = rd16(p + 2); if ((len & 3U) || 20U + len > n) return -1; end = 20U + len;
+    for (off = 20; off + 4 <= end;) {
+        uint16_t type = rd16(p + off), alen = rd16(p + off + 2); size_t value = off + 4, padded = ((size_t)alen + 3U) & ~3U;
+        if (value + alen > end || value + padded > end) return -1;
+        if (type == STUN_XOR_MAPPED) {
+            unsigned char raw[16], mask[16] = {0x21,0x12,0xa4,0x42}; size_t sz; int af;
+            if (alen < 8 || p[value] != 0) return -1;
+            if (p[value + 1] == 1) { sz = 4; af = AF_INET; } else if (p[value + 1] == 2) { sz = 16; af = AF_INET6; } else return -1;
+            if (alen < 4U + sz) return -1;
+            *port = (unsigned short)(rd16(p + value + 2) ^ (STUN_MAGIC >> 16));
+            memcpy(mask + 4, id, 12); memcpy(raw, p + value + 4, sz);
+            for (size_t i = 0; i < sz; ++i) raw[i] ^= mask[i];
+            return inet_ntop(af, raw, host, NI_MAXHOST) ? 1 : -1;
+        }
+        off = value + padded;
+    }
+    return -1;
+}
+static int transact(kc_stun_mapping_t *m, uint64_t timeout) {
+    unsigned char id[12], packet[STUN_MAX + 1U]; uint64_t end; int rc;
+    rc = send_binding(m, id); if (rc != KC_STUN_OK) return rc; end = deadline_ms(timeout);
+    for (;;) {
+        struct sockaddr_storage from; kc_socklen_t flen = (kc_socklen_t)sizeof(from); uint64_t left = remaining_ms(end); int ready, got, parsed;
+        if (!left) return KC_STUN_ETIMEOUT;
+        ready = wait_readable(m->fd, left, 0);
+        if (ready < 0) return KC_STUN_ENET;
+        if (!ready) return KC_STUN_ETIMEOUT;
+#ifdef _WIN32
+        got = recvfrom(m->fd, (char *)packet, (int)sizeof(packet), 0, (struct sockaddr *)&from, &flen);
+#else
+        got = (int)recvfrom(m->fd, packet, sizeof(packet), 0, (struct sockaddr *)&from, &flen);
+#endif
+        if (got < 0) return KC_STUN_ENET;
+        if (!endpoint_equal(&from, &m->server)) continue;
+        parsed = parse_response(packet, (size_t)got, id, m->mapped_host, &m->mapped_port); if (parsed > 0) return KC_STUN_OK; if (parsed < 0) return KC_STUN_EPROTO;
+    }
+}
+int kc_stun_discover(kc_stun_mapping_t **out, const kc_stun_options_t *o) {
+    char server_host[NI_MAXHOST], service[16]; unsigned short server_port; struct addrinfo hints, *list = NULL, *it; uint64_t timeout, end; int result = KC_STUN_ENET, started = 0;
+    if (!out || !o || !o->server || !*o->server) return KC_STUN_EINVAL;
+    *out = NULL;
+    if (!parse_server(o->server, server_host, &server_port)) return KC_STUN_EINVAL;
+    if (!runtime_start()) return KC_STUN_ENET;
+    started = 1;
+    memset(&hints, 0, sizeof(hints)); hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_DGRAM; hints.ai_protocol = IPPROTO_UDP; snprintf(service, sizeof(service), "%u", server_port);
+    if (getaddrinfo(server_host, service, &hints, &list) != 0) { runtime_stop(); return KC_STUN_ENET; }
+    timeout = o->timeout_ms ? o->timeout_ms : STUN_TIMEOUT; end = deadline_ms(timeout);
+    for (it = list; it; it = it->ai_next) {
+        kc_stun_mapping_t *m; kc_sock_t fd; struct sockaddr_storage local; kc_socklen_t llen = (kc_socklen_t)sizeof(local); uint64_t left, slice;
+        if ((it->ai_family != AF_INET && it->ai_family != AF_INET6) || it->ai_addrlen <= 0 || (size_t)it->ai_addrlen > sizeof(struct sockaddr_storage)) continue;
+        left = remaining_ms(end); if (!left) { result = KC_STUN_ETIMEOUT; break; } slice = it->ai_next && left > 1000 ? 1000 : left;
+        fd = bind_udp(o->host, o->port, it->ai_family); if (fd == KC_BAD_SOCKET) continue;
+        m = (kc_stun_mapping_t *)calloc(1, sizeof(*m)); if (!m) { kc_close_socket(fd); result = KC_STUN_ENOMEM; break; }
+        m->fd = fd; m->family = it->ai_family; memcpy(&m->server, it->ai_addr, (size_t)it->ai_addrlen); m->server_len = (kc_socklen_t)it->ai_addrlen;
+#ifdef _WIN32
+        m->wsa = 1;
+#endif
+        if (getsockname(fd, (struct sockaddr *)&local, &llen) != 0 || !endpoint_text(&local, llen, m->local_host, &m->local_port)) { kc_stun_close(m); started = 0; result = KC_STUN_ENET; break; }
+        result = transact(m, slice); if (result == KC_STUN_OK) { *out = m; started = 0; break; }
+        kc_stun_close(m); started = 0; if (!runtime_start()) { result = KC_STUN_ENET; break; } started = 1;
+    }
+    freeaddrinfo(list); if (started) runtime_stop(); return *out ? KC_STUN_OK : result;
+}
+int kc_stun_refresh(kc_stun_mapping_t *m) { int rc; if (!m) return KC_STUN_EINVAL; if (m->fd == KC_BAD_SOCKET) return KC_STUN_ECLOSED; rc = send_binding(m, m->refresh_id); if (rc == KC_STUN_OK) m->refresh_pending = 1; return rc; }
+int kc_stun_send(kc_stun_mapping_t *m, const kc_stun_endpoint_t *peer, const void *data, size_t size) {
+    struct sockaddr_storage to; kc_socklen_t len; int n;
+    if (!m || !peer || !peer->host || !*peer->host || !peer->port || (size && !data) || size > STUN_MAX || size > INT_MAX) return KC_STUN_EINVAL;
+    if (m->fd == KC_BAD_SOCKET) return KC_STUN_ECLOSED;
+    if (!resolve_peer(peer->host, peer->port, m->family, &to, &len)) return KC_STUN_ENET;
+#ifdef _WIN32
+    n = sendto(m->fd, (const char *)data, (int)size, 0, (const struct sockaddr *)&to, len);
+#else
+    n = (int)sendto(m->fd, data, size, 0, (const struct sockaddr *)&to, len);
+#endif
+    return n == (int)size ? KC_STUN_OK : KC_STUN_ENET;
+}
+int kc_stun_receive(kc_stun_mapping_t *m, kc_stun_datagram_t *out, uint64_t timeout) {
+    unsigned char packet[STUN_MAX + 1U]; uint64_t end = timeout ? deadline_ms(timeout) : 0;
+    if (!m || !out) return KC_STUN_EINVAL;
+    if (m->fd == KC_BAD_SOCKET) return KC_STUN_ECLOSED;
+    memset(out, 0, sizeof(*out));
+    for (;;) {
+        struct sockaddr_storage from; kc_socklen_t flen = (kc_socklen_t)sizeof(from); uint64_t left = timeout ? remaining_ms(end) : 0; int ready, got; char host[NI_MAXHOST]; unsigned short port; size_t hlen;
+        if (timeout && !left) return KC_STUN_ETIMEOUT;
+        ready = wait_readable(m->fd, left, !timeout);
+        if (ready < 0) return KC_STUN_ENET;
+        if (!ready) return KC_STUN_ETIMEOUT;
+#ifdef _WIN32
+        got = recvfrom(m->fd, (char *)packet, (int)sizeof(packet), 0, (struct sockaddr *)&from, &flen);
+#else
+        got = (int)recvfrom(m->fd, packet, sizeof(packet), 0, (struct sockaddr *)&from, &flen);
+#endif
+        if (got < 0) return KC_STUN_ENET;
+        if (endpoint_equal(&from, &m->server) && got >= 20 && !(packet[0] & 0xc0U) && rd32(packet + 4) == STUN_MAGIC) {
+            if (m->refresh_pending && !memcmp(packet + 8, m->refresh_id, 12)) { char mapped[NI_MAXHOST]; unsigned short mapped_port; if (parse_response(packet, (size_t)got, m->refresh_id, mapped, &mapped_port) > 0) { memcpy(m->mapped_host, mapped, strlen(mapped) + 1); m->mapped_port = mapped_port; } m->refresh_pending = 0; }
+            continue;
+        }
+        if (!endpoint_text(&from, flen, host, &port)) return KC_STUN_ENET;
+        hlen = strlen(host);
+        out->host = (char *)malloc(hlen + 1); out->data = malloc(got > 0 ? (size_t)got : 1U);
+        if (!out->host || !out->data) { kc_stun_datagram_free(out); return KC_STUN_ENOMEM; }
+        memcpy(out->host, host, hlen + 1); if (got > 0) memcpy(out->data, packet, (size_t)got); out->port = port; out->data_size = (size_t)got; return KC_STUN_OK;
+    }
+}
+const char *kc_stun_local_host(const kc_stun_mapping_t *m) { return m && m->fd != KC_BAD_SOCKET && *m->local_host ? m->local_host : NULL; }
+unsigned short kc_stun_local_port(const kc_stun_mapping_t *m) { return m && m->fd != KC_BAD_SOCKET ? m->local_port : 0; }
+const char *kc_stun_mapped_host(const kc_stun_mapping_t *m) { return m && m->fd != KC_BAD_SOCKET && *m->mapped_host ? m->mapped_host : NULL; }
+unsigned short kc_stun_mapped_port(const kc_stun_mapping_t *m) { return m && m->fd != KC_BAD_SOCKET ? m->mapped_port : 0; }
+void kc_stun_datagram_free(kc_stun_datagram_t *d) { if (!d) return; free(d->host); free(d->data); memset(d, 0, sizeof(*d)); }
+void kc_stun_close(kc_stun_mapping_t *m) {
+    if (!m) return;
+    if (m->fd != KC_BAD_SOCKET) kc_close_socket(m->fd);
+#ifdef _WIN32
+    if (m->wsa) runtime_stop();
+#endif
+    free(m);
+}
+const char *kc_stun_strerror(int s) { switch (s) { case KC_STUN_OK: return "ok"; case KC_STUN_EINVAL: return "invalid argument"; case KC_STUN_ENET: return "network error"; case KC_STUN_ETIMEOUT: return "timeout"; case KC_STUN_EPROTO: return "invalid STUN response"; case KC_STUN_ENOMEM: return "out of memory"; case KC_STUN_ECLOSED: return "mapping closed"; default: return "unknown status"; } }
+uint64_t kc_stun_version(void) { return (uint64_t)KC_STUN_BUILD_VERSION; }
