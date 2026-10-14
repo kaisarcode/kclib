@@ -39,20 +39,76 @@ typedef struct {
     uint64_t timeout_ms;
 } kc_hpm_options_t;
 
+typedef struct {
+    char *host;
+    unsigned short port;
+    void *data;
+    size_t data_size;
+} kc_hpm_datagram_t;
+
+typedef int (*kc_hpm_udp_send_fn)(
+    void *context,
+    const kc_hpm_endpoint_t *peer,
+    const void *data,
+    size_t data_size
+);
+
+typedef int (*kc_hpm_udp_receive_fn)(
+    void *context,
+    kc_hpm_datagram_t *out,
+    uint64_t timeout_ms
+);
+
+typedef void (*kc_hpm_udp_release_fn)(
+    void *context,
+    kc_hpm_datagram_t *datagram
+);
+
+typedef struct {
+    void *context;
+    kc_hpm_endpoint_t local;
+    kc_hpm_udp_send_fn send;
+    kc_hpm_udp_receive_fn receive;
+    kc_hpm_udp_release_fn release;
+} kc_hpm_udp_t;
+
 /**
  * Establish a direct bidirectional UDP path to one supplied peer endpoint.
  * NULL or empty host binds all local interfaces. Port zero requests an
  * operating-system-selected local port. peers must contain at least one
  * endpoint with a host and nonzero port. timeout_ms zero uses the default.
  *
- * Peer endpoint discovery, STUN, rendezvous, relay, identity, and application
- * policy are outside this operation.
+ * Peer endpoint discovery, rendezvous, identity, and application policy are
+ * outside this operation.
  *
  * @return KC_HPM_OK on success, otherwise a negative status.
  */
 int kc_hpm_connect(
     kc_hpm_path_t **out,
     const kc_hpm_options_t *options
+);
+
+/**
+ * Establish a direct bidirectional UDP path over a caller-supplied live UDP
+ * mapping instead of binding a new local socket.
+ *
+ * The transport callbacks operate on complete UDP datagrams. send and receive
+ * return KC_HPM_OK, KC_HPM_ETIMEOUT, or another public HPM status. receive
+ * fills one datagram and release frees any storage owned by the transport.
+ * local must describe the numeric local endpoint of the supplied mapping.
+ *
+ * HPM borrows the transport: its context and callbacks must remain valid until
+ * kc_hpm_close() and HPM does not close the underlying mapping. The path must
+ * have exclusive receive access to that mapping while it is active.
+ * options.host and options.port are ignored; peers and timeout_ms retain their
+ * normal meaning.
+ *
+ * @return KC_HPM_OK on success, otherwise a negative status.
+ */
+int kc_hpm_connect_over(
+    kc_hpm_path_t **out,
+    const kc_hpm_options_t *options,
+    const kc_hpm_udp_t *udp
 );
 
 /**
@@ -118,6 +174,8 @@ void kc_hpm_free(void *ptr);
 
 /**
  * Closes and releases an established path. NULL is accepted.
+ * A borrowed UDP transport supplied to kc_hpm_connect_over() remains owned by
+ * the caller and is not closed.
  * @param path Path handle.
  * @return None.
  */

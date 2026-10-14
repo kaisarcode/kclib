@@ -9,6 +9,10 @@ endif()
 
 option(STUN_BUILD_TESTS "Build stun tests" OFF)
 
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+endif()
+
 if(NOT MSVC)
     add_compile_options(-O3 -Wall -Wextra -Werror)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -45,14 +49,14 @@ if(NOT STUN_TEST_EXTERNAL_ARTIFACTS)
     if(WIN32)
         target_link_libraries(stun_static PUBLIC ws2_32 bcrypt)
         target_link_libraries(stun_shared PUBLIC ws2_32 bcrypt)
+    else()
+        target_link_libraries(stun_static PUBLIC Threads::Threads)
+        target_link_libraries(stun_shared PUBLIC Threads::Threads)
     endif()
 endif()
 
 if(STUN_BUILD_TESTS)
     enable_testing()
-    if(NOT WIN32)
-        find_package(Threads REQUIRED)
-    endif()
     if(STUN_TEST_SHARED_LIBRARY)
         add_library(stun_test_shared SHARED IMPORTED)
         set_target_properties(stun_test_shared PROPERTIES

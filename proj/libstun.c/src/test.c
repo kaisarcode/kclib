@@ -42,7 +42,7 @@ typedef socklen_t test_socklen_t;
 
 #define TEST_STUN_MAGIC 0x2112A442U
 
-static int test_case_total = 4;
+static int test_case_total = 5;
 static int test_case_current = 0;
 
 typedef struct {
@@ -56,6 +56,12 @@ static void put16(unsigned char *out, size_t off, unsigned short v)
 {
     out[off] = (unsigned char)(v >> 8);
     out[off + 1U] = (unsigned char)v;
+}
+
+/** Loads one network-order u16 from a test packet. */
+static unsigned short get16(const unsigned char *in, size_t off)
+{
+    return (unsigned short)(((unsigned short)in[off] << 8) | in[off + 1U]);
 }
 
 /** Starts the test socket runtime. */
@@ -410,6 +416,134 @@ static int case_discover_ipv6(void)
     return fail ? 1 : 0;
 }
 
+/** Validates the autonomous STUN Binding listener and its wire response. */
+static int case_listen(void)
+{
+    const char *name = "kc_stun_listen";
+    const char *detail = "serves UDP Binding requests on a live endpoint";
+    kc_stun_server_options_t server_options;
+    kc_stun_server_t *server = NULL;
+    kc_stun_mapping_t *mapping = NULL;
+    kc_stun_options_t options;
+    test_socket_t client = TEST_INVALID_SOCKET;
+    unsigned short client_port = 0;
+    unsigned short server_port = 0;
+    unsigned char request[20];
+    unsigned char response[64];
+    struct sockaddr_in destination;
+    char server_text[64];
+    int received = -1;
+    int fail = 0;
+    size_t i;
+
+    memset(&server_options, 0, sizeof(server_options));
+    fail += expect_true("NULL listener output rejected",
+        kc_stun_listen(NULL, &server_options) == KC_STUN_EINVAL);
+    fail += expect_true("NULL listener options rejected",
+        kc_stun_listen(&server, NULL) == KC_STUN_EINVAL);
+    fail += expect_true("NULL listener reports no port",
+        kc_stun_server_port(NULL) == 0);
+
+    server_options.host = NULL;
+    server_options.port = 0;
+    fail += expect_true("listener starts",
+        kc_stun_listen(&server, &server_options) == KC_STUN_OK && server != NULL);
+    if (!server) {
+        case_result(1, name, detail);
+        return 1;
+    }
+    server_port = kc_stun_server_port(server);
+    fail += expect_true("listener reports assigned port", server_port != 0);
+
+    client = bind_loopback(AF_INET, &client_port);
+    fail += expect_true("raw client created", client != TEST_INVALID_SOCKET);
+    if (client != TEST_INVALID_SOCKET) {
+        memset(request, 0, sizeof(request));
+        put16(request, 0, 0x0001);
+        request[4] = 0x21; request[5] = 0x12; request[6] = 0xa4; request[7] = 0x42;
+        for (i = 0; i < 12U; ++i) request[8U + i] = (unsigned char)(i + 1U);
+        memset(&destination, 0, sizeof(destination));
+        destination.sin_family = AF_INET;
+        destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        destination.sin_port = htons(server_port);
+#ifdef _WIN32
+        (void)sendto(client, (const char *)request, (int)sizeof(request), 0,
+            (const struct sockaddr *)&destination, (int)sizeof(destination));
+#else
+        (void)sendto(client, request, sizeof(request), 0,
+            (const struct sockaddr *)&destination, (socklen_t)sizeof(destination));
+#endif
+        if (wait_readable(client, 1000)) {
+#ifdef _WIN32
+            received = recvfrom(client, (char *)response, (int)sizeof(response), 0,
+                NULL, NULL);
+#else
+            received = (int)recvfrom(client, response, sizeof(response), 0,
+                NULL, NULL);
+#endif
+        }
+        fail += expect_true("raw Binding response received", received == 32);
+        if (received == 32) {
+            unsigned short mapped_port = (unsigned short)(get16(response, 26) ^
+                (TEST_STUN_MAGIC >> 16));
+            unsigned char mapped[4];
+            mapped[0] = response[28] ^ 0x21;
+            mapped[1] = response[29] ^ 0x12;
+            mapped[2] = response[30] ^ 0xa4;
+            mapped[3] = response[31] ^ 0x42;
+            fail += expect_true("Binding response type is success",
+                get16(response, 0) == 0x0101 && get16(response, 2) == 12);
+            fail += expect_true("Binding response preserves transaction id",
+                memcmp(response + 8, request + 8, 12) == 0);
+            fail += expect_true("Binding response contains XOR-MAPPED-ADDRESS",
+                get16(response, 20) == 0x0020 && get16(response, 22) == 8 &&
+                response[24] == 0 && response[25] == 1);
+            fail += expect_true("Binding response reflects source endpoint",
+                mapped_port == client_port && mapped[0] == 127 && mapped[1] == 0 &&
+                mapped[2] == 0 && mapped[3] == 1);
+        }
+    }
+
+    snprintf(server_text, sizeof(server_text), "127.0.0.1:%u", server_port);
+    memset(&options, 0, sizeof(options));
+    options.server = server_text;
+    options.host = "127.0.0.1";
+    options.timeout_ms = 1000;
+    fail += expect_true("library discovery works against library listener",
+        kc_stun_discover(&mapping, &options) == KC_STUN_OK && mapping != NULL);
+    if (mapping) {
+        fail += expect_true("listener reports discovery source mapping",
+            kc_stun_mapped_host(mapping) &&
+            strcmp(kc_stun_mapped_host(mapping), "127.0.0.1") == 0 &&
+            kc_stun_mapped_port(mapping) == kc_stun_local_port(mapping));
+    }
+    kc_stun_close(mapping);
+    mapping = NULL;
+
+    {
+        unsigned short probe_port = 0;
+        test_socket_t probe = bind_loopback(AF_INET6, &probe_port);
+        if (probe != TEST_INVALID_SOCKET) {
+            test_socket_close(probe);
+            snprintf(server_text, sizeof(server_text), "[::1]:%u", server_port);
+            memset(&options, 0, sizeof(options));
+            options.server = server_text;
+            options.host = "::1";
+            options.timeout_ms = 1000;
+            fail += expect_true("wildcard listener accepts IPv6 Binding",
+                kc_stun_discover(&mapping, &options) == KC_STUN_OK && mapping != NULL);
+            kc_stun_close(mapping);
+            mapping = NULL;
+        }
+    }
+
+    if (client != TEST_INVALID_SOCKET) test_socket_close(client);
+    kc_stun_server_close(server);
+    kc_stun_server_close(NULL);
+    case_result(fail, name, detail);
+    return fail ? 1 : 0;
+}
+
 /** Validates invalid arguments and bounded discovery timeout behavior. */
 static int case_errors(void)
 {
@@ -483,6 +617,7 @@ int main(int argc, char **argv)
     }
     test_case_current++; rc += case_discover_ipv4();
     test_case_current++; rc += case_discover_ipv6();
+    test_case_current++; rc += case_listen();
     test_case_current++; rc += case_errors();
     test_case_current++; rc += case_metadata();
     socket_runtime_stop();

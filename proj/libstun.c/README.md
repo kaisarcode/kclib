@@ -1,20 +1,35 @@
-# libstun.c - STUN UDP mappings
+# libstun.c - STUN UDP mappings and endpoints
 
 ---
 
-`libstun.c` discovers the externally observed endpoint of a local UDP mapping
-with STUN and keeps that mapping alive as an object. The mapping remains bound
-to the same local UDP socket for its lifetime, so application datagrams use the
-same mapping that STUN observed.
+`libstun.c` provides both sides of UDP STUN Binding: it can discover the
+externally observed endpoint of a local UDP mapping and keep that mapping alive,
+or run an autonomous UDP Binding endpoint that other machines can query.
 
-The library owns STUN discovery and refresh traffic. It does not perform
-rendezvous, endpoint exchange, hole punching, relay/TURN, identity,
-authentication, encryption, reliable delivery, or application session policy.
+A discovered mapping remains bound to the same local UDP socket for its
+lifetime, so application datagrams use the same mapping that STUN observed. A
+listener answers Binding Requests with the source IP address and UDP port it
+actually received, encoded as `XOR-MAPPED-ADDRESS`.
+
+The library owns STUN Binding discovery, refresh traffic, and UDP Binding
+responses. Its public surface is limited to STUN mapping discovery, the live UDP
+mapping produced by discovery, and autonomous STUN Binding service.
 
 ## Public API
 
 ```c
 #include "libstun.h"
+
+kc_stun_server_options_t server_options = {
+    .host = NULL,
+    .port = 3478
+};
+kc_stun_server_t *server = NULL;
+
+if (kc_stun_listen(&server, &server_options) == KC_STUN_OK) {
+    printf("STUN listening on UDP port %u\n",
+        kc_stun_server_port(server));
+}
 
 kc_stun_options_t options = {
     .server = "stun.example.com:3478",
@@ -22,24 +37,25 @@ kc_stun_options_t options = {
     .port = 5000,
     .timeout_ms = 3000
 };
-
 kc_stun_mapping_t *mapping = NULL;
 
 if (kc_stun_discover(&mapping, &options) == KC_STUN_OK) {
     printf("mapped as %s:%u\n",
         kc_stun_mapped_host(mapping),
         kc_stun_mapped_port(mapping));
-
-    kc_stun_endpoint_t peer = { "203.0.113.20", 5000 };
-    kc_stun_send(mapping, &peer, "hello", 5);
 }
 
 kc_stun_close(mapping);
+kc_stun_server_close(server);
 ```
 
 The public API contains:
 
 ```c
+int kc_stun_listen(kc_stun_server_t **out,
+    const kc_stun_server_options_t *options);
+unsigned short kc_stun_server_port(const kc_stun_server_t *server);
+void kc_stun_server_close(kc_stun_server_t *server);
 int kc_stun_discover(kc_stun_mapping_t **out,
     const kc_stun_options_t *options);
 int kc_stun_refresh(kc_stun_mapping_t *mapping);
@@ -57,6 +73,15 @@ void kc_stun_close(kc_stun_mapping_t *mapping);
 const char *kc_stun_strerror(int status);
 uint64_t kc_stun_version(void);
 ```
+
+`kc_stun_listen()` starts an autonomous UDP Binding endpoint. A NULL or empty
+`host` listens on available IPv4 and IPv6 wildcard addresses using the same UDP
+port. An explicit `host` restricts the listener to address families resolved for
+that host. Port zero requests an operating-system-selected port, which can be
+read with `kc_stun_server_port()`. For a conventional public endpoint, use port
+3478. The listener runs until `kc_stun_server_close()` and answers UDP STUN Binding
+Requests with `XOR-MAPPED-ADDRESS`. The current transport is UDP; TCP, TLS, and
+DTLS STUN transports are not part of this API.
 
 `kc_stun_discover()` creates a UDP mapping, sends an RFC 5389 Binding Request,
 and returns a live mapping only after the STUN server reports its observed
@@ -104,9 +129,9 @@ make x86_64/windows
 make test wine
 ```
 
-The contract tests use local STUN responders and validate IPv4 and IPv6
-discovery, preservation of the observed local mapping, refresh traffic,
-application datagram exchange, timeouts, errors, and cleanup.
+The contract tests validate the autonomous Binding listener at the wire level,
+IPv4 and IPv6 discovery, preservation of the observed local mapping, refresh
+traffic, application datagram exchange, timeouts, errors, and cleanup.
 
 ### Multiarch Builds
 

@@ -1,6 +1,6 @@
 /**
- * libstun.h - STUN-discovered UDP mappings.
- * Summary: Discovers and preserves an externally observed UDP mapping.
+ * libstun.h - STUN UDP mappings and Binding endpoints.
+ * Summary: Discovers UDP mappings and serves STUN Binding requests.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 typedef struct kc_stun_mapping kc_stun_mapping_t;
+typedef struct kc_stun_server kc_stun_server_t;
 
 #define KC_STUN_OK        0
 #define KC_STUN_EINVAL   -1
@@ -40,11 +41,42 @@ typedef struct {
 } kc_stun_options_t;
 
 typedef struct {
+    const char *host;
+    unsigned short port;
+} kc_stun_server_options_t;
+
+typedef struct {
     char *host;
     unsigned short port;
     void *data;
     size_t data_size;
 } kc_stun_datagram_t;
+
+/**
+ * Starts an autonomous UDP STUN Binding endpoint.
+ *
+ * NULL or empty host listens on available IPv4 and IPv6 wildcard addresses.
+ * An explicit host restricts the listener to address families resolved for
+ * that host. Port zero requests an operating-system-selected local port.
+ * The server replies to UDP STUN Binding Requests with XOR-MAPPED-ADDRESS
+ * until kc_stun_server_close() is called.
+ *
+ * @return KC_STUN_OK on success, otherwise a negative status.
+ */
+int kc_stun_listen(
+    kc_stun_server_t **out,
+    const kc_stun_server_options_t *options
+);
+
+/**
+ * Returns the UDP port used by a running STUN server, or zero.
+ */
+unsigned short kc_stun_server_port(const kc_stun_server_t *server);
+
+/**
+ * Stops and releases a STUN server. NULL is accepted.
+ */
+void kc_stun_server_close(kc_stun_server_t *server);
 
 /**
  * Discovers the externally observed endpoint of a bound UDP mapping and keeps

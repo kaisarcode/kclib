@@ -1,12 +1,20 @@
 # stun scripting API
 
-STUN discovery for a live UDP mapping. Discovery keeps the same local mapping
+UDP STUN Binding discovery and serving. Discovery keeps the same local mapping
 open so the observed endpoint and later application datagrams refer to the same
-UDP mapping.
+UDP mapping. A listener autonomously answers Binding Requests from other
+machines.
 
 ## Lua
 
 ```lua
+local server = stun.listen {
+    host = nil,
+    port = 3478
+}
+
+print(server.port)
+
 local mapping = stun.discover {
     server = "stun.example.com:3478",
     host = nil,
@@ -29,10 +37,16 @@ local from = packet.from
 local data = packet.data
 
 mapping:close()
+server:close()
 ```
 
-`server` accepts `host:port`, `[IPv6]:port`, or a host without a port, which
-uses port 3478. `host` is optional. `port` may be zero to request an
+`stun.listen { host, port }` starts an autonomous UDP Binding endpoint. A nil or
+empty `host` listens on available IPv4 and IPv6 wildcard addresses. Port zero
+requests an operating-system-selected port, exposed as `server.port`; use 3478
+for the conventional public STUN UDP port.
+
+The discovery `server` option accepts `host:port`, `[IPv6]:port`, or a host
+without a port, which uses port 3478. `host` is optional. `port` may be zero to request an
 operating-system-selected local port. `timeout_ms` zero uses the default
 discovery timeout.
 
@@ -51,6 +65,13 @@ waits indefinitely.
 ## JavaScript
 
 ```js
+const server = await stun.listen({
+  host: null,
+  port: 3478
+});
+
+console.log(server.port);
+
 const mapping = await stun.discover({
   server: "stun.example.com:3478",
   host: null,
@@ -73,13 +94,16 @@ const from = packet.from;
 const data = packet.data;
 
 await mapping.close();
+await server.close();
 ```
+
+The listener answers UDP STUN Binding Requests with `XOR-MAPPED-ADDRESS`. It
+does not expose request parsing or socket polling to the scripting caller. The
+current transport is UDP; TCP, TLS, and DTLS STUN transports are outside this
+API.
 
 The mapping supports IPv4 and IPv6. The chosen STUN server address family and
 explicit local bind host must be compatible.
 
-STUN itself performs no rendezvous, endpoint exchange, direct-path selection,
-TURN relay, identity, authentication, encryption, or application session
-management.
 
 `strerror(status)` and `version()` remain namespace functions.

@@ -66,15 +66,24 @@ if(HPM_BUILD_TESTS)
         set(HPM_TEST_SHARED_TARGET hpm_shared)
     endif()
     add_executable(hpm_contract_test src/test.c)
+    add_executable(hpm_over_contract_test src/test_over.c)
     target_include_directories(hpm_contract_test PRIVATE src)
+    target_include_directories(hpm_over_contract_test PRIVATE src)
     target_link_libraries(hpm_contract_test PRIVATE ${HPM_TEST_SHARED_TARGET})
+    target_link_libraries(hpm_over_contract_test PRIVATE ${HPM_TEST_SHARED_TARGET})
     if(WIN32)
         target_link_libraries(hpm_contract_test PRIVATE ws2_32)
+        target_link_libraries(hpm_over_contract_test PRIVATE ws2_32)
     else()
         target_link_libraries(hpm_contract_test PRIVATE Threads::Threads)
+        target_link_libraries(hpm_over_contract_test PRIVATE Threads::Threads)
     endif()
     add_custom_command(TARGET hpm_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:${HPM_TEST_SHARED_TARGET}>
             $<TARGET_FILE_DIR:hpm_contract_test>)
+    add_custom_command(TARGET hpm_over_contract_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:${HPM_TEST_SHARED_TARGET}>
+            $<TARGET_FILE_DIR:hpm_over_contract_test>)
 endif()

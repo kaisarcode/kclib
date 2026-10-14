@@ -78,6 +78,10 @@ struct kc_hpm_path {
     unsigned short peer_port;
     uint64_t local_nonce;
     uint64_t peer_nonce;
+    struct sockaddr_storage peer_addr;
+    hpm_socklen_t peer_addr_len;
+    int borrowed_udp;
+    kc_hpm_udp_t udp;
 #ifdef _WIN32
     int wsa_started;
 #endif
@@ -510,6 +514,135 @@ static void hpm_fill_local(kc_hpm_path_t *path)
 }
 
 /**
+ * Normalizes one caller-supplied UDP transport status.
+ * @param status Transport callback status.
+ * @return Public HPM status.
+ */
+static int hpm_udp_status(int status)
+{
+    switch (status) {
+        case KC_HPM_OK:
+        case KC_HPM_EINVAL:
+        case KC_HPM_ENET:
+        case KC_HPM_ETIMEOUT:
+        case KC_HPM_ENOMEM:
+        case KC_HPM_ECLOSED:
+            return status;
+        default:
+            return KC_HPM_ENET;
+    }
+}
+
+/**
+ * Resolves the numeric local host of a supplied UDP mapping to its family.
+ * @param udp Borrowed UDP mapping adapter.
+ * @return AF_INET, AF_INET6, or AF_UNSPEC on failure.
+ */
+static int hpm_udp_family(const kc_hpm_udp_t *udp)
+{
+    struct addrinfo hints;
+    struct addrinfo *result = NULL;
+    struct addrinfo *it;
+    int family = AF_UNSPEC;
+
+    if (!udp || !udp->local.host || !udp->local.host[0]) return AF_UNSPEC;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_NUMERICHOST;
+    if (getaddrinfo(udp->local.host, NULL, &hints, &result) != 0)
+        return AF_UNSPEC;
+    for (it = result; it; it = it->ai_next) {
+        if (it->ai_family == AF_INET || it->ai_family == AF_INET6) {
+            family = it->ai_family;
+            break;
+        }
+    }
+    freeaddrinfo(result);
+    return family;
+}
+
+/**
+ * Converts a resolved candidate to the public endpoint value used by a
+ * supplied UDP mapping.
+ * @param candidate Resolved peer candidate.
+ * @param host Output numeric host buffer.
+ * @param endpoint Output endpoint value borrowing host.
+ * @return 1 on success, 0 on failure.
+ */
+static int hpm_candidate_endpoint(const hpm_candidate_t *candidate,
+    char host[NI_MAXHOST], kc_hpm_endpoint_t *endpoint)
+{
+    if (!candidate || !endpoint ||
+        hpm_addr_host(&candidate->addr, candidate->addr_len,
+            host, NI_MAXHOST) != 0)
+        return 0;
+    endpoint->host = host;
+    endpoint->port = hpm_addr_port(&candidate->addr);
+    return endpoint->port != 0;
+}
+
+/**
+ * Resolves a datagram source reported by a supplied UDP mapping.
+ * @param datagram Received datagram.
+ * @param family Required mapping family.
+ * @param out Resolved source address.
+ * @return 1 on success, 0 on failure.
+ */
+static int hpm_datagram_addr(const kc_hpm_datagram_t *datagram, int family,
+    struct sockaddr_storage *out)
+{
+    struct addrinfo hints;
+    struct addrinfo *result = NULL;
+    struct addrinfo *it;
+    char service[16];
+    int ok = 0;
+
+    if (!datagram || !datagram->host || !datagram->host[0] ||
+        datagram->port == 0 || !out)
+        return 0;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = family;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+    snprintf(service, sizeof(service), "%u", datagram->port);
+    if (getaddrinfo(datagram->host, service, &hints, &result) != 0) return 0;
+    for (it = result; it; it = it->ai_next) {
+        if (it->ai_addrlen <= 0 ||
+            (size_t)it->ai_addrlen > sizeof(*out))
+            continue;
+        memset(out, 0, sizeof(*out));
+        memcpy(out, it->ai_addr, (size_t)it->ai_addrlen);
+        ok = 1;
+        break;
+    }
+    freeaddrinfo(result);
+    return ok;
+}
+
+/**
+ * Sends one HPM probe through a caller-supplied UDP mapping.
+ * @param udp Borrowed UDP mapping adapter.
+ * @param candidate Destination candidate.
+ * @param type Probe type.
+ * @param nonce Probe nonce.
+ * @return Public HPM status.
+ */
+static int hpm_udp_send_probe(const kc_hpm_udp_t *udp,
+    const hpm_candidate_t *candidate, unsigned type, uint64_t nonce)
+{
+    unsigned char packet[HPM_PACKET_SIZE];
+    char host[NI_MAXHOST];
+    kc_hpm_endpoint_t endpoint;
+
+    if (!hpm_candidate_endpoint(candidate, host, &endpoint))
+        return KC_HPM_ENET;
+    hpm_make_packet(packet, type, nonce);
+    return hpm_udp_status(udp->send(udp->context, &endpoint,
+        packet, sizeof(packet)));
+}
+
+/**
  * Returns the library build version.
  * @return Build version number.
  */
@@ -657,6 +790,8 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
         }
         path->fd = fd;
         fd = HPM_INVALID_SOCKET;
+        path->peer_addr = candidates[chosen].addr;
+        path->peer_addr_len = candidates[chosen].addr_len;
         path->peer_port = hpm_addr_port(&candidates[chosen].addr);
         if (hpm_addr_host(&candidates[chosen].addr,
             candidates[chosen].addr_len, path->peer_host,
@@ -684,6 +819,158 @@ done:
 }
 
 /**
+ * Establishes a direct bidirectional UDP path over a supplied live mapping.
+ * @param out Output path handle.
+ * @param options Peer endpoints and timeout.
+ * @param udp Borrowed UDP mapping adapter.
+ * @return KC_HPM_OK on success, otherwise a negative status.
+ */
+int kc_hpm_connect_over(kc_hpm_path_t **out, const kc_hpm_options_t *options,
+    const kc_hpm_udp_t *udp)
+{
+    hpm_candidate_t *candidates = NULL;
+    size_t candidate_count = 0;
+    uint64_t nonce;
+    uint64_t timeout_ms;
+    uint64_t deadline;
+    uint64_t last_probe = 0;
+    int family;
+    int status = KC_HPM_ENET;
+    int chosen = -1;
+    size_t i;
+#ifdef _WIN32
+    WSADATA wsa;
+    int wsa_started = 0;
+#endif
+
+    if (!out || !options || !options->peers || options->peer_count == 0 ||
+        !udp || !udp->local.host || !udp->local.host[0] ||
+        udp->local.port == 0 || !udp->send || !udp->receive || !udp->release)
+        return KC_HPM_EINVAL;
+    *out = NULL;
+
+#ifdef _WIN32
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return KC_HPM_ENET;
+    wsa_started = 1;
+#endif
+
+    family = hpm_udp_family(udp);
+    if (family != AF_INET && family != AF_INET6) {
+        status = KC_HPM_EINVAL;
+        goto done;
+    }
+    status = hpm_resolve_peers(options, family, &candidates, &candidate_count);
+    if (status != KC_HPM_OK) goto done;
+
+    nonce = hpm_nonce();
+    timeout_ms = options->timeout_ms ? options->timeout_ms : HPM_DEFAULT_TIMEOUT_MS;
+    deadline = hpm_deadline(hpm_now_ms(), timeout_ms);
+
+    while (hpm_now_ms() < deadline && chosen < 0) {
+        uint64_t now = hpm_now_ms();
+        uint64_t remaining;
+        uint64_t wait_ms;
+        kc_hpm_datagram_t datagram;
+        struct sockaddr_storage source;
+        int receive_status;
+        int index;
+        unsigned type;
+        uint64_t packet_nonce;
+
+        if (last_probe == 0 || now - last_probe >= HPM_PROBE_INTERVAL_MS) {
+            for (i = 0; i < candidate_count; ++i)
+                (void)hpm_udp_send_probe(udp, &candidates[i],
+                    HPM_PACKET_HELLO, nonce);
+            last_probe = now;
+        }
+
+        now = hpm_now_ms();
+        if (now >= deadline) break;
+        remaining = deadline - now;
+        wait_ms = remaining < HPM_PROBE_INTERVAL_MS ?
+            remaining : HPM_PROBE_INTERVAL_MS;
+        memset(&datagram, 0, sizeof(datagram));
+        receive_status = hpm_udp_status(udp->receive(udp->context,
+            &datagram, wait_ms));
+        if (receive_status == KC_HPM_ETIMEOUT) continue;
+        if (receive_status != KC_HPM_OK) {
+            status = receive_status;
+            goto done;
+        }
+        if ((datagram.data_size > 0 && !datagram.data) ||
+            datagram.data_size > HPM_MAX_DATAGRAM ||
+            !hpm_datagram_addr(&datagram, family, &source)) {
+            udp->release(udp->context, &datagram);
+            status = KC_HPM_ENET;
+            goto done;
+        }
+        index = hpm_candidate_index(candidates, candidate_count, &source);
+        if (index >= 0 && hpm_parse_packet(datagram.data, datagram.data_size,
+            &type, &packet_nonce)) {
+            if (type == HPM_PACKET_HELLO) {
+                candidates[index].saw_hello = 1;
+                candidates[index].peer_nonce = packet_nonce;
+                (void)hpm_udp_send_probe(udp, &candidates[index],
+                    HPM_PACKET_ACK, packet_nonce);
+            } else if (type == HPM_PACKET_ACK && packet_nonce == nonce) {
+                candidates[index].saw_ack = 1;
+            }
+            if (candidates[index].saw_hello && candidates[index].saw_ack)
+                chosen = index;
+        }
+        udp->release(udp->context, &datagram);
+    }
+
+    if (chosen < 0) {
+        status = KC_HPM_ETIMEOUT;
+        goto done;
+    }
+
+    for (i = 0; i < 3U; ++i) {
+        if (candidates[chosen].peer_nonce != 0)
+            (void)hpm_udp_send_probe(udp, &candidates[chosen],
+                HPM_PACKET_ACK, candidates[chosen].peer_nonce);
+    }
+
+    {
+        kc_hpm_path_t *path = (kc_hpm_path_t *)calloc(1, sizeof(*path));
+        if (!path) {
+            status = KC_HPM_ENOMEM;
+            goto done;
+        }
+        path->fd = HPM_INVALID_SOCKET;
+        path->borrowed_udp = 1;
+        path->udp = *udp;
+        snprintf(path->local_host, sizeof(path->local_host), "%s",
+            udp->local.host);
+        path->local_port = udp->local.port;
+        path->udp.local.host = path->local_host;
+        path->udp.local.port = path->local_port;
+        path->peer_addr = candidates[chosen].addr;
+        path->peer_addr_len = candidates[chosen].addr_len;
+        path->peer_port = hpm_addr_port(&candidates[chosen].addr);
+        if (hpm_addr_host(&candidates[chosen].addr,
+            candidates[chosen].addr_len, path->peer_host,
+            sizeof(path->peer_host)) != 0) path->peer_host[0] = '\0';
+        path->local_nonce = nonce;
+        path->peer_nonce = candidates[chosen].peer_nonce;
+#ifdef _WIN32
+        path->wsa_started = wsa_started;
+        wsa_started = 0;
+#endif
+        *out = path;
+        status = KC_HPM_OK;
+    }
+
+done:
+    free(candidates);
+#ifdef _WIN32
+    if (wsa_started) WSACleanup();
+#endif
+    return status;
+}
+
+/**
  * Sends one UDP datagram through an established path.
  * @param path Path handle.
  * @param data Data to send.
@@ -694,12 +981,107 @@ int kc_hpm_send(kc_hpm_path_t *path, const void *data, size_t data_size)
 {
     static const unsigned char empty = 0;
     int sent;
-    if (!path || path->fd == HPM_INVALID_SOCKET) return KC_HPM_ECLOSED;
+
+    if (!path) return KC_HPM_ECLOSED;
     if (!data && data_size != 0) return KC_HPM_EINVAL;
     if (data_size > HPM_MAX_DATAGRAM) return KC_HPM_EINVAL;
+    if (path->borrowed_udp) {
+        kc_hpm_endpoint_t peer;
+        if (!path->udp.send || !path->peer_host[0] || path->peer_port == 0)
+            return KC_HPM_ECLOSED;
+        peer.host = path->peer_host;
+        peer.port = path->peer_port;
+        return hpm_udp_status(path->udp.send(path->udp.context, &peer,
+            data_size ? data : &empty, data_size));
+    }
+    if (path->fd == HPM_INVALID_SOCKET) return KC_HPM_ECLOSED;
     sent = (int)send(path->fd,
         (const char *)(data_size ? data : &empty), (int)data_size, 0);
     return sent == (int)data_size ? KC_HPM_OK : KC_HPM_ENET;
+}
+
+/**
+ * Receives one UDP datagram through a borrowed UDP mapping.
+ * @param path Established path.
+ * @param out_data Output data buffer.
+ * @param out_size Output data size.
+ * @param timeout_ms Timeout in milliseconds (0 = wait indefinitely).
+ * @return KC_HPM_OK on success, otherwise a negative status.
+ */
+static int hpm_receive_over(kc_hpm_path_t *path, void **out_data,
+    size_t *out_size, uint64_t timeout_ms)
+{
+    uint64_t deadline = timeout_ms ? hpm_deadline(hpm_now_ms(), timeout_ms) : 0;
+    int family = path->peer_addr.ss_family;
+
+    if (family != AF_INET && family != AF_INET6) return KC_HPM_ECLOSED;
+    for (;;) {
+        kc_hpm_datagram_t datagram;
+        struct sockaddr_storage source;
+        uint64_t wait_ms = 0;
+        int status;
+        int is_peer;
+        unsigned type;
+        uint64_t probe_nonce;
+        hpm_candidate_t selected;
+        unsigned char *buffer;
+
+        if (timeout_ms) {
+            uint64_t now = hpm_now_ms();
+            if (now >= deadline) return KC_HPM_ETIMEOUT;
+            wait_ms = deadline - now;
+        }
+        memset(&datagram, 0, sizeof(datagram));
+        status = hpm_udp_status(path->udp.receive(path->udp.context,
+            &datagram, wait_ms));
+        if (status != KC_HPM_OK) return status;
+        if ((datagram.data_size > 0 && !datagram.data) ||
+            datagram.data_size > HPM_MAX_DATAGRAM ||
+            !hpm_datagram_addr(&datagram, family, &source)) {
+            path->udp.release(path->udp.context, &datagram);
+            return KC_HPM_ENET;
+        }
+
+        memset(&selected, 0, sizeof(selected));
+        is_peer = hpm_same_endpoint(&source, &path->peer_addr);
+        if (!is_peer) {
+            path->udp.release(path->udp.context, &datagram);
+            continue;
+        }
+
+        if (hpm_parse_packet(datagram.data, datagram.data_size,
+            &type, &probe_nonce)) {
+            if (type == HPM_PACKET_HELLO && probe_nonce == path->peer_nonce) {
+                char host[NI_MAXHOST];
+                kc_hpm_endpoint_t endpoint;
+                selected.addr = source;
+                selected.addr_len = family == AF_INET ?
+                    (hpm_socklen_t)sizeof(struct sockaddr_in) :
+                    (hpm_socklen_t)sizeof(struct sockaddr_in6);
+                if (hpm_candidate_endpoint(&selected, host, &endpoint)) {
+                    unsigned char ack[HPM_PACKET_SIZE];
+                    hpm_make_packet(ack, HPM_PACKET_ACK, probe_nonce);
+                    (void)path->udp.send(path->udp.context, &endpoint,
+                        ack, sizeof(ack));
+                }
+            }
+            path->udp.release(path->udp.context, &datagram);
+            continue;
+        }
+
+        buffer = (unsigned char *)malloc(datagram.data_size ?
+            datagram.data_size : 1U);
+        if (!buffer) {
+            path->udp.release(path->udp.context, &datagram);
+            return KC_HPM_ENOMEM;
+        }
+        if (datagram.data_size > 0)
+            memcpy(buffer, datagram.data, datagram.data_size);
+        *out_data = buffer;
+        *out_size = datagram.data_size;
+        path->udp.release(path->udp.context, &datagram);
+        return KC_HPM_OK;
+    }
 }
 
 /**
@@ -718,7 +1100,10 @@ int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
     if (!out_data || !out_size) return KC_HPM_EINVAL;
     *out_data = NULL;
     *out_size = 0;
-    if (!path || path->fd == HPM_INVALID_SOCKET) return KC_HPM_ECLOSED;
+    if (!path) return KC_HPM_ECLOSED;
+    if (path->borrowed_udp)
+        return hpm_receive_over(path, out_data, out_size, timeout_ms);
+    if (path->fd == HPM_INVALID_SOCKET) return KC_HPM_ECLOSED;
 
     for (;;) {
         uint64_t wait_ms;
@@ -736,10 +1121,7 @@ int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
         if (wait_ms > 1000ULL) wait_ms = 1000ULL;
         ready = hpm_wait_readable(path->fd, wait_ms);
         if (ready < 0) return KC_HPM_ENET;
-        if (ready == 0) {
-            if (timeout_ms) continue;
-            else continue;
-        }
+        if (ready == 0) continue;
 
         buffer = (unsigned char *)malloc(HPM_MAX_DATAGRAM);
         if (!buffer) return KC_HPM_ENOMEM;
@@ -840,6 +1222,8 @@ void kc_hpm_close(kc_hpm_path_t *path)
         hpm_socket_close(path->fd);
         path->fd = HPM_INVALID_SOCKET;
     }
+    memset(&path->udp, 0, sizeof(path->udp));
+    path->borrowed_udp = 0;
 #ifdef _WIN32
     if (path->wsa_started) WSACleanup();
 #endif
