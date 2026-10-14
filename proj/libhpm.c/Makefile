@@ -59,6 +59,9 @@ ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_SHARED_NAME := libhpm.dll
 NATIVE_IMPORT_LIBRARY := -DHPM_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libhpm.dll.a
 endif
+ifeq ($(NATIVE_PLATFORM),macos)
+NATIVE_SHARED_NAME := libhpm.dylib
+endif
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 .PHONY: all test wine clean x86_64/linux x86_64/windows x86_64/macos x86_64/iossim i686/linux i686/windows aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim armv7/linux armv7/android armv7hf/linux riscv64/linux powerpc64le/linux mips/linux mipsel/linux mips64el/linux s390x/linux loongarch64/linux
 all: x86_64/linux x86_64/windows x86_64/macos x86_64/iossim i686/linux i686/windows aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim armv7/linux armv7/android armv7hf/linux riscv64/linux powerpc64le/linux mips/linux mipsel/linux mips64el/linux s390x/linux loongarch64/linux
@@ -93,7 +96,7 @@ x86_64/windows: ; $(call windows_target,x86_64,x86_64-w64-mingw32-gcc)
 i686/windows: ; $(call windows_target,i686,i686-w64-mingw32-gcc)
 ifeq ($(HOST_SYSTEM),Darwin)
 define macos_target
-$(call build_target,$(1),macos,-DCMAKE_OSX_ARCHITECTURES=$(1))
+$(call build_target,$(1),macos,-DCMAKE_OSX_ARCHITECTURES=$(if $(filter aarch64,$(1)),arm64,$(1)))
 endef
 else
 define macos_target

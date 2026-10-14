@@ -54,7 +54,6 @@ typedef socklen_t hpm_socklen_t;
 
 #define HPM_DEFAULT_TIMEOUT_MS 5000ULL
 #define HPM_PROBE_INTERVAL_MS 100ULL
-#define HPM_SETTLE_MS 500ULL
 #define HPM_PACKET_SIZE 16U
 #define HPM_PACKET_HELLO 1U
 #define HPM_PACKET_ACK 2U
@@ -65,6 +64,7 @@ static const unsigned char hpm_magic[6] = { 'K', 'C', 'H', 'P', 'M', '1' };
 typedef struct {
     struct sockaddr_storage addr;
     hpm_socklen_t addr_len;
+    int socket_index;
     int saw_hello;
     int saw_ack;
     uint64_t peer_nonce;
@@ -76,7 +76,8 @@ struct kc_hpm_path {
     unsigned short local_port;
     char peer_host[NI_MAXHOST];
     unsigned short peer_port;
-    uint64_t settle_until_ms;
+    uint64_t local_nonce;
+    uint64_t peer_nonce;
 #ifdef _WIN32
     int wsa_started;
 #endif
@@ -95,6 +96,18 @@ static uint64_t hpm_now_ms(void)
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
     return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
 #endif
+}
+
+/**
+ * Adds a timeout to a monotonic timestamp without wrapping.
+ * @param now Current monotonic time.
+ * @param timeout_ms Timeout duration.
+ * @return Saturated deadline.
+ */
+static uint64_t hpm_deadline(uint64_t now, uint64_t timeout_ms)
+{
+    if (UINT64_MAX - now < timeout_ms) return UINT64_MAX;
+    return now + timeout_ms;
 }
 
 /**
@@ -214,6 +227,49 @@ static int hpm_wait_readable(hpm_socket_t fd, uint64_t timeout_ms)
 }
 
 /**
+ * Waits for either of two sockets to become readable.
+ * @param first First socket.
+ * @param second Second socket.
+ * @param timeout_ms Timeout in milliseconds.
+ * @param out_index Ready socket index.
+ * @return 1 if readable, 0 on timeout, -1 on error.
+ */
+static int hpm_wait_any(hpm_socket_t first, hpm_socket_t second,
+    uint64_t timeout_ms, int *out_index)
+{
+    fd_set readfds;
+    struct timeval tv;
+    int rc;
+#ifndef _WIN32
+    hpm_socket_t maximum = first > second ? first : second;
+#endif
+
+    if (!out_index) return -1;
+    *out_index = -1;
+    FD_ZERO(&readfds);
+    if (first != HPM_INVALID_SOCKET) FD_SET(first, &readfds);
+    if (second != HPM_INVALID_SOCKET) FD_SET(second, &readfds);
+    tv.tv_sec = (long)(timeout_ms / 1000ULL);
+    tv.tv_usec = (long)((timeout_ms % 1000ULL) * 1000ULL);
+#ifdef _WIN32
+    rc = select(0, &readfds, NULL, NULL, &tv);
+#else
+    rc = select(maximum + 1, &readfds, NULL, NULL, &tv);
+#endif
+    if (rc > 0) {
+        *out_index = first != HPM_INVALID_SOCKET && FD_ISSET(first, &readfds) ?
+            0 : 1;
+        return 1;
+    }
+    if (rc == 0) return 0;
+#ifdef _WIN32
+    return WSAGetLastError() == WSAEINTR ? 0 : -1;
+#else
+    return errno == EINTR ? 0 : -1;
+#endif
+}
+
+/**
  * Compares two socket addresses for equality.
  * @param a First address.
  * @param b Second address.
@@ -254,59 +310,6 @@ static int hpm_candidate_index(const hpm_candidate_t *candidates,
         if (hpm_same_endpoint(&candidates[i].addr, addr)) return (int)i;
     }
     return -1;
-}
-
-/**
- * Determines the address family from options.
- * @param options Connection options.
- * @return AF_INET, AF_INET6, or AF_UNSPEC if undetermined.
- */
-static int hpm_choose_family(const kc_hpm_options_t *options)
-{
-    struct addrinfo hints;
-    struct addrinfo *result = NULL;
-    size_t i;
-    int family = AF_UNSPEC;
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_socktype = SOCK_DGRAM;
-
-    if (options->host && options->host[0]) {
-        if (getaddrinfo(options->host, NULL, &hints, &result) == 0) {
-            struct addrinfo *it;
-            for (it = result; it; it = it->ai_next) {
-                if (it->ai_family == AF_INET || it->ai_family == AF_INET6) {
-                    family = it->ai_family;
-                    break;
-                }
-            }
-            freeaddrinfo(result);
-            result = NULL;
-        }
-        if (family != AF_UNSPEC) return family;
-    }
-
-    for (i = 0; i < options->peer_count; ++i) {
-        char service[16];
-        if (!options->peers[i].host || !options->peers[i].host[0] ||
-            options->peers[i].port == 0) continue;
-        snprintf(service, sizeof(service), "%u", options->peers[i].port);
-        if (getaddrinfo(options->peers[i].host, service, &hints, &result) != 0)
-            continue;
-        {
-            struct addrinfo *it;
-            for (it = result; it; it = it->ai_next) {
-                if (it->ai_family == AF_INET || it->ai_family == AF_INET6) {
-                    family = it->ai_family;
-                    break;
-                }
-            }
-        }
-        freeaddrinfo(result);
-        result = NULL;
-        if (family != AF_UNSPEC) return family;
-    }
-    return AF_UNSPEC;
 }
 
 /**
@@ -459,7 +462,7 @@ static int hpm_addr_host(const struct sockaddr_storage *addr,
 {
     if (!addr || !out || out_size == 0) return -1;
     return getnameinfo((const struct sockaddr *)addr, addr_len,
-        out, (socklen_t)out_size, NULL, 0, NI_NUMERICHOST) == 0 ? 0 : -1;
+        out, (hpm_socklen_t)out_size, NULL, 0, NI_NUMERICHOST) == 0 ? 0 : -1;
 }
 
 /**
@@ -499,12 +502,12 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
 {
     hpm_candidate_t *candidates = NULL;
     size_t candidate_count = 0;
+    hpm_socket_t fds[2] = { HPM_INVALID_SOCKET, HPM_INVALID_SOCKET };
     hpm_socket_t fd = HPM_INVALID_SOCKET;
     uint64_t nonce;
     uint64_t timeout_ms;
     uint64_t deadline;
     uint64_t last_probe = 0;
-    int family;
     int status = KC_HPM_ENET;
     int chosen = -1;
     size_t i;
@@ -522,20 +525,21 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
     wsa_started = 1;
 #endif
 
-    family = hpm_choose_family(options);
-    if (family == AF_UNSPEC) goto done;
-    status = hpm_resolve_peers(options, family, &candidates, &candidate_count);
+    status = hpm_resolve_peers(options, AF_UNSPEC, &candidates, &candidate_count);
     if (status != KC_HPM_OK) goto done;
 
-    fd = hpm_bind_socket(options, family);
-    if (fd == HPM_INVALID_SOCKET) {
-        status = KC_HPM_ENET;
-        goto done;
+    for (i = 0; i < candidate_count; ++i) {
+        int slot = candidates[i].addr.ss_family == AF_INET6 ? 1 : 0;
+        if (fds[slot] == HPM_INVALID_SOCKET)
+            fds[slot] = hpm_bind_socket(options, candidates[i].addr.ss_family);
+        candidates[i].socket_index = fds[slot] == HPM_INVALID_SOCKET ? -1 : slot;
     }
+    if (fds[0] == HPM_INVALID_SOCKET && fds[1] == HPM_INVALID_SOCKET)
+        goto done;
 
     nonce = hpm_nonce();
     timeout_ms = options->timeout_ms ? options->timeout_ms : HPM_DEFAULT_TIMEOUT_MS;
-    deadline = hpm_now_ms() + timeout_ms;
+    deadline = hpm_deadline(hpm_now_ms(), timeout_ms);
 
     while (hpm_now_ms() < deadline) {
         uint64_t now = hpm_now_ms();
@@ -544,8 +548,8 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
         int ready;
 
         if (last_probe == 0 || now - last_probe >= HPM_PROBE_INTERVAL_MS) {
-            for (i = 0; i < candidate_count; ++i)
-                (void)hpm_send_probe(fd, &candidates[i].addr,
+            for (i = 0; i < candidate_count; ++i) if (candidates[i].socket_index >= 0)
+                (void)hpm_send_probe(fds[candidates[i].socket_index], &candidates[i].addr,
                     candidates[i].addr_len, HPM_PACKET_HELLO, nonce);
             last_probe = now;
         }
@@ -555,7 +559,7 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
         remaining = deadline - now;
         wait_ms = remaining < HPM_PROBE_INTERVAL_MS ?
             remaining : HPM_PROBE_INTERVAL_MS;
-        ready = hpm_wait_readable(fd, wait_ms);
+        ready = hpm_wait_any(fds[0], fds[1], wait_ms, &chosen);
         if (ready < 0) {
             status = KC_HPM_ENET;
             goto done;
@@ -564,7 +568,10 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
             unsigned char packet[256];
             struct sockaddr_storage source;
             hpm_socklen_t source_len = (hpm_socklen_t)sizeof(source);
-            int received = (int)recvfrom(fd, (char *)packet, (int)sizeof(packet),
+            int received;
+            int ready_socket = chosen;
+            chosen = -1;
+            received = (int)recvfrom(fds[ready_socket], (char *)packet, (int)sizeof(packet),
                 0, (struct sockaddr *)&source, &source_len);
             int index;
             unsigned type;
@@ -578,7 +585,7 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
             if (type == HPM_PACKET_HELLO) {
                 candidates[index].saw_hello = 1;
                 candidates[index].peer_nonce = packet_nonce;
-                (void)hpm_send_probe(fd, &source, source_len,
+                (void)hpm_send_probe(fds[ready_socket], &source, source_len,
                     HPM_PACKET_ACK, packet_nonce);
             } else if (type == HPM_PACKET_ACK && packet_nonce == nonce) {
                 candidates[index].saw_ack = 1;
@@ -598,11 +605,13 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
 
     for (i = 0; i < 3U; ++i) {
         if (candidates[chosen].peer_nonce != 0)
-            (void)hpm_send_probe(fd, &candidates[chosen].addr,
+            (void)hpm_send_probe(fds[candidates[chosen].socket_index], &candidates[chosen].addr,
                 candidates[chosen].addr_len, HPM_PACKET_ACK,
                 candidates[chosen].peer_nonce);
     }
 
+    fd = fds[candidates[chosen].socket_index];
+    fds[candidates[chosen].socket_index] = HPM_INVALID_SOCKET;
     if (connect(fd, (const struct sockaddr *)&candidates[chosen].addr,
         candidates[chosen].addr_len) != 0) {
         status = KC_HPM_ENET;
@@ -622,7 +631,8 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
             candidates[chosen].addr_len, path->peer_host,
             sizeof(path->peer_host)) != 0) path->peer_host[0] = '\0';
         hpm_fill_local(path);
-        path->settle_until_ms = hpm_now_ms() + HPM_SETTLE_MS;
+        path->local_nonce = nonce;
+        path->peer_nonce = candidates[chosen].peer_nonce;
 #ifdef _WIN32
         path->wsa_started = wsa_started;
         wsa_started = 0;
@@ -633,6 +643,8 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
 
 done:
     if (fd != HPM_INVALID_SOCKET) hpm_socket_close(fd);
+    for (i = 0; i < 2U; ++i)
+        if (fds[i] != HPM_INVALID_SOCKET) hpm_socket_close(fds[i]);
     free(candidates);
 #ifdef _WIN32
     if (wsa_started) WSACleanup();
@@ -670,7 +682,7 @@ int kc_hpm_send(kc_hpm_path_t *path, const void *data, size_t data_size)
 int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
     size_t *out_size, uint64_t timeout_ms)
 {
-    uint64_t deadline = timeout_ms ? hpm_now_ms() + timeout_ms : 0;
+    uint64_t deadline = timeout_ms ? hpm_deadline(hpm_now_ms(), timeout_ms) : 0;
 
     if (!out_data || !out_size) return KC_HPM_EINVAL;
     *out_data = NULL;
@@ -706,10 +718,12 @@ int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
             return KC_HPM_ENET;
         }
 
-        if (hpm_now_ms() <= path->settle_until_ms) {
+        {
             unsigned type;
             uint64_t probe_nonce;
-            if (hpm_parse_packet(buffer, (size_t)received, &type, &probe_nonce)) {
+            if (hpm_parse_packet(buffer, (size_t)received, &type, &probe_nonce) &&
+                ((type == HPM_PACKET_HELLO && probe_nonce == path->peer_nonce) ||
+                (type == HPM_PACKET_ACK && probe_nonce == path->local_nonce))) {
                 if (type == HPM_PACKET_HELLO) {
                     unsigned char ack[HPM_PACKET_SIZE];
                     hpm_make_packet(ack, HPM_PACKET_ACK, probe_nonce);

@@ -253,6 +253,10 @@ static int case_kc_hpm_datagrams(void)
     void *data = NULL;
     size_t size = 0;
     unsigned char binary[] = { 0, 1, 0, 255 };
+    unsigned char control_like[16] = {
+        'K', 'C', 'H', 'P', 'M', '1', 1, 1,
+        0, 0, 0, 0, 0, 0, 0, 1
+    };
     unsigned char large[32768];
     unsigned i;
     int fail = 0;
@@ -266,6 +270,14 @@ static int case_kc_hpm_datagrams(void)
         fail += expect_true("received size matches", size == 5);
         fail += expect_true("received bytes match",
             data && size == 5 && memcmp(data, "hello", 5) == 0);
+        kc_hpm_free(data);
+        data = NULL;
+        fail += expect_true("control-sized application datagram succeeds",
+            kc_hpm_send(a, control_like, sizeof(control_like)) == KC_HPM_OK);
+        fail += expect_true("control-like application datagram is delivered",
+            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            size == sizeof(control_like) &&
+            memcmp(data, control_like, sizeof(control_like)) == 0);
         kc_hpm_free(data);
         data = NULL;
         size = 0;
@@ -328,6 +340,10 @@ static int case_kc_hpm_lifecycle(void)
 {
     const char *name = "kc_hpm_lifecycle";
     const char *detail = "reports errors, version, and accepts NULL cleanup";
+    kc_hpm_path_t *first_a = NULL;
+    kc_hpm_path_t *first_b = NULL;
+    kc_hpm_path_t *second_a = NULL;
+    kc_hpm_path_t *second_b = NULL;
     int fail = 0;
 
     kc_hpm_close(NULL);
@@ -345,6 +361,17 @@ static int case_kc_hpm_lifecycle(void)
         kc_hpm_send(NULL, "x", 1) == KC_HPM_ECLOSED);
     fail += expect_true("closed path rejects receive",
         kc_hpm_receive(NULL, NULL, NULL, 1) == KC_HPM_EINVAL);
+    fail += expect_true("first independent pair establishes",
+        test_pair(&first_a, &first_b) == 0);
+    kc_hpm_close(first_a);
+    kc_hpm_close(first_b);
+    fail += expect_true("second independent pair establishes",
+        test_pair(&second_a, &second_b) == 0);
+    fail += expect_true("second pair has current endpoint",
+        second_a && kc_hpm_local_port(second_a) != 0 &&
+        kc_hpm_peer_port(second_a) == kc_hpm_local_port(second_b));
+    kc_hpm_close(second_a);
+    kc_hpm_close(second_b);
 
     case_result(fail, name, detail);
     return fail ? 1 : 0;
