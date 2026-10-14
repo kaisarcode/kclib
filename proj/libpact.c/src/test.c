@@ -366,6 +366,54 @@ static int case_kc_pact_seal(void) {
 }
 
 /**
+ * Tests kc_pact_size.
+ * @return 0 on success, or 1 on failure.
+ */
+static int case_kc_pact_size(void) {
+    kc_pact_t *bob = NULL;
+    kc_pact_t *alice = NULL;
+    char *alice_uid = NULL;
+    char *bob_uid = NULL;
+    void *data = NULL;
+    size_t data_size = 0;
+    size_t protected_size = 0;
+    int fail = 0;
+
+    fail += expect_int("relationship establishes", 0,
+        test_relation("size", &bob, &alice, &alice_uid, &bob_uid));
+    if (bob && alice && alice_uid) {
+        fail += expect_int("bob seals", KC_PACT_OK,
+            kc_pact_seal(bob, alice_uid, "hello", 5, &data, &data_size));
+        if (data && data_size > 2) {
+            fail += expect_int("short prefix is incomplete", KC_PACT_INCOMPLETE,
+                kc_pact_size(alice, alice_uid, data, data_size / 2,
+                    &protected_size));
+            fail += expect_true("incomplete size is cleared",
+                protected_size == 0);
+
+            fail += expect_int("authenticated prefix reveals total size",
+                KC_PACT_OK,
+                kc_pact_size(alice, alice_uid, data, data_size - 1,
+                    &protected_size));
+            fail += expect_true("reported size matches sealed blob",
+                protected_size == data_size);
+
+            ((unsigned char *)data)[50] ^= 1;
+            fail += expect_int("tampered encrypted length is rejected",
+                KC_PACT_ERROR,
+                kc_pact_size(alice, alice_uid, data, data_size - 1,
+                    &protected_size));
+            ((unsigned char *)data)[50] ^= 1;
+        }
+    }
+    kc_pact_free(data);
+    test_relation_close(bob, alice, alice_uid, bob_uid);
+    case_result(fail, "kc_pact_size",
+        "derives protected blob size from the encrypted authenticated length");
+    return fail ? 1 : 0;
+}
+
+/**
  * Tests kc_pact_unseal.
  * @return 0 on success, or 1 on failure.
  */
@@ -523,7 +571,7 @@ static int case_kc_pact_protocol(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 10;
+    test_case_total = 11;
     test_case_current = 0;
     run_case(&rc, case_kc_pact_version);
     run_case(&rc, case_kc_pact_init);
@@ -531,6 +579,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_pact_join);
     run_case(&rc, case_kc_pact_confirm);
     run_case(&rc, case_kc_pact_seal);
+    run_case(&rc, case_kc_pact_size);
     run_case(&rc, case_kc_pact_unseal);
     run_case(&rc, case_kc_pact_revoke);
     run_case(&rc, case_kc_pact_free);
@@ -557,6 +606,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_pact_join") == 0) return case_kc_pact_join();
     if (strcmp(argv[1], "kc_pact_confirm") == 0) return case_kc_pact_confirm();
     if (strcmp(argv[1], "kc_pact_seal") == 0) return case_kc_pact_seal();
+    if (strcmp(argv[1], "kc_pact_size") == 0) return case_kc_pact_size();
     if (strcmp(argv[1], "kc_pact_unseal") == 0) return case_kc_pact_unseal();
     if (strcmp(argv[1], "kc_pact_revoke") == 0) return case_kc_pact_revoke();
     if (strcmp(argv[1], "kc_pact_free") == 0) return case_kc_pact_free();
