@@ -346,7 +346,8 @@ static int hpm_resolve_peers(const kc_hpm_options_t *options, int family,
 
         for (it = result; it; it = it->ai_next) {
             hpm_candidate_t *next;
-            if (it->ai_addrlen > sizeof(struct sockaddr_storage)) continue;
+            if (it->ai_addrlen <= 0 || (size_t)it->ai_addrlen >
+                sizeof(struct sockaddr_storage)) continue;
             if (count == capacity) {
                 size_t next_capacity = capacity ? capacity * 2U : 8U;
                 next = (hpm_candidate_t *)realloc(items,

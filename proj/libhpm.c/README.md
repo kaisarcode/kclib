@@ -88,8 +88,8 @@ the application discovered or exchanged endpoint information.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
+A plain `make` builds only the current host target. Artifacts, including the
+public header, are generated under `bin/{arch}/{platform}/`.
 
 ```bash
 make
@@ -102,6 +102,8 @@ The portable test entry point is `make test`.
 ```bash
 make
 make test
+make x86_64/windows
+make test wine
 ```
 
 The contract tests establish a pair of loopback UDP paths and verify direct
@@ -110,8 +112,9 @@ cleanup.
 
 ### Multiarch Builds
 
-The initial project builder targets the current native host architecture. The
-CMake project can also be used by external cross-compilation toolchains.
+A plain `make` builds the current host target. `make all` builds the configured
+Linux, Windows, Android, macOS, and iOS target matrix. HPM deliberately has no
+WebAssembly target because its capability requires real UDP sockets.
 
 ```bash
 make all
@@ -127,6 +130,13 @@ make all
 - `cmake` >= 3.14
 - `ninja`
 - `gcc` or `clang` (C11 compatible)
+
+### Optional Cross-Compilation SDKs
+
+- GNU Linux and MinGW-w64 cross-compilers for the selected targets
+- Android NDK `27.2.12479018` for Android
+- osxcross plus installed Apple SDKs for macOS and iOS
+- Wine to run the x86_64 Windows contract test on Linux
 
 ### System Libraries
 

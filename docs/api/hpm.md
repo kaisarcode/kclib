@@ -55,8 +55,9 @@ const peerEndpoint = path.peer;
 await path.close();
 ```
 
-Endpoint discovery is outside HPM. The supplied peer endpoints may come from
-STUN, rendezvous, configuration, local discovery, or any other application
-mechanism without changing the HPM capability model.
+Endpoint discovery is outside HPM. HPM itself performs no STUN, rendezvous,
+index lookup, relay/TURN, identity, authentication, or publisher/consumer
+role management. The application supplies remote endpoints and HPM attempts a
+direct UDP path using them.
 
 `strerror(status)` and `version()` remain namespace functions.
