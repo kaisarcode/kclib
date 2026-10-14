@@ -55,15 +55,32 @@ typedef struct {
     size_t block_size;
 } kc_pow_sha256_t;
 
+/**
+ * Rotates one 32-bit value right.
+ * @param value Value to rotate.
+ * @param bits Rotation count.
+ * @return Rotated value.
+ */
 static uint32_t kc_pow_rotr32(uint32_t value, unsigned bits) {
     return (value >> bits) | (value << (32U - bits));
 }
 
+/**
+ * Loads one big-endian 32-bit value.
+ * @param p Source bytes.
+ * @return Decoded value.
+ */
 static uint32_t kc_pow_load32be(const unsigned char *p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
         ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
+/**
+ * Stores one big-endian 32-bit value.
+ * @param p Destination bytes.
+ * @param value Value to encode.
+ * @return None.
+ */
 static void kc_pow_store32be(unsigned char *p, uint32_t value) {
     p[0] = (unsigned char)(value >> 24);
     p[1] = (unsigned char)(value >> 16);
@@ -71,15 +88,31 @@ static void kc_pow_store32be(unsigned char *p, uint32_t value) {
     p[3] = (unsigned char)value;
 }
 
+/**
+ * Loads one big-endian 16-bit value.
+ * @param p Source bytes.
+ * @return Decoded value.
+ */
 static uint16_t kc_pow_load16be(const unsigned char *p) {
     return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
 }
 
+/**
+ * Stores one big-endian 16-bit value.
+ * @param p Destination bytes.
+ * @param value Value to encode.
+ * @return None.
+ */
 static void kc_pow_store16be(unsigned char *p, uint16_t value) {
     p[0] = (unsigned char)(value >> 8);
     p[1] = (unsigned char)value;
 }
 
+/**
+ * Loads one big-endian 64-bit value.
+ * @param p Source bytes.
+ * @return Decoded value.
+ */
 static uint64_t kc_pow_load64be(const unsigned char *p) {
     uint64_t value = 0;
     size_t i;
@@ -87,6 +120,12 @@ static uint64_t kc_pow_load64be(const unsigned char *p) {
     return value;
 }
 
+/**
+ * Stores one big-endian 64-bit value.
+ * @param p Destination bytes.
+ * @param value Value to encode.
+ * @return None.
+ */
 static void kc_pow_store64be(unsigned char *p, uint64_t value) {
     int i;
     for (i = 7; i >= 0; --i) {
@@ -95,6 +134,12 @@ static void kc_pow_store64be(unsigned char *p, uint64_t value) {
     }
 }
 
+/**
+ * Processes one SHA-256 block.
+ * @param ctx Hash context.
+ * @param block Input block.
+ * @return None.
+ */
 static void kc_pow_sha256_transform(kc_pow_sha256_t *ctx,
     const unsigned char block[KC_POW_SHA256_BLOCK_SIZE]) {
     static const uint32_t k[64] = {

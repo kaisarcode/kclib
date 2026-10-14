@@ -81,13 +81,24 @@ Native builds use the compiled HashWX backend where supported and fall back to
 the interpreter. WebAssembly currently uses the interpreted backend inside the
 standalone kclib module.
 
-## Beta notice
+---
 
-This is a beta project. The serialized challenge and solution entities are
-versioned, but compatibility guarantees may evolve while the library remains in
-beta.
+## Beta Notice
+
+This is a beta project tested only on Debian x86_64. It was created out of a
+personal need for these libraries, but no guarantees are provided regarding its
+stability or future support. You are free to test it, use it, and modify it as
+you please.
+
+If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
+Please note that I do not accept pull requests; the goal is to avoid long-term
+dependency on platforms like GitHub, and I do not maintain fixed infrastructure
+to guarantee long-term stability for these projects.
+
+---
 
 ## License
 
-This project is distributed under the **GNU Lesser General Public License
-version 3 (LGPLv3)**.
+[![LGPLv3](https://www.gnu.org/graphics/lgplv3-147x51.png)](https://www.gnu.org/licenses/lgpl-3.0.html)
+
+This project is distributed under the **GNU Lesser General Public License version 3 (LGPLv3)**.

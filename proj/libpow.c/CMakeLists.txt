@@ -62,6 +62,7 @@ set(POW_INCLUDE_DIRS
 if(EMSCRIPTEN)
     add_executable(libpow_wasm ${POW_CORE_SOURCES})
     target_include_directories(libpow_wasm PRIVATE ${POW_INCLUDE_DIRS})
+    target_compile_definitions(libpow_wasm PRIVATE HASHWX_STATIC)
     set_target_properties(libpow_wasm PROPERTIES
         OUTPUT_NAME "libpow"
         SUFFIX ".wasm"
@@ -75,6 +76,7 @@ elseif(NOT POW_TEST_EXTERNAL_ARTIFACTS)
     add_library(pow_static STATIC ${POW_CORE_SOURCES})
     set_target_properties(pow_static PROPERTIES OUTPUT_NAME "pow")
     target_include_directories(pow_static PRIVATE ${POW_INCLUDE_DIRS})
+    target_compile_definitions(pow_static PRIVATE HASHWX_STATIC)
 
     add_library(pow_shared SHARED ${POW_CORE_SOURCES})
     set_target_properties(pow_shared PROPERTIES
@@ -82,6 +84,7 @@ elseif(NOT POW_TEST_EXTERNAL_ARTIFACTS)
         WINDOWS_EXPORT_ALL_SYMBOLS ON
     )
     target_include_directories(pow_shared PRIVATE ${POW_INCLUDE_DIRS})
+    target_compile_definitions(pow_shared PRIVATE HASHWX_STATIC)
 
     if(WIN32)
         target_link_libraries(pow_static PRIVATE bcrypt)

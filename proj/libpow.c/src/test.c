@@ -15,6 +15,13 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+/**
+ * Prints one test-case result.
+ * @param fail Non-zero when the case failed.
+ * @param name Canonical test-case name.
+ * @param detail Test-case description.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, detail);
@@ -25,6 +32,12 @@ static void run_case(int *rc, int (*fn)(void)) {
     *rc += fn();
 }
 
+/**
+ * Verifies one boolean condition.
+ * @param name Check description.
+ * @param condition Non-zero when the check passed.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_true(const char *name, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", name);
@@ -33,6 +46,10 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
+/**
+ * Tests kc_pow_challenge.
+ * @return 0 on success, 1 on failure.
+ */
 static int case_kc_pow_challenge(void) {
     const char *name = "kc_pow_challenge";
     const char *detail = "creates a self-contained framed challenge";
@@ -58,6 +75,10 @@ static int case_kc_pow_challenge(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests challenge solving and verification.
+ * @return 0 on success, 1 on failure.
+ */
 static int case_kc_pow_solve_verify(void) {
     const char *name = "kc_pow_solve_verify";
     const char *detail = "solves and verifies one challenge without transport state";
@@ -93,6 +114,10 @@ static int case_kc_pow_solve_verify(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Tests kc_pow_version.
+ * @return 0 on success, 1 on failure.
+ */
 static int case_kc_pow_version(void) {
     const char *name = "kc_pow_version";
     const char *detail = "returns a nonzero generated build version";
@@ -101,6 +126,10 @@ static int case_kc_pow_version(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Runs all public contract tests.
+ * @return 0 on success, 1 on failure.
+ */
 static int case_all(void) {
     int rc = 0;
     test_case_total = 3;
@@ -112,6 +141,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Runs one named public contract test.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return 0 on success, 1 on failure, or 2 for invalid input.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
