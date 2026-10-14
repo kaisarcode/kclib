@@ -35,6 +35,13 @@ typedef struct {
     int status;
 } test_side_t;
 
+/**
+ * Prints a test case result.
+ * @param fail Failure flag.
+ * @param name Test case name.
+ * @param detail Test case detail.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail)
 {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
@@ -47,6 +54,12 @@ static void run_case(int *rc, int (*fn)(void))
     *rc += fn();
 }
 
+/**
+ * Checks a condition and reports failure.
+ * @param name Test name.
+ * @param condition Condition to check.
+ * @return 0 on pass, 1 on fail.
+ */
 static int expect_true(const char *name, int condition)
 {
     if (!condition) {
@@ -57,8 +70,18 @@ static int expect_true(const char *name, int condition)
 }
 
 #ifdef _WIN32
+/**
+ * Thread function for connect test (Windows).
+ * @param arg Test side data.
+ * @return 0.
+ */
 static DWORD WINAPI test_connect_thread(LPVOID arg)
 #else
+/**
+ * Thread function for connect test (POSIX).
+ * @param arg Test side data.
+ * @return NULL.
+ */
 static void *test_connect_thread(void *arg)
 #endif
 {
@@ -71,6 +94,10 @@ static void *test_connect_thread(void *arg)
 #endif
 }
 
+/**
+ * Returns a base port for testing derived from process ID.
+ * @return Base port number.
+ */
 static unsigned short test_base_port(void)
 {
 #ifdef _WIN32
@@ -81,6 +108,12 @@ static unsigned short test_base_port(void)
     return (unsigned short)(35000U + (pid % 12000U));
 }
 
+/**
+ * Establishes a pair of connected paths for testing.
+ * @param a_path Output path A.
+ * @param b_path Output path B.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
 {
     unsigned short base = test_base_port();
@@ -142,6 +175,10 @@ static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
     return 1;
 }
 
+/**
+ * Test case for kc_hpm_connect.
+ * @return 0 on pass, 1 on fail.
+ */
 static int case_kc_hpm_connect(void)
 {
     const char *name = "kc_hpm_connect";
@@ -171,6 +208,10 @@ static int case_kc_hpm_connect(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Test case for kc_hpm_datagrams.
+ * @return 0 on pass, 1 on fail.
+ */
 static int case_kc_hpm_datagrams(void)
 {
     const char *name = "kc_hpm_datagrams";
@@ -204,6 +245,10 @@ static int case_kc_hpm_datagrams(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Test case for kc_hpm_lifecycle.
+ * @return 0 on pass, 1 on fail.
+ */
 static int case_kc_hpm_lifecycle(void)
 {
     const char *name = "kc_hpm_lifecycle";
@@ -224,6 +269,10 @@ static int case_kc_hpm_lifecycle(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs all test cases.
+ * @return Number of failures.
+ */
 static int case_all(void)
 {
     int rc = 0;
@@ -236,6 +285,12 @@ static int case_all(void)
     return rc;
 }
 
+/**
+ * Test program entry point.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Exit status.
+ */
 int main(int argc, char **argv)
 {
     if (argc != 2) {

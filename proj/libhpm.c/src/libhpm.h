@@ -81,28 +81,59 @@ int kc_hpm_receive(
     uint64_t timeout_ms
 );
 
-/** Return the numeric local host selected for the path, or NULL. */
+/**
+ * Returns the numeric local host selected for the path, or NULL.
+ * @param path Path handle.
+ * @return Local host string or NULL if unknown.
+ */
 const char *kc_hpm_local_host(const kc_hpm_path_t *path);
 
-/** Return the local UDP port selected for the path, or zero. */
+/**
+ * Returns the local UDP port selected for the path, or zero.
+ * @param path Path handle.
+ * @return Local port or 0 if unknown.
+ */
 unsigned short kc_hpm_local_port(const kc_hpm_path_t *path);
 
-/** Return the numeric remote host selected for the path, or NULL. */
+/**
+ * Returns the numeric remote host selected for the path, or NULL.
+ * @param path Path handle.
+ * @return Peer host string or NULL if unknown.
+ */
 const char *kc_hpm_peer_host(const kc_hpm_path_t *path);
 
-/** Return the remote UDP port selected for the path, or zero. */
+/**
+ * Returns the remote UDP port selected for the path, or zero.
+ * @param path Path handle.
+ * @return Peer port or 0 if unknown.
+ */
 unsigned short kc_hpm_peer_port(const kc_hpm_path_t *path);
 
-/** Release memory returned by libhpm. NULL is accepted. */
+/**
+ * Releases memory returned by libhpm. NULL is accepted.
+ * @param ptr Pointer to free.
+ * @return None.
+ */
 void kc_hpm_free(void *ptr);
 
-/** Close and release an established path. NULL is accepted. */
+/**
+ * Closes and releases an established path. NULL is accepted.
+ * @param path Path handle.
+ * @return None.
+ */
 void kc_hpm_close(kc_hpm_path_t *path);
 
-/** Return a static message for a public status code. */
+/**
+ * Returns a static message for a public status code.
+ * @param status Status code.
+ * @return Static error message string.
+ */
 const char *kc_hpm_strerror(int status);
 
-/** Return the build version generated at compile time. */
+/**
+ * Returns the build version generated at compile time.
+ * @return Build version number.
+ */
 uint64_t kc_hpm_version(void);
 
 #ifdef __cplusplus

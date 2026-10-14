@@ -82,6 +82,10 @@ struct kc_hpm_path {
 #endif
 };
 
+/**
+ * Returns the current monotonic time in milliseconds.
+ * @return Current time in milliseconds, or 0 on failure.
+ */
 static uint64_t hpm_now_ms(void)
 {
 #ifdef _WIN32
@@ -93,6 +97,10 @@ static uint64_t hpm_now_ms(void)
 #endif
 }
 
+/**
+ * Generates a pseudo-random nonce.
+ * @return Non-zero nonce value.
+ */
 static uint64_t hpm_nonce(void)
 {
     uint64_t x = hpm_now_ms();
@@ -108,6 +116,12 @@ static uint64_t hpm_nonce(void)
     return x ? x : 1ULL;
 }
 
+/**
+ * Stores a 64-bit value in big-endian format.
+ * @param out Output buffer (8 bytes).
+ * @param value Value to store.
+ * @return None.
+ */
 static void hpm_store64be(unsigned char out[8], uint64_t value)
 {
     unsigned i;
@@ -117,6 +131,11 @@ static void hpm_store64be(unsigned char out[8], uint64_t value)
     }
 }
 
+/**
+ * Loads a 64-bit value from big-endian format.
+ * @param in Input buffer (8 bytes).
+ * @return Decoded value.
+ */
 static uint64_t hpm_load64be(const unsigned char in[8])
 {
     uint64_t value = 0;
@@ -125,6 +144,13 @@ static uint64_t hpm_load64be(const unsigned char in[8])
     return value;
 }
 
+/**
+ * Creates a HPM packet.
+ * @param packet Output buffer (HPM_PACKET_SIZE bytes).
+ * @param type Packet type (HELLO or ACK).
+ * @param nonce Nonce value.
+ * @return None.
+ */
 static void hpm_make_packet(unsigned char packet[HPM_PACKET_SIZE],
     unsigned type, uint64_t nonce)
 {
@@ -134,6 +160,14 @@ static void hpm_make_packet(unsigned char packet[HPM_PACKET_SIZE],
     hpm_store64be(packet + 8, nonce);
 }
 
+/**
+ * Parses a HPM packet.
+ * @param data Packet data.
+ * @param size Packet size.
+ * @param type Output packet type.
+ * @param nonce Output nonce value.
+ * @return 1 on success, 0 on failure.
+ */
 static int hpm_parse_packet(const void *data, size_t size,
     unsigned *type, uint64_t *nonce)
 {
@@ -148,6 +182,12 @@ static int hpm_parse_packet(const void *data, size_t size,
     return 1;
 }
 
+/**
+ * Waits for a socket to become readable.
+ * @param fd Socket to wait on.
+ * @param timeout_ms Timeout in milliseconds.
+ * @return 1 if readable, 0 on timeout, -1 on error.
+ */
 static int hpm_wait_readable(hpm_socket_t fd, uint64_t timeout_ms)
 {
     fd_set readfds;
@@ -173,6 +213,12 @@ static int hpm_wait_readable(hpm_socket_t fd, uint64_t timeout_ms)
     return -1;
 }
 
+/**
+ * Compares two socket addresses for equality.
+ * @param a First address.
+ * @param b Second address.
+ * @return 1 if equal, 0 otherwise.
+ */
 static int hpm_same_endpoint(const struct sockaddr_storage *a,
     const struct sockaddr_storage *b)
 {
@@ -193,6 +239,13 @@ static int hpm_same_endpoint(const struct sockaddr_storage *a,
     return 0;
 }
 
+/**
+ * Finds a candidate index matching the given address.
+ * @param candidates Candidate array.
+ * @param count Number of candidates.
+ * @param addr Address to match.
+ * @return Index on success, -1 if not found.
+ */
 static int hpm_candidate_index(const hpm_candidate_t *candidates,
     size_t count, const struct sockaddr_storage *addr)
 {
@@ -203,6 +256,11 @@ static int hpm_candidate_index(const hpm_candidate_t *candidates,
     return -1;
 }
 
+/**
+ * Determines the address family from options.
+ * @param options Connection options.
+ * @return AF_INET, AF_INET6, or AF_UNSPEC if undetermined.
+ */
 static int hpm_choose_family(const kc_hpm_options_t *options)
 {
     struct addrinfo hints;
@@ -251,6 +309,14 @@ static int hpm_choose_family(const kc_hpm_options_t *options)
     return AF_UNSPEC;
 }
 
+/**
+ * Resolves all peer endpoints to socket addresses.
+ * @param options Connection options.
+ * @param family Address family.
+ * @param out_candidates Output candidate array.
+ * @param out_count Output candidate count.
+ * @return KC_HPM_OK on success, error code otherwise.
+ */
 static int hpm_resolve_peers(const kc_hpm_options_t *options, int family,
     hpm_candidate_t **out_candidates, size_t *out_count)
 {
@@ -310,6 +376,12 @@ static int hpm_resolve_peers(const kc_hpm_options_t *options, int family,
     return KC_HPM_OK;
 }
 
+/**
+ * Binds a UDP socket to the local address.
+ * @param options Connection options.
+ * @param family Address family.
+ * @return Socket on success, HPM_INVALID_SOCKET on failure.
+ */
 static hpm_socket_t hpm_bind_socket(const kc_hpm_options_t *options, int family)
 {
     struct addrinfo hints;
@@ -337,6 +409,15 @@ static hpm_socket_t hpm_bind_socket(const kc_hpm_options_t *options, int family)
     return fd;
 }
 
+/**
+ * Sends a probe packet to an endpoint.
+ * @param fd Socket.
+ * @param addr Destination address.
+ * @param addr_len Address length.
+ * @param type Packet type.
+ * @param nonce Nonce value.
+ * @return 0 on success, -1 on failure.
+ */
 static int hpm_send_probe(hpm_socket_t fd,
     const struct sockaddr_storage *addr, hpm_socklen_t addr_len,
     unsigned type, uint64_t nonce)
@@ -349,6 +430,11 @@ static int hpm_send_probe(hpm_socket_t fd,
     return sent == (int)sizeof(packet) ? 0 : -1;
 }
 
+/**
+ * Extracts the port from a socket address.
+ * @param addr Socket address.
+ * @return Port in host byte order, or 0 if not found.
+ */
 static unsigned short hpm_addr_port(const struct sockaddr_storage *addr)
 {
     if (!addr) return 0;
@@ -359,6 +445,14 @@ static unsigned short hpm_addr_port(const struct sockaddr_storage *addr)
     return 0;
 }
 
+/**
+ * Extracts the host address from a socket address.
+ * @param addr Socket address.
+ * @param addr_len Address length.
+ * @param out Output buffer.
+ * @param out_size Output buffer size.
+ * @return 0 on success, -1 on failure.
+ */
 static int hpm_addr_host(const struct sockaddr_storage *addr,
     hpm_socklen_t addr_len, char *out, size_t out_size)
 {
@@ -367,6 +461,11 @@ static int hpm_addr_host(const struct sockaddr_storage *addr,
         out, (socklen_t)out_size, NULL, 0, NI_NUMERICHOST) == 0 ? 0 : -1;
 }
 
+/**
+ * Fills the local address information in a path.
+ * @param path Path to update.
+ * @return None.
+ */
 static void hpm_fill_local(kc_hpm_path_t *path)
 {
     struct sockaddr_storage addr;
@@ -380,11 +479,21 @@ static void hpm_fill_local(kc_hpm_path_t *path)
     }
 }
 
+/**
+ * Returns the library build version.
+ * @return Build version number.
+ */
 uint64_t kc_hpm_version(void)
 {
     return (uint64_t)KC_HPM_BUILD_VERSION;
 }
 
+/**
+ * Establishes a direct bidirectional UDP path to one supplied peer endpoint.
+ * @param out Output path handle.
+ * @param options Connection options.
+ * @return KC_HPM_OK on success, otherwise a negative status.
+ */
 int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
 {
     hpm_candidate_t *candidates = NULL;
@@ -530,6 +639,13 @@ done:
     return status;
 }
 
+/**
+ * Sends one UDP datagram through an established path.
+ * @param path Path handle.
+ * @param data Data to send.
+ * @param data_size Data size.
+ * @return KC_HPM_OK on success, otherwise a negative status.
+ */
 int kc_hpm_send(kc_hpm_path_t *path, const void *data, size_t data_size)
 {
     static const unsigned char empty = 0;
@@ -542,6 +658,14 @@ int kc_hpm_send(kc_hpm_path_t *path, const void *data, size_t data_size)
     return sent == (int)data_size ? KC_HPM_OK : KC_HPM_ENET;
 }
 
+/**
+ * Receives one UDP datagram through an established path.
+ * @param path Path handle.
+ * @param out_data Output data buffer.
+ * @param out_size Output data size.
+ * @param timeout_ms Timeout in milliseconds (0 = wait indefinitely).
+ * @return KC_HPM_OK on success, otherwise a negative status.
+ */
 int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
     size_t *out_size, uint64_t timeout_ms)
 {
@@ -610,31 +734,61 @@ int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
     }
 }
 
+/**
+ * Returns the local host address.
+ * @param path Path handle.
+ * @return Local host string or NULL if unknown.
+ */
 const char *kc_hpm_local_host(const kc_hpm_path_t *path)
 {
     return path && path->local_host[0] ? path->local_host : NULL;
 }
 
+/**
+ * Returns the local UDP port.
+ * @param path Path handle.
+ * @return Local port or 0 if unknown.
+ */
 unsigned short kc_hpm_local_port(const kc_hpm_path_t *path)
 {
     return path ? path->local_port : 0;
 }
 
+/**
+ * Returns the peer host address.
+ * @param path Path handle.
+ * @return Peer host string or NULL if unknown.
+ */
 const char *kc_hpm_peer_host(const kc_hpm_path_t *path)
 {
     return path && path->peer_host[0] ? path->peer_host : NULL;
 }
 
+/**
+ * Returns the peer UDP port.
+ * @param path Path handle.
+ * @return Peer port or 0 if unknown.
+ */
 unsigned short kc_hpm_peer_port(const kc_hpm_path_t *path)
 {
     return path ? path->peer_port : 0;
 }
 
+/**
+ * Frees memory allocated by libhpm.
+ * @param ptr Pointer to free (may be NULL).
+ * @return None.
+ */
 void kc_hpm_free(void *ptr)
 {
     free(ptr);
 }
 
+/**
+ * Closes and frees an established path.
+ * @param path Path handle (may be NULL).
+ * @return None.
+ */
 void kc_hpm_close(kc_hpm_path_t *path)
 {
     if (!path) return;
@@ -648,6 +802,11 @@ void kc_hpm_close(kc_hpm_path_t *path)
     free(path);
 }
 
+/**
+ * Returns a string description for a status code.
+ * @param status Status code.
+ * @return Static error message string.
+ */
 const char *kc_hpm_strerror(int status)
 {
     switch (status) {
