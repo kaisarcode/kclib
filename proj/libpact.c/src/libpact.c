@@ -1389,6 +1389,72 @@ done:
 }
 
 /**
+ * Reads the authenticated encrypted logical length from one Noise K message.
+ * @param initiator_uid Initiator endpoint UID.
+ * @param responder_uid Responder endpoint UID.
+ * @param local_sk Local static secret key.
+ * @param remote_pk Remote static public key.
+ * @param data Available leading protected bytes.
+ * @param data_size Available byte count.
+ * @param out_size Destination total protected blob size.
+ * @return 0 when size is known, 1 when more bytes are needed, or -1 on failure.
+ */
+static int kc_pact_k_size(
+    const unsigned char initiator_uid[KC_PACT_UID_BYTES],
+    const unsigned char responder_uid[KC_PACT_UID_BYTES],
+    const unsigned char local_sk[KC_PACT_SK_SIZE],
+    const unsigned char remote_pk[KC_PACT_PK_SIZE],
+    const unsigned char *data, size_t data_size, size_t *out_size) {
+    static const char name[] = "Noise_K_25519_ChaChaPoly_BLAKE2b";
+    kc_pact_symmetric_state_t state;
+    kc_pact_cipher_state_t first;
+    kc_pact_cipher_state_t second;
+    unsigned char local_pk[KC_PACT_PK_SIZE];
+    unsigned char dh[32];
+    unsigned char empty[1];
+    unsigned char logical[8];
+    const unsigned char *p = data;
+    uint64_t logical_size;
+    int rc = -1;
+
+    if (out_size) *out_size = 0;
+    if (!out_size || (data_size && !data)) return -1;
+    if (data_size < KC_PACT_PAYLOAD_BASE_SIZE) return 1;
+
+    crypto_x25519_public_key(local_pk, local_sk);
+    kc_pact_noise_init(&state, name, initiator_uid, responder_uid);
+    kc_pact_mix_hash(&state, remote_pk, KC_PACT_PK_SIZE);
+    kc_pact_mix_hash(&state, local_pk, KC_PACT_PK_SIZE);
+    kc_pact_mix_hash(&state, p, KC_PACT_PK_SIZE);
+    if (kc_pact_x25519(dh, local_sk, p) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    if (kc_pact_x25519(dh, local_sk, remote_pk) != 0) goto done;
+    kc_pact_mix_key(&state, dh, sizeof(dh));
+    crypto_wipe(dh, sizeof(dh));
+    p += KC_PACT_PK_SIZE;
+    if (kc_pact_decrypt_and_hash(&state, p, KC_PACT_MAC_SIZE, empty) != 0)
+        goto done;
+    p += KC_PACT_MAC_SIZE;
+    kc_pact_split(&state, &first, &second);
+    if (kc_pact_cipher_decrypt(&first, NULL, 0, p,
+        KC_PACT_LENGTH_RECORD_SIZE, logical) != 0) goto done;
+    logical_size = kc_pact_load_u64(logical);
+    if (logical_size > KC_PACT_MAX_MESSAGE) goto done;
+    *out_size = kc_pact_payload_size((size_t)logical_size);
+    rc = 0;
+done:
+    crypto_wipe(local_pk, sizeof(local_pk));
+    crypto_wipe(dh, sizeof(dh));
+    crypto_wipe(empty, sizeof(empty));
+    crypto_wipe(logical, sizeof(logical));
+    crypto_wipe(&first, sizeof(first));
+    crypto_wipe(&second, sizeof(second));
+    crypto_wipe(&state, sizeof(state));
+    return rc;
+}
+
+/**
  * Reads one Noise K protected message.
  * @param initiator_uid Initiator endpoint UID.
  * @param responder_uid Responder endpoint UID.
@@ -1796,6 +1862,53 @@ done:
     kc_pact_free(data);
     crypto_wipe(remote_uid, sizeof(remote_uid));
     crypto_wipe(local_uid, sizeof(local_uid));
+    crypto_wipe(local_sk, sizeof(local_sk));
+    crypto_wipe(remote_pk, sizeof(remote_pk));
+    return rc;
+}
+
+/**
+ * Determines the total protected message size from its authenticated encrypted
+ * logical length record.
+ * @param trust Trust context.
+ * @param uid Local destination UID.
+ * @param data Available leading protected bytes.
+ * @param data_size Available byte count.
+ * @param out_size Destination total protected blob size.
+ * @return KC_PACT_OK, KC_PACT_INCOMPLETE, or KC_PACT_ERROR.
+ */
+int kc_pact_size(kc_pact_t *trust, const char *uid,
+    const void *data, size_t data_size, size_t *out_size) {
+    unsigned char local_uid[KC_PACT_UID_BYTES];
+    unsigned char remote_uid[KC_PACT_UID_BYTES];
+    unsigned char stored_local_uid[KC_PACT_UID_BYTES];
+    unsigned char local_sk[KC_PACT_SK_SIZE];
+    unsigned char remote_pk[KC_PACT_PK_SIZE];
+    char remote_uid_text[KC_PACT_UID_SIZE + 1];
+    int size_rc;
+    int rc = KC_PACT_ERROR;
+
+    if (out_size) *out_size = 0;
+    if (!trust || !uid || !out_size || (data_size && !data))
+        return KC_PACT_ERROR;
+
+    if (kc_pact_uid_parse(uid, local_uid) != 0 ||
+        kc_pact_local_read(trust, uid, remote_uid) != 0 ||
+        kc_pact_uid_format(remote_uid, remote_uid_text) != 0 ||
+        kc_pact_peer_read(trust, remote_uid_text, stored_local_uid,
+            local_sk, remote_pk) != 0 ||
+        memcmp(local_uid, stored_local_uid, KC_PACT_UID_BYTES) != 0)
+        goto done;
+
+    size_rc = kc_pact_k_size(remote_uid, local_uid, local_sk, remote_pk,
+        (const unsigned char *)data, data_size, out_size);
+    if (size_rc == 0) rc = KC_PACT_OK;
+    else if (size_rc > 0) rc = KC_PACT_INCOMPLETE;
+
+done:
+    crypto_wipe(local_uid, sizeof(local_uid));
+    crypto_wipe(remote_uid, sizeof(remote_uid));
+    crypto_wipe(stored_local_uid, sizeof(stored_local_uid));
     crypto_wipe(local_sk, sizeof(local_sk));
     crypto_wipe(remote_pk, sizeof(remote_pk));
     return rc;
