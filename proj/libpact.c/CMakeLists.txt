@@ -55,7 +55,7 @@ if(EMSCRIPTEN)
     )
     target_link_options(pact_wasm PRIVATE
         --no-entry
-        -sEXPORTED_FUNCTIONS=_kc_pact_init,_kc_pact_invite,_kc_pact_join,_kc_pact_confirm,_kc_pact_seal,_kc_pact_unseal,_kc_pact_revoke,_kc_pact_close,_kc_pact_free,_kc_pact_version
+        -sEXPORTED_FUNCTIONS=_kc_pact_init,_kc_pact_invite,_kc_pact_join,_kc_pact_confirm,_kc_pact_seal,_kc_pact_size,_kc_pact_unseal,_kc_pact_revoke,_kc_pact_close,_kc_pact_free,_kc_pact_version
         ${PACT_WASM_MEMORY_FLAGS}
     )
 endif()

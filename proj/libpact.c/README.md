@@ -103,6 +103,32 @@ if (kc_pact_unseal(
 }
 ```
 
+When protected messages arrive through a byte stream, the application may
+accumulate leading bytes and ask Pact when the total protected message size is
+known:
+
+```c
+size_t protected_size = 0;
+int status = kc_pact_size(
+    pact,
+    alice_uid,
+    buffer,
+    buffered_size,
+    &protected_size
+);
+
+if (status == KC_PACT_INCOMPLETE) {
+    /* collect more leading bytes */
+} else if (status == KC_PACT_OK && buffered_size >= protected_size) {
+    /* exactly protected_size bytes form one complete Pact message */
+}
+```
+
+`kc_pact_size()` authenticates and decrypts Pact's encrypted logical-length
+record. It does not parse a transport header and does not require the complete
+protected message to be present. The caller remains responsible for buffering,
+transport, and consuming the indicated byte count.
+
 The reverse direction uses `bob_uid` in the same way.
 
 The public API is:
@@ -111,6 +137,7 @@ The public API is:
 typedef struct kc_pact kc_pact_t;
 
 #define KC_PACT_OK 0
+#define KC_PACT_INCOMPLETE 1
 #define KC_PACT_ERROR -1
 
 #define KC_PACT_UID_SIZE 36
@@ -146,6 +173,14 @@ int kc_pact_seal(
     size_t *out_size
 );
 
+int kc_pact_size(
+    kc_pact_t *trust,
+    const char *uid,
+    const void *data,
+    size_t data_size,
+    size_t *out_size
+);
+
 int kc_pact_unseal(
     kc_pact_t *trust,
     const char *uid,
@@ -171,13 +206,13 @@ A relationship has two endpoint UIDs. The UID returned by
 
 `kc_pact_seal()` receives a remote UID. The application transports that UID
 with the protected message. On the receiving endpoint, the same UID is local
-and is passed to `kc_pact_unseal()`.
+and is passed to `kc_pact_size()` and `kc_pact_unseal()`.
 
 `kc_pact_revoke()` receives the remote UID known by the local endpoint.
 
-`kc_pact_seal()` and `kc_pact_unseal()` do not implement transport,
-ordering, retries, timeouts, or replay detection. A valid protected message may
-be passed to `kc_pact_unseal()` more than once.
+`kc_pact_seal()`, `kc_pact_size()`, and `kc_pact_unseal()` do not implement
+transport, ordering, retries, timeouts, buffering, or replay detection. A valid
+protected message may be passed to `kc_pact_unseal()` more than once.
 
 Messages may contain arbitrary binary data up to `KC_PACT_MAX_MESSAGE`.
 
@@ -233,7 +268,7 @@ make test wasm
 
 - Artifacts: `bin/wasm32/wasm/libpact.js` and `bin/wasm32/wasm/libpact.wasm`
 - Exports: `kc_pact_init`, `kc_pact_invite`, `kc_pact_join`,
-    `kc_pact_confirm`, `kc_pact_seal`, `kc_pact_unseal`,
+    `kc_pact_confirm`, `kc_pact_seal`, `kc_pact_size`, `kc_pact_unseal`,
     `kc_pact_revoke`, `kc_pact_close`, `kc_pact_free`,
     `kc_pact_version`
 `wasm32/wasm` is included in `make all`.
