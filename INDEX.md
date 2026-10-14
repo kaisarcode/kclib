@@ -40,6 +40,7 @@ index is the summary, not the contract.
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
 | [`http`](https://github.com/kaisarcode/kclib/tree/master/proj/libhttp.c) | Parses and builds HTTP messages; it handles protocol, not transport. | Handling HTTP requests or responses over a socket. |
+| [`hpm`](https://github.com/kaisarcode/kclib/tree/master/proj/libhpm.c) | Establishes a direct UDP path using remote endpoints supplied by the application. | Direct peer-to-peer UDP communication after endpoint exchange. |
 | [`netl`](https://github.com/kaisarcode/kclib/tree/master/proj/libnetl.c) | Maintains named TCP or UDP listeners and delivers incoming traffic to consumers. | Listening and serving on the network. |
 | [`nets`](https://github.com/kaisarcode/kclib/tree/master/proj/libnets.c) | Exchanges data with a TCP or UDP destination. | Connecting to a remote host and exchanging data. |
 | [`dmn`](https://github.com/kaisarcode/kclib/tree/master/proj/libdmn.c) | Maintains named resident processes and exchanges data through local IPC. | Persistent subprocess with a message channel. |
