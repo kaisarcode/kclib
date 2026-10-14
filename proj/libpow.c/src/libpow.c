@@ -421,20 +421,18 @@ static void kc_pow_hashwx_seed(const unsigned char challenge[32], uint64_t nonce
 }
 
 /**
- * Computes a HashWX hash value for a given nonce.
+ * Configures HashWX for the nonce group containing one nonce.
  * @param ctx HashWX context.
  * @param challenge 32-byte challenge.
  * @param nonce Nonce value.
- * @param out_hash Output hash value.
  * @return 0 on success, -1 on failure.
  */
-static int kc_pow_hash_value(hashwx_ctx *ctx,
-    const unsigned char challenge[32], uint64_t nonce, uint64_t *out_hash) {
+static int kc_pow_hashwx_make(hashwx_ctx *ctx,
+    const unsigned char challenge[32], uint64_t nonce) {
     unsigned char seed[32];
-    if (!ctx || !challenge || !out_hash) return -1;
+    if (!ctx || !challenge) return -1;
     kc_pow_hashwx_seed(challenge, nonce, seed);
     hashwx_make(ctx, seed);
-    *out_hash = hashwx_exec(ctx, nonce);
     memset(seed, 0, sizeof(seed));
     return 0;
 }
@@ -449,7 +447,7 @@ uint64_t kc_pow_version(void) {
 
 /**
  * Generates a new proof-of-work challenge.
- * @param effort Difficulty effort (higher = easier).
+ * @param effort Approximate expected nonce attempts (higher = harder).
  * @param out_challenge Output challenge pointer (caller must free).
  * @param out_size Output challenge size.
  * @return KC_POW_OK on success, error code otherwise.
@@ -510,17 +508,23 @@ int kc_pow_solve(const void *challenge, size_t challenge_size,
     if (!ctx) return KC_POW_ERROR;
 
     for (;;) {
-        if (kc_pow_hash_value(ctx, c + 16U, nonce, &hash) != 0) {
+        if (kc_pow_hashwx_make(ctx, c + 16U, nonce) != 0) {
             hashwx_free(ctx);
             return KC_POW_ERROR;
+        }
+        for (;;) {
+            hash = hashwx_exec(ctx, nonce);
+            if (hash < target) break;
+            if (nonce == UINT64_MAX) {
+                hashwx_free(ctx);
+                return KC_POW_ERROR;
+            }
+            nonce++;
+            if (nonce % KC_POW_HASHWX_BATCH == 0) break;
         }
         if (hash < target) break;
-        if (nonce == UINT64_MAX) {
-            hashwx_free(ctx);
-            return KC_POW_ERROR;
-        }
-        nonce++;
     }
+
     hashwx_free(ctx);
 
     solution = (unsigned char *)malloc(KC_POW_SOLUTION_SIZE);
@@ -563,10 +567,11 @@ int kc_pow_verify(const void *challenge, size_t challenge_size,
 
     ctx = kc_pow_hashwx_alloc();
     if (!ctx) return KC_POW_ERROR;
-    if (kc_pow_hash_value(ctx, c + 16U, nonce, &hash) != 0) {
+    if (kc_pow_hashwx_make(ctx, c + 16U, nonce) != 0) {
         hashwx_free(ctx);
         return KC_POW_ERROR;
     }
+    hash = hashwx_exec(ctx, nonce);
     hashwx_free(ctx);
     return hash < target ? KC_POW_OK : KC_POW_INVALID;
 }
