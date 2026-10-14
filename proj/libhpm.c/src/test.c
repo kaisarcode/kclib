@@ -48,18 +48,37 @@ typedef struct {
     int status;
 } test_side_t;
 
+/**
+ * Prints a test case result.
+ * @param fail Failure flag.
+ * @param name Test case name.
+ * @param detail Test case detail.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail)
 {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, detail);
 }
 
+/**
+ * Runs a test case and increments the counter.
+ * @param rc Output failure count.
+ * @param fn Test function to run.
+ * @return None.
+ */
 static void run_case(int *rc, int (*fn)(void))
 {
     test_case_current++;
     *rc += fn();
 }
 
+/**
+ * Checks a condition and reports failure.
+ * @param name Test name.
+ * @param condition Condition to check.
+ * @return 0 on pass, 1 on fail.
+ */
 static int expect_true(const char *name, int condition)
 {
     if (!condition) {
@@ -69,14 +88,29 @@ static int expect_true(const char *name, int condition)
     return 0;
 }
 
+/**
+ * Reports a skipped test case.
+ * @param name Test case name.
+ * @return None.
+ */
 static void test_skip(const char *name)
 {
     printf("[SKIP] %s\n", name);
 }
 
 #ifdef _WIN32
+/**
+ * Thread function for connect test (Windows).
+ * @param arg Test side data.
+ * @return 0.
+ */
 static DWORD WINAPI test_connect_thread(LPVOID arg)
 #else
+/**
+ * Thread function for connect test (POSIX).
+ * @param arg Test side data.
+ * @return NULL.
+ */
 static void *test_connect_thread(void *arg)
 #endif
 {
@@ -89,6 +123,10 @@ static void *test_connect_thread(void *arg)
 #endif
 }
 
+/**
+ * Initializes socket runtime (Windows).
+ * @return 1 on success, 0 on failure.
+ */
 static int test_socket_runtime_start(void)
 {
 #ifdef _WIN32
@@ -99,6 +137,10 @@ static int test_socket_runtime_start(void)
 #endif
 }
 
+/**
+ * Cleans up socket runtime (Windows).
+ * @return None.
+ */
 static void test_socket_runtime_stop(void)
 {
 #ifdef _WIN32
@@ -106,6 +148,11 @@ static void test_socket_runtime_stop(void)
 #endif
 }
 
+/**
+ * Gets an ephemeral port for testing.
+ * @param family Address family (AF_INET or AF_INET6).
+ * @return Port number, or 0 on failure.
+ */
 static unsigned short test_ephemeral_port(int family)
 {
     test_socket_t fd = TEST_INVALID_SOCKET;
@@ -147,6 +194,13 @@ done:
     return port;
 }
 
+/**
+ * Gets a pair of distinct ephemeral ports.
+ * @param family Address family.
+ * @param a Output first port.
+ * @param b Output second port.
+ * @return 1 on success, 0 on failure.
+ */
 static int test_port_pair(int family, unsigned short *a, unsigned short *b)
 {
     unsigned attempt;
@@ -163,6 +217,14 @@ static int test_port_pair(int family, unsigned short *a, unsigned short *b)
     return 0;
 }
 
+/**
+ * Starts a pair of connect threads and waits for completion.
+ * @param a Test side A.
+ * @param b Test side B.
+ * @param a_path Output path A.
+ * @param b_path Output path B.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_start_pair(test_side_t *a, test_side_t *b,
     kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
 {
@@ -198,6 +260,12 @@ static int test_start_pair(test_side_t *a, test_side_t *b,
     return 1;
 }
 
+/**
+ * Establishes a pair of connected paths for testing (IPv4 with bad peer).
+ * @param a_path Output path A.
+ * @param b_path Output path B.
+ * @return 0 on success, 1 on failure.
+ */
 static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
 {
     unsigned attempt;
@@ -240,6 +308,12 @@ static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
     return 1;
 }
 
+/**
+ * Establishes a pair of connected paths for testing (IPv6 loopback).
+ * @param a_path Output path A.
+ * @param b_path Output path B.
+ * @return 0 on success, 1 on failure, 2 if IPv6 unavailable.
+ */
 static int test_pair_ipv6(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
 {
     unsigned attempt;
@@ -275,6 +349,12 @@ static int test_pair_ipv6(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
     return 1;
 }
 
+/**
+ * Establishes a pair of connected paths for testing (mixed IPv4/IPv6).
+ * @param a_path Output path A.
+ * @param b_path Output path B.
+ * @return 0 on success, 1 on failure, 2 if IPv6 unavailable.
+ */
 static int test_pair_mixed(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
 {
     unsigned attempt;
@@ -319,6 +399,10 @@ static int test_pair_mixed(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
     return 1;
 }
 
+/**
+ * Test case for kc_hpm_connect.
+ * @return 0 on pass, 1 on fail.
+ */
 static int case_kc_hpm_connect(void)
 {
     const char *name = "kc_hpm_connect";
@@ -408,6 +492,10 @@ static int case_kc_hpm_connect(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Test case for kc_hpm_datagrams.
+ * @return 0 on pass, 1 on fail.
+ */
 static int case_kc_hpm_datagrams(void)
 {
     const char *name = "kc_hpm_datagrams";
@@ -525,6 +613,10 @@ static int case_kc_hpm_datagrams(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Test case for kc_hpm_lifecycle.
+ * @return 0 on pass, 1 on fail.
+ */
 static int case_kc_hpm_lifecycle(void)
 {
     const char *name = "kc_hpm_lifecycle";
@@ -567,6 +659,10 @@ static int case_kc_hpm_lifecycle(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs all test cases.
+ * @return Number of failures.
+ */
 static int case_all(void)
 {
     int rc = 0;
@@ -579,6 +675,12 @@ static int case_all(void)
     return rc;
 }
 
+/**
+ * Test program entry point.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Exit status.
+ */
 int main(int argc, char **argv)
 {
     if (argc != 2) {
