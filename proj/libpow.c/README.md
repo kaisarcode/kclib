@@ -1,5 +1,7 @@
 # libpow.c - Proof-of-Work Challenges
 
+---
+
 `libpow.c` creates, solves, and verifies portable proof-of-work challenges.
 Challenges and solutions are self-contained binary entities. The library does
 not perform transport, networking, retries, leases, replay protection, or
@@ -59,27 +61,92 @@ does not prove who issued a challenge and intentionally does not impose
 freshness, expiry, replay, identity, or authorization policy. Those semantics
 belong to the application using the proof.
 
+---
+
 ## Build
+
+Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
+architecture running the build.
+
+```bash
+make
+```
+
+### Tests
+
+The portable test entry point is `make test`. Build project artifacts first,
+then run tests.
 
 ```bash
 make
 make test
 ```
 
-### WebAssembly
+To run through Wine:
+
+```bash
+make x86_64/windows
+make test wine
+```
+
+### WebAssembly (Emscripten)
 
 ```bash
 make wasm32/wasm
 make test wasm
 ```
 
-## Implementation
+- Artifact: `bin/wasm32/wasm/libpow.wasm`
+- Exports: `kc_pow_challenge`, `kc_pow_solve`, `kc_pow_verify`,
+    `kc_pow_size`, `kc_pow_free`, `kc_pow_version`
 
-HashWX is vendored under `lib/hashwx/` under its LGPLv3-or-later license. The
-public `libpow` API does not expose HashWX contexts or algorithm machinery.
-Native builds use the compiled HashWX backend where supported and fall back to
-the interpreter. WebAssembly currently uses the interpreted backend inside the
-standalone kclib module.
+`wasm32/wasm` is included in `make all`.
+
+### Multiarch Builds
+
+A plain `make` builds only the current host architecture. `make all` builds
+all configured targets.
+
+```bash
+make all
+```
+
+---
+
+## Development Requirements
+
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+
+### Optional Cross-Compilation SDKs
+
+Required only for the corresponding targets:
+
+- MinGW for Windows cross-compilation.
+- `wine` for Windows tests on Linux.
+- Emscripten SDK and Node.js for WebAssembly builds and tests.
+- Other cross-compilation toolchains are required only by enabled targets.
+
+### System Libraries
+
+Linux:
+- No additional system libraries required.
+
+Windows (MSVC or MinGW):
+- `bcrypt`
+
+macOS / iOS:
+- No additional system libraries required.
+
+### Dependencies
+
+| Path | Description |
+|------|-------------|
+| `lib/hashwx/` | HashWX client-puzzle proof-of-work backend |
 
 ---
 
