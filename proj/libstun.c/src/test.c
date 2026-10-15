@@ -675,5 +675,6 @@ int main(int argc, char **argv)
     test_case_current++; rc += case_errors();
     test_case_current++; rc += case_metadata();
     socket_runtime_stop();
+    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc ? 1 : 0;
 }
