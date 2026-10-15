@@ -306,11 +306,13 @@ test:
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
 		if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1; then echo "Missing Emscripten cmake wrapper" >&2; exit 1; fi; \
 		if ! command -v $(WASM_NODE) >/dev/null 2>&1; then echo "Missing Node.js runtime" >&2; exit 1; fi; \
-		$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/test-wasm \
-			-DCMAKE_BUILD_TYPE=Release \
-			-DRDV_BUILD_TESTS=ON \
-			-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
-			-G Ninja -Wno-dev > /dev/null; \
+		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/test-wasm/CMakeCache.txt; then \
+			$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/test-wasm \
+				-DCMAKE_BUILD_TYPE=Release \
+				-DRDV_BUILD_TESTS=ON \
+				-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+				-G Ninja -Wno-dev > /dev/null; \
+		fi; \
 		cmake --build $(BUILD_DIR)/test-wasm --target rdv_contract_test; \
 		$(WASM_NODE) $(BUILD_DIR)/test-wasm/rdv_contract_test.js all; \
 	else \
