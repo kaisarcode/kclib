@@ -85,9 +85,11 @@ static uint64_t rdv_now_ms(void) {
         return (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U;
     }
 #endif
+#if !defined(__ANDROID__)
     if (timespec_get(&ts, TIME_UTC) == TIME_UTC) {
         return (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U;
     }
+#endif
     return (uint64_t)time(NULL) * 1000U;
 #endif
 }

@@ -32,6 +32,44 @@ WASM_NODE ?= node
 BUILD_DIR := .build
 BIN_DIR := bin
 BUILD_VERSION ?= $(shell date +%s)
+CMAKE ?= cmake
+
+define cmake_build
+	@prelog=$$(mktemp); \
+	if ! $(CMAKE) --build $(1) -- -n > "$$prelog" 2>&1; then \
+		cat "$$prelog"; \
+		rm -f "$$prelog"; \
+		exit 1; \
+	fi; \
+	if grep -q "ninja: no work to do." "$$prelog"; then \
+		rm -f "$$prelog"; \
+		out=$$(mktemp); \
+		$(CMAKE) --build $(1) >"$$out" 2>&1; \
+		r=$$?; \
+		if [ $$r -ne 0 ]; then cat "$$out"; fi; \
+		rm -f "$$out"; \
+		exit $$r; \
+	fi; \
+	rm -f "$$prelog"; \
+	out=$$(mktemp); \
+	$(CMAKE) --build $(1) 2>"$$out"; \
+	r=$$?; \
+	if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+	rm -f "$$out"; \
+	if [ $$r -ne 0 ]; then \
+		exit 1; \
+	fi; \
+	ver=$$(date +%s); \
+	$(2); \
+	log=$$(mktemp); \
+	if ! $(CMAKE) --build $(1) > "$$log" 2>&1; then \
+		cat "$$log"; \
+		rm -f "$$log"; \
+		exit 1; \
+	fi; \
+	rm -f "$$log"; \
+	:
+endef
 
 HOST_ARCH := $(shell uname -m)
 HOST_SYSTEM := $(shell uname -s)
@@ -102,15 +140,17 @@ all: \
 
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
-	@cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Linux \
 		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_C_COMPILER=$(2) \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(subst /,-,$(1))-linux
+		-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,$(CMAKE) -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DRDV_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/linux"
 endef
 
@@ -131,7 +171,8 @@ loongarch64/linux: ; $(call linux_target,loongarch64,loongarch64-linux-gnu-gcc)
 
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@cmake -S . -B $(BUILD_DIR)/$(1)-windows \
+	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-windows/CMakeCache.txt; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-windows \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Windows \
 		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
@@ -139,8 +180,9 @@ define windows_target
 		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-windows
+		-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DRDV_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
 	@cp $(BUILD_DIR)/$(1)-windows/out/librdv.dll $(BIN_DIR)/$(1)/windows/librdv.dll
 	@echo "OK $(1)/windows"
 endef
@@ -155,7 +197,8 @@ define android_target
 		echo "Missing Android NDK toolchain: $(NDK_TOOLCHAIN)" >&2; exit 1; \
 	fi
 	@mkdir -p $(BIN_DIR)/$(1)/android
-	@cmake -S . -B $(BUILD_DIR)/$(1)-android \
+	@if [ ! -f $(BUILD_DIR)/$(1)-android/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-android/CMakeCache.txt; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-android \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
 		-DANDROID_ABI=$(2) \
@@ -163,8 +206,9 @@ define android_target
 		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-android
+		-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-android,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-24 -DRDV_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/android"
 endef
 
@@ -179,7 +223,8 @@ define macos_target
 		echo "Missing macOS SDK under $(OSXCROSS_ROOT)" >&2; exit 1; \
 	fi
 	@mkdir -p $(BIN_DIR)/$(1)/macos
-	@cmake -S . -B $(BUILD_DIR)/$(1)-macos \
+	@if [ ! -f $(BUILD_DIR)/$(1)-macos/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Darwin \
 		-DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) \
@@ -188,8 +233,9 @@ define macos_target
 		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-macos
+		-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(2) -DRDV_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/macos"
 endef
 
@@ -202,7 +248,8 @@ define ios_target
 	@if [ ! -x "$(3)" ]; then echo "Missing iOS compiler: $(3)" >&2; exit 1; fi
 	@if [ -z "$(4)" ] || [ ! -d "$(4)" ]; then echo "Missing iOS SDK" >&2; exit 1; fi
 	@mkdir -p $(BIN_DIR)/$(1)/$(2)
-	@cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=iOS \
 		-DCMAKE_OSX_SYSROOT=$(4) \
@@ -211,8 +258,9 @@ define ios_target
 		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-$(2)
+		-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=$(4) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(3) -DRDV_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/$(2)"
 endef
 
@@ -227,12 +275,14 @@ wasm32/wasm:
 		echo "Missing Emscripten cmake wrapper: $(WASM_EMCMAKE)" >&2; exit 1; \
 	fi
 	@mkdir -p $(BIN_DIR)/wasm32/wasm
-	@$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm \
+	@if [ ! -f $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt; then \
+		$(WASM_EMCMAKE) $(CMAKE) -S . -B $(BUILD_DIR)/wasm32-wasm \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/wasm32/wasm \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/wasm32-wasm --target librdv_wasm
+		-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(WASM_EMCMAKE) $(CMAKE) -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DRDV_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/wasm32/wasm -G Ninja -Wno-dev > /dev/null)
 	@echo "OK wasm32/wasm"
 
 ## Tests
