@@ -21,6 +21,44 @@ WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
 BUILD_DIR := .build
 BIN_DIR := bin
 BUILD_VERSION ?= $(shell date +%s)
+CMAKE ?= cmake
+
+define cmake_build
+	@prelog=$$(mktemp); \
+	if ! $(CMAKE) --build $(1) -- -n > "$$prelog" 2>&1; then \
+		cat "$$prelog"; \
+		rm -f "$$prelog"; \
+		exit 1; \
+	fi; \
+	if grep -q "ninja: no work to do." "$$prelog"; then \
+		rm -f "$$prelog"; \
+		out=$$(mktemp); \
+		$(CMAKE) --build $(1) 2>"$$out"; \
+		r=$$?; \
+		if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+		rm -f "$$out"; \
+		exit $$r; \
+	fi; \
+	rm -f "$$prelog"; \
+	out=$$(mktemp); \
+	$(CMAKE) --build $(1) 2>"$$out"; \
+	r=$$?; \
+	if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+	rm -f "$$out"; \
+	if [ $$r -ne 0 ]; then \
+		exit 1; \
+	fi; \
+	ver=$$(date +%s); \
+	$(2); \
+	log=$$(mktemp); \
+	if ! $(CMAKE) --build $(1) > "$$log" 2>&1; then \
+		cat "$$log"; \
+		rm -f "$$log"; \
+		exit 1; \
+	fi; \
+	rm -f "$$log"; \
+	:
+endef
 HOST_ARCH := $(shell uname -m)
 HOST_SYSTEM := $(shell uname -s)
 NATIVE_ARCH := unsupported
@@ -59,14 +97,17 @@ ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_SHARED_NAME := libhpm.dll
 NATIVE_IMPORT_LIBRARY := -DHPM_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libhpm.dll.a
 endif
+ifeq ($(NATIVE_PLATFORM),macos)
+NATIVE_SHARED_NAME := libhpm.dylib
+endif
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 .PHONY: all test wine clean x86_64/linux x86_64/windows x86_64/macos x86_64/iossim i686/linux i686/windows aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim armv7/linux armv7/android armv7hf/linux riscv64/linux powerpc64le/linux mips/linux mipsel/linux mips64el/linux s390x/linux loongarch64/linux
 all: x86_64/linux x86_64/windows x86_64/macos x86_64/iossim i686/linux i686/windows aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim armv7/linux armv7/android armv7hf/linux riscv64/linux powerpc64le/linux mips/linux mipsel/linux mips64el/linux s390x/linux loongarch64/linux
 
 define build_target
 	@mkdir -p $(BIN_DIR)/$(1)/$(2)
-	@cmake -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DHPM_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-$(2)
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ]; then $(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DHPM_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null; fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DHPM_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null)
 	@cp src/libhpm.h $(BIN_DIR)/$(1)/$(2)/libhpm.h
 	@if [ "$(2)" = windows ]; then cp $(BUILD_DIR)/$(1)-$(2)/out/libhpm.dll $(BIN_DIR)/$(1)/$(2)/libhpm.dll; fi
 	@echo "OK $(1)/$(2)"
@@ -93,7 +134,7 @@ x86_64/windows: ; $(call windows_target,x86_64,x86_64-w64-mingw32-gcc)
 i686/windows: ; $(call windows_target,i686,i686-w64-mingw32-gcc)
 ifeq ($(HOST_SYSTEM),Darwin)
 define macos_target
-$(call build_target,$(1),macos,-DCMAKE_OSX_ARCHITECTURES=$(1))
+$(call build_target,$(1),macos,-DCMAKE_OSX_ARCHITECTURES=$(if $(filter aarch64,$(1)),arm64,$(1)))
 endef
 else
 define macos_target
