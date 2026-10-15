@@ -25,6 +25,13 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+/**
+ * Report a test case result.
+ * @param fail Non-zero if the case failed.
+ * @param name Test case name.
+ * @param detail Additional detail string.
+ * @return void
+ */
 static void case_result(int fail, const char *name, const char *detail) {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, detail);
@@ -35,6 +42,12 @@ static void run_case(int *rc, int (*fn)(void)) {
     *rc += fn();
 }
 
+/**
+ * Assert a condition is true, reporting failure if not.
+ * @param name Test case name.
+ * @param condition Condition to evaluate.
+ * @return 0 on success, 1 on failure.
+ */
 static int expect_true(const char *name, int condition) {
     if (!condition) {
         printf("[FAIL] %s\n", name);
@@ -43,6 +56,11 @@ static int expect_true(const char *name, int condition) {
     return 0;
 }
 
+/**
+ * Sleep for the specified number of milliseconds.
+ * @param ms Milliseconds to sleep.
+ * @return void
+ */
 static void sleep_ms(unsigned int ms) {
 #ifdef _WIN32
     Sleep(ms);
@@ -54,11 +72,23 @@ static void sleep_ms(unsigned int ms) {
 #endif
 }
 
+/**
+ * Compare binary data to a text string.
+ * @param data Binary data pointer.
+ * @param size Binary data size.
+ * @param text Text string to compare.
+ * @return 1 if equal, 0 otherwise.
+ */
 static int bytes_equal(const void *data, size_t size, const char *text) {
     size_t text_size = strlen(text);
     return size == text_size && (size == 0U || memcmp(data, text, size) == 0);
 }
 
+/**
+ * Test case: seek before publish.
+ * Seekers exist independently and survive later publication.
+ * @return Number of failed assertions.
+ */
 static int case_seek_before_publish(void) {
     const char *name = "seek_before_publish";
     const char *detail = "seekers exist independently and survive later publication";
@@ -95,6 +125,11 @@ static int case_seek_before_publish(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test case: unpublish independent.
+ * Unpublish removes only publication and republish reuses waiting seekers.
+ * @return Number of failed assertions.
+ */
 static int case_unpublish_independent(void) {
     const char *name = "unpublish_independent";
     const char *detail = "unpublish removes only publication and republish reuses waiting seekers";
@@ -133,6 +168,11 @@ static int case_unpublish_independent(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test case: remove and order.
+ * Middle removal is isolated and insertion order remains linked.
+ * @return Number of failed assertions.
+ */
 static int case_remove_and_order(void) {
     const char *name = "remove_and_order";
     const char *detail = "middle removal is isolated and insertion order remains linked";
@@ -165,6 +205,11 @@ static int case_remove_and_order(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test case: data is copied.
+ * Publication and seeker values are owned copies.
+ * @return Number of failed assertions.
+ */
 static int case_data_is_copied(void) {
     const char *name = "data_is_copied";
     const char *detail = "publication and seeker values are owned copies";
@@ -192,6 +237,11 @@ static int case_data_is_copied(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test case: limits.
+ * Publication, global seeker and per-point seeker limits are independent.
+ * @return Number of failed assertions.
+ */
 static int case_limits(void) {
     const char *name = "limits";
     const char *detail = "publication, global seeker and per-point seeker limits are independent";
@@ -222,6 +272,11 @@ static int case_limits(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test case: ttl independence.
+ * Pruning publication expiry preserves seekers with independent TTL.
+ * @return Number of failed assertions.
+ */
 static int case_ttl_independence(void) {
     const char *name = "ttl_independence";
     const char *detail = "pruning publication expiry preserves seekers with independent TTL";
@@ -254,6 +309,11 @@ static int case_ttl_independence(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test case: hash index.
+ * Many identifiers survive hash growth and direct lookup.
+ * @return Number of failed assertions.
+ */
 static int case_hash_index(void) {
     const char *name = "hash_index";
     const char *detail = "many identifiers survive hash growth and direct lookup";
@@ -291,6 +351,11 @@ static int case_hash_index(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Test case: errors and version.
+ * Invalid, duplicate and not-found states remain explicit.
+ * @return Number of failed assertions.
+ */
 static int case_errors_and_version(void) {
     const char *name = "errors_and_version";
     const char *detail = "invalid, duplicate and not-found states remain explicit";
@@ -317,6 +382,10 @@ static int case_errors_and_version(void) {
     return fail == 0 ? 0 : 1;
 }
 
+/**
+ * Run all test cases.
+ * @return Total number of failed assertions across all cases.
+ */
 static int case_all(void) {
     int rc = 0;
 
@@ -334,6 +403,12 @@ static int case_all(void) {
     return rc;
 }
 
+/**
+ * Test program entry point.
+ * @param argc Argument count.
+ * @param argv Argument vector: test case name or "all".
+ * @return Exit code.
+ */
 int main(int argc, char **argv) {
     if (argc != 2) {
         fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);

@@ -73,6 +73,10 @@ struct kc_rdv {
     kc_rdv_seeker_node_t *seeker_expiry_tail;
 };
 
+/**
+ * Get current time in milliseconds.
+ * @return Current time in milliseconds.
+ */
 static uint64_t rdv_now_ms(void) {
 #ifdef _WIN32
     return (uint64_t)GetTickCount64();
@@ -94,12 +98,23 @@ static uint64_t rdv_now_ms(void) {
 #endif
 }
 
+/**
+ * Compute expiry timestamp with saturation arithmetic.
+ * @param now Current time in milliseconds.
+ * @param ttl Time-to-live in milliseconds, or 0 for no expiry.
+ * @return Expiry timestamp, 0 if no expiry, UINT64_MAX on overflow.
+ */
 static uint64_t rdv_expiry(uint64_t now, uint64_t ttl) {
     if (ttl == 0U) return 0U;
     if (UINT64_MAX - now < ttl) return UINT64_MAX;
     return now + ttl;
 }
 
+/**
+ * Compute FNV-1a hash of a string identifier.
+ * @param id NUL-terminated identifier string.
+ * @return 64-bit hash value.
+ */
 static uint64_t rdv_hash_id(const char *id) {
     const unsigned char *p;
     uint64_t hash;
@@ -112,6 +127,12 @@ static uint64_t rdv_hash_id(const char *id) {
     return hash;
 }
 
+/**
+ * Copy data bytes with malloc.
+ * @param data Source data pointer, or NULL when size is zero.
+ * @param size Number of bytes to copy.
+ * @return Newly allocated copy, or NULL on allocation failure or zero size.
+ */
 static void *rdv_copy_data(const void *data, size_t size) {
     void *copy;
 
@@ -122,6 +143,11 @@ static void *rdv_copy_data(const void *data, size_t size) {
     return copy;
 }
 
+/**
+ * Copy a NUL-terminated identifier string with malloc.
+ * @param id Source identifier string.
+ * @return Newly allocated copy, or NULL on allocation failure.
+ */
 static char *rdv_copy_id(const char *id) {
     size_t len;
     char *copy;
@@ -134,10 +160,22 @@ static char *rdv_copy_id(const char *id) {
     return copy;
 }
 
+/**
+ * Convert seeker view to internal node pointer.
+ * @param seeker Borrowed seeker view.
+ * @return Internal seeker node pointer.
+ */
 static kc_rdv_seeker_node_t *rdv_seeker_node(const kc_rdv_seeker_t *seeker) {
     return (kc_rdv_seeker_node_t *)(uintptr_t)seeker;
 }
 
+/**
+ * Find a point node by identifier and hash.
+ * @param rdv Registry.
+ * @param id Identifier string.
+ * @param hash Precomputed hash of id.
+ * @return Matching point node, or NULL if not found.
+ */
 static kc_rdv_point_node_t *rdv_find(kc_rdv_t *rdv, const char *id,
     uint64_t hash)
 {
@@ -152,6 +190,12 @@ static kc_rdv_point_node_t *rdv_find(kc_rdv_t *rdv, const char *id,
     return NULL;
 }
 
+/**
+ * Rehash the registry's bucket array to a new capacity.
+ * @param rdv Registry.
+ * @param capacity New bucket capacity (must be power of two).
+ * @return 1 on success, 0 on allocation failure.
+ */
 static int rdv_rehash(kc_rdv_t *rdv, size_t capacity) {
     kc_rdv_point_node_t **buckets;
     kc_rdv_point_node_t *point;
@@ -182,6 +226,11 @@ static int rdv_rehash(kc_rdv_t *rdv, size_t capacity) {
     return 1;
 }
 
+/**
+ * Reserve space for a new point, rehashing if needed.
+ * @param rdv Registry.
+ * @return 1 on success, 0 on rehash failure.
+ */
 static int rdv_reserve_point(kc_rdv_t *rdv) {
     size_t capacity;
     size_t threshold;
@@ -193,6 +242,12 @@ static int rdv_reserve_point(kc_rdv_t *rdv) {
     return rdv_rehash(rdv, capacity);
 }
 
+/**
+ * Insert a point into the hash table.
+ * @param rdv Registry.
+ * @param point Point node to insert.
+ * @return void
+ */
 static void rdv_hash_insert(kc_rdv_t *rdv, kc_rdv_point_node_t *point) {
     size_t bucket;
 
@@ -204,6 +259,12 @@ static void rdv_hash_insert(kc_rdv_t *rdv, kc_rdv_point_node_t *point) {
     rdv->point_count++;
 }
 
+/**
+ * Remove a point from the hash table.
+ * @param rdv Registry.
+ * @param point Point node to remove.
+ * @return void
+ */
 static void rdv_hash_remove(kc_rdv_t *rdv, kc_rdv_point_node_t *point) {
     size_t bucket;
 
@@ -219,6 +280,13 @@ static void rdv_hash_remove(kc_rdv_t *rdv, kc_rdv_point_node_t *point) {
     rdv->point_count--;
 }
 
+/**
+ * Create a new point node and insert into hash table.
+ * @param rdv Registry.
+ * @param id Identifier string.
+ * @param hash Precomputed hash of id.
+ * @return New point node, or NULL on allocation failure.
+ */
 static kc_rdv_point_node_t *rdv_point_create(kc_rdv_t *rdv, const char *id,
     uint64_t hash)
 {
@@ -238,6 +306,12 @@ static kc_rdv_point_node_t *rdv_point_create(kc_rdv_t *rdv, const char *id,
     return point;
 }
 
+/**
+ * Destroy an empty point node (no publication, no seekers).
+ * @param rdv Registry.
+ * @param point Point node to destroy.
+ * @return void
+ */
 static void rdv_point_destroy_empty(kc_rdv_t *rdv,
     kc_rdv_point_node_t *point)
 {
@@ -246,6 +320,12 @@ static void rdv_point_destroy_empty(kc_rdv_t *rdv,
     free(point);
 }
 
+/**
+ * Append a point to the publication expiry queue.
+ * @param rdv Registry.
+ * @param point Point with publication to add to expiry queue.
+ * @return void
+ */
 static void rdv_publication_expiry_append(kc_rdv_t *rdv,
     kc_rdv_point_node_t *point)
 {
@@ -258,6 +338,12 @@ static void rdv_publication_expiry_append(kc_rdv_t *rdv,
     rdv->publication_expiry_tail = point;
 }
 
+/**
+ * Remove a point from the publication expiry queue.
+ * @param rdv Registry.
+ * @param point Point to remove from expiry queue.
+ * @return void
+ */
 static void rdv_publication_expiry_remove(kc_rdv_t *rdv,
     kc_rdv_point_node_t *point)
 {
@@ -273,6 +359,12 @@ static void rdv_publication_expiry_remove(kc_rdv_t *rdv,
     point->expiry_next = NULL;
 }
 
+/**
+ * Append a seeker to the seeker expiry queue.
+ * @param rdv Registry.
+ * @param seeker Seeker node to add to expiry queue.
+ * @return void
+ */
 static void rdv_seeker_expiry_append(kc_rdv_t *rdv,
     kc_rdv_seeker_node_t *seeker)
 {
@@ -285,6 +377,12 @@ static void rdv_seeker_expiry_append(kc_rdv_t *rdv,
     rdv->seeker_expiry_tail = seeker;
 }
 
+/**
+ * Remove a seeker from the seeker expiry queue.
+ * @param rdv Registry.
+ * @param seeker Seeker node to remove from expiry queue.
+ * @return void
+ */
 static void rdv_seeker_expiry_remove(kc_rdv_t *rdv,
     kc_rdv_seeker_node_t *seeker)
 {
@@ -300,6 +398,12 @@ static void rdv_seeker_expiry_remove(kc_rdv_t *rdv,
     seeker->expiry_next = NULL;
 }
 
+/**
+ * Append a seeker to a point's seeker list.
+ * @param point Point node.
+ * @param seeker Seeker node to append.
+ * @return void
+ */
 static void rdv_seeker_list_append(kc_rdv_point_node_t *point,
     kc_rdv_seeker_node_t *seeker)
 {
@@ -319,6 +423,12 @@ static void rdv_seeker_list_append(kc_rdv_point_node_t *point,
     point->view.seeker_count++;
 }
 
+/**
+ * Remove a seeker node from its point and expiry queue, and free its data.
+ * @param rdv Registry.
+ * @param seeker Seeker node to remove and free.
+ * @return void
+ */
 static void rdv_seeker_remove_node(kc_rdv_t *rdv,
     kc_rdv_seeker_node_t *seeker)
 {
@@ -356,6 +466,12 @@ static void rdv_seeker_remove_node(kc_rdv_t *rdv,
         rdv_point_destroy_empty(rdv, point);
 }
 
+/**
+ * Remove publication from a point, freeing its data.
+ * @param rdv Registry.
+ * @param point Point node with publication to remove.
+ * @return void
+ */
 static void rdv_unpublish_node(kc_rdv_t *rdv, kc_rdv_point_node_t *point) {
     if (!point->view.publication) return;
     if (rdv->options.publication_ttl_ms != 0U)
@@ -371,6 +487,12 @@ static void rdv_unpublish_node(kc_rdv_t *rdv, kc_rdv_point_node_t *point) {
         rdv_point_destroy_empty(rdv, point);
 }
 
+/**
+ * Open a new rendezvous registry.
+ * @param out Output pointer for the new registry.
+ * @param options Configuration options, or NULL for defaults.
+ * @return KC_RDV_OK on success, negative status code on failure.
+ */
 int kc_rdv_open(kc_rdv_t **out, const kc_rdv_options_t *options) {
     kc_rdv_t *rdv;
 

@@ -129,7 +129,7 @@ int kc_rdv_unpublish(kc_rdv_t *rdv, const char *id);
  *
  * Seeking succeeds even when no publication currently exists. The data bytes
  * are copied by the library. The returned seeker exposes its point, so a caller
- * can inspect point->publication immediately when present.
+ * can inspect the point publication immediately when present.
  *
  * @param rdv Open registry.
  * @param id Arbitrary NUL-terminated identifier.
