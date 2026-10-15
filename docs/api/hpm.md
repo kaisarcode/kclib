@@ -1,8 +1,9 @@
 # hpm scripting API
 
-Direct bidirectional UDP path establishment against peer endpoints supplied by
-the application. HPM can create its own local UDP mapping or use a live mapping
-supplied by the caller.
+Direct bidirectional UDP channel establishment against peer endpoints supplied
+by the application. HPM can create its own local UDP mapping or use a live
+mapping supplied by the caller, then maintains the selected channel until it is
+closed or peer liveness is lost.
 
 ## Lua
 
@@ -44,8 +45,11 @@ open or close another local mapping. The mapping must remain alive until
 `path:close()` and must have one active receive owner while the path is active.
 `timeout_ms` zero uses the default connection timeout.
 
-`path:send(bytes)` sends one UDP datagram. `path:receive(timeout_ms)` returns one
-UDP datagram; a zero receive timeout waits indefinitely.
+The returned path object represents a live bidirectional channel. HPM maintains
+peer liveness autonomously, including while application traffic is idle; callers
+do not send maintenance traffic themselves. `path:send(bytes)` writes one UDP
+datagram onto the channel and `path:receive(timeout_ms)` returns one datagram
+from it. A zero receive timeout waits indefinitely.
 
 `path.local` and `path.peer` project as `{ host = ..., port = ... }` values.
 

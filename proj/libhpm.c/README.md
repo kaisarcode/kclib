@@ -2,15 +2,15 @@
 
 ---
 
-`libhpm.c` establishes direct bidirectional UDP paths between peers. The caller
-supplies one or more remote endpoints; HPM performs the direct connectivity
-attempt and returns an operational UDP path when one of the supplied endpoints
-is reachable.
+`libhpm.c` establishes and maintains direct bidirectional UDP channels between
+peers. The caller supplies one or more remote endpoints; HPM performs the direct
+connectivity attempt and returns a live channel when one of the supplied
+endpoints is reachable.
 
 HPM can either bind its own local UDP socket with `kc_hpm_connect()` or perform
-the same direct-path establishment over an already-open UDP mapping with
+the same channel establishment over an already-open UDP mapping with
 `kc_hpm_connect_over()`. Using an existing mapping preserves that mapping while
-HPM probes and establishes the path; HPM borrows it and does not close it.
+HPM establishes and maintains the channel; HPM borrows it and does not close it.
 
 Peer endpoint discovery and exchange are outside the library. Remote endpoints
 may come from any source chosen by the application.
@@ -71,10 +71,10 @@ const char *kc_hpm_strerror(int status);
 uint64_t kc_hpm_version(void);
 ```
 
-`kc_hpm_connect()` establishes a direct UDP path using endpoints supplied by the
-application and a local socket owned by HPM. `host` is the optional local bind
-host. `port` is the preferred local UDP port; zero asks the operating system to
-select one.
+`kc_hpm_connect()` establishes a direct UDP channel using endpoints supplied by
+the application and a local socket owned by HPM. `host` is the optional local
+bind host. `port` is the preferred local UDP port; zero asks the operating
+system to select one.
 
 `kc_hpm_connect_over()` performs the same probing and path selection over a live
 UDP mapping supplied by the caller. The supplied mapping provides its numeric
@@ -85,14 +85,19 @@ mapping must have one active receive owner while the path is alive.
 
 For both entry points, `peers` is the set of remote endpoints that HPM may try
 and `timeout_ms` bounds the direct connectivity attempt; zero uses the library
-default. HPM owns candidate probing, simultaneous punch behavior, and selection.
-The application does not manage candidate pairs, probe phases, retry state, or
-socket readiness.
+default. HPM owns candidate probing, simultaneous punch behavior, selection, and
+the ongoing liveness of the selected channel. The application does not manage
+candidate pairs, probe phases, keepalives, retry state, or socket readiness.
 
-The resulting path preserves UDP datagram semantics. `kc_hpm_send()` sends one
-datagram, and `kc_hpm_receive()` returns one datagram. A receive timeout of zero
-waits indefinitely. UDP itself does not guarantee delivery, ordering, or
-retransmission.
+The returned path handle represents the lifetime of the live bidirectional
+channel. HPM exchanges private control traffic while the channel is idle and
+marks the channel failed when peer liveness is lost. Applications may exchange
+datagrams at any time until `kc_hpm_close()` or a channel failure.
+
+Application traffic preserves UDP datagram semantics. `kc_hpm_send()` writes one
+datagram onto the channel, and `kc_hpm_receive()` returns one datagram from it. A
+receive timeout of zero waits indefinitely. UDP itself does not guarantee
+delivery, ordering, or retransmission.
 
 The selected local and remote endpoint can be inspected through the path. These
 values describe the path that was actually established; they do not imply how
@@ -155,13 +160,13 @@ make all
 ### System Libraries
 
 Linux:
-- No additional system libraries required.
+- POSIX threads
 
 Windows (MSVC or MinGW):
 - `ws2_32`
 
 macOS:
-- No additional system libraries required.
+- POSIX threads
 
 ### Dependencies
 
