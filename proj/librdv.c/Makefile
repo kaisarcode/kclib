@@ -302,7 +302,7 @@ test:
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/test-wine/out \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target rdv_contract_test; \
-		$(WINE) $(BUILD_DIR)/test-wine/out/rdv_contract_test.exe all; \
+		WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/out/rdv_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
 		if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1; then echo "Missing Emscripten cmake wrapper" >&2; exit 1; fi; \
 		if ! command -v $(WASM_NODE) >/dev/null 2>&1; then echo "Missing Node.js runtime" >&2; exit 1; fi; \
