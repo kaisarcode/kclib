@@ -1,6 +1,6 @@
 /**
  * test.c - libhpm public API contract tests.
- * Summary: Validates direct path establishment, datagrams, and lifecycle.
+ * Summary: Validates direct and borrowed-UDP paths, datagrams, and lifecycle.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -29,6 +29,7 @@ typedef int test_socklen_t;
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 typedef pthread_t test_thread_t;
@@ -659,6 +660,310 @@ static int case_kc_hpm_lifecycle(void)
     return fail ? 1 : 0;
 }
 
+typedef struct {
+    test_socket_t fd;
+    char host[64];
+    unsigned short port;
+    unsigned release_count;
+#ifdef _WIN32
+    int wsa_started;
+#endif
+} test_over_udp_t;
+
+typedef struct {
+    kc_hpm_path_t *path;
+    kc_hpm_options_t options;
+    kc_hpm_udp_t udp;
+    int status;
+} test_over_side_t;
+
+/**
+ * Opens a caller-owned UDP mapping for connect-over testing.
+ * @return 1 on success, 0 on failure.
+ */
+static int test_over_open(test_over_udp_t *udp)
+{
+    struct sockaddr_in addr;
+    test_socklen_t len = (test_socklen_t)sizeof(addr);
+
+    memset(udp, 0, sizeof(*udp));
+    udp->fd = TEST_INVALID_SOCKET;
+    if (!test_socket_runtime_start()) return 0;
+#ifdef _WIN32
+    udp->wsa_started = 1;
+#endif
+    udp->fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (udp->fd == TEST_INVALID_SOCKET) goto fail;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(udp->fd, (const struct sockaddr *)&addr, len) != 0 ||
+        getsockname(udp->fd, (struct sockaddr *)&addr, &len) != 0)
+        goto fail;
+    strcpy(udp->host, "127.0.0.1");
+    udp->port = ntohs(addr.sin_port);
+    return udp->port != 0;
+
+fail:
+    if (udp->fd != TEST_INVALID_SOCKET) test_socket_close(udp->fd);
+#ifdef _WIN32
+    if (udp->wsa_started) test_socket_runtime_stop();
+#endif
+    memset(udp, 0, sizeof(*udp));
+    udp->fd = TEST_INVALID_SOCKET;
+    return 0;
+}
+
+/**
+ * Closes a caller-owned UDP mapping used by connect-over testing.
+ * @return None.
+ */
+static void test_over_close(test_over_udp_t *udp)
+{
+    if (!udp) return;
+    if (udp->fd != TEST_INVALID_SOCKET) test_socket_close(udp->fd);
+#ifdef _WIN32
+    if (udp->wsa_started) test_socket_runtime_stop();
+#endif
+    memset(udp, 0, sizeof(*udp));
+    udp->fd = TEST_INVALID_SOCKET;
+}
+
+/**
+ * Sends one datagram through a caller-owned UDP mapping.
+ * @return KC_HPM_OK on success, error code on failure.
+ */
+static int test_over_send(void *context, const kc_hpm_endpoint_t *peer,
+    const void *data, size_t size)
+{
+    test_over_udp_t *udp = (test_over_udp_t *)context;
+    struct sockaddr_in addr;
+    int sent;
+
+    if (!udp || udp->fd == TEST_INVALID_SOCKET || !peer || !peer->host ||
+        peer->port == 0 || (size > 0 && !data) || size > 65535U)
+        return KC_HPM_EINVAL;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(peer->port);
+    if (inet_pton(AF_INET, peer->host, &addr.sin_addr) != 1)
+        return KC_HPM_ENET;
+    sent = (int)sendto(udp->fd, (const char *)data, (int)size, 0,
+        (const struct sockaddr *)&addr, (test_socklen_t)sizeof(addr));
+    return sent == (int)size ? KC_HPM_OK : KC_HPM_ENET;
+}
+
+/**
+ * Receives one datagram through a caller-owned UDP mapping.
+ * @return KC_HPM_OK on success, error code on failure.
+ */
+static int test_over_receive(void *context, kc_hpm_datagram_t *out,
+    uint64_t timeout_ms)
+{
+    test_over_udp_t *udp = (test_over_udp_t *)context;
+    struct sockaddr_in from;
+    test_socklen_t from_len = (test_socklen_t)sizeof(from);
+    unsigned char packet[65535];
+    fd_set set;
+    struct timeval tv;
+    struct timeval *tvp = NULL;
+    int ready;
+    int received;
+
+    if (!udp || udp->fd == TEST_INVALID_SOCKET || !out) return KC_HPM_EINVAL;
+    memset(out, 0, sizeof(*out));
+    FD_ZERO(&set);
+    FD_SET(udp->fd, &set);
+    if (timeout_ms != 0) {
+        tv.tv_sec = (long)(timeout_ms / 1000ULL);
+        tv.tv_usec = (long)((timeout_ms % 1000ULL) * 1000ULL);
+        tvp = &tv;
+    }
+#ifdef _WIN32
+    ready = select(0, &set, NULL, NULL, tvp);
+#else
+    ready = select(udp->fd + 1, &set, NULL, NULL, tvp);
+#endif
+    if (ready == 0) return KC_HPM_ETIMEOUT;
+    if (ready < 0) return KC_HPM_ENET;
+    received = (int)recvfrom(udp->fd, (char *)packet, (int)sizeof(packet), 0,
+        (struct sockaddr *)&from, &from_len);
+    if (received < 0) return KC_HPM_ENET;
+    out->host = (char *)malloc(10U);
+    out->data = malloc(received > 0 ? (size_t)received : 1U);
+    if (!out->host || !out->data) {
+        free(out->host);
+        free(out->data);
+        memset(out, 0, sizeof(*out));
+        return KC_HPM_ENOMEM;
+    }
+    strcpy(out->host, "127.0.0.1");
+    out->port = ntohs(from.sin_port);
+    if (received > 0) memcpy(out->data, packet, (size_t)received);
+    out->data_size = (size_t)received;
+    return KC_HPM_OK;
+}
+
+/**
+ * Releases a datagram allocated by the caller-owned UDP test mapping.
+ * @return None.
+ */
+static void test_over_release(void *context, kc_hpm_datagram_t *packet)
+{
+    test_over_udp_t *udp = (test_over_udp_t *)context;
+    if (!packet) return;
+    free(packet->host);
+    free(packet->data);
+    memset(packet, 0, sizeof(*packet));
+    if (udp) udp->release_count++;
+}
+
+#ifdef _WIN32
+/**
+ * Connect-over thread entry point for Windows.
+ * @return Thread exit code.
+ */
+static DWORD WINAPI test_over_connect_thread(LPVOID arg)
+#else
+/**
+ * Connect-over thread entry point for POSIX.
+ * @return NULL.
+ */
+static void *test_over_connect_thread(void *arg)
+#endif
+{
+    test_over_side_t *side = (test_over_side_t *)arg;
+    side->status = kc_hpm_connect_over(&side->path, &side->options, &side->udp);
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+/**
+ * Establishes a pair of paths over caller-owned UDP mappings.
+ * @return 1 on success, 0 on failure.
+ */
+static int test_over_pair(test_over_side_t *a, test_over_side_t *b)
+{
+    test_thread_t ta;
+    test_thread_t tb;
+    int started_a = 0;
+    int started_b = 0;
+
+#ifdef _WIN32
+    tb = CreateThread(NULL, 0, test_over_connect_thread, b, 0, NULL);
+    started_b = tb != NULL;
+    ta = CreateThread(NULL, 0, test_over_connect_thread, a, 0, NULL);
+    started_a = ta != NULL;
+    if (started_a) WaitForSingleObject(ta, INFINITE);
+    if (started_b) WaitForSingleObject(tb, INFINITE);
+    if (started_a) CloseHandle(ta);
+    if (started_b) CloseHandle(tb);
+#else
+    started_b = pthread_create(&tb, NULL, test_over_connect_thread, b) == 0;
+    started_a = pthread_create(&ta, NULL, test_over_connect_thread, a) == 0;
+    if (started_a) pthread_join(ta, NULL);
+    if (started_b) pthread_join(tb, NULL);
+#endif
+    return started_a && started_b && a->status == KC_HPM_OK &&
+        b->status == KC_HPM_OK && a->path && b->path;
+}
+
+/**
+ * Tests kc_hpm_connect_over with caller-owned UDP mappings.
+ * @return 0 on pass, 1 on failure.
+ */
+static int case_kc_hpm_connect_over(void)
+{
+    const char *name = "kc_hpm_connect_over";
+    const char *detail = "preserves caller-owned UDP mappings";
+    test_over_udp_t au;
+    test_over_udp_t bu;
+    test_over_side_t a;
+    test_over_side_t b;
+    kc_hpm_endpoint_t a_peer;
+    kc_hpm_endpoint_t b_peer;
+    kc_hpm_datagram_t raw;
+    void *data = NULL;
+    size_t size = 0;
+    int fail = 0;
+
+    memset(&au, 0, sizeof(au));
+    memset(&bu, 0, sizeof(bu));
+    memset(&a, 0, sizeof(a));
+    memset(&b, 0, sizeof(b));
+    au.fd = TEST_INVALID_SOCKET;
+    bu.fd = TEST_INVALID_SOCKET;
+    if (!test_over_open(&au) || !test_over_open(&bu)) {
+        fail = 1;
+        goto done;
+    }
+    a_peer.host = bu.host;
+    a_peer.port = bu.port;
+    b_peer.host = au.host;
+    b_peer.port = au.port;
+    a.options.peers = &a_peer;
+    a.options.peer_count = 1;
+    a.options.timeout_ms = 1500;
+    b.options.peers = &b_peer;
+    b.options.peer_count = 1;
+    b.options.timeout_ms = 1500;
+    a.udp.context = &au;
+    a.udp.local = a_peer;
+    a.udp.local.host = au.host;
+    a.udp.local.port = au.port;
+    a.udp.send = test_over_send;
+    a.udp.receive = test_over_receive;
+    a.udp.release = test_over_release;
+    b.udp.context = &bu;
+    b.udp.local = b_peer;
+    b.udp.local.host = bu.host;
+    b.udp.local.port = bu.port;
+    b.udp.send = test_over_send;
+    b.udp.receive = test_over_receive;
+    b.udp.release = test_over_release;
+
+    fail += expect_true("rejects NULL borrowed output",
+        kc_hpm_connect_over(NULL, &a.options, &a.udp) == KC_HPM_EINVAL);
+    fail += expect_true("borrowed UDP pair establishes", test_over_pair(&a, &b));
+    if (!fail) {
+        fail += expect_true("path preserves supplied local mapping",
+            kc_hpm_local_port(a.path) == au.port);
+        fail += expect_true("path selects supplied remote endpoint",
+            kc_hpm_peer_port(a.path) == bu.port);
+        fail += expect_true("received transport datagrams are released",
+            au.release_count != 0 && bu.release_count != 0);
+        fail += expect_true("path sends application datagram",
+            kc_hpm_send(a.path, "over", 4) == KC_HPM_OK);
+        fail += expect_true("path receives application datagram",
+            kc_hpm_receive(b.path, &data, &size, 1000) == KC_HPM_OK &&
+            size == 4 && data && memcmp(data, "over", 4) == 0);
+        kc_hpm_free(data);
+        data = NULL;
+    }
+    kc_hpm_close(a.path);
+    kc_hpm_close(b.path);
+    a.path = NULL;
+    b.path = NULL;
+    memset(&raw, 0, sizeof(raw));
+    fail += expect_true("closing path preserves borrowed mapping",
+        test_over_send(&au, &a_peer, "raw", 3) == KC_HPM_OK &&
+        test_over_receive(&bu, &raw, 1000) == KC_HPM_OK &&
+        raw.data_size == 3 && raw.data && memcmp(raw.data, "raw", 3) == 0);
+    test_over_release(&bu, &raw);
+
+done:
+    kc_hpm_free(data);
+    kc_hpm_close(a.path);
+    kc_hpm_close(b.path);
+    test_over_close(&au);
+    test_over_close(&bu);
+    case_result(fail, name, detail);
+    return fail ? 1 : 0;
+}
+
 /**
  * Runs all test cases.
  * @return Number of failures.
@@ -666,11 +971,12 @@ static int case_kc_hpm_lifecycle(void)
 static int case_all(void)
 {
     int rc = 0;
-    test_case_total = 3;
+    test_case_total = 4;
     test_case_current = 0;
     run_case(&rc, case_kc_hpm_connect);
     run_case(&rc, case_kc_hpm_datagrams);
     run_case(&rc, case_kc_hpm_lifecycle);
+    run_case(&rc, case_kc_hpm_connect_over);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -691,6 +997,8 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "kc_hpm_connect") == 0) return case_kc_hpm_connect();
     if (strcmp(argv[1], "kc_hpm_datagrams") == 0) return case_kc_hpm_datagrams();
     if (strcmp(argv[1], "kc_hpm_lifecycle") == 0) return case_kc_hpm_lifecycle();
+    if (strcmp(argv[1], "kc_hpm_connect_over") == 0)
+        return case_kc_hpm_connect_over();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
