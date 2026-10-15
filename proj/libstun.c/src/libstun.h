@@ -70,11 +70,13 @@ int kc_stun_listen(
 
 /**
  * Returns the UDP port used by a running STUN server, or zero.
+ * @return The server port, or 0 if not available.
  */
 unsigned short kc_stun_server_port(const kc_stun_server_t *server);
 
 /**
  * Stops and releases a STUN server. NULL is accepted.
+ * @return void
  */
 void kc_stun_server_close(kc_stun_server_t *server);
 
@@ -134,42 +136,50 @@ int kc_stun_receive(
 
 /**
  * Returns the numeric local bind host for the mapping, or NULL.
+ * @return The local host string, or NULL if not available.
  */
 const char *kc_stun_local_host(const kc_stun_mapping_t *mapping);
 
 /**
  * Returns the local UDP port for the mapping, or zero.
+ * @return The local port, or 0 if not available.
  */
 unsigned short kc_stun_local_port(const kc_stun_mapping_t *mapping);
 
 /**
  * Returns the numeric endpoint observed by the STUN server, or NULL.
+ * @return The mapped host string, or NULL if not available.
  */
 const char *kc_stun_mapped_host(const kc_stun_mapping_t *mapping);
 
 /**
  * Returns the UDP port observed by the STUN server, or zero.
+ * @return The mapped port, or 0 if not available.
  */
 unsigned short kc_stun_mapped_port(const kc_stun_mapping_t *mapping);
 
 /**
  * Releases allocations owned by one received datagram and resets it.
  * NULL is accepted.
+ * @return void
  */
 void kc_stun_datagram_free(kc_stun_datagram_t *datagram);
 
 /**
  * Closes and releases a live mapping. NULL is accepted.
+ * @return void
  */
 void kc_stun_close(kc_stun_mapping_t *mapping);
 
 /**
  * Returns a static message for a public status code.
+ * @return The status message string.
  */
 const char *kc_stun_strerror(int status);
 
 /**
  * Returns the build version generated at compile time.
+ * @return The build version.
  */
 uint64_t kc_stun_version(void);
 

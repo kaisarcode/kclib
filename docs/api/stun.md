@@ -105,5 +105,4 @@ API.
 The mapping supports IPv4 and IPv6. The chosen STUN server address family and
 explicit local bind host must be compatible.
 
-
 `strerror(status)` and `version()` remain namespace functions.

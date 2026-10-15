@@ -94,6 +94,11 @@ struct kc_stun_server {
 static uint16_t rd16(const unsigned char *p) { return (uint16_t)((p[0] << 8) | p[1]); }
 static uint32_t rd32(const unsigned char *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
 static void wr16(unsigned char *p, uint16_t v) { p[0] = (unsigned char)(v >> 8); p[1] = (unsigned char)v; }
+
+/**
+ * Returns the current monotonic time in milliseconds.
+ * @return Current time in milliseconds.
+ */
 static uint64_t now_ms(void) {
 #ifdef _WIN32
     return (uint64_t)GetTickCount64();
@@ -105,6 +110,11 @@ static uint64_t now_ms(void) {
 }
 static uint64_t deadline_ms(uint64_t timeout) { uint64_t n = now_ms(); return UINT64_MAX - n < timeout ? UINT64_MAX : n + timeout; }
 static uint64_t remaining_ms(uint64_t deadline) { uint64_t n = now_ms(); return n >= deadline ? 0 : deadline - n; }
+
+/**
+ * Initializes the socket runtime.
+ * @return 1 on success, 0 on failure.
+ */
 static int runtime_start(void) {
 #ifdef _WIN32
     WSADATA wsa; return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
@@ -112,11 +122,21 @@ static int runtime_start(void) {
     return 1;
 #endif
 }
+
+/**
+ * Stops the socket runtime.
+ * @return void
+ */
 static void runtime_stop(void) {
 #ifdef _WIN32
     WSACleanup();
 #endif
 }
+
+/**
+ * Fills the buffer with random bytes.
+ * @return 1 on success, 0 on failure.
+ */
 static int random_bytes(unsigned char *out, size_t n) {
 #ifdef _WIN32
     return n <= ULONG_MAX && BCryptGenRandom(NULL, out, (ULONG)n, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
@@ -133,6 +153,11 @@ static int random_bytes(unsigned char *out, size_t n) {
     close(fd); return 1;
 #endif
 }
+
+/**
+ * Parses a STUN server specification into host and port.
+ * @return 1 on success, 0 on failure.
+ */
 static int parse_server(const char *text, char host[NI_MAXHOST], unsigned short *port) {
     const char *p, *end, *colon = NULL, *s;
     char tmp[16], *tail;
@@ -168,6 +193,11 @@ static int parse_server(const char *text, char host[NI_MAXHOST], unsigned short 
     if (*tail || !v || v > 65535UL) return 0;
     *port = (unsigned short)v; return 1;
 }
+
+/**
+ * Compares two socket endpoints for equality.
+ * @return 1 if equal, 0 otherwise.
+ */
 static int endpoint_equal(const struct sockaddr_storage *a, const struct sockaddr_storage *b) {
     if (a->ss_family != b->ss_family) return 0;
     if (a->ss_family == AF_INET) {
@@ -180,6 +210,11 @@ static int endpoint_equal(const struct sockaddr_storage *a, const struct sockadd
     }
     return 0;
 }
+
+/**
+ * Converts a socket endpoint to text host and port.
+ * @return 1 on success, 0 on failure.
+ */
 static int endpoint_text(const struct sockaddr_storage *a, kc_socklen_t len, char host[NI_MAXHOST], unsigned short *port) {
     char service[16], *tail;
     unsigned long v;
@@ -187,6 +222,11 @@ static int endpoint_text(const struct sockaddr_storage *a, kc_socklen_t len, cha
     v = strtoul(service, &tail, 10); if (*tail || v > 65535UL) return 0;
     *port = (unsigned short)v; return 1;
 }
+
+/**
+ * Binds a UDP socket to the given host and port.
+ * @return Socket descriptor on success, KC_BAD_SOCKET on failure.
+ */
 static kc_sock_t bind_udp(const char *host, unsigned short port, int family) {
     struct addrinfo hints, *list = NULL, *it;
     char service[16]; kc_sock_t fd = KC_BAD_SOCKET;
@@ -201,6 +241,11 @@ static kc_sock_t bind_udp(const char *host, unsigned short port, int family) {
     }
     freeaddrinfo(list); return fd;
 }
+
+/**
+ * Waits for a socket to become readable.
+ * @return 1 if readable, 0 on timeout, -1 on error.
+ */
 static int wait_readable(kc_sock_t fd, uint64_t ms, int infinite) {
     fd_set set; struct timeval tv, *p = NULL; int rc;
     FD_ZERO(&set); FD_SET(fd, &set);
@@ -217,6 +262,11 @@ static int wait_readable(kc_sock_t fd, uint64_t ms, int infinite) {
     return errno == EINTR ? 0 : -1;
 #endif
 }
+
+/**
+ * Resolves a peer hostname and port to a socket address.
+ * @return 1 on success, 0 on failure.
+ */
 static int resolve_peer(const char *host, unsigned short port, int family, struct sockaddr_storage *out, kc_socklen_t *len) {
     struct addrinfo hints, *list = NULL, *it; char service[16]; int ok = 0;
     memset(&hints, 0, sizeof(hints)); hints.ai_family = family; hints.ai_socktype = SOCK_DGRAM; hints.ai_protocol = IPPROTO_UDP;
@@ -225,6 +275,11 @@ static int resolve_peer(const char *host, unsigned short port, int family, struc
     for (it = list; it; it = it->ai_next) if (it->ai_addrlen > 0 && (size_t)it->ai_addrlen <= sizeof(*out)) { memset(out, 0, sizeof(*out)); memcpy(out, it->ai_addr, (size_t)it->ai_addrlen); *len = (kc_socklen_t)it->ai_addrlen; ok = 1; break; }
     freeaddrinfo(list); return ok;
 }
+
+/**
+ * Returns the local port of a bound socket.
+ * @return Port number in host byte order, or 0 on failure.
+ */
 static unsigned short socket_port(kc_sock_t fd) {
     struct sockaddr_storage addr; kc_socklen_t len = (kc_socklen_t)sizeof(addr);
     memset(&addr, 0, sizeof(addr));
@@ -233,6 +288,11 @@ static unsigned short socket_port(kc_sock_t fd) {
     if (addr.ss_family == AF_INET6) return ntohs(((struct sockaddr_in6 *)&addr)->sin6_port);
     return 0;
 }
+
+/**
+ * Creates the wake-up socket pair for the server.
+ * @return 1 on success, 0 on failure.
+ */
 static int server_make_wake(kc_stun_server_t *s) {
     int family = s->fd4 != KC_BAD_SOCKET ? AF_INET : AF_INET6;
     const char *host = family == AF_INET ? "127.0.0.1" : "::1";
@@ -243,12 +303,22 @@ static int server_make_wake(kc_stun_server_t *s) {
     s->wake_tx = socket(family, SOCK_DGRAM, IPPROTO_UDP);
     return s->wake_tx != KC_BAD_SOCKET;
 }
+
+/**
+ * Validates a STUN Binding Request.
+ * @return 1 if valid, 0 otherwise.
+ */
 static int binding_request_valid(const unsigned char *p, size_t n) {
     uint16_t len;
     if (!p || n < 20 || (p[0] & 0xc0U) || rd16(p) != STUN_BINDING || rd32(p + 4) != STUN_MAGIC) return 0;
     len = rd16(p + 2);
     return !(len & 3U) && 20U + (size_t)len == n;
 }
+
+/**
+ * Builds a STUN Binding Success response.
+ * @return Number of bytes written, or 0 on failure.
+ */
 static size_t make_success(const unsigned char *request, const struct sockaddr_storage *peer,
     unsigned char *out, size_t cap) {
     unsigned char raw[16], mask[16] = {0x21,0x12,0xa4,0x42};
@@ -270,6 +340,11 @@ static size_t make_success(const unsigned char *request, const struct sockaddr_s
     for (i = 0; i < n; ++i) out[28 + i] = raw[i] ^ mask[i];
     return total;
 }
+
+/**
+ * Processes one incoming STUN request and sends a response.
+ * @return void
+ */
 static void server_reply(kc_sock_t fd) {
     unsigned char request[1280], response[64]; struct sockaddr_storage peer;
     kc_socklen_t peer_len = (kc_socklen_t)sizeof(peer); int got; size_t size;
@@ -286,9 +361,18 @@ static void server_reply(kc_sock_t fd) {
     (void)sendto(fd, response, size, 0, (const struct sockaddr *)&peer, peer_len);
 #endif
 }
+
 #ifdef _WIN32
+/**
+ * Server thread entry point (Windows).
+ * @return Thread exit code.
+ */
 static DWORD WINAPI server_thread(LPVOID arg)
 #else
+/**
+ * Server thread entry point (POSIX).
+ * @return Thread exit code.
+ */
 static void *server_thread(void *arg)
 #endif
 {
@@ -333,9 +417,18 @@ static void *server_thread(void *arg)
 #endif
 }
 
+/**
+ * Builds a STUN Binding Request packet.
+ * @return void
+ */
 static void make_request(unsigned char out[20], const unsigned char id[12]) {
     memset(out, 0, 20); wr16(out, STUN_BINDING); out[4] = 0x21; out[5] = 0x12; out[6] = 0xa4; out[7] = 0x42; memcpy(out + 8, id, 12);
 }
+
+/**
+ * Sends a STUN Binding Request.
+ * @return KC_STUN_OK on success, KC_STUN_ENET on failure.
+ */
 static int send_binding(kc_stun_mapping_t *m, unsigned char id[12]) {
     unsigned char packet[20]; int n;
     if (!random_bytes(id, 12)) return KC_STUN_ENET;
@@ -347,6 +440,11 @@ static int send_binding(kc_stun_mapping_t *m, unsigned char id[12]) {
 #endif
     return n == 20 ? KC_STUN_OK : KC_STUN_ENET;
 }
+
+/**
+ * Parses a STUN Binding Success response.
+ * @return 1 on success, 0 on failure, -1 on malformed.
+ */
 static int parse_response(const unsigned char *p, size_t n, const unsigned char id[12], char host[NI_MAXHOST], unsigned short *port) {
     size_t end, off; uint16_t len;
     if (n < 20 || (p[0] & 0xc0U) || rd16(p) != STUN_SUCCESS || rd32(p + 4) != STUN_MAGIC || memcmp(p + 8, id, 12)) return 0;
@@ -368,6 +466,11 @@ static int parse_response(const unsigned char *p, size_t n, const unsigned char 
     }
     return -1;
 }
+
+/**
+ * Performs a STUN transaction with retry logic.
+ * @return KC_STUN_OK on success, error code on failure.
+ */
 static int transact(kc_stun_mapping_t *m, uint64_t timeout) {
     unsigned char id[12], packet[STUN_MAX + 1U]; uint64_t end; int rc;
     rc = send_binding(m, id); if (rc != KC_STUN_OK) return rc; end = deadline_ms(timeout);
@@ -387,6 +490,11 @@ static int transact(kc_stun_mapping_t *m, uint64_t timeout) {
         parsed = parse_response(packet, (size_t)got, id, m->mapped_host, &m->mapped_port); if (parsed > 0) return KC_STUN_OK; if (parsed < 0) return KC_STUN_EPROTO;
     }
 }
+
+/**
+ * Starts a STUN server listener.
+ * @return KC_STUN_OK on success, error code on failure.
+ */
 int kc_stun_listen(kc_stun_server_t **out, const kc_stun_server_options_t *o) {
     kc_stun_server_t *s; unsigned short port;
     if (!out || !o) return KC_STUN_EINVAL;
@@ -412,7 +520,17 @@ int kc_stun_listen(kc_stun_server_t **out, const kc_stun_server_options_t *o) {
 #endif
     s->thread_started = 1; *out = s; return KC_STUN_OK;
 }
+
+/**
+ * Returns the local port of the STUN server.
+ * @return Port number in host byte order, or 0 if not available.
+ */
 unsigned short kc_stun_server_port(const kc_stun_server_t *s) { return s ? s->port : 0; }
+
+/**
+ * Closes the STUN server and cleans up resources.
+ * @return void
+ */
 void kc_stun_server_close(kc_stun_server_t *s) {
     if (!s) return;
     if (s->thread_started) {
@@ -436,6 +554,10 @@ void kc_stun_server_close(kc_stun_server_t *s) {
     free(s);
 }
 
+/**
+ * Discovers a STUN mapping.
+ * @return KC_STUN_OK on success, error code on failure.
+ */
 int kc_stun_discover(kc_stun_mapping_t **out, const kc_stun_options_t *o) {
     char server_host[NI_MAXHOST], service[16]; unsigned short server_port; struct addrinfo hints, *list = NULL, *it; uint64_t timeout, end; int result = KC_STUN_ENET, started = 0;
     if (!out || !o || !o->server || !*o->server) return KC_STUN_EINVAL;
@@ -462,7 +584,17 @@ int kc_stun_discover(kc_stun_mapping_t **out, const kc_stun_options_t *o) {
     }
     freeaddrinfo(list); if (started) runtime_stop(); return *out ? KC_STUN_OK : result;
 }
+
+/**
+ * Refreshes a STUN mapping.
+ * @return KC_STUN_OK on success, error code on failure.
+ */
 int kc_stun_refresh(kc_stun_mapping_t *m) { int rc; if (!m) return KC_STUN_EINVAL; if (m->fd == KC_BAD_SOCKET) return KC_STUN_ECLOSED; rc = send_binding(m, m->refresh_id); if (rc == KC_STUN_OK) m->refresh_pending = 1; return rc; }
+
+/**
+ * Sends data through a STUN mapping.
+ * @return KC_STUN_OK on success, error code on failure.
+ */
 int kc_stun_send(kc_stun_mapping_t *m, const kc_stun_endpoint_t *peer, const void *data, size_t size) {
     struct sockaddr_storage to; kc_socklen_t len; int n;
     if (!m || !peer || !peer->host || !*peer->host || !peer->port || (size && !data) || size > STUN_MAX || size > INT_MAX) return KC_STUN_EINVAL;
@@ -475,6 +607,11 @@ int kc_stun_send(kc_stun_mapping_t *m, const kc_stun_endpoint_t *peer, const voi
 #endif
     return n == (int)size ? KC_STUN_OK : KC_STUN_ENET;
 }
+
+/**
+ * Receives data through a STUN mapping.
+ * @return KC_STUN_OK on success, error code on failure.
+ */
 int kc_stun_receive(kc_stun_mapping_t *m, kc_stun_datagram_t *out, uint64_t timeout) {
     unsigned char packet[STUN_MAX + 1U]; uint64_t end = timeout ? deadline_ms(timeout) : 0;
     if (!m || !out) return KC_STUN_EINVAL;
@@ -508,6 +645,11 @@ unsigned short kc_stun_local_port(const kc_stun_mapping_t *m) { return m && m->f
 const char *kc_stun_mapped_host(const kc_stun_mapping_t *m) { return m && m->fd != KC_BAD_SOCKET && *m->mapped_host ? m->mapped_host : NULL; }
 unsigned short kc_stun_mapped_port(const kc_stun_mapping_t *m) { return m && m->fd != KC_BAD_SOCKET ? m->mapped_port : 0; }
 void kc_stun_datagram_free(kc_stun_datagram_t *d) { if (!d) return; free(d->host); free(d->data); memset(d, 0, sizeof(*d)); }
+
+/**
+ * Closes a STUN mapping and cleans up resources.
+ * @return void
+ */
 void kc_stun_close(kc_stun_mapping_t *m) {
     if (!m) return;
     if (m->fd != KC_BAD_SOCKET) kc_close_socket(m->fd);

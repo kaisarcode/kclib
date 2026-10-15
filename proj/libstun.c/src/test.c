@@ -51,20 +51,29 @@ typedef struct {
     int responses;
 } test_server_t;
 
-/** Stores one network-order u16 in a test packet. */
+/**
+ * Stores one network-order u16 in a test packet.
+ * @return void
+ */
 static void put16(unsigned char *out, size_t off, unsigned short v)
 {
     out[off] = (unsigned char)(v >> 8);
     out[off + 1U] = (unsigned char)v;
 }
 
-/** Loads one network-order u16 from a test packet. */
+/**
+ * Loads one network-order u16 from a test packet.
+ * @return The loaded unsigned short value.
+ */
 static unsigned short get16(const unsigned char *in, size_t off)
 {
     return (unsigned short)(((unsigned short)in[off] << 8) | in[off + 1U]);
 }
 
-/** Starts the test socket runtime. */
+/**
+ * Starts the test socket runtime.
+ * @return 1 on success, 0 on failure.
+ */
 static int socket_runtime_start(void)
 {
 #ifdef _WIN32
@@ -75,7 +84,10 @@ static int socket_runtime_start(void)
 #endif
 }
 
-/** Stops the test socket runtime. */
+/**
+ * Stops the test socket runtime.
+ * @return void
+ */
 static void socket_runtime_stop(void)
 {
 #ifdef _WIN32
@@ -83,7 +95,10 @@ static void socket_runtime_stop(void)
 #endif
 }
 
-/** Waits for a test socket to become readable. */
+/**
+ * Waits for a test socket to become readable.
+ * @return 1 if readable, 0 otherwise.
+ */
 static int wait_readable(test_socket_t fd, unsigned timeout_ms)
 {
     fd_set readfds;
@@ -101,7 +116,10 @@ static int wait_readable(test_socket_t fd, unsigned timeout_ms)
     return rc > 0;
 }
 
-/** Binds one IPv4 or IPv6 loopback UDP socket. */
+/**
+ * Binds one IPv4 or IPv6 loopback UDP socket.
+ * @return The bound socket or TEST_INVALID_SOCKET on failure.
+ */
 static test_socket_t bind_loopback(int family, unsigned short *out_port)
 {
     test_socket_t fd;
@@ -140,7 +158,10 @@ static test_socket_t bind_loopback(int family, unsigned short *out_port)
     return fd;
 }
 
-/** Builds a Binding Success response that reflects the request source. */
+/**
+ * Builds a Binding Success response that reflects the request source.
+ * @return Number of bytes written, or 0 on failure.
+ */
 static size_t build_response(const unsigned char *request, size_t request_size,
     const struct sockaddr_storage *peer, unsigned char *out, size_t cap)
 {
@@ -186,7 +207,10 @@ static size_t build_response(const unsigned char *request, size_t request_size,
     return total;
 }
 
-/** Runs the local STUN responder. */
+/**
+ * Runs the local STUN responder.
+ * @return Thread exit code (Windows: DWORD, POSIX: void*).
+ */
 #ifdef _WIN32
 static DWORD WINAPI server_thread(LPVOID arg)
 #else
@@ -228,7 +252,10 @@ static void *server_thread(void *arg)
 #endif
 }
 
-/** Starts one local STUN responder thread. */
+/**
+ * Starts one local STUN responder thread.
+ * @return 1 on success, 0 on failure.
+ */
 static int thread_start(test_thread_t *thread, test_server_t *server)
 {
 #ifdef _WIN32
@@ -239,7 +266,10 @@ static int thread_start(test_thread_t *thread, test_server_t *server)
 #endif
 }
 
-/** Waits for one local STUN responder thread. */
+/**
+ * Waits for one local STUN responder thread.
+ * @return void
+ */
 static void thread_join(test_thread_t thread)
 {
 #ifdef _WIN32
@@ -250,7 +280,10 @@ static void thread_join(test_thread_t thread)
 #endif
 }
 
-/** Reports one failed test assertion. */
+/**
+ * Reports one failed test assertion.
+ * @return 1 on failure, 0 on success.
+ */
 static int expect_true(const char *name, int condition)
 {
     if (!condition) {
@@ -260,14 +293,20 @@ static int expect_true(const char *name, int condition)
     return 0;
 }
 
-/** Prints one contract-test case result. */
+/**
+ * Prints one contract-test case result.
+ * @return void
+ */
 static void case_result(int fail, const char *name, const char *detail)
 {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, detail);
 }
 
-/** Validates live IPv4 discovery, refresh, send, and receive behavior. */
+/**
+ * Validates live IPv4 discovery, refresh, send, and receive behavior.
+ * @return 1 on failure, 0 on success.
+ */
 static int case_discover_ipv4(void)
 {
     const char *name = "kc_stun_discover";
@@ -299,7 +338,7 @@ static int case_discover_ipv4(void)
         return 1;
     }
 
-    snprintf(server_text, sizeof(server_text), "127.0.0.1:%u", server_port);
+    snprintf(server_text, sizeof(server_text), "%s:%u", "127.0.0.1", server_port);
     memset(&options, 0, sizeof(options));
     options.server = server_text;
     options.host = "127.0.0.1";
@@ -368,7 +407,10 @@ static int case_discover_ipv4(void)
     return fail ? 1 : 0;
 }
 
-/** Validates IPv6 mapping discovery when IPv6 loopback is available. */
+/**
+ * Validates IPv6 mapping discovery when IPv6 loopback is available.
+ * @return 1 on failure, 0 on success.
+ */
 static int case_discover_ipv6(void)
 {
     const char *name = "IPv6 discovery";
@@ -416,7 +458,10 @@ static int case_discover_ipv6(void)
     return fail ? 1 : 0;
 }
 
-/** Validates the autonomous STUN Binding listener and its wire response. */
+/**
+ * Validates the autonomous STUN Binding listener and its wire response.
+ * @return 1 on failure, 0 on success.
+ */
 static int case_listen(void)
 {
     const char *name = "kc_stun_listen";
@@ -504,7 +549,7 @@ static int case_listen(void)
         }
     }
 
-    snprintf(server_text, sizeof(server_text), "127.0.0.1:%u", server_port);
+    snprintf(server_text, sizeof(server_text), "%s:%u", "127.0.0.1", server_port);
     memset(&options, 0, sizeof(options));
     options.server = server_text;
     options.host = "127.0.0.1";
@@ -544,7 +589,10 @@ static int case_listen(void)
     return fail ? 1 : 0;
 }
 
-/** Validates invalid arguments and bounded discovery timeout behavior. */
+/**
+ * Validates invalid arguments and bounded discovery timeout behavior.
+ * @return 1 on failure, 0 on success.
+ */
 static int case_errors(void)
 {
     const char *name = "errors and timeout";
@@ -567,7 +615,7 @@ static int case_errors(void)
 
     silent = bind_loopback(AF_INET, &port);
     if (silent != TEST_INVALID_SOCKET) {
-        snprintf(server_text, sizeof(server_text), "127.0.0.1:%u", port);
+        snprintf(server_text, sizeof(server_text), "%s:%u", "127.0.0.1", port);
         memset(&options, 0, sizeof(options));
         options.server = server_text;
         options.host = "127.0.0.1";
@@ -588,7 +636,10 @@ static int case_errors(void)
     return fail ? 1 : 0;
 }
 
-/** Validates public status strings and the generated build version. */
+/**
+ * Validates public status strings and the generated build version.
+ * @return 1 on failure, 0 on success.
+ */
 static int case_metadata(void)
 {
     const char *name = "metadata";
@@ -605,7 +656,10 @@ static int case_metadata(void)
     return fail ? 1 : 0;
 }
 
-/** Runs the portable public API contract test suite. */
+/**
+ * Runs the portable public API contract test suite.
+ * @return 0 on success, 1 on failure.
+ */
 int main(int argc, char **argv)
 {
     int rc = 0;

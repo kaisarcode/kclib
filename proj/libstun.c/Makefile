@@ -21,6 +21,44 @@ WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
 BUILD_DIR := .build
 BIN_DIR := bin
 BUILD_VERSION ?= $(shell date +%s)
+CMAKE ?= cmake
+
+define cmake_build
+	@prelog=$$(mktemp); \
+	if ! $(CMAKE) --build $(1) -- -n > "$$prelog" 2>&1; then \
+		cat "$$prelog"; \
+		rm -f "$$prelog"; \
+		exit 1; \
+	fi; \
+	if grep -q "ninja: no work to do." "$$prelog"; then \
+		rm -f "$$prelog"; \
+		out=$$(mktemp); \
+		$(CMAKE) --build $(1) 2>"$$out"; \
+		r=$$?; \
+		if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+		rm -f "$$out"; \
+		exit $$r; \
+	fi; \
+	rm -f "$$prelog"; \
+	out=$$(mktemp); \
+	$(CMAKE) --build $(1) 2>"$$out"; \
+	r=$$?; \
+	if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+	rm -f "$$out"; \
+	if [ $$r -ne 0 ]; then \
+		exit 1; \
+	fi; \
+	ver=$$(date +%s); \
+	$(2); \
+	log=$$(mktemp); \
+	if ! $(CMAKE) --build $(1) > "$$log" 2>&1; then \
+		cat "$$log"; \
+		rm -f "$$log"; \
+		exit 1; \
+	fi; \
+	rm -f "$$log"; \
+	:
+endef
 HOST_ARCH := $(shell uname -m)
 HOST_SYSTEM := $(shell uname -s)
 NATIVE_ARCH := unsupported
@@ -68,8 +106,8 @@ all: x86_64/linux x86_64/windows x86_64/macos x86_64/iossim i686/linux i686/wind
 
 define build_target
 	@mkdir -p $(BIN_DIR)/$(1)/$(2)
-	@cmake -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DSTUN_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-$(2)
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ]; then $(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DSTUN_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null; fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DSTUN_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null)
 	@cp src/libstun.h $(BIN_DIR)/$(1)/$(2)/libstun.h
 	@if [ "$(2)" = windows ]; then cp $(BUILD_DIR)/$(1)-$(2)/out/libstun.dll $(BIN_DIR)/$(1)/$(2)/libstun.dll; fi
 	@echo "OK $(1)/$(2)"

@@ -55,6 +55,10 @@ typedef struct {
     int status;
 } test_side_t;
 
+/**
+ * Initializes the socket runtime.
+ * @return 1 on success, 0 on failure.
+ */
 static int runtime_start(void)
 {
 #ifdef _WIN32
@@ -65,6 +69,10 @@ static int runtime_start(void)
 #endif
 }
 
+/**
+ * Stops the socket runtime.
+ * @return void
+ */
 static void runtime_stop(void)
 {
 #ifdef _WIN32
@@ -72,6 +80,10 @@ static void runtime_stop(void)
 #endif
 }
 
+/**
+ * Opens a UDP socket for testing.
+ * @return 1 on success, 0 on failure.
+ */
 static int udp_open(test_udp_t *udp)
 {
     struct sockaddr_in addr;
@@ -105,6 +117,10 @@ fail:
     return 0;
 }
 
+/**
+ * Closes a UDP test socket.
+ * @return void
+ */
 static void udp_close(test_udp_t *udp)
 {
     if (!udp) return;
@@ -120,6 +136,10 @@ static void udp_close(test_udp_t *udp)
 #endif
 }
 
+/**
+ * Sends UDP data for testing.
+ * @return KC_HPM_OK on success, error code on failure.
+ */
 static int udp_send(void *context, const kc_hpm_endpoint_t *peer,
     const void *data, size_t size)
 {
@@ -140,6 +160,10 @@ static int udp_send(void *context, const kc_hpm_endpoint_t *peer,
     return sent == (int)size ? KC_HPM_OK : KC_HPM_ENET;
 }
 
+/**
+ * Receives UDP data for testing.
+ * @return KC_HPM_OK on success, error code on failure.
+ */
 static int udp_receive(void *context, kc_hpm_datagram_t *out,
     uint64_t timeout_ms)
 {
@@ -187,6 +211,10 @@ static int udp_receive(void *context, kc_hpm_datagram_t *out,
     return KC_HPM_OK;
 }
 
+/**
+ * Releases a received datagram for testing.
+ * @return void
+ */
 static void udp_release(void *context, kc_hpm_datagram_t *packet)
 {
     test_udp_t *udp = (test_udp_t *)context;
@@ -198,8 +226,16 @@ static void udp_release(void *context, kc_hpm_datagram_t *packet)
 }
 
 #ifdef _WIN32
+/**
+ * Connection thread entry point (Windows).
+ * @return Thread exit code.
+ */
 static DWORD WINAPI connect_thread(LPVOID arg)
 #else
+/**
+ * Connection thread entry point (POSIX).
+ * @return Thread exit code.
+ */
 static void *connect_thread(void *arg)
 #endif
 {
@@ -212,6 +248,10 @@ static void *connect_thread(void *arg)
 #endif
 }
 
+/**
+ * Starts and joins a connection pair for testing.
+ * @return 1 on success, 0 on failure.
+ */
 static int connect_pair(test_side_t *a, test_side_t *b)
 {
     test_thread_t ta;
@@ -237,6 +277,10 @@ static int connect_pair(test_side_t *a, test_side_t *b)
         b->status == KC_HPM_OK && a->path && b->path;
 }
 
+/**
+ * Checks a condition and reports failure.
+ * @return 1 on failure, 0 on success.
+ */
 static int check(int condition, const char *message)
 {
     if (condition) return 0;
@@ -244,6 +288,10 @@ static int check(int condition, const char *message)
     return 1;
 }
 
+/**
+ * Runs the HPM connect-over test suite.
+ * @return 0 on success, 1 on failure.
+ */
 int main(void)
 {
     test_udp_t au;
