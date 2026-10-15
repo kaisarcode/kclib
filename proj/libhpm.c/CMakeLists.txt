@@ -23,11 +23,9 @@ else()
     add_compile_options(/O2 /W3 /WX)
 endif()
 
-set_source_files_properties(src/libhpm.c PROPERTIES
-    COMPILE_DEFINITIONS "KC_HPM_BUILD_VERSION=${HPM_BUILD_VERSION};kc_hpm_path=hpm_base_path;kc_hpm_path_t=hpm_base_path_t;kc_hpm_connect=hpm_base_connect;kc_hpm_connect_over=hpm_base_connect_over;kc_hpm_send=hpm_base_send;kc_hpm_receive=hpm_base_receive;kc_hpm_local_host=hpm_base_local_host;kc_hpm_local_port=hpm_base_local_port;kc_hpm_peer_host=hpm_base_peer_host;kc_hpm_peer_port=hpm_base_peer_port;kc_hpm_close=hpm_base_close"
-)
+add_compile_definitions(KC_HPM_BUILD_VERSION=${HPM_BUILD_VERSION})
 
-set(HPM_SOURCES src/libhpm.c src/libhpm-runtime.c)
+set(HPM_SOURCES src/libhpm.c)
 set(HPM_TEST_EXTERNAL_ARTIFACTS OFF)
 if(HPM_BUILD_TESTS AND HPM_TEST_SHARED_LIBRARY)
     set(HPM_TEST_EXTERNAL_ARTIFACTS ON)
