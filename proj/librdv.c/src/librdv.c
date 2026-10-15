@@ -512,6 +512,12 @@ int kc_rdv_open(kc_rdv_t **out, const kc_rdv_options_t *options) {
     return KC_RDV_OK;
 }
 
+/**
+ * Get a rendezvous point by identifier.
+ * @param rdv Registry.
+ * @param id Identifier string.
+ * @return Point view, or NULL if not found.
+ */
 const kc_rdv_point_t *kc_rdv_get(kc_rdv_t *rdv, const char *id) {
     kc_rdv_point_node_t *point;
     uint64_t hash;
@@ -522,6 +528,15 @@ const kc_rdv_point_t *kc_rdv_get(kc_rdv_t *rdv, const char *id) {
     return point ? &point->view : NULL;
 }
 
+/**
+ * Publish data at an identifier.
+ * @param rdv Registry.
+ * @param id Identifier string.
+ * @param data Data to publish, or NULL when data_size is zero.
+ * @param data_size Data byte count.
+ * @param out Optional output for the point view.
+ * @return KC_RDV_OK on success, negative status code on failure.
+ */
 int kc_rdv_publish(kc_rdv_t *rdv, const char *id,
     const void *data, size_t data_size, const kc_rdv_point_t **out)
 {
@@ -562,6 +577,12 @@ int kc_rdv_publish(kc_rdv_t *rdv, const char *id,
     return KC_RDV_OK;
 }
 
+/**
+ * Remove publication at an identifier.
+ * @param rdv Registry.
+ * @param id Identifier string.
+ * @return KC_RDV_OK on success, negative status code on failure.
+ */
 int kc_rdv_unpublish(kc_rdv_t *rdv, const char *id) {
     kc_rdv_point_node_t *point;
     uint64_t hash;
@@ -574,6 +595,15 @@ int kc_rdv_unpublish(kc_rdv_t *rdv, const char *id) {
     return KC_RDV_OK;
 }
 
+/**
+ * Add a seeker at an identifier.
+ * @param rdv Registry.
+ * @param id Identifier string.
+ * @param data Seeker data, or NULL when data_size is zero.
+ * @param data_size Seeker data byte count.
+ * @param out Output for the seeker view.
+ * @return KC_RDV_OK on success, negative status code on failure.
+ */
 int kc_rdv_seek(kc_rdv_t *rdv, const char *id,
     const void *data, size_t data_size, const kc_rdv_seeker_t **out)
 {
@@ -628,6 +658,12 @@ int kc_rdv_seek(kc_rdv_t *rdv, const char *id,
     return KC_RDV_OK;
 }
 
+/**
+ * Remove a seeker by its view pointer.
+ * @param rdv Registry that owns the seeker.
+ * @param seeker Borrowed seeker view from kc_rdv_seek() or point traversal.
+ * @return KC_RDV_OK on success, KC_RDV_EINVAL on invalid seeker.
+ */
 int kc_rdv_remove(kc_rdv_t *rdv, const kc_rdv_seeker_t *seeker) {
     kc_rdv_seeker_node_t *node;
 
@@ -638,6 +674,11 @@ int kc_rdv_remove(kc_rdv_t *rdv, const kc_rdv_seeker_t *seeker) {
     return KC_RDV_OK;
 }
 
+/**
+ * Apply configured TTLs and remove expired publications and seekers.
+ * @param rdv Registry.
+ * @return Number of publications plus seekers removed.
+ */
 size_t kc_rdv_prune(kc_rdv_t *rdv) {
     kc_rdv_point_node_t *point;
     kc_rdv_seeker_node_t *seeker;
@@ -663,6 +704,11 @@ size_t kc_rdv_prune(kc_rdv_t *rdv) {
     return removed;
 }
 
+/**
+ * Close a rendezvous registry and free all resources.
+ * @param rdv Registry to close. NULL is a safe no-op.
+ * @return void
+ */
 void kc_rdv_close(kc_rdv_t *rdv) {
     kc_rdv_point_node_t *point;
     kc_rdv_point_node_t *next_point;
@@ -692,6 +738,11 @@ void kc_rdv_close(kc_rdv_t *rdv) {
     free(rdv);
 }
 
+/**
+ * Get a textual description for a status code.
+ * @param status Status code.
+ * @return Static NUL-terminated description string.
+ */
 const char *kc_rdv_strerror(int status) {
     switch (status) {
         case KC_RDV_OK: return "ok";
@@ -704,6 +755,10 @@ const char *kc_rdv_strerror(int status) {
     }
 }
 
+/**
+ * Get the build version.
+ * @return Unix timestamp of the build.
+ */
 uint64_t kc_rdv_version(void) {
     return (uint64_t)KC_RDV_BUILD_VERSION;
 }
