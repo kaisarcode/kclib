@@ -23,21 +23,24 @@ else()
     add_compile_options(/O2 /W3 /WX)
 endif()
 
-set_source_files_properties(src/libhpm.c PROPERTIES
-    COMPILE_DEFINITIONS KC_HPM_BUILD_VERSION=${HPM_BUILD_VERSION}
-)
+add_compile_definitions(KC_HPM_BUILD_VERSION=${HPM_BUILD_VERSION})
 
+set(HPM_SOURCES src/libhpm.c)
 set(HPM_TEST_EXTERNAL_ARTIFACTS OFF)
 if(HPM_BUILD_TESTS AND HPM_TEST_SHARED_LIBRARY)
     set(HPM_TEST_EXTERNAL_ARTIFACTS ON)
 endif()
 
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+endif()
+
 if(NOT HPM_TEST_EXTERNAL_ARTIFACTS)
-    add_library(hpm_static STATIC src/libhpm.c)
+    add_library(hpm_static STATIC ${HPM_SOURCES})
     set_target_properties(hpm_static PROPERTIES OUTPUT_NAME "hpm")
     target_include_directories(hpm_static PUBLIC src)
 
-    add_library(hpm_shared SHARED src/libhpm.c)
+    add_library(hpm_shared SHARED ${HPM_SOURCES})
     set_target_properties(hpm_shared PROPERTIES OUTPUT_NAME "hpm"
         WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_include_directories(hpm_shared PUBLIC src)
@@ -45,14 +48,14 @@ if(NOT HPM_TEST_EXTERNAL_ARTIFACTS)
     if(WIN32)
         target_link_libraries(hpm_static PUBLIC ws2_32)
         target_link_libraries(hpm_shared PUBLIC ws2_32)
+    else()
+        target_link_libraries(hpm_static PUBLIC Threads::Threads)
+        target_link_libraries(hpm_shared PUBLIC Threads::Threads)
     endif()
 endif()
 
 if(HPM_BUILD_TESTS)
     enable_testing()
-    if(NOT WIN32)
-        find_package(Threads REQUIRED)
-    endif()
     if(HPM_TEST_SHARED_LIBRARY)
         add_library(hpm_test_shared SHARED IMPORTED)
         set_target_properties(hpm_test_shared PROPERTIES

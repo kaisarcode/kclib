@@ -396,7 +396,7 @@ define wasm_target
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DPACT_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
+	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,wasm_log=$$(mktemp); if ! $(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DPACT_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > "$$wasm_log" 2>&1; then cat "$$wasm_log"; rm -f "$$wasm_log"; exit 1; fi; rm -f "$$wasm_log")
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libpact.wasm $(BIN_DIR)/wasm32/wasm/libpact.wasm
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libpact.js $(BIN_DIR)/wasm32/wasm/libpact.js
 	@echo "OK wasm32/wasm"

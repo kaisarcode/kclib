@@ -15,6 +15,16 @@ if(NOT DEFINED EMB_BUILD_VERSION)
     set(EMB_BUILD_VERSION 0)
 endif()
 
+## ggml generates this header in its own build.  emb compiles the vendored
+## sources directly, so provide the equivalent generated header here.
+set(GGML_VERSION "1")
+set(GGML_BUILD_COMMIT "custom")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/lib/ggml/src/ggml-version.h.in"
+    "${CMAKE_BINARY_DIR}/ggml-version.h"
+    @ONLY
+)
+
 option(EMB_BUILD_TESTS "Build emb tests" OFF)
 
 set(EMB_TEST_EXTERNAL_ARTIFACTS OFF)
@@ -29,10 +39,10 @@ if(NOT MSVC)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_compile_options(-Wno-unused-command-line-argument)
     endif()
-    add_definitions(-D_GNU_SOURCE -DGGML_USE_CPU -DGGML_VERSION="1" -DGGML_COMMIT="custom")
+    add_definitions(-D_GNU_SOURCE -DGGML_USE_CPU)
 else()
     add_compile_options(/O2 /arch:AVX2 /W4 /WX)
-    add_definitions(-DGGML_USE_CPU -DGGML_VERSION="1" -DGGML_COMMIT="custom")
+    add_definitions(-DGGML_USE_CPU)
 endif()
 
 set_source_files_properties(src/libemb.c PROPERTIES
@@ -42,6 +52,7 @@ set_source_files_properties(src/libemb.c PROPERTIES
 ## GGML sources
 
 include_directories(
+    ${CMAKE_BINARY_DIR}
     src
     lib/ggml/include
     lib/ggml/src
@@ -53,6 +64,7 @@ file(GLOB GGML_BASE_SOURCES
     "lib/ggml/src/*.cpp"
     "lib/ggml/src/ggml-cpu/*.c"
     "lib/ggml/src/ggml-cpu/*.cpp"
+    "lib/ggml/src/ggml-cpu/tiled/*.cpp"
 )
 
 set(GGML_ARCH_SOURCES "")

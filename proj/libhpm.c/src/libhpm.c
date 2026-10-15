@@ -25,6 +25,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+typedef HANDLE hpm_live_thread_t;
+typedef CRITICAL_SECTION hpm_live_mutex_t;
+typedef CONDITION_VARIABLE hpm_live_cond_t;
 typedef SOCKET hpm_socket_t;
 typedef int hpm_socklen_t;
 #define HPM_INVALID_SOCKET INVALID_SOCKET
@@ -34,10 +37,14 @@ typedef int hpm_socklen_t;
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+typedef pthread_t hpm_live_thread_t;
+typedef pthread_mutex_t hpm_live_mutex_t;
+typedef pthread_cond_t hpm_live_cond_t;
 typedef int hpm_socket_t;
 typedef socklen_t hpm_socklen_t;
 #define HPM_INVALID_SOCKET (-1)
@@ -70,7 +77,9 @@ typedef struct {
     uint64_t peer_nonce;
 } hpm_candidate_t;
 
-struct kc_hpm_path {
+typedef struct hpm_base_path hpm_base_path_t;
+
+struct hpm_base_path {
     hpm_socket_t fd;
     char local_host[NI_MAXHOST];
     unsigned short local_port;
@@ -500,7 +509,7 @@ static int hpm_addr_host(const struct sockaddr_storage *addr,
  * @param path Path to update.
  * @return None.
  */
-static void hpm_fill_local(kc_hpm_path_t *path)
+static void hpm_fill_local(hpm_base_path_t *path)
 {
     struct sockaddr_storage addr;
     hpm_socklen_t addr_len = (hpm_socklen_t)sizeof(addr);
@@ -657,7 +666,7 @@ uint64_t kc_hpm_version(void)
  * @param options Connection options.
  * @return KC_HPM_OK on success, otherwise a negative status.
  */
-int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
+static int hpm_base_connect(hpm_base_path_t **out, const kc_hpm_options_t *options)
 {
     hpm_candidate_t *candidates = NULL;
     size_t candidate_count = 0;
@@ -783,7 +792,7 @@ int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
     }
 
     {
-        kc_hpm_path_t *path = (kc_hpm_path_t *)calloc(1, sizeof(*path));
+        hpm_base_path_t *path = (hpm_base_path_t *)calloc(1, sizeof(*path));
         if (!path) {
             status = KC_HPM_ENOMEM;
             goto done;
@@ -825,7 +834,7 @@ done:
  * @param udp Borrowed UDP mapping adapter.
  * @return KC_HPM_OK on success, otherwise a negative status.
  */
-int kc_hpm_connect_over(kc_hpm_path_t **out, const kc_hpm_options_t *options,
+static int hpm_base_connect_over(hpm_base_path_t **out, const kc_hpm_options_t *options,
     const kc_hpm_udp_t *udp)
 {
     hpm_candidate_t *candidates = NULL;
@@ -933,7 +942,7 @@ int kc_hpm_connect_over(kc_hpm_path_t **out, const kc_hpm_options_t *options,
     }
 
     {
-        kc_hpm_path_t *path = (kc_hpm_path_t *)calloc(1, sizeof(*path));
+        hpm_base_path_t *path = (hpm_base_path_t *)calloc(1, sizeof(*path));
         if (!path) {
             status = KC_HPM_ENOMEM;
             goto done;
@@ -977,7 +986,7 @@ done:
  * @param data_size Data size.
  * @return KC_HPM_OK on success, otherwise a negative status.
  */
-int kc_hpm_send(kc_hpm_path_t *path, const void *data, size_t data_size)
+static int hpm_base_send(hpm_base_path_t *path, const void *data, size_t data_size)
 {
     static const unsigned char empty = 0;
     int sent;
@@ -1008,7 +1017,7 @@ int kc_hpm_send(kc_hpm_path_t *path, const void *data, size_t data_size)
  * @param timeout_ms Timeout in milliseconds (0 = wait indefinitely).
  * @return KC_HPM_OK on success, otherwise a negative status.
  */
-static int hpm_receive_over(kc_hpm_path_t *path, void **out_data,
+static int hpm_receive_over(hpm_base_path_t *path, void **out_data,
     size_t *out_size, uint64_t timeout_ms)
 {
     uint64_t deadline = timeout_ms ? hpm_deadline(hpm_now_ms(), timeout_ms) : 0;
@@ -1092,7 +1101,7 @@ static int hpm_receive_over(kc_hpm_path_t *path, void **out_data,
  * @param timeout_ms Timeout in milliseconds (0 = wait indefinitely).
  * @return KC_HPM_OK on success, otherwise a negative status.
  */
-int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
+static int hpm_base_receive(hpm_base_path_t *path, void **out_data,
     size_t *out_size, uint64_t timeout_ms)
 {
     uint64_t deadline = timeout_ms ? hpm_deadline(hpm_now_ms(), timeout_ms) : 0;
@@ -1165,7 +1174,7 @@ int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
  * @param path Path handle.
  * @return Local host string or NULL if unknown.
  */
-const char *kc_hpm_local_host(const kc_hpm_path_t *path)
+static const char *hpm_base_local_host(const hpm_base_path_t *path)
 {
     return path && path->local_host[0] ? path->local_host : NULL;
 }
@@ -1175,7 +1184,7 @@ const char *kc_hpm_local_host(const kc_hpm_path_t *path)
  * @param path Path handle.
  * @return Local port or 0 if unknown.
  */
-unsigned short kc_hpm_local_port(const kc_hpm_path_t *path)
+static unsigned short hpm_base_local_port(const hpm_base_path_t *path)
 {
     return path ? path->local_port : 0;
 }
@@ -1185,7 +1194,7 @@ unsigned short kc_hpm_local_port(const kc_hpm_path_t *path)
  * @param path Path handle.
  * @return Peer host string or NULL if unknown.
  */
-const char *kc_hpm_peer_host(const kc_hpm_path_t *path)
+static const char *hpm_base_peer_host(const hpm_base_path_t *path)
 {
     return path && path->peer_host[0] ? path->peer_host : NULL;
 }
@@ -1195,7 +1204,7 @@ const char *kc_hpm_peer_host(const kc_hpm_path_t *path)
  * @param path Path handle.
  * @return Peer port or 0 if unknown.
  */
-unsigned short kc_hpm_peer_port(const kc_hpm_path_t *path)
+static unsigned short hpm_base_peer_port(const hpm_base_path_t *path)
 {
     return path ? path->peer_port : 0;
 }
@@ -1215,7 +1224,7 @@ void kc_hpm_free(void *ptr)
  * @param path Path handle (may be NULL).
  * @return None.
  */
-void kc_hpm_close(kc_hpm_path_t *path)
+static void hpm_base_close(hpm_base_path_t *path)
 {
     if (!path) return;
     if (path->fd != HPM_INVALID_SOCKET) {
@@ -1246,4 +1255,768 @@ const char *kc_hpm_strerror(int status)
         case KC_HPM_ECLOSED: return "path is closed";
         default: return "unknown hpm error";
     }
+}
+
+#ifndef HPM_LIVE_POLL_MS
+#define HPM_LIVE_POLL_MS       100ULL
+#endif
+#ifndef HPM_LIVE_KEEPALIVE_MS
+#define HPM_LIVE_KEEPALIVE_MS 3000ULL
+#endif
+#ifndef HPM_LIVE_TIMEOUT_MS
+#define HPM_LIVE_TIMEOUT_MS  10000ULL
+#endif
+#define HPM_LIVE_PACKET_SIZE       16U
+#define HPM_LIVE_PACKET_KEEPALIVE   1U
+#define HPM_LIVE_PACKET_ACK         2U
+#define HPM_LIVE_QUEUE_MAX         256U
+#define HPM_LIVE_QUEUE_BYTES (4U * 1024U * 1024U)
+
+static const unsigned char hpm_live_magic[6] = { 'K', 'C', 'H', 'P', 'M', '2' };
+
+typedef struct hpm_live_datagram {
+    struct hpm_live_datagram *next;
+    void *data;
+    size_t size;
+} hpm_live_datagram_t;
+
+struct kc_hpm_path {
+    hpm_base_path_t *base;
+    hpm_live_thread_t thread;
+    hpm_live_mutex_t mutex;
+    hpm_live_cond_t cond;
+    hpm_live_datagram_t *head;
+    hpm_live_datagram_t *tail;
+    size_t queued_count;
+    size_t queued_bytes;
+    uint64_t token;
+    uint64_t last_rx_ms;
+    int stopping;
+    int terminal_status;
+    int thread_started;
+};
+
+/**
+ * Get current monotonic time in milliseconds.
+ * @return Current time in milliseconds.
+ */
+static uint64_t hpm_live_now_ms(void)
+{
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+#endif
+}
+
+/**
+ * Compute deadline with overflow protection.
+ * @param now Current time in milliseconds.
+ * @param timeout_ms Timeout in milliseconds.
+ * @return Deadline in milliseconds, or UINT64_MAX on overflow.
+ */
+static uint64_t hpm_live_deadline(uint64_t now, uint64_t timeout_ms)
+{
+    return UINT64_MAX - now < timeout_ms ? UINT64_MAX : now + timeout_ms;
+}
+
+/**
+ * Generate a unique token from address and time.
+ * @param address Pointer to use as entropy source.
+ * @return Non-zero 64-bit token.
+ */
+static uint64_t hpm_live_token(const void *address)
+{
+    uint64_t x = hpm_live_now_ms() ^ (uint64_t)(uintptr_t)address;
+#ifdef _WIN32
+    x ^= (uint64_t)GetCurrentProcessId() << 32;
+#else
+    x ^= (uint64_t)(uintptr_t)&x << 17;
+#endif
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    return x ? x : 1ULL;
+}
+
+/**
+ * Store 64-bit value as big-endian bytes.
+ * @param out Output buffer of 8 bytes.
+ * @param value Value to store.
+ * @return void
+ */
+static void hpm_live_store64be(unsigned char out[8], uint64_t value)
+{
+    unsigned i;
+    for (i = 0; i < 8U; ++i) {
+        out[7U - i] = (unsigned char)(value & 0xffU);
+        value >>= 8;
+    }
+}
+
+/**
+ * Load 64-bit value from big-endian bytes.
+ * @param in Input buffer of 8 bytes.
+ * @return Loaded 64-bit value.
+ */
+static uint64_t hpm_live_load64be(const unsigned char in[8])
+{
+    uint64_t value = 0;
+    unsigned i;
+    for (i = 0; i < 8U; ++i) value = (value << 8) | in[i];
+    return value;
+}
+
+/**
+ * Construct a live protocol packet.
+ * @param packet Output buffer of HPM_LIVE_PACKET_SIZE bytes.
+ * @param type Packet type.
+ * @param token Token value.
+ * @return void
+ */
+static void hpm_live_make_packet(unsigned char packet[HPM_LIVE_PACKET_SIZE],
+    unsigned type, uint64_t token)
+{
+    memcpy(packet, hpm_live_magic, sizeof(hpm_live_magic));
+    packet[6] = (unsigned char)type;
+    packet[7] = 0;
+    hpm_live_store64be(packet + 8, token);
+}
+
+/**
+ * Parse a live protocol packet.
+ * @param data Packet data.
+ * @param size Packet size.
+ * @param type Output packet type.
+ * @param token Output token value.
+ * @return 1 on success, 0 on failure.
+ */
+static int hpm_live_parse_packet(const void *data, size_t size,
+    unsigned *type, uint64_t *token)
+{
+    const unsigned char *packet = (const unsigned char *)data;
+    if (!packet || size != HPM_LIVE_PACKET_SIZE || !type || !token) return 0;
+    if (memcmp(packet, hpm_live_magic, sizeof(hpm_live_magic)) != 0 ||
+        packet[7] != 0) return 0;
+    if (packet[6] != HPM_LIVE_PACKET_KEEPALIVE &&
+        packet[6] != HPM_LIVE_PACKET_ACK) return 0;
+    *type = packet[6];
+    *token = hpm_live_load64be(packet + 8);
+    return 1;
+}
+
+#ifdef _WIN32
+/**
+ * Initialize mutex.
+ * @param mutex Mutex to initialize.
+ * @return 0 on success, -1 on failure.
+ */
+static int hpm_live_mutex_init(hpm_live_mutex_t *mutex)
+{
+    InitializeCriticalSection(mutex);
+    return 0;
+}
+
+/**
+ * Destroy mutex.
+ * @param mutex Mutex to destroy.
+ * @return void
+ */
+static void hpm_live_mutex_destroy(hpm_live_mutex_t *mutex)
+{
+    DeleteCriticalSection(mutex);
+}
+
+/**
+ * Lock mutex.
+ * @param mutex Mutex to lock.
+ * @return void
+ */
+static void hpm_live_lock(hpm_live_mutex_t *mutex)
+{
+    EnterCriticalSection(mutex);
+}
+
+/**
+ * Unlock mutex.
+ * @param mutex Mutex to unlock.
+ * @return void
+ */
+static void hpm_live_unlock(hpm_live_mutex_t *mutex)
+{
+    LeaveCriticalSection(mutex);
+}
+
+/**
+ * Initialize condition variable.
+ * @param cond Condition variable to initialize.
+ * @return void
+ */
+static void hpm_live_cond_init(hpm_live_cond_t *cond)
+{
+    InitializeConditionVariable(cond);
+}
+
+/**
+ * Signal condition variable.
+ * @param cond Condition variable to signal.
+ * @return void
+ */
+static void hpm_live_cond_signal(hpm_live_cond_t *cond)
+{
+    WakeAllConditionVariable(cond);
+}
+
+/**
+ * Wait on condition variable with timeout.
+ * @param cond Condition variable to wait on.
+ * @param mutex Associated mutex.
+ * @param timeout_ms Timeout in milliseconds, 0 for infinite.
+ * @return 0 on success, 1 on timeout, -1 on error.
+ */
+static int hpm_live_cond_wait(hpm_live_cond_t *cond, hpm_live_mutex_t *mutex,
+    uint64_t timeout_ms)
+{
+    DWORD ms = timeout_ms >= (uint64_t)INFINITE ? INFINITE - 1U :
+        (DWORD)timeout_ms;
+    if (SleepConditionVariableCS(cond, mutex,
+        timeout_ms == 0 ? INFINITE : ms)) return 0;
+    return GetLastError() == ERROR_TIMEOUT ? 1 : -1;
+}
+#else
+/**
+ * Initialize mutex.
+ * @param mutex Mutex to initialize.
+ * @return 0 on success, -1 on failure.
+ */
+static int hpm_live_mutex_init(hpm_live_mutex_t *mutex)
+{
+    return pthread_mutex_init(mutex, NULL);
+}
+
+/**
+ * Destroy mutex.
+ * @param mutex Mutex to destroy.
+ * @return void
+ */
+static void hpm_live_mutex_destroy(hpm_live_mutex_t *mutex)
+{
+    (void)pthread_mutex_destroy(mutex);
+}
+
+/**
+ * Lock mutex.
+ * @param mutex Mutex to lock.
+ * @return void
+ */
+static void hpm_live_lock(hpm_live_mutex_t *mutex)
+{
+    (void)pthread_mutex_lock(mutex);
+}
+
+/**
+ * Unlock mutex.
+ * @param mutex Mutex to unlock.
+ * @return void
+ */
+static void hpm_live_unlock(hpm_live_mutex_t *mutex)
+{
+    (void)pthread_mutex_unlock(mutex);
+}
+
+/**
+ * Initialize condition variable.
+ * @param cond Condition variable to initialize.
+ * @return void
+ */
+static void hpm_live_cond_init(hpm_live_cond_t *cond)
+{
+    (void)pthread_cond_init(cond, NULL);
+}
+
+/**
+ * Destroy condition variable.
+ * @param cond Condition variable to destroy.
+ * @return void
+ */
+static void hpm_live_cond_destroy(hpm_live_cond_t *cond)
+{
+    (void)pthread_cond_destroy(cond);
+}
+
+/**
+ * Signal condition variable.
+ * @param cond Condition variable to signal.
+ * @return void
+ */
+static void hpm_live_cond_signal(hpm_live_cond_t *cond)
+{
+    (void)pthread_cond_broadcast(cond);
+}
+
+/**
+ * Wait on condition variable with timeout.
+ * @param cond Condition variable to wait on.
+ * @param mutex Associated mutex.
+ * @param timeout_ms Timeout in milliseconds, 0 for infinite.
+ * @return 0 on success, 1 on timeout, -1 on error.
+ */
+static int hpm_live_cond_wait(hpm_live_cond_t *cond, hpm_live_mutex_t *mutex,
+    uint64_t timeout_ms)
+{
+    int rc;
+    if (timeout_ms == 0) {
+        rc = pthread_cond_wait(cond, mutex);
+        return rc == 0 ? 0 : -1;
+    }
+    {
+        struct timespec ts;
+        uint64_t ns;
+        if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
+        ns = (uint64_t)ts.tv_nsec + (timeout_ms % 1000ULL) * 1000000ULL;
+        ts.tv_sec += (time_t)(timeout_ms / 1000ULL + ns / 1000000000ULL);
+        ts.tv_nsec = (long)(ns % 1000000000ULL);
+        rc = pthread_cond_timedwait(cond, mutex, &ts);
+    }
+    if (rc == 0) return 0;
+    return rc == ETIMEDOUT ? 1 : -1;
+}
+#endif
+
+/**
+ * Set terminal status on path.
+ * @param path Path to update.
+ * @param status Terminal status to set.
+ * @return void
+ */
+static void hpm_live_set_terminal(kc_hpm_path_t *path, int status)
+{
+    hpm_live_lock(&path->mutex);
+    if (path->terminal_status == KC_HPM_OK)
+        path->terminal_status = status == KC_HPM_OK ? KC_HPM_ENET : status;
+    hpm_live_cond_signal(&path->cond);
+    hpm_live_unlock(&path->mutex);
+}
+
+/**
+ * Check if path should stop.
+ * @param path Path to check.
+ * @return 1 if should stop, 0 otherwise.
+ */
+static int hpm_live_should_stop(kc_hpm_path_t *path)
+{
+    int stop;
+    hpm_live_lock(&path->mutex);
+    stop = path->stopping || path->terminal_status != KC_HPM_OK;
+    hpm_live_unlock(&path->mutex);
+    return stop;
+}
+
+/**
+ * Note receive time on path.
+ * @param path Path to update.
+ * @return void
+ */
+static void hpm_live_note_rx(kc_hpm_path_t *path)
+{
+    hpm_live_lock(&path->mutex);
+    path->last_rx_ms = hpm_live_now_ms();
+    hpm_live_unlock(&path->mutex);
+}
+
+/**
+ * Queue data on path.
+ * @param path Path to queue on.
+ * @param data Data to queue (ownership transferred).
+ * @param size Size of data.
+ * @return 0 on success, error code on failure.
+ */
+static int hpm_live_queue(kc_hpm_path_t *path, void *data, size_t size)
+{
+    hpm_live_datagram_t *item;
+    int keep = 0;
+
+    item = (hpm_live_datagram_t *)calloc(1, sizeof(*item));
+    if (!item) return KC_HPM_ENOMEM;
+    item->data = data;
+    item->size = size;
+
+    hpm_live_lock(&path->mutex);
+    if (!path->stopping && path->terminal_status == KC_HPM_OK &&
+        path->queued_count < HPM_LIVE_QUEUE_MAX &&
+        size <= HPM_LIVE_QUEUE_BYTES - path->queued_bytes) {
+        if (path->tail) path->tail->next = item;
+        else path->head = item;
+        path->tail = item;
+        path->queued_count++;
+        path->queued_bytes += size;
+        keep = 1;
+        hpm_live_cond_signal(&path->cond);
+    }
+    hpm_live_unlock(&path->mutex);
+
+    if (!keep) {
+        free(item);
+        return KC_HPM_ETIMEOUT;
+    }
+    return KC_HPM_OK;
+}
+
+/**
+ * Send control packet on path.
+ * @param path Path to send on.
+ * @param type Packet type.
+ * @param token Token value.
+ * @return 0 on success, error code on failure.
+ */
+static int hpm_live_send_control(kc_hpm_path_t *path, unsigned type,
+    uint64_t token)
+{
+    unsigned char packet[HPM_LIVE_PACKET_SIZE];
+    hpm_live_make_packet(packet, type, token);
+    return hpm_base_send(path->base, packet, sizeof(packet));
+}
+
+/**
+ * Live path worker thread.
+ * @param argument Path pointer.
+ * @return Thread exit value.
+ */
+#ifdef _WIN32
+static DWORD WINAPI hpm_live_worker(LPVOID argument)
+#else
+static void *hpm_live_worker(void *argument)
+#endif
+{
+    kc_hpm_path_t *path = (kc_hpm_path_t *)argument;
+    uint64_t next_keepalive = hpm_live_now_ms() + HPM_LIVE_KEEPALIVE_MS;
+
+    while (!hpm_live_should_stop(path)) {
+        void *data = NULL;
+        size_t size = 0;
+        uint64_t now = hpm_live_now_ms();
+        int status;
+
+        if (now >= next_keepalive) {
+            status = hpm_live_send_control(path, HPM_LIVE_PACKET_KEEPALIVE,
+                path->token);
+            if (status != KC_HPM_OK) {
+                hpm_live_set_terminal(path, status);
+                break;
+            }
+            next_keepalive = now + HPM_LIVE_KEEPALIVE_MS;
+        }
+
+        status = hpm_base_receive(path->base, &data, &size, HPM_LIVE_POLL_MS);
+        if (status == KC_HPM_ETIMEOUT) {
+            hpm_live_lock(&path->mutex);
+            now = hpm_live_now_ms();
+            if (!path->stopping && path->terminal_status == KC_HPM_OK &&
+                now - path->last_rx_ms >= HPM_LIVE_TIMEOUT_MS) {
+                path->terminal_status = KC_HPM_ETIMEOUT;
+                hpm_live_cond_signal(&path->cond);
+            }
+            hpm_live_unlock(&path->mutex);
+            continue;
+        }
+        if (status != KC_HPM_OK) {
+            hpm_live_set_terminal(path, status);
+            break;
+        }
+
+        hpm_live_note_rx(path);
+        {
+            unsigned type;
+            uint64_t token;
+            if (hpm_live_parse_packet(data, size, &type, &token)) {
+                if (type == HPM_LIVE_PACKET_KEEPALIVE) {
+                    status = hpm_live_send_control(path,
+                        HPM_LIVE_PACKET_ACK, token);
+                    if (status != KC_HPM_OK)
+                        hpm_live_set_terminal(path, status);
+                }
+                kc_hpm_free(data);
+                continue;
+            }
+        }
+
+        status = hpm_live_queue(path, data, size);
+        if (status == KC_HPM_ENOMEM) {
+            kc_hpm_free(data);
+            hpm_live_set_terminal(path, status);
+            break;
+        }
+        if (status != KC_HPM_OK) kc_hpm_free(data);
+    }
+
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+/**
+ * Free queued data on path.
+ * @param path Path to free queue on.
+ * @return void
+ */
+static void hpm_live_free_queue(kc_hpm_path_t *path)
+{
+    hpm_live_datagram_t *item = path->head;
+    while (item) {
+        hpm_live_datagram_t *next = item->next;
+        kc_hpm_free(item->data);
+        free(item);
+        item = next;
+    }
+    path->head = NULL;
+    path->tail = NULL;
+    path->queued_count = 0;
+    path->queued_bytes = 0;
+}
+
+/**
+ * Start live path.
+ * @param out Output path pointer.
+ * @param base Base path.
+ * @return 0 on success, error code on failure.
+ */
+static int hpm_live_start(kc_hpm_path_t **out, hpm_base_path_t *base)
+{
+    kc_hpm_path_t *path;
+    if (!out || !base) return KC_HPM_EINVAL;
+    *out = NULL;
+
+    path = (kc_hpm_path_t *)calloc(1, sizeof(*path));
+    if (!path) return KC_HPM_ENOMEM;
+    path->base = base;
+    path->token = hpm_live_token(path);
+    path->last_rx_ms = hpm_live_now_ms();
+    path->terminal_status = KC_HPM_OK;
+    if (hpm_live_mutex_init(&path->mutex) != 0) {
+        free(path);
+        return KC_HPM_ENET;
+    }
+    hpm_live_cond_init(&path->cond);
+#ifdef _WIN32
+    path->thread = CreateThread(NULL, 0, hpm_live_worker, path, 0, NULL);
+    if (!path->thread) {
+        hpm_live_mutex_destroy(&path->mutex);
+        free(path);
+        return KC_HPM_ENET;
+    }
+#else
+    if (pthread_create(&path->thread, NULL, hpm_live_worker, path) != 0) {
+        hpm_live_cond_destroy(&path->cond);
+        hpm_live_mutex_destroy(&path->mutex);
+        free(path);
+        return KC_HPM_ENET;
+    }
+#endif
+    path->thread_started = 1;
+    *out = path;
+    return KC_HPM_OK;
+}
+
+/**
+ * Connect to HPM server.
+ * @param out Output path handle.
+ * @param options Connection options.
+ * @return 0 on success, error code on failure.
+ */
+int kc_hpm_connect(kc_hpm_path_t **out, const kc_hpm_options_t *options)
+{
+    hpm_base_path_t *base = NULL;
+    int status;
+    if (!out) return KC_HPM_EINVAL;
+    *out = NULL;
+    status = hpm_base_connect(&base, options);
+    if (status != KC_HPM_OK) return status;
+    status = hpm_live_start(out, base);
+    if (status != KC_HPM_OK) hpm_base_close(base);
+    return status;
+}
+
+/**
+ * Connect to HPM server over existing UDP socket.
+ * @param out Output path handle.
+ * @param options Connection options.
+ * @param udp Existing UDP socket.
+ * @return 0 on success, error code on failure.
+ */
+int kc_hpm_connect_over(kc_hpm_path_t **out, const kc_hpm_options_t *options,
+    const kc_hpm_udp_t *udp)
+{
+    hpm_base_path_t *base = NULL;
+    int status;
+    if (!out) return KC_HPM_EINVAL;
+    *out = NULL;
+    status = hpm_base_connect_over(&base, options, udp);
+    if (status != KC_HPM_OK) return status;
+    status = hpm_live_start(out, base);
+    if (status != KC_HPM_OK) hpm_base_close(base);
+    return status;
+}
+
+/**
+ * Send data on path.
+ * @param path Path to send on.
+ * @param data Data to send.
+ * @param data_size Size of data.
+ * @return 0 on success, error code on failure.
+ */
+int kc_hpm_send(kc_hpm_path_t *path, const void *data, size_t data_size)
+{
+    int terminal;
+    if (!path) return KC_HPM_ECLOSED;
+    hpm_live_lock(&path->mutex);
+    terminal = path->stopping ? KC_HPM_ECLOSED : path->terminal_status;
+    hpm_live_unlock(&path->mutex);
+    if (terminal != KC_HPM_OK) return terminal;
+    return hpm_base_send(path->base, data, data_size);
+}
+
+/**
+ * Receive data from path.
+ * @param path Path to receive from.
+ * @param out_data Output data pointer.
+ * @param out_size Output data size.
+ * @param timeout_ms Timeout in milliseconds, 0 for infinite.
+ * @return 0 on success, error code on failure.
+ */
+int kc_hpm_receive(kc_hpm_path_t *path, void **out_data,
+    size_t *out_size, uint64_t timeout_ms)
+{
+    uint64_t deadline = timeout_ms ? hpm_live_deadline(hpm_live_now_ms(), timeout_ms) : 0;
+    if (!out_data || !out_size) return KC_HPM_EINVAL;
+    *out_data = NULL;
+    *out_size = 0;
+    if (!path) return KC_HPM_ECLOSED;
+
+    hpm_live_lock(&path->mutex);
+    for (;;) {
+        hpm_live_datagram_t *item;
+        int terminal;
+        int wait_status;
+
+        if (path->head) {
+            item = path->head;
+            path->head = item->next;
+            if (!path->head) path->tail = NULL;
+            path->queued_count--;
+            path->queued_bytes -= item->size;
+            *out_data = item->data;
+            *out_size = item->size;
+            free(item);
+            hpm_live_unlock(&path->mutex);
+            return KC_HPM_OK;
+        }
+
+        terminal = path->stopping ? KC_HPM_ECLOSED : path->terminal_status;
+        if (terminal != KC_HPM_OK) {
+            hpm_live_unlock(&path->mutex);
+            return terminal;
+        }
+
+        if (timeout_ms) {
+            uint64_t now = hpm_live_now_ms();
+            uint64_t remaining;
+            if (now >= deadline) {
+                hpm_live_unlock(&path->mutex);
+                return KC_HPM_ETIMEOUT;
+            }
+            remaining = deadline - now;
+            wait_status = hpm_live_cond_wait(&path->cond, &path->mutex,
+                remaining);
+            if (wait_status == 1) {
+                hpm_live_unlock(&path->mutex);
+                return KC_HPM_ETIMEOUT;
+            }
+        } else {
+            wait_status = hpm_live_cond_wait(&path->cond, &path->mutex, 0);
+        }
+        if (wait_status < 0) {
+            hpm_live_unlock(&path->mutex);
+            return KC_HPM_ENET;
+        }
+    }
+}
+
+/**
+ * Get local host of path.
+ * @param path Path to query.
+ * @return Local host string, or NULL if not available.
+ */
+const char *kc_hpm_local_host(const kc_hpm_path_t *path)
+{
+    return path ? hpm_base_local_host(path->base) : NULL;
+}
+
+/**
+ * Get local port of path.
+ * @param path Path to query.
+ * @return Local port, or 0 if not available.
+ */
+unsigned short kc_hpm_local_port(const kc_hpm_path_t *path)
+{
+    return path ? hpm_base_local_port(path->base) : 0;
+}
+
+/**
+ * Get peer host of path.
+ * @param path Path to query.
+ * @return Peer host string, or NULL if not available.
+ */
+const char *kc_hpm_peer_host(const kc_hpm_path_t *path)
+{
+    return path ? hpm_base_peer_host(path->base) : NULL;
+}
+
+/**
+ * Get peer port of path.
+ * @param path Path to query.
+ * @return Peer port, or 0 if not available.
+ */
+unsigned short kc_hpm_peer_port(const kc_hpm_path_t *path)
+{
+    return path ? hpm_base_peer_port(path->base) : 0;
+}
+
+/**
+ * Close path.
+ * @param path Path to close.
+ * @return void
+ */
+void kc_hpm_close(kc_hpm_path_t *path)
+{
+    if (!path) return;
+    hpm_live_lock(&path->mutex);
+    path->stopping = 1;
+    hpm_live_cond_signal(&path->cond);
+    hpm_live_unlock(&path->mutex);
+
+    if (path->thread_started) {
+#ifdef _WIN32
+        WaitForSingleObject(path->thread, INFINITE);
+        CloseHandle(path->thread);
+#else
+        (void)pthread_join(path->thread, NULL);
+#endif
+        path->thread_started = 0;
+    }
+
+    hpm_live_lock(&path->mutex);
+    hpm_live_free_queue(path);
+    hpm_live_unlock(&path->mutex);
+#ifdef _WIN32
+    hpm_live_mutex_destroy(&path->mutex);
+#else
+    hpm_live_cond_destroy(&path->cond);
+    hpm_live_mutex_destroy(&path->mutex);
+#endif
+    hpm_base_close(path->base);
+    free(path);
 }
