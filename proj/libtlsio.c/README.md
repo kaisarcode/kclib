@@ -1,8 +1,8 @@
 # libtlsio.c - Authenticated TLS byte connection
 
-`libtlsio.c` opens authenticated client TLS connections and exchanges plaintext
-bytes over them. It provides transport security only and does not implement HTTP
-or another application protocol.
+`libtlsio.c` opens authenticated client TLS connections and exchanges bytes over
+authenticated TLS connections. It provides transport security only and does not
+implement HTTP or another application protocol.
 
 ## Quick start
 
