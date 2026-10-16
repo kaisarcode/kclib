@@ -41,9 +41,8 @@ make
 make test
 ```
 
-Use `make all` for the configured cross-platform targets. See the
-[repository build guide](../../README.md#build) for shared toolchain and target
-information.
+Use `make all` for the configured cross-platform targets when their required
+toolchains are installed.
 
 ## Status
 

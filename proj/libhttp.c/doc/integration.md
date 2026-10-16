@@ -39,12 +39,12 @@ chunk size of zero is invalid.
 
 `libhttp.c` does not listen on ports or own sockets.
 
-For an inbound TCP server, a transport layer such as `libnetl.c` owns the
+For an inbound TCP server, the application's transport layer owns the
 connection. Keep one HTTP parser per accepted connection and pass that
 connection's bytes to its parser.
 
-An outbound transport such as `libnets.c` can return bytes that are then passed
-to an HTTP parser when the transfer carries HTTP.
+An outbound transport can return bytes that are then passed to an HTTP parser
+when the transfer carries HTTP.
 
 This separation keeps HTTP framing independent from connection management.
 
