@@ -9,11 +9,9 @@ if(APPLE)
     set(CMAKE_AR "${TLSIO_AR}")
     set(CMAKE_RANLIB "${TLSIO_RANLIB}")
     set(CMAKE_C_ARCHIVE_CREATE
-        "/bin/bash -c '\"$$@\" 2> >(grep -F -v \" has no symbols\" >&2)' bash <CMAKE_AR> qc <TARGET> <LINK_FLAGS> <OBJECTS>"
+        "<CMAKE_AR> qc <TARGET> <LINK_FLAGS> <OBJECTS>"
     )
-    set(CMAKE_C_ARCHIVE_FINISH
-        "/bin/bash -c '\"$$@\" 2> >(grep -F -v \" has no symbols\" >&2)' bash <CMAKE_AR> -s <TARGET>"
-    )
+    set(CMAKE_C_ARCHIVE_FINISH "<CMAKE_RANLIB> <TARGET>")
 endif()
 
 if(NOT WIN32)
@@ -50,6 +48,54 @@ file(GLOB MBEDTLS_SOURCES "lib/mbedtls/library/*.c")
 if(NOT MBEDTLS_SOURCES)
     message(FATAL_ERROR "Missing vendored Mbed TLS sources in lib/mbedtls")
 endif()
+
+set(TLSIO_DISABLED_MBEDTLS_SOURCES
+    aria.c
+    bignum_mod.c
+    bignum_mod_raw.c
+    block_cipher.c
+    camellia.c
+    ccm.c
+    cmac.c
+    des.c
+    dhm.c
+    ecjpake.c
+    ecp_curves_new.c
+    lmots.c
+    lms.c
+    memory_buffer_alloc.c
+    mps_trace.c
+    net_sockets.c
+    nist_kw.c
+    pkcs12.c
+    pkcs5.c
+    pkcs7.c
+    psa_crypto_ffdh.c
+    psa_crypto_pake.c
+    psa_crypto_se.c
+    ripemd160.c
+    ssl_cache.c
+    ssl_cookie.c
+    ssl_ticket.c
+    threading.c
+    x509_create.c
+    x509_crl.c
+    x509_csr.c
+    x509write.c
+    x509write_crt.c
+    x509write_csr.c
+)
+
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    list(APPEND TLSIO_DISABLED_MBEDTLS_SOURCES aesce.c)
+    list(APPEND TLSIO_DISABLED_MBEDTLS_SOURCES padlock.c)
+endif()
+
+foreach(source IN LISTS TLSIO_DISABLED_MBEDTLS_SOURCES)
+    list(REMOVE_ITEM MBEDTLS_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/lib/mbedtls/library/${source}"
+    )
+endforeach()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(
