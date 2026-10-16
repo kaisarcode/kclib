@@ -1,9 +1,0 @@
-LIBRARY libtlsio
-EXPORTS
-    kc_tlsio_connect
-    kc_tlsio_write
-    kc_tlsio_read
-    kc_tlsio_close
-    kc_tlsio_free
-    kc_tlsio_strerror
-    kc_tlsio_version
