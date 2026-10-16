@@ -1,6 +1,7 @@
 # netl scripting API
 
-Incoming TCP or UDP listener with peer-oriented responses.
+`netl` maintains TCP or UDP listeners and exchanges raw bytes with incoming
+peers.
 
 ## Lua
 
@@ -11,19 +12,27 @@ local listener = netl.open({
     protocol = netl.TCP,
 
     receive = function(input)
-        -- input.peer, input.protocol, input.host, input.port, input.data
         input.peer:respond("ok")
     end,
 
-    disconnect = function(peer) end,
-    error = function(status) end
+    disconnect = function(peer)
+    end,
+
+    error = function(status)
+    end
 })
 
 local port = listener:port()
 listener:close()
 ```
 
-`receive` is required. `disconnect` and `error` are optional. A TCP peer remains the same object across receives until closed. A UDP peer is receive-local.
+`receive` is required. `disconnect` and `error` are optional. A TCP peer remains
+the same object across receives until it closes. The peer can respond multiple
+times, including after a receive callback has returned, and responses preserve
+call order.
+
+A UDP peer is receive-local and each `respond(bytes)` call produces one datagram
+to that datagram's origin.
 
 Peer methods:
 
@@ -41,16 +50,21 @@ const listener = await netl.open({
   protocol: netl.TCP,
 
   receive(input) {
-    // input.peer, input.protocol, input.host, input.port, input.data
     input.peer.respond(new TextEncoder().encode("ok"));
   },
 
-  disconnect(peer) {},
-  error(status) {}
+  disconnect(peer) {
+  },
+
+  error(status) {
+  }
 });
 
 const port = await listener.port();
 await listener.close();
 ```
+
+A TCP peer is usable outside the receive callback while its connection remains
+live. `disconnect(peer)` is terminal for that peer.
 
 `strerror(status)` and `version()` remain namespace functions.

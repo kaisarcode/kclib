@@ -2,7 +2,7 @@
  * libnetl.h - Incoming network listener.
  * Summary: Receives bytes from TCP/UDP peers and optionally responds.
  *
- * Author:  KaisarCode
+ * Author: KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
@@ -20,14 +20,14 @@ extern "C" {
 typedef struct kc_netl kc_netl_t;
 typedef struct kc_netl_peer kc_netl_peer_t;
 
-#define KC_NETL_OK        0
-#define KC_NETL_EINVAL   -1
-#define KC_NETL_ENET     -2
-#define KC_NETL_ECLOSED  -3
-#define KC_NETL_ENOMEM   -4
+#define KC_NETL_OK 0
+#define KC_NETL_EINVAL -1
+#define KC_NETL_ENET -2
+#define KC_NETL_ECLOSED -3
+#define KC_NETL_ENOMEM -4
 
-#define KC_NETL_TCP       1
-#define KC_NETL_UDP       2
+#define KC_NETL_TCP 1
+#define KC_NETL_UDP 2
 
 typedef struct {
     const char *host;
@@ -46,11 +46,14 @@ typedef struct {
 } kc_netl_input_t;
 
 /**
- * Receive bytes from one remote peer.
- * The input and its data/host values are borrowed for the receive duration.
- * TCP peer identity remains stable across receives until peer close.
- * A UDP peer represents the origin of this datagram and is valid only for the
- * notification duration.
+ * Receives bytes from one remote peer.
+ * The input and its data and host values are borrowed for the callback duration.
+ * TCP peer identity remains stable across receives until disconnect or peer
+ * close. A UDP peer represents one datagram origin and is valid only for the
+ * callback duration.
+ * @param input Borrowed input description.
+ * @param userdata Consumer data supplied when opening the listener.
+ * @return void.
  */
 typedef void (*kc_netl_receive_fn)(
     const kc_netl_input_t *input,
@@ -58,8 +61,12 @@ typedef void (*kc_netl_receive_fn)(
 );
 
 /**
- * Receive notification that one TCP peer has closed.
- * The peer is borrowed and remains valid only for the notification duration.
+ * Receives notification that one TCP peer has closed.
+ * The peer is borrowed and remains valid only for the callback duration. This
+ * is the final callback in which that peer may be observed.
+ * @param peer Closing TCP peer.
+ * @param userdata Consumer data supplied when opening the listener.
+ * @return void.
  */
 typedef void (*kc_netl_disconnect_fn)(
     kc_netl_peer_t *peer,
@@ -67,8 +74,11 @@ typedef void (*kc_netl_disconnect_fn)(
 );
 
 /**
- * Receive an asynchronous listener failure.
+ * Receives an asynchronous listener failure.
  * After this notification no further input is delivered.
+ * @param status Public failure status.
+ * @param userdata Consumer data supplied when opening the listener.
+ * @return void.
  */
 typedef void (*kc_netl_error_fn)(
     int status,
@@ -76,13 +86,18 @@ typedef void (*kc_netl_error_fn)(
 );
 
 /**
- * Open an operational TCP or UDP listener.
+ * Opens an operational TCP or UDP listener.
  * NULL or empty host binds all interfaces. Port zero requests an ephemeral
  * operating-system-selected port. NULL max_pending_connections uses the
- * default. Receive is required; disconnect/error are optional.
- * Receive may respond, close peers, or close the listener.
- *
-  * @return KC_NETL_OK on success, otherwise a negative status.
+ * default. Receive is required; disconnect and error are optional. Receive may
+ * respond, close peers, or close the listener.
+ * @param out Destination listener pointer.
+ * @param options Listener options.
+ * @param receive Incoming byte callback.
+ * @param disconnect Optional TCP disconnect callback.
+ * @param error Optional asynchronous failure callback.
+ * @param userdata Consumer data passed to callbacks.
+ * @return KC_NETL_OK on success, otherwise a negative status.
  */
 int kc_netl_open(
     kc_netl_t **out,
@@ -94,10 +109,16 @@ int kc_netl_open(
 );
 
 /**
- * Respond to one peer.
+ * Responds to one peer.
  * The library copies the supplied bytes before returning and absorbs transport
- * buffering, partial writes, retries, and TCP/UDP-specific send mechanics.
-  * @return KC_NETL_OK on success, otherwise a negative status.
+ * buffering, partial writes, and retries. TCP responses preserve call order.
+ * Respond may be called repeatedly, from receive, after receive returns, or
+ * from another thread while the TCP peer remains connected. Each UDP response
+ * is one datagram to the receive-local peer.
+ * @param peer Destination peer.
+ * @param data Bytes to copy and send.
+ * @param data_size Byte count.
+ * @return KC_NETL_OK on success, otherwise a negative status.
  */
 int kc_netl_respond(
     kc_netl_peer_t *peer,
@@ -106,37 +127,41 @@ int kc_netl_respond(
 );
 
 /**
- * Stop interacting with one peer.
- * For TCP this closes that peer without affecting other peers. For a UDP peer
- * this simply prevents further response through that receive-local peer.
+ * Stops interacting with one peer.
+ * For TCP, queued responses are sent in order before the peer is closed. For a
+ * UDP peer this only prevents further response through that receive-local peer.
  * NULL and already-closed peers are accepted.
-  * @return None.
+ * @param peer Peer to close, or NULL.
+ * @return void.
  */
 void kc_netl_peer_close(kc_netl_peer_t *peer);
 
 /**
- * Return the bound port, including an ephemeral port selected by the OS.
-  * @return Bound port, or zero for an invalid listener.
+ * Returns the bound port, including an ephemeral port selected by the OS.
+ * @param listener Listener, or NULL.
+ * @return Bound port, or zero for an invalid listener.
  */
 unsigned short kc_netl_port(const kc_netl_t *listener);
 
 /**
- * Stop the listener, close all TCP peers, and release it.
- * NULL is accepted. This may also be called while netl is delivering a
- * receive, disconnect, or error.
-  * @return None.
+ * Stops the listener, closes active TCP peers, and releases it.
+ * NULL is accepted. This may also be called while netl is delivering a receive,
+ * disconnect, or error callback.
+ * @param listener Listener, or NULL.
+ * @return void.
  */
 void kc_netl_close(kc_netl_t *listener);
 
 /**
- * Return a static message for a public status code.
-  * @return Static error string.
+ * Returns a static message for a public status code.
+ * @param status Public status code.
+ * @return Static error string.
  */
 const char *kc_netl_strerror(int status);
 
 /**
- * Return the build version generated at compile time.
-  * @return Build version.
+ * Returns the build version generated at compile time.
+ * @return Build version.
  */
 uint64_t kc_netl_version(void);
 

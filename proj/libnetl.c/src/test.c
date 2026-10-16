@@ -1,7 +1,8 @@
 /**
  * test.c - netl public contract tests.
+ * Summary: Tests persistent TCP peers and UDP datagram behavior.
  *
- * Author:  KaisarCode
+ * Author: KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
@@ -13,7 +14,6 @@
 #include "libnetl.h"
 
 #include <stdatomic.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,41 +25,57 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#define TEST_FD SOCKET
+typedef SOCKET test_fd_t;
+typedef HANDLE test_thread_t;
 #define TEST_FD_INVALID INVALID_SOCKET
 #define TEST_CLOSE(fd) closesocket(fd)
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#define TEST_FD int
+typedef int test_fd_t;
+typedef pthread_t test_thread_t;
 #define TEST_FD_INVALID (-1)
 #define TEST_CLOSE(fd) close(fd)
 #endif
 
-static int test_case_total = 0;
-static int test_case_current = 0;
+#define TEST_WAIT_STEPS 200
+#define TEST_WAIT_MS 10UL
 
 typedef struct {
     atomic_int receive_count;
     atomic_int disconnect_count;
     atomic_int error_count;
     atomic_int udp_reply;
-    kc_netl_peer_t *peers[8];
-    int protocols[8];
-    unsigned short ports[8];
-    char hosts[8][128];
-    unsigned char data[8][64];
-    size_t sizes[8];
+    atomic_int tcp_callback_reply;
+    kc_netl_peer_t *peers[12];
+    int protocols[12];
+    unsigned short ports[12];
+    char hosts[12][128];
+    unsigned char data[12][64];
+    size_t sizes[12];
 } receive_state_t;
 
+typedef struct {
+    kc_netl_peer_t *peer;
+    const void *data;
+    size_t data_size;
+    int status;
+} respond_job_t;
+
+static int test_case_total;
+static int test_case_current;
+
 /**
- * Expect true.
- * @return Function result.
+ * Verifies one condition.
+ * @param label Check label.
+ * @param value Condition value.
+ * @return Failure count.
  */
 static int expect_true(const char *label, int value) {
     if (value) return 0;
@@ -68,8 +84,11 @@ static int expect_true(const char *label, int value) {
 }
 
 /**
- * Expect int.
- * @return Function result.
+ * Verifies one integer value.
+ * @param label Check label.
+ * @param expected Expected value.
+ * @param actual Actual value.
+ * @return Failure count.
  */
 static int expect_int(const char *label, int expected, int actual) {
     if (expected == actual) return 0;
@@ -84,8 +103,13 @@ static int expect_int(const char *label, int expected, int actual) {
 }
 
 /**
- * Expect bytes.
- * @return Function result.
+ * Verifies one byte sequence.
+ * @param label Check label.
+ * @param expected Expected bytes.
+ * @param expected_size Expected byte count.
+ * @param actual Actual bytes.
+ * @param actual_size Actual byte count.
+ * @return Failure count.
  */
 static int expect_bytes(
     const char *label,
@@ -96,7 +120,10 @@ static int expect_bytes(
 ) {
     if (
         expected_size == actual_size &&
-        (expected_size == 0U || memcmp(expected, actual, expected_size) == 0)
+        (
+            expected_size == 0U ||
+            memcmp(expected, actual, expected_size) == 0
+        )
     ) {
         return 0;
     }
@@ -105,10 +132,17 @@ static int expect_bytes(
 }
 
 /**
- * Result.
- * @return None.
+ * Prints one top-level test result.
+ * @param fail Failure count.
+ * @param name Test name.
+ * @param description Test description.
+ * @return void.
  */
-static void case_result(int fail, const char *name, const char *description) {
+static void case_result(
+    int fail,
+    const char *name,
+    const char *description
+) {
     test_case_current++;
     printf(
         "[%d/%d] %s: %s - %s\n",
@@ -120,49 +154,60 @@ static void case_result(int fail, const char *name, const char *description) {
     );
 }
 
+typedef int (*case_fn)(void);
+
 /**
- * Run case.
- * @return None.
+ * Runs one top-level test case.
+ * @param total_fail Failure accumulator.
+ * @param function Test function.
+ * @return void.
  */
-static void run_case(int *total_fail, int (*fn)(void)) {
-    if (fn() != 0) (*total_fail)++;
+static void run_case(int *total_fail, case_fn function) {
+    if (function() != 0) (*total_fail)++;
 }
 
 /**
- * Sleep ms.
- * @return None.
+ * Sleeps for a bounded interval.
+ * @param milliseconds Sleep duration.
+ * @return void.
  */
-static void test_sleep_ms(unsigned long ms) {
+static void test_sleep_ms(unsigned long milliseconds) {
 #ifdef _WIN32
-    Sleep((DWORD)ms);
+    Sleep((DWORD)milliseconds);
 #else
     struct timespec delay;
-    delay.tv_sec = (time_t)(ms / 1000UL);
-    delay.tv_nsec = (long)((ms % 1000UL) * 1000000UL);
+
+    delay.tv_sec = (time_t)(milliseconds / 1000UL);
+    delay.tv_nsec = (long)((milliseconds % 1000UL) * 1000000UL);
     (void)nanosleep(&delay, NULL);
 #endif
 }
 
 /**
- * Wait atomic at least.
- * @return Function result.
+ * Waits for an atomic counter to reach one value.
+ * @param value Counter.
+ * @param expected Required minimum.
+ * @return Zero on success, non-zero on timeout.
  */
 static int wait_atomic_at_least(atomic_int *value, int expected) {
-    int i;
-    for (i = 0; i < 200; i++) {
+    int index;
+
+    for (index = 0; index < TEST_WAIT_STEPS; index++) {
         if (atomic_load(value) >= expected) return 0;
-        test_sleep_ms(10UL);
+        test_sleep_ms(TEST_WAIT_MS);
     }
     return 1;
 }
 
 /**
- * Socket timeout.
- * @return Function result.
+ * Configures a receive timeout for one test socket.
+ * @param fd Socket descriptor.
+ * @return Zero on success, non-zero on failure.
  */
-static int test_socket_timeout(TEST_FD fd) {
+static int test_socket_timeout(test_fd_t fd) {
 #ifdef _WIN32
     DWORD timeout = 2000U;
+
     return setsockopt(
         fd,
         SOL_SOCKET,
@@ -172,6 +217,7 @@ static int test_socket_timeout(TEST_FD fd) {
     ) == 0 ? 0 : 1;
 #else
     struct timeval timeout;
+
     timeout.tv_sec = 2;
     timeout.tv_usec = 0;
     return setsockopt(
@@ -185,14 +231,17 @@ static int test_socket_timeout(TEST_FD fd) {
 }
 
 /**
- * Tcp connect.
- * @return Function result.
+ * Connects one test TCP socket to the listener.
+ * @param port Listener port.
+ * @return Connected socket, or TEST_FD_INVALID.
  */
-static TEST_FD test_tcp_connect(unsigned short port) {
+static test_fd_t test_tcp_connect(unsigned short port) {
     struct sockaddr_in address;
-    TEST_FD fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    test_fd_t fd;
 
+    fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (fd == TEST_FD_INVALID) return TEST_FD_INVALID;
+
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
@@ -214,20 +263,27 @@ static TEST_FD test_tcp_connect(unsigned short port) {
 }
 
 /**
- * Socket expect.
- * @return Function result.
+ * Reads and verifies one exact TCP response.
+ * @param fd Connected socket.
+ * @param expected Expected bytes.
+ * @param expected_size Expected byte count.
+ * @return Failure count.
  */
 static int test_socket_expect(
-    TEST_FD fd,
+    test_fd_t fd,
     const void *expected,
     size_t expected_size
 ) {
     unsigned char buffer[256];
-    size_t used = 0U;
+    size_t used;
 
+    used = 0U;
     while (used < expected_size) {
-        int amount = (int)(expected_size - used);
-        int received = recv(fd, (char *)buffer + used, amount, 0);
+        int amount;
+        int received;
+
+        amount = (int)(expected_size - used);
+        received = recv(fd, (char *)buffer + used, amount, 0);
         if (received <= 0) return 1;
         used += (size_t)received;
     }
@@ -242,18 +298,24 @@ static int test_socket_expect(
 }
 
 /**
- * On input.
- * @return None.
+ * Stores one public receive event and optional callback response.
+ * @param input Borrowed input event.
+ * @param userdata Test state.
+ * @return void.
  */
 static void receive(const kc_netl_input_t *input, void *userdata) {
-    receive_state_t *state = (receive_state_t *)userdata;
-    int index = atomic_load(&state->receive_count);
+    receive_state_t *state;
+    int index;
 
-    if (index < 8) {
-        size_t copy_size = input->data_size < sizeof(state->data[index])
+    state = (receive_state_t *)userdata;
+    index = atomic_load(&state->receive_count);
+
+    if (index < 12) {
+        size_t copy_size;
+
+        copy_size = input->data_size < sizeof(state->data[index])
             ? input->data_size
             : sizeof(state->data[index]);
-
         state->peers[index] = input->peer;
         state->protocols[index] = input->protocol;
         state->ports[index] = input->port;
@@ -263,11 +325,22 @@ static void receive(const kc_netl_input_t *input, void *userdata) {
             "%s",
             input->host != NULL ? input->host : ""
         );
-        if (copy_size != 0U) memcpy(state->data[index], input->data, copy_size);
+        if (copy_size != 0U) {
+            memcpy(state->data[index], input->data, copy_size);
+        }
         state->sizes[index] = copy_size;
     }
 
-    if (input->protocol == KC_NETL_UDP && atomic_load(&state->udp_reply)) {
+    if (
+        input->protocol == KC_NETL_TCP &&
+        atomic_load(&state->tcp_callback_reply)
+    ) {
+        (void)kc_netl_respond(input->peer, "callback", 8U);
+    }
+    if (
+        input->protocol == KC_NETL_UDP &&
+        atomic_load(&state->udp_reply)
+    ) {
         (void)kc_netl_respond(input->peer, "pong", 4U);
     }
 
@@ -275,28 +348,37 @@ static void receive(const kc_netl_input_t *input, void *userdata) {
 }
 
 /**
- * On close.
- * @return None.
+ * Stores one TCP disconnect event.
+ * @param peer Closing peer.
+ * @param userdata Test state.
+ * @return void.
  */
 static void disconnect(kc_netl_peer_t *peer, void *userdata) {
-    receive_state_t *state = (receive_state_t *)userdata;
+    receive_state_t *state;
+
+    state = (receive_state_t *)userdata;
     (void)peer;
     atomic_fetch_add(&state->disconnect_count, 1);
 }
 
 /**
- * On error.
- * @return None.
+ * Stores one asynchronous listener failure.
+ * @param status Public failure status.
+ * @param userdata Test state.
+ * @return void.
  */
 static void error(int status, void *userdata) {
-    receive_state_t *state = (receive_state_t *)userdata;
+    receive_state_t *state;
+
+    state = (receive_state_t *)userdata;
     (void)status;
     atomic_fetch_add(&state->error_count, 1);
 }
 
 /**
- * State init.
- * @return None.
+ * Initializes one receive state.
+ * @param state State to initialize.
+ * @return void.
  */
 static void state_init(receive_state_t *state) {
     memset(state, 0, sizeof(*state));
@@ -304,18 +386,90 @@ static void state_init(receive_state_t *state) {
     atomic_init(&state->disconnect_count, 0);
     atomic_init(&state->error_count, 0);
     atomic_init(&state->udp_reply, 0);
+    atomic_init(&state->tcp_callback_reply, 0);
+}
+
+#ifdef _WIN32
+/**
+ * Sends one response from a secondary Windows thread.
+ * @param userdata Response job.
+ * @return Thread exit code.
+ */
+static DWORD WINAPI respond_thread_main(LPVOID userdata) {
+    respond_job_t *job;
+
+    job = (respond_job_t *)userdata;
+    job->status = kc_netl_respond(job->peer, job->data, job->data_size);
+    return 0;
+}
+#else
+/**
+ * Sends one response from a secondary POSIX thread.
+ * @param userdata Response job.
+ * @return NULL.
+ */
+static void *respond_thread_main(void *userdata) {
+    respond_job_t *job;
+
+    job = (respond_job_t *)userdata;
+    job->status = kc_netl_respond(job->peer, job->data, job->data_size);
+    return NULL;
+}
+#endif
+
+/**
+ * Sends one peer response from another thread and joins it.
+ * @param peer Destination peer.
+ * @param data Response bytes.
+ * @param data_size Response byte count.
+ * @return Public response status, or KC_NETL_ENET on thread failure.
+ */
+static int respond_from_thread(
+    kc_netl_peer_t *peer,
+    const void *data,
+    size_t data_size
+) {
+    respond_job_t job;
+    test_thread_t thread;
+
+    memset(&job, 0, sizeof(job));
+    job.peer = peer;
+    job.data = data;
+    job.data_size = data_size;
+    job.status = KC_NETL_ENET;
+
+#ifdef _WIN32
+    thread = CreateThread(NULL, 0, respond_thread_main, &job, 0, NULL);
+    if (thread == NULL) return KC_NETL_ENET;
+    if (WaitForSingleObject(thread, INFINITE) != WAIT_OBJECT_0) {
+        CloseHandle(thread);
+        return KC_NETL_ENET;
+    }
+    CloseHandle(thread);
+#else
+    if (pthread_create(&thread, NULL, respond_thread_main, &job) != 0) {
+        return KC_NETL_ENET;
+    }
+    if (pthread_join(thread, NULL) != 0) return KC_NETL_ENET;
+#endif
+
+    return job.status;
 }
 
 /**
- * Kc netl open.
- * @return Function result.
+ * Tests listener creation and argument validation.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_open(void) {
     kc_netl_options_t options;
-    kc_netl_t *listener = (kc_netl_t *)1;
+    kc_netl_t *listener;
     receive_state_t state;
-    int fail = 0;
+    int pending;
+    int fail;
 
+    listener = (kc_netl_t *)1;
+    pending = -1;
+    fail = 0;
     state_init(&state);
     memset(&options, 0, sizeof(options));
     options.host = "127.0.0.1";
@@ -346,38 +500,54 @@ static int case_kc_netl_open(void) {
     );
 
     options.protocol = KC_NETL_TCP;
+    options.max_pending_connections = &pending;
+    fail += expect_int(
+        "invalid pending count",
+        KC_NETL_EINVAL,
+        kc_netl_open(&listener, &options, receive, disconnect, error, &state)
+    );
+
+    options.max_pending_connections = NULL;
     fail += expect_int(
         "TCP open",
         KC_NETL_OK,
         kc_netl_open(&listener, &options, receive, disconnect, error, &state)
     );
     fail += expect_true("listener allocated", listener != NULL);
-    fail += expect_true(
-        "ephemeral port selected",
-        kc_netl_port(listener) != 0U
-    );
+    fail += expect_true("ephemeral port selected", kc_netl_port(listener) != 0U);
     kc_netl_close(listener);
     kc_netl_close(NULL);
 
-    case_result(fail, "kc_netl_open", "opens an operational receiving listener");
+    case_result(
+        fail,
+        "kc_netl_open",
+        "opens an operational receiving listener"
+    );
     return fail != 0;
 }
 
 /**
- * Kc netl tcp.
- * @return Function result.
+ * Tests stable TCP peers, ordered responses, and peer closure.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_tcp(void) {
+    static const unsigned char binary[] = {'x', 0, 'y'};
     kc_netl_options_t options;
-    kc_netl_t *listener = NULL;
+    kc_netl_t *listener;
     receive_state_t state;
-    TEST_FD client_a = TEST_FD_INVALID;
-    TEST_FD client_b = TEST_FD_INVALID;
-    kc_netl_peer_t *peer_a = NULL;
-    kc_netl_peer_t *peer_b = NULL;
-    int i;
-    int fail = 0;
+    test_fd_t client_a;
+    test_fd_t client_b;
+    kc_netl_peer_t *peer_a;
+    kc_netl_peer_t *peer_b;
+    int index;
+    int fail;
 
+    listener = NULL;
+    client_a = TEST_FD_INVALID;
+    client_b = TEST_FD_INVALID;
+    peer_a = NULL;
+    peer_b = NULL;
+    fail = 0;
     state_init(&state);
     memset(&options, 0, sizeof(options));
     options.host = "127.0.0.1";
@@ -405,24 +575,27 @@ static int case_kc_netl_tcp(void) {
         return 1;
     }
 
-    (void)send(client_a, "A", 1, 0);
-    (void)send(client_b, "B", 1, 0);
+    fail += expect_int("send A", 1, (int)send(client_a, "A", 1, 0));
+    fail += expect_int("send B", 1, (int)send(client_b, "B", 1, 0));
     fail += expect_int(
         "two TCP inputs",
         0,
         wait_atomic_at_least(&state.receive_count, 2)
     );
 
-    for (i = 0; i < 2; i++) {
-        fail += expect_int("TCP protocol", KC_NETL_TCP, state.protocols[i]);
-        fail += expect_true("TCP peer", state.peers[i] != NULL);
-        fail += expect_true("TCP host", state.hosts[i][0] != '\0');
-        fail += expect_true("TCP port", state.ports[i] != 0U);
+    for (index = 0; index < 2; index++) {
+        fail += expect_int("TCP protocol", KC_NETL_TCP, state.protocols[index]);
+        fail += expect_true("TCP peer", state.peers[index] != NULL);
+        fail += expect_true("TCP host", state.hosts[index][0] != '\0');
+        fail += expect_true("TCP port", state.ports[index] != 0U);
 
-        if (state.sizes[i] == 1U && state.data[i][0] == 'A') {
-            peer_a = state.peers[i];
-        } else if (state.sizes[i] == 1U && state.data[i][0] == 'B') {
-            peer_b = state.peers[i];
+        if (state.sizes[index] == 1U && state.data[index][0] == 'A') {
+            peer_a = state.peers[index];
+        } else if (
+            state.sizes[index] == 1U &&
+            state.data[index][0] == 'B'
+        ) {
+            peer_b = state.peers[index];
         }
     }
 
@@ -430,35 +603,45 @@ static int case_kc_netl_tcp(void) {
     fail += expect_true("peer B identified", peer_b != NULL);
     fail += expect_true("peer identities differ", peer_a != peer_b);
 
-    if (peer_a != NULL) {
-        fail += expect_int(
-            "respond A",
-            KC_NETL_OK,
-            kc_netl_respond(peer_a, "reply-a", 7U)
-        );
-        fail += test_socket_expect(client_a, "reply-a", 7U);
-    }
-
-    (void)send(client_b, "still", 5, 0);
+    atomic_store(&state.tcp_callback_reply, 1);
+    fail += expect_int("callback input", 2, (int)send(client_b, "cb", 2, 0));
     fail += expect_int(
-        "third TCP input",
+        "callback receive",
         0,
         wait_atomic_at_least(&state.receive_count, 3)
     );
+    fail += test_socket_expect(client_b, "callback", 8U);
+    atomic_store(&state.tcp_callback_reply, 0);
     if (atomic_load(&state.receive_count) >= 3) {
         fail += expect_true("B peer retained", state.peers[2] == peer_b);
-        fail += expect_bytes(
-            "B next bytes",
-            "still",
-            5U,
-            state.data[2],
-            state.sizes[2]
-        );
     }
 
     if (peer_a != NULL) {
         fail += expect_int(
-            "queue final A response",
+            "first ordered response",
+            KC_NETL_OK,
+            kc_netl_respond(peer_a, "one", 3U)
+        );
+        fail += expect_int(
+            "second ordered response",
+            KC_NETL_OK,
+            kc_netl_respond(peer_a, "two", 3U)
+        );
+        fail += test_socket_expect(client_a, "onetwo", 6U);
+    }
+
+    if (peer_b != NULL) {
+        fail += expect_int(
+            "thread response",
+            KC_NETL_OK,
+            respond_from_thread(peer_b, "thread", 6U)
+        );
+        fail += test_socket_expect(client_b, "thread", 6U);
+    }
+
+    if (peer_a != NULL) {
+        fail += expect_int(
+            "pending close response",
             KC_NETL_OK,
             kc_netl_respond(peer_a, "bye", 3U)
         );
@@ -471,50 +654,132 @@ static int case_kc_netl_tcp(void) {
         );
     }
 
-    (void)send(client_b, "ok", 2, 0);
     fail += expect_int(
-        "B stays active",
+        "binary send",
+        (int)sizeof(binary),
+        (int)send(client_b, (const char *)binary, (int)sizeof(binary), 0)
+    );
+    fail += expect_int(
+        "binary receive",
         0,
         wait_atomic_at_least(&state.receive_count, 4)
     );
     if (atomic_load(&state.receive_count) >= 4) {
-        fail += expect_true(
-            "B identity still retained",
-            state.peers[3] == peer_b
+        fail += expect_true("B identity remains stable", state.peers[3] == peer_b);
+        fail += expect_bytes(
+            "binary input bytes",
+            binary,
+            sizeof(binary),
+            state.data[3],
+            state.sizes[3]
         );
     }
 
     TEST_CLOSE(client_a);
     TEST_CLOSE(client_b);
-    (void)wait_atomic_at_least(&state.disconnect_count, 2);
+    fail += expect_int(
+        "two disconnects",
+        0,
+        wait_atomic_at_least(&state.disconnect_count, 2)
+    );
+    test_sleep_ms(50UL);
+    fail += expect_int(
+        "disconnect exactly once per TCP peer",
+        2,
+        atomic_load(&state.disconnect_count)
+    );
     fail += expect_int("no listener error", 0, atomic_load(&state.error_count));
 
     kc_netl_close(listener);
     case_result(
         fail,
         "kc_netl_tcp",
-        "delivers peer-scoped TCP input and responses"
+        "keeps peers stable and responses composable"
     );
     return fail != 0;
 }
 
 /**
- * Kc netl udp.
- * @return Function result.
+ * Tests closing a listener while one TCP peer remains active.
+ * @return Zero on success, non-zero on failure.
+ */
+static int case_kc_netl_listener_close(void) {
+    kc_netl_options_t options;
+    kc_netl_t *listener;
+    receive_state_t state;
+    test_fd_t client;
+    char byte;
+    int received;
+    int fail;
+
+    listener = NULL;
+    client = TEST_FD_INVALID;
+    fail = 0;
+    state_init(&state);
+    memset(&options, 0, sizeof(options));
+    options.host = "127.0.0.1";
+    options.protocol = KC_NETL_TCP;
+
+    if (
+        kc_netl_open(
+            &listener,
+            &options,
+            receive,
+            disconnect,
+            error,
+            &state
+        ) != KC_NETL_OK
+    ) {
+        return 1;
+    }
+
+    client = test_tcp_connect(kc_netl_port(listener));
+    if (client == TEST_FD_INVALID) {
+        kc_netl_close(listener);
+        return 1;
+    }
+
+    fail += expect_int("active send", 4, (int)send(client, "live", 4, 0));
+    fail += expect_int(
+        "active peer accepted",
+        0,
+        wait_atomic_at_least(&state.receive_count, 1)
+    );
+
+    kc_netl_close(listener);
+    listener = NULL;
+    received = recv(client, &byte, 1, 0);
+    fail += expect_true("active peer socket closed", received <= 0);
+    TEST_CLOSE(client);
+
+    case_result(
+        fail,
+        "kc_netl_listener_close",
+        "closes active peers with the listener"
+    );
+    return fail != 0;
+}
+
+/**
+ * Tests UDP datagram input and receive-local responses.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_udp(void) {
+    static const unsigned char payload[] = {'p', 0, 'g'};
     kc_netl_options_t options;
-    kc_netl_t *listener = NULL;
+    kc_netl_t *listener;
     receive_state_t state;
     struct sockaddr_in address;
-    TEST_FD client = TEST_FD_INVALID;
-    char response[8];
+    test_fd_t client;
+    unsigned char response[8];
     int received;
-    int fail = 0;
+    int fail;
 
+    listener = NULL;
+    client = TEST_FD_INVALID;
+    fail = 0;
     state_init(&state);
     atomic_store(&state.udp_reply, 1);
-
     memset(&options, 0, sizeof(options));
     options.host = "127.0.0.1";
     options.protocol = KC_NETL_UDP;
@@ -546,17 +811,16 @@ static int case_kc_netl_udp(void) {
 
     fail += expect_int(
         "UDP send",
-        4,
+        (int)sizeof(payload),
         (int)sendto(
             client,
-            "ping",
-            4,
+            (const char *)payload,
+            (int)sizeof(payload),
             0,
             (const struct sockaddr *)&address,
             (socklen_t)sizeof(address)
         )
     );
-
     fail += expect_int(
         "UDP receive",
         0,
@@ -568,18 +832,17 @@ static int case_kc_netl_udp(void) {
     fail += expect_true("UDP port present", state.ports[0] != 0U);
     fail += expect_bytes(
         "UDP input bytes",
-        "ping",
-        4U,
+        payload,
+        sizeof(payload),
         state.data[0],
         state.sizes[0]
     );
 
-    received = recv(client, response, (int)sizeof(response), 0);
+    received = recv(client, (char *)response, (int)sizeof(response), 0);
     fail += expect_int("UDP response size", 4, received);
     if (received == 4) {
         fail += expect_bytes("UDP response", "pong", 4U, response, 4U);
     }
-
     fail += expect_int(
         "UDP has no disconnect",
         0,
@@ -592,18 +855,19 @@ static int case_kc_netl_udp(void) {
     case_result(
         fail,
         "kc_netl_udp",
-        "responds to the exact UDP origin without sendto"
+        "preserves datagrams and responds to their origins"
     );
     return fail != 0;
 }
 
 /**
- * Kc netl status.
- * @return Function result.
+ * Tests public status helpers.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_status(void) {
-    int fail = 0;
+    int fail;
 
+    fail = 0;
     fail += expect_true("OK", strcmp(kc_netl_strerror(KC_NETL_OK), "ok") == 0);
     fail += expect_true(
         "EINVAL",
@@ -621,36 +885,45 @@ static int case_kc_netl_status(void) {
         "ENOMEM",
         strcmp(kc_netl_strerror(KC_NETL_ENOMEM), "out of memory") == 0
     );
+    fail += expect_int(
+        "NULL peer respond",
+        KC_NETL_EINVAL,
+        kc_netl_respond(NULL, "x", 1U)
+    );
     (void)kc_netl_version();
 
     case_result(
         fail,
         "kc_netl_status",
-        "maps status values and exposes build version"
+        "maps status values and validates closed inputs"
     );
     return fail != 0;
 }
 
 /**
- * All.
- * @return Function result.
+ * Runs all public contract cases.
+ * @return Failure count.
  */
 static int case_all(void) {
-    int rc = 0;
+    int result;
 
-    test_case_total = 4;
+    result = 0;
+    test_case_total = 5;
     test_case_current = 0;
-    run_case(&rc, case_kc_netl_open);
-    run_case(&rc, case_kc_netl_tcp);
-    run_case(&rc, case_kc_netl_udp);
-    run_case(&rc, case_kc_netl_status);
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
-    return rc;
+    run_case(&result, case_kc_netl_open);
+    run_case(&result, case_kc_netl_tcp);
+    run_case(&result, case_kc_netl_listener_close);
+    run_case(&result, case_kc_netl_udp);
+    run_case(&result, case_kc_netl_status);
+    printf("\n%d passed, %d failed\n", test_case_total - result, result);
+    return result;
 }
 
 /**
- * Main.
- * @return Function result.
+ * Runs one requested test case.
+ * @param argc Argument count.
+ * @param argv Argument values.
+ * @return Process exit status.
  */
 int main(int argc, char **argv) {
     if (argc != 2) {
@@ -660,6 +933,11 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_netl_open") == 0) return case_kc_netl_open();
     if (strcmp(argv[1], "kc_netl_tcp") == 0) return case_kc_netl_tcp();
+    if (
+        strcmp(argv[1], "kc_netl_listener_close") == 0
+    ) {
+        return case_kc_netl_listener_close();
+    }
     if (strcmp(argv[1], "kc_netl_udp") == 0) return case_kc_netl_udp();
     if (strcmp(argv[1], "kc_netl_status") == 0) return case_kc_netl_status();
 
