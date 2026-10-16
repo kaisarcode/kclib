@@ -1,5 +1,5 @@
 ## Makefile
-## Summary: Cross-compilation builder for rdv.
+## Summary: Cross-compilation builder for rdvz.
 ##
 ## Author:  KaisarCode
 ## Website: https://kaisarcode.com
@@ -106,14 +106,14 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_SHARED_NAME := librdv.so
+NATIVE_SHARED_NAME := librdvz.so
 NATIVE_IMPORT_LIBRARY :=
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_SHARED_NAME := librdv.dll
-NATIVE_IMPORT_LIBRARY := -DRDV_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/librdv.dll.a
+NATIVE_SHARED_NAME := librdvz.dll
+NATIVE_IMPORT_LIBRARY := -DRDVZ_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/librdvz.dll.a
 endif
 ifeq ($(NATIVE_PLATFORM),macos)
-NATIVE_SHARED_NAME := librdv.dylib
+NATIVE_SHARED_NAME := librdvz.dylib
 endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
@@ -140,17 +140,17 @@ all: \
 
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
-	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; then \
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ] || grep -q '^RDVZ_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; then \
 		$(CMAKE) -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Linux \
-		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+		-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_C_COMPILER=$(2) \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
 		-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,$(CMAKE) -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DRDV_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
+	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,$(CMAKE) -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DRDVZ_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/linux"
 endef
 
@@ -171,19 +171,19 @@ loongarch64/linux: ; $(call linux_target,loongarch64,loongarch64-linux-gnu-gcc)
 
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-windows/CMakeCache.txt; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ] || grep -q '^RDVZ_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-windows/CMakeCache.txt; then \
 		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-windows \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Windows \
-		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+		-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_C_COMPILER=$(2) \
 		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
 		-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DRDV_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/librdv.dll $(BIN_DIR)/$(1)/windows/librdv.dll
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DRDVZ_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/$(1)-windows/out/librdvz.dll $(BIN_DIR)/$(1)/windows/librdvz.dll
 	@echo "OK $(1)/windows"
 endef
 
@@ -197,18 +197,18 @@ define android_target
 		echo "Missing Android NDK toolchain: $(NDK_TOOLCHAIN)" >&2; exit 1; \
 	fi
 	@mkdir -p $(BIN_DIR)/$(1)/android
-	@if [ ! -f $(BUILD_DIR)/$(1)-android/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-android/CMakeCache.txt; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-android/CMakeCache.txt ] || grep -q '^RDVZ_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-android/CMakeCache.txt; then \
 		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-android \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
 		-DANDROID_ABI=$(2) \
 		-DANDROID_PLATFORM=android-24 \
-		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+		-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
 		-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-android,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-24 -DRDV_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
+	$(call cmake_build,$(BUILD_DIR)/$(1)-android,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-24 -DRDVZ_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/android"
 endef
 
@@ -223,19 +223,19 @@ define macos_target
 		echo "Missing macOS SDK under $(OSXCROSS_ROOT)" >&2; exit 1; \
 	fi
 	@mkdir -p $(BIN_DIR)/$(1)/macos
-	@if [ ! -f $(BUILD_DIR)/$(1)-macos/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-macos/CMakeCache.txt ] || grep -q '^RDVZ_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
 		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Darwin \
 		-DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) \
 		-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
 		-DCMAKE_C_COMPILER=$(2) \
-		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+		-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
 		-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(2) -DRDV_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -G Ninja -Wno-dev > /dev/null)
+	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(2) -DRDVZ_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/macos"
 endef
 
@@ -248,19 +248,19 @@ define ios_target
 	@if [ ! -x "$(3)" ]; then echo "Missing iOS compiler: $(3)" >&2; exit 1; fi
 	@if [ -z "$(4)" ] || [ ! -d "$(4)" ]; then echo "Missing iOS SDK" >&2; exit 1; fi
 	@mkdir -p $(BIN_DIR)/$(1)/$(2)
-	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ] || grep -q '^RDVZ_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
 		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=iOS \
 		-DCMAKE_OSX_SYSROOT=$(4) \
 		-DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) \
 		-DCMAKE_C_COMPILER=$(3) \
-		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+		-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
 		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
 		-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=$(4) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(3) -DRDV_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null)
+	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=$(4) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(3) -DRDVZ_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/$(2)"
 endef
 
@@ -275,14 +275,14 @@ wasm32/wasm:
 		echo "Missing Emscripten cmake wrapper: $(WASM_EMCMAKE)" >&2; exit 1; \
 	fi
 	@mkdir -p $(BIN_DIR)/wasm32/wasm
-	@if [ ! -f $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt; then \
+	@if [ ! -f $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt ] || grep -q '^RDVZ_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/wasm32-wasm/CMakeCache.txt; then \
 		$(WASM_EMCMAKE) $(CMAKE) -S . -B $(BUILD_DIR)/wasm32-wasm \
 		-DCMAKE_BUILD_TYPE=Release \
-		-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+		-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/wasm32/wasm \
 		-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,wasm_log=$$(mktemp); if ! $(WASM_EMCMAKE) $(CMAKE) -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DRDV_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/wasm32/wasm -G Ninja -Wno-dev > "$$wasm_log" 2>&1; then cat "$$wasm_log"; rm -f "$$wasm_log"; exit 1; fi; rm -f "$$wasm_log")
+	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,wasm_log=$$(mktemp); if ! $(WASM_EMCMAKE) $(CMAKE) -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DRDVZ_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/wasm32/wasm -G Ninja -Wno-dev > "$$wasm_log" 2>&1; then cat "$$wasm_log"; rm -f "$$wasm_log"; exit 1; fi; rm -f "$$wasm_log")
 	@echo "OK wasm32/wasm"
 
 ## Tests
@@ -290,39 +290,39 @@ wasm32/wasm:
 test:
 	@if [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
 		if ! command -v $(WINE) >/dev/null 2>&1; then echo "Missing Wine runtime: $(WINE)" >&2; exit 1; fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/librdv.dll ]; then echo "Run 'make x86_64/windows' first." >&2; exit 1; fi; \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/librdvz.dll ]; then echo "Run 'make x86_64/windows' first." >&2; exit 1; fi; \
 		cmake -S . -B $(BUILD_DIR)/test-wine \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Windows \
 			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
-			-DRDV_BUILD_TESTS=ON \
-			-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
-			-DRDV_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/librdv.dll \
-			-DRDV_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/librdv.dll.a \
+			-DRDVZ_BUILD_TESTS=ON \
+			-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
+			-DRDVZ_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/librdvz.dll \
+			-DRDVZ_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/librdvz.dll.a \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/test-wine/out \
 			-G Ninja -Wno-dev > /dev/null; \
-		cmake --build $(BUILD_DIR)/test-wine --target rdv_contract_test; \
-		WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/out/rdv_contract_test.exe all; \
+		cmake --build $(BUILD_DIR)/test-wine --target rdvz_contract_test; \
+		WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/out/rdvz_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
 		if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1; then echo "Missing Emscripten cmake wrapper" >&2; exit 1; fi; \
 		if ! command -v $(WASM_NODE) >/dev/null 2>&1; then echo "Missing Node.js runtime" >&2; exit 1; fi; \
-		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ] || grep -q '^RDV_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/test-wasm/CMakeCache.txt; then \
+		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ] || grep -q '^RDVZ_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/test-wasm/CMakeCache.txt; then \
 			$(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/test-wasm \
 				-DCMAKE_BUILD_TYPE=Release \
-				-DRDV_BUILD_TESTS=ON \
-				-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+				-DRDVZ_BUILD_TESTS=ON \
+				-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test-wasm --target rdv_contract_test; \
-		$(WASM_NODE) $(BUILD_DIR)/test-wasm/rdv_contract_test.js all; \
+		cmake --build $(BUILD_DIR)/test-wasm --target rdvz_contract_test; \
+		$(WASM_NODE) $(BUILD_DIR)/test-wasm/rdvz_contract_test.js all; \
 	else \
 		cmake -S . -B $(BUILD_DIR)/test \
 			-DCMAKE_BUILD_TYPE=Release \
-			-DRDV_BUILD_TESTS=ON \
-			-DRDV_BUILD_VERSION=$(BUILD_VERSION) \
+			-DRDVZ_BUILD_TESTS=ON \
+			-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 			-G Ninja -Wno-dev > /dev/null; \
-		cmake --build $(BUILD_DIR)/test --target rdv_contract_test; \
-		$(BUILD_DIR)/test/rdv_contract_test all; \
+		cmake --build $(BUILD_DIR)/test --target rdvz_contract_test; \
+		$(BUILD_DIR)/test/rdvz_contract_test all; \
 	fi
 
 wine:
