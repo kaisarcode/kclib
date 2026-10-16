@@ -1,4 +1,4 @@
-# librdvz.c - Generic rendezvous registry
+# librdvz.c - Rendezvous registry
 
 `librdvz.c` maintains named rendezvous points with one optional publication and
 an ordered collection of seekers. It stores opaque bytes only and does not
