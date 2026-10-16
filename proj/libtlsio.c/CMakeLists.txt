@@ -3,6 +3,11 @@ project(tlsio C)
 
 set(CMAKE_C_STANDARD 11)
 
+if(MINGW)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libgcc")
+endif()
+
 if(NOT DEFINED TLSIO_BUILD_VERSION)
     set(TLSIO_BUILD_VERSION 0)
 endif()
