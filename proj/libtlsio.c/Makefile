@@ -30,6 +30,46 @@ WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
 BUILD_DIR := .build
 BIN_DIR := bin
 BUILD_VERSION ?= $(shell date +%s)
+CMAKE ?= cmake
+
+define cmake_build
+	@prelog=$$(mktemp); \
+	if ! $(3) $(CMAKE) --build $(1) -- -n > "$$prelog" 2>&1; then \
+		cat "$$prelog"; \
+		rm -f "$$prelog"; \
+		exit 1; \
+	fi; \
+	if grep -q "ninja: no work to do." "$$prelog"; then \
+		rm -f "$$prelog"; \
+		out=$$(mktemp); \
+		$(3) $(CMAKE) --build $(1) 2>"$$out"; \
+		r=$$?; \
+		if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+		rm -f "$$out"; \
+		exit $$r; \
+	fi; \
+	rm -f "$$prelog"; \
+	out=$$(mktemp); \
+	$(3) $(CMAKE) --build $(1) 2>"$$out"; \
+	r=$$?; \
+	if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+	rm -f "$$out"; \
+	if [ $$r -ne 0 ]; then \
+		exit 1; \
+	fi; \
+	if [ -n "$(2)" ]; then \
+		ver=$$(date +%s); \
+		$(2); \
+		log=$$(mktemp); \
+		if ! $(3) $(CMAKE) --build $(1) > "$$log" 2>&1; then \
+			cat "$$log"; \
+			rm -f "$$log"; \
+			exit 1; \
+		fi; \
+		rm -f "$$log"; \
+	fi; \
+	:
+endef
 
 HOST_ARCH := $(shell uname -m)
 HOST_SYSTEM := $(shell uname -s)
@@ -104,17 +144,19 @@ all: \
 
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
-	@cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Linux \
-		-DCMAKE_SYSTEM_PROCESSOR=$(1) \
-		-DCMAKE_C_COMPILER=$(2) \
-		-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(subst /,-,$(1))-linux
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Linux \
+			-DCMAKE_SYSTEM_PROCESSOR=$(1) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,$(CMAKE) -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$(1) -DCMAKE_C_COMPILER=$(2) -DTLSIO_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/linux"
 endef
 
@@ -156,17 +198,19 @@ loongarch64/linux:
 
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@cmake -S . -B $(BUILD_DIR)/$(1)-windows \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Windows \
-		-DCMAKE_SYSTEM_PROCESSOR=$(1) \
-		-DCMAKE_C_COMPILER=$(2) \
-		-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-windows
+	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ]; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-windows \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DCMAKE_SYSTEM_PROCESSOR=$(1) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=$(1) -DCMAKE_C_COMPILER=$(2) -DTLSIO_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
 	@cp $(BUILD_DIR)/$(1)-windows/out/libtlsio.dll \
 		$(BIN_DIR)/$(1)/windows/libtlsio.dll
 	@echo "OK $(1)/windows"
@@ -184,23 +228,23 @@ define macos_target
 		echo "Missing macOS cross-compiler wrapper: $(2)" >&2; \
 		exit 1; \
 	fi
-	@LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" \
-	PATH="$(OSXCROSS_ROOT)/bin:$$PATH" \
-	cmake -S . -B $(BUILD_DIR)/$(1)-macos \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Darwin \
-		-DCMAKE_SYSTEM_PROCESSOR=$(1) \
-		-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
-		-DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) \
-		-DCMAKE_C_COMPILER=$(2) \
-		-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
-		-G Ninja -Wno-dev > /dev/null
-	@LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" \
-	PATH="$(OSXCROSS_ROOT)/bin:$$PATH" \
-	cmake --build $(BUILD_DIR)/$(1)-macos
+	@if [ ! -f $(BUILD_DIR)/$(1)-macos/CMakeCache.txt ]; then \
+		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" \
+		PATH="$(OSXCROSS_ROOT)/bin:$$PATH" \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Darwin \
+			-DCMAKE_SYSTEM_PROCESSOR=$(1) \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
+			-DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" $(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_SYSTEM_PROCESSOR=$(1) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) -DCMAKE_C_COMPILER=$(2) -DTLSIO_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -G Ninja -Wno-dev > /dev/null,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
 	@echo "OK $(1)/macos"
 endef
 
@@ -220,25 +264,25 @@ define ios_target
 		echo "Missing iOS SDK sysroot: $(5)" >&2; \
 		exit 1; \
 	fi
-	@LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" \
-	PATH="$(OSXCROSS_ROOT)/bin:$$PATH" \
-	cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=iOS \
-		-DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) \
-		-DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) \
-		-DCMAKE_OSX_SYSROOT=$(5) \
-		-DCMAKE_OSX_ARCHITECTURES=$(6) \
-		-DCMAKE_SYSTEM_PROCESSOR=$(1) \
-		-DCMAKE_C_COMPILER=$(3) \
-		-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
-		-G Ninja -Wno-dev > /dev/null
-	@LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" \
-	PATH="$(OSXCROSS_ROOT)/bin:$$PATH" \
-	cmake --build $(BUILD_DIR)/$(1)-$(2)
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ]; then \
+		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" \
+		PATH="$(OSXCROSS_ROOT)/bin:$$PATH" \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) \
+			-DCMAKE_OSX_SYSROOT=$(5) \
+			-DCMAKE_OSX_ARCHITECTURES=$(6) \
+			-DCMAKE_SYSTEM_PROCESSOR=$(1) \
+			-DCMAKE_C_COMPILER=$(3) \
+			-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" $(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(5) -DCMAKE_OSX_ARCHITECTURES=$(6) -DCMAKE_SYSTEM_PROCESSOR=$(1) -DCMAKE_C_COMPILER=$(3) -DTLSIO_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
 	@echo "OK $(1)/$(2)"
 endef
 
@@ -253,17 +297,19 @@ x86_64/iossim:
 
 define android_target
 	@mkdir -p $(BIN_DIR)/$(1)/android
-	@cmake -S . -B $(BUILD_DIR)/$(1)-android \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
-		-DANDROID_ABI=$(2) \
-		-DANDROID_PLATFORM=android-21 \
-		-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-android
+	@if [ ! -f $(BUILD_DIR)/$(1)-android/CMakeCache.txt ]; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-android \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
+			-DANDROID_ABI=$(2) \
+			-DANDROID_PLATFORM=android-21 \
+			-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-android,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DTLSIO_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
 	@echo "OK $(1)/android"
 endef
 
@@ -283,24 +329,28 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		cmake -S . -B $(BUILD_DIR)/test-wine \
-			-DCMAKE_BUILD_TYPE=Release \
-			-DCMAKE_SYSTEM_NAME=Windows \
-			-DCMAKE_SYSTEM_PROCESSOR=x86_64 \
-			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
-			-DTLSIO_BUILD_TESTS=ON \
-			-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
-			-G Ninja -Wno-dev > /dev/null; \
-		cmake --build $(BUILD_DIR)/test-wine --target tlsio_contract_test; \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
+			$(CMAKE) -S . -B $(BUILD_DIR)/test-wine \
+				-DCMAKE_BUILD_TYPE=Release \
+				-DCMAKE_SYSTEM_NAME=Windows \
+				-DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
+				-DTLSIO_BUILD_TESTS=ON \
+				-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
+				-G Ninja -Wno-dev > /dev/null; \
+		fi; \
+		$(CMAKE) --build $(BUILD_DIR)/test-wine --target tlsio_contract_test; \
 		WINEDEBUG=-all $(WINE) \
 			$(BUILD_DIR)/test-wine/tlsio_contract_test.exe all; \
 	else \
-		cmake -S . -B $(BUILD_DIR)/test \
-			-DCMAKE_BUILD_TYPE=Release \
-			-DTLSIO_BUILD_TESTS=ON \
-			-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
-			-G Ninja -Wno-dev > /dev/null; \
-		cmake --build $(BUILD_DIR)/test --target tlsio_contract_test; \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
+			$(CMAKE) -S . -B $(BUILD_DIR)/test \
+				-DCMAKE_BUILD_TYPE=Release \
+				-DTLSIO_BUILD_TESTS=ON \
+				-DTLSIO_BUILD_VERSION=$(BUILD_VERSION) \
+				-G Ninja -Wno-dev > /dev/null; \
+		fi; \
+		$(CMAKE) --build $(BUILD_DIR)/test --target tlsio_contract_test; \
 		$(BUILD_DIR)/test/tlsio_contract_test all; \
 	fi
 
