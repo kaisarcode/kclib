@@ -40,6 +40,7 @@ index is the summary, not the contract.
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
 | [`http`](https://github.com/kaisarcode/kclib/tree/master/proj/libhttp.c) | Parses and builds HTTP messages; it handles protocol, not transport. | Handling HTTP requests or responses over a socket. |
+| [`tlsio`](https://github.com/kaisarcode/kclib/tree/master/proj/libtlsio.c) | Opens authenticated client TLS connections and exchanges plaintext bytes. | Adding TLS transport security to a byte-oriented client connection. |
 | [`stun`](https://github.com/kaisarcode/kclib/tree/master/proj/libstun.c) | Discovers live UDP mappings and serves STUN Binding requests. | Discovering an observed UDP endpoint or providing a STUN endpoint for other machines. |
 | [`punch`](https://github.com/kaisarcode/kclib/tree/master/proj/libpunch.c) | Establishes a direct UDP path using supplied remote endpoints, either on its own socket or an existing live UDP mapping. | Direct peer-to-peer UDP communication after endpoint exchange. |
 | [`netl`](https://github.com/kaisarcode/kclib/tree/master/proj/libnetl.c) | Maintains named TCP or UDP listeners and delivers incoming traffic to consumers. | Listening and serving on the network. |
