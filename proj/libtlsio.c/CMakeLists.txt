@@ -3,6 +3,19 @@ project(tlsio C)
 
 set(CMAKE_C_STANDARD 11)
 
+if(APPLE)
+    get_property(TLSIO_AR CACHE CMAKE_AR PROPERTY VALUE)
+    get_property(TLSIO_RANLIB CACHE CMAKE_RANLIB PROPERTY VALUE)
+    set(CMAKE_AR "${TLSIO_AR}")
+    set(CMAKE_RANLIB "${TLSIO_RANLIB}")
+    set(CMAKE_C_ARCHIVE_CREATE
+        "/bin/bash -c '\"$$@\" 2> >(grep -F -v \" has no symbols\" >&2)' bash <CMAKE_AR> qc <TARGET> <LINK_FLAGS> <OBJECTS>"
+    )
+    set(CMAKE_C_ARCHIVE_FINISH
+        "/bin/bash -c '\"$$@\" 2> >(grep -F -v \" has no symbols\" >&2)' bash <CMAKE_AR> -s <TARGET>"
+    )
+endif()
+
 if(NOT WIN32)
     find_package(Threads REQUIRED)
 endif()
