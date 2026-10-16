@@ -50,17 +50,6 @@ Peer trust uses the native platform trust roots:
 TLS 1.2 is the minimum protocol version. TLS 1.3 is enabled by the embedded
 backend.
 
-## Targets
-
-The project follows the native kclib target matrix:
-
-- Linux: x86_64, i686, aarch64, armv7, armv7hf, riscv64, powerpc64le, mips,
-    mipsel, mips64el, s390x, and loongarch64.
-- Windows: x86_64 and i686.
-- macOS: x86_64 and aarch64.
-- iOS: aarch64 devices plus aarch64 and x86_64 simulators.
-- Android: aarch64 and armv7.
-
 ## Build
 
 From this project directory:
@@ -68,13 +57,10 @@ From this project directory:
 ```bash
 make
 make test
-make test wine
-make all
 ```
 
-`make all` builds every configured native and mobile target when its toolchain is
-installed. All TLS implementation sources required by the build are shipped in
-this project.
+Use `make all` for the configured cross-platform targets when their required
+toolchains are installed.
 
 ## Status
 
@@ -89,6 +75,4 @@ long-term infrastructure.
 
 [![LGPLv3](https://www.gnu.org/graphics/lgplv3-147x51.png)](https://www.gnu.org/licenses/lgpl-3.0.html)
 
-This project is distributed under the **GNU Lesser General Public License
-version 3 (LGPLv3)**. Mbed TLS is distributed under Apache-2.0 OR
-GPL-2.0-or-later and is used as a private implementation dependency.
+This project is distributed under the **GNU Lesser General Public License version 3 (LGPLv3)**.
