@@ -1,51 +1,77 @@
-# libnets.c - Network sender
+# libnets.c - Outbound network transport
 
-`libnets.c` starts asynchronous raw-byte transfers to one TCP, UDP, or optional
-TLS destination. One transfer handle represents one operation and completes
-through a terminal callback.
+`libnets.c` maintains one persistent outbound TCP or UDP endpoint and exchanges
+raw bytes with the remote destination.
+
+The library owns host resolution, the socket, transport buffering, partial
+writes, and output ordering. The public API remains focused on opening an
+endpoint, sending bytes, receiving bytes, and closing the endpoint.
+
+## Features
+
+- Opens persistent TCP or UDP endpoints.
+- Sends multiple byte buffers through the same endpoint.
+- Delivers incoming TCP stream chunks or UDP datagrams through callbacks.
+- Preserves TCP output order and UDP datagram boundaries.
+- Supports `send()` from callbacks and other threads.
+- Reports remote TCP disconnects and asynchronous network failures.
 
 ## Quick start
 
 ```c
 #include "libnets.h"
 
-static void complete(
-    int status,
+static void receive(
     const void *data,
-    size_t size,
+    size_t data_size,
     void *userdata
 ) {
-    (void)status;
     (void)data;
-    (void)size;
+    (void)data_size;
     (void)userdata;
 }
 
-kc_nets_t *transfer = NULL;
-const unsigned char message[] = "hello";
+int main(void) {
+    kc_nets_options_t options = {
+        .host = "127.0.0.1",
+        .port = 8080,
+        .protocol = KC_NETS_TCP
+    };
+    kc_nets_t *network = NULL;
 
-if (kc_nets_send(
-        &transfer,
-        "127.0.0.1",
-        8080,
-        KC_NETS_TCP,
-        message,
-        sizeof(message) - 1,
-        complete,
-        NULL
-    ) != KC_NETS_OK) {
-    return 1;
+    if (
+        kc_nets_open(
+            &network,
+            &options,
+            receive,
+            NULL,
+            NULL,
+            NULL
+        ) != KC_NETS_OK
+    ) {
+        return 1;
+    }
+
+    if (kc_nets_send(network, "hello", 5) != KC_NETS_OK) {
+        kc_nets_close(network);
+        return 1;
+    }
+
+    kc_nets_close(network);
+    return 0;
 }
 ```
 
-TCP and TLS can return response bytes. UDP sends one datagram and does not wait
-for a response. `kc_nets_stop()` requests interruption; close the transfer after
-its terminal completion.
+`kc_nets_open()` establishes the destination before returning. The `receive`
+callback is required. TCP `disconnect` and asynchronous `error` callbacks are
+optional.
 
-## TLS
+`kc_nets_send()` copies its input before returning. Repeated TCP sends form one
+ordered byte stream. Repeated UDP sends remain separate datagrams.
 
-TLS is optional at build time. Use `kc_nets_tls_available()` to determine
-whether the current build includes TLS support.
+`kc_nets_close()` stops local I/O and releases the endpoint. It may also be
+called from a callback. A local close does not report a remote disconnect or a
+network error.
 
 ## Build
 
@@ -64,12 +90,13 @@ toolchains are installed.
 This is beta software tested primarily on Debian x86_64. No guarantees are
 provided regarding stability or future support. You may test, use, and modify it.
 
-Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
-Pull requests are not accepted; the project avoids depending on GitHub as
-long-term infrastructure.
+Questions can be sent to
+[kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com). Pull requests are not
+accepted; the project avoids depending on GitHub as long-term infrastructure.
 
 ## License
 
 [![LGPLv3](https://www.gnu.org/graphics/lgplv3-147x51.png)](https://www.gnu.org/licenses/lgpl-3.0.html)
 
-This project is distributed under the **GNU Lesser General Public License version 3 (LGPLv3)**.
+This project is distributed under the **GNU Lesser General Public License
+version 3 (LGPLv3)**.

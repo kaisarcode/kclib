@@ -1,8 +1,8 @@
 /**
- * libnets.h - Asynchronous network transfer.
- * Summary: Public API for sending byte buffers over TCP, UDP, or optional TLS.
+ * libnets.h - Persistent outbound network transport.
+ * Summary: Public API for exchanging raw bytes over TCP or UDP.
  *
- * Author:  KaisarCode
+ * Author: KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
@@ -19,88 +19,115 @@ extern "C" {
 
 typedef struct kc_nets kc_nets_t;
 
-#define KC_NETS_OK        0
-#define KC_NETS_EINVAL   -1
-#define KC_NETS_ENET     -2
-#define KC_NETS_ESTOP    -3
+#define KC_NETS_OK 0
+#define KC_NETS_EINVAL -1
+#define KC_NETS_ENET -2
+#define KC_NETS_ECLOSED -3
+#define KC_NETS_ENOMEM -4
 
-#define KC_NETS_TCP       1
-#define KC_NETS_UDP       2
-#define KC_NETS_TLS       3
+#define KC_NETS_TCP 1
+#define KC_NETS_UDP 2
 
-/**
- * Receives the terminal result of one network transfer.
- * Response bytes are borrowed and remain valid only for the completion
- * duration.
- * @param status   KC_NETS_OK or a negative status code.
- * @param data     Borrowed response bytes, or NULL when no response is present.
- * @param size     Response size in bytes.
- * @param userdata Caller-provided completion data.
- * @return None.
- */
-typedef void (*kc_nets_complete_fn)(
-    int status,
-    const void *data,
-    size_t size,
-    void *userdata
-);
+typedef struct {
+    const char *host;
+    unsigned short port;
+    int protocol;
+} kc_nets_options_t;
 
 /**
- * Start one asynchronous network transfer.
- * The library copies host and data before returning. A successful launch causes
- * exactly one terminal completion.
- * @param out       Receives the transfer handle.
- * @param host      Destination host or IP address.
- * @param port      Destination port.
- * @param protocol  KC_NETS_TCP, KC_NETS_UDP, or KC_NETS_TLS.
- * @param data      Input bytes copied by the library.
- * @param data_size Input size in bytes.
- * @param complete  Terminal completion.
- * @param userdata  Caller data passed unchanged to complete.
- * @return KC_NETS_OK when launched, or a negative status code.
+ * Receives bytes from one outbound network endpoint.
+ * @param data Borrowed bytes valid for the callback duration.
+ * @param data_size Received byte count.
+ * @param userdata Consumer data supplied when opening the endpoint.
+ * @return void.
  */
-int kc_nets_send(
-    kc_nets_t **out,
-    const char *host,
-    unsigned short port,
-    int protocol,
+typedef void (*kc_nets_receive_fn)(
     const void *data,
     size_t data_size,
-    kc_nets_complete_fn complete,
     void *userdata
 );
 
 /**
- * Request graceful interruption of one transfer.
- * @param nets Transfer handle.
- * @return KC_NETS_OK on success, KC_NETS_EINVAL for NULL.
+ * Receives notification that one TCP peer disconnected.
+ * This callback is not used for UDP endpoints.
+ * @param userdata Consumer data supplied when opening the endpoint.
+ * @return void.
  */
-int kc_nets_stop(kc_nets_t *nets);
+typedef void (*kc_nets_disconnect_fn)(void *userdata);
 
 /**
- * Stop if necessary and release one transfer.
- * Call after the terminal completion has returned.
- * @param nets Transfer handle, or NULL.
- * @return None.
+ * Receives an asynchronous network failure.
+ * After this callback no further network input is delivered.
+ * @param status Public failure status.
+ * @param userdata Consumer data supplied when opening the endpoint.
+ * @return void.
+ */
+typedef void (*kc_nets_error_fn)(int status, void *userdata);
+
+/**
+ * Opens one persistent outbound TCP or UDP endpoint.
+ *
+ * Host must be non-empty and port must be non-zero. Open resolves the host and
+ * establishes the endpoint before returning. Receive is required. Disconnect
+ * and error are optional.
+ *
+ * @param out Destination endpoint pointer.
+ * @param options Outbound endpoint options.
+ * @param receive Incoming byte callback.
+ * @param disconnect Optional TCP disconnect callback.
+ * @param error Optional asynchronous failure callback.
+ * @param userdata Consumer data passed to callbacks.
+ * @return KC_NETS_OK on success, otherwise a negative status.
+ */
+int kc_nets_open(
+    kc_nets_t **out,
+    const kc_nets_options_t *options,
+    kc_nets_receive_fn receive,
+    kc_nets_disconnect_fn disconnect,
+    kc_nets_error_fn error,
+    void *userdata
+);
+
+/**
+ * Sends bytes through one open endpoint.
+ *
+ * The library copies the supplied bytes before returning. TCP sends preserve
+ * stream order. Each UDP send remains one datagram. This function may be called
+ * from callbacks or other threads while the endpoint remains open.
+ *
+ * @param nets Open endpoint.
+ * @param data Bytes to send.
+ * @param data_size Byte count.
+ * @return KC_NETS_OK on success, otherwise a negative status.
+ */
+int kc_nets_send(
+    kc_nets_t *nets,
+    const void *data,
+    size_t data_size
+);
+
+/**
+ * Closes and releases one outbound endpoint.
+ *
+ * NULL is accepted. This function may be called from a callback. In that case
+ * release completes after the callback returns. No callback is delivered after
+ * an external close call returns.
+ *
+ * @param nets Endpoint, or NULL.
+ * @return void.
  */
 void kc_nets_close(kc_nets_t *nets);
 
 /**
- * Return a static message for a public status code.
- * @param code Status code.
- * @return Static message.
+ * Returns a static message for one public status code.
+ * @param status Public status code.
+ * @return Static status message.
  */
-const char *kc_nets_strerror(int code);
+const char *kc_nets_strerror(int status);
 
 /**
- * Check whether TLS support is compiled in.
- * @return 1 when TLS is available, otherwise 0.
- */
-int kc_nets_tls_available(void);
-
-/**
- * Return the build version generated at compile time.
- * @return Unix timestamp for the current build.
+ * Returns the build version generated at compile time.
+ * @return Build version.
  */
 uint64_t kc_nets_version(void);
 

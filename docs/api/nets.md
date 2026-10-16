@@ -1,49 +1,60 @@
 # nets scripting API
 
-One asynchronous raw-byte transfer over TCP, UDP, or optional TLS.
+`nets` maintains one persistent outbound TCP or UDP endpoint and exchanges raw
+bytes with the remote destination.
 
 ## Lua
 
 ```lua
-local transfer = nets.send({
-    host = "127.0.0.1",
-    port = 8080,
+local network = nets.open({
+    host = "example.com",
+    port = 443,
     protocol = nets.TCP,
-    data = bytes,
 
-    complete = function(status, response)
-        -- called exactly once after a successful launch
+    receive = function(data)
+    end,
+
+    disconnect = function()
+    end,
+
+    error = function(status)
     end
 })
 
-transfer:stop()
-transfer:close()
-
-local tls = nets.tlsAvailable()
+network:send(bytes)
+network:close()
 ```
 
-A successful launch returns a transfer object and eventually invokes `complete(status, response)` exactly once. TCP/TLS completion may include response bytes. UDP succeeds with no response bytes.
+`receive(data)` receives TCP stream chunks or one complete UDP datagram.
+`disconnect()` is used only when a TCP peer closes the connection.
+`error(status)` reports an asynchronous endpoint failure.
 
-`stop()` requests graceful interruption and terminal completion reports `nets.ESTOP`.
+`send(bytes)` may be called repeatedly. TCP calls contribute bytes to one
+ordered stream. Each UDP call remains one datagram.
 
 ## JavaScript
 
 ```js
-const transfer = await nets.send({
-  host: "127.0.0.1",
-  port: 8080,
+const network = await nets.open({
+  host: "example.com",
+  port: 443,
   protocol: nets.TCP,
-  data: bytes,
 
-  complete(status, response) {
-    // called exactly once after a successful launch
+  receive(data) {
+  },
+
+  disconnect() {
+  },
+
+  error(status) {
   }
 });
 
-await transfer.stop();
-await transfer.close();
-
-const tls = await nets.tlsAvailable();
+await network.send(bytes);
+await network.close();
 ```
+
+`open()` establishes the endpoint before returning it. `receive` is required.
+`disconnect` and `error` are optional.
 
 `strerror(status)` and `version()` remain namespace functions.

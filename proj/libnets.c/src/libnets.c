@@ -1,754 +1,970 @@
 /**
- * libnets.c - Asynchronous network transfer.
- * Summary: Sends one byte buffer over TCP, UDP, or optional TLS.
+ * libnets.c - Persistent outbound network transport.
+ * Summary: Exchanges raw bytes through persistent TCP or UDP endpoints.
  *
- * Author:  KaisarCode
+ * Author: KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
-#define _XOPEN_SOURCE 700
 #endif
 
 #include "libnets.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+typedef SOCKET kc_nets_fd_t;
+typedef WSAPOLLFD kc_nets_pollfd_t;
+typedef CRITICAL_SECTION kc_nets_mutex_t;
+typedef HANDLE kc_nets_thread_t;
+#define KC_NETS_FD_INVALID INVALID_SOCKET
+#define KC_NETS_CLOSE(fd) closesocket(fd)
+#define KC_NETS_POLL(fds, count, timeout) \
+    WSAPoll((fds), (ULONG)(count), (timeout))
 #else
+#include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+typedef int kc_nets_fd_t;
+typedef struct pollfd kc_nets_pollfd_t;
+typedef pthread_mutex_t kc_nets_mutex_t;
+typedef pthread_t kc_nets_thread_t;
+#define KC_NETS_FD_INVALID (-1)
+#define KC_NETS_CLOSE(fd) close(fd)
+#define KC_NETS_POLL(fds, count, timeout) \
+    poll((fds), (nfds_t)(count), (timeout))
 #endif
 
-#ifdef KC_NETS_OPENSSL
-#include <openssl/ssl.h>
-#endif
-
-#ifdef _WIN32
-typedef SOCKET kc_nets_socket_t;
-#define KC_NETS_BAD_SOCKET INVALID_SOCKET
+#ifdef MSG_NOSIGNAL
+#define KC_NETS_SEND_FLAGS MSG_NOSIGNAL
 #else
-typedef int kc_nets_socket_t;
-#define KC_NETS_BAD_SOCKET (-1)
+#define KC_NETS_SEND_FLAGS 0
 #endif
+
+#define KC_NETS_BUFFER_SIZE 65536U
+#define KC_NETS_POLL_TIMEOUT_MS 25
+
+typedef struct kc_nets_output {
+    unsigned char *data;
+    size_t size;
+    size_t offset;
+    struct kc_nets_output *next;
+} kc_nets_output_t;
 
 struct kc_nets {
-    char *host;
-    unsigned short port;
+    kc_nets_fd_t fd;
     int protocol;
-    unsigned char *data;
-    size_t data_size;
-    kc_nets_complete_fn complete;
+    int platform_ready;
+    kc_nets_receive_fn receive;
+    kc_nets_disconnect_fn disconnect;
+    kc_nets_error_fn error;
     void *userdata;
-    int stopped;
-    kc_nets_socket_t socket;
+    kc_nets_output_t *out_head;
+    kc_nets_output_t *out_tail;
+    kc_nets_mutex_t mutex;
+    int mutex_ready;
+    kc_nets_thread_t worker;
 #ifdef _WIN32
-    CRITICAL_SECTION lock;
-    HANDLE thread;
-    DWORD thread_id;
-#else
-    pthread_mutex_t lock;
-    pthread_t thread;
+    DWORD worker_id;
 #endif
+    int worker_started;
+    int stop;
+    int terminal;
+    int self_close;
 };
 
-#ifdef _WIN32
-static void kc_nets_lock(kc_nets_t *nets) { EnterCriticalSection(&nets->lock); }
-static void kc_nets_unlock(kc_nets_t *nets) { LeaveCriticalSection(&nets->lock); }
-#else
-static void kc_nets_lock(kc_nets_t *nets) { pthread_mutex_lock(&nets->lock); }
-static void kc_nets_unlock(kc_nets_t *nets) { pthread_mutex_unlock(&nets->lock); }
-#endif
-
 /**
- * Duplicate one string.
- * @param text Source string.
- * @return Owned copy, or NULL.
+ * Starts platform socket support.
+ * @return KC_NETS_OK on success, otherwise KC_NETS_ENET.
  */
-static char *kc_nets_dup(const char *text) {
-    size_t size;
-    char *copy;
-
-    size = strlen(text) + 1U;
-    copy = (char *)malloc(size);
-    if (copy != NULL) memcpy(copy, text, size);
-    return copy;
-}
-
-/**
- * Return whether stop has been requested.
- * @param nets Transfer.
- * @return Non-zero when stopped.
- */
-static int kc_nets_is_stopped(kc_nets_t *nets) {
-    int stopped;
-
-    kc_nets_lock(nets);
-    stopped = nets->stopped;
-    kc_nets_unlock(nets);
-    return stopped;
-}
-
-/**
- * Publish the currently active socket for interruption.
- * @param nets Transfer.
- * @param socket Active socket.
- * @return None.
- */
-static void kc_nets_set_socket(kc_nets_t *nets, kc_nets_socket_t socket) {
-    kc_nets_lock(nets);
-    nets->socket = socket;
-    kc_nets_unlock(nets);
-}
-
-/**
- * Clear the active socket before closing it.
- * @param nets Transfer.
- * @param socket Socket being closed.
- * @return None.
- */
-static void kc_nets_clear_socket(kc_nets_t *nets, kc_nets_socket_t socket) {
-    kc_nets_lock(nets);
-    if (nets->socket == socket) nets->socket = KC_NETS_BAD_SOCKET;
-    kc_nets_unlock(nets);
-}
-
-/**
- * Close one socket.
- * @param socket Socket handle.
- * @return None.
- */
-static void kc_nets_socket_close(kc_nets_socket_t socket) {
-#ifdef _WIN32
-    closesocket(socket);
-#else
-    close(socket);
-#endif
-}
-
-/**
- * Shut down one socket to wake blocking network operations.
- * @param socket Socket handle.
- * @return None.
- */
-static void kc_nets_socket_shutdown(kc_nets_socket_t socket) {
-#ifdef _WIN32
-    shutdown(socket, SD_BOTH);
-#else
-    shutdown(socket, SHUT_RDWR);
-#endif
-}
-
-/**
- * Initialize process socket support.
- * @return 0 on success, -1 on failure.
- */
-static int kc_nets_platform_init(void) {
+static int kc_nets_platform_open(void) {
 #ifdef _WIN32
     WSADATA data;
-    return WSAStartup(MAKEWORD(2, 2), &data) == 0 ? 0 : -1;
+    return WSAStartup(MAKEWORD(2, 2), &data) == 0
+        ? KC_NETS_OK
+        : KC_NETS_ENET;
 #else
-    return 0;
+    return KC_NETS_OK;
 #endif
 }
 
 /**
- * Release process socket support.
- * @return None.
+ * Releases platform socket support.
+ * @return void.
  */
-static void kc_nets_platform_cleanup(void) {
+static void kc_nets_platform_close(void) {
 #ifdef _WIN32
     WSACleanup();
 #endif
 }
 
 /**
- * Append bytes to a response buffer.
- * @param buffer Owned response buffer pointer.
- * @param used Current used size.
- * @param capacity Current capacity.
- * @param data Bytes to append.
- * @param size Byte count.
- * @return KC_NETS_OK on success, KC_NETS_ENET on allocation failure.
+ * Returns whether the last socket operation would block.
+ * @return Non-zero when the last socket error means would-block.
  */
-static int kc_nets_append(
-    unsigned char **buffer,
-    size_t *used,
-    size_t *capacity,
+static int kc_nets_would_block(void) {
+#ifdef _WIN32
+    return WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+    return errno == EAGAIN || errno == EWOULDBLOCK;
+#endif
+}
+
+/**
+ * Returns whether the last socket operation was interrupted.
+ * @return Non-zero when the last socket error means interrupted.
+ */
+static int kc_nets_interrupted(void) {
+#ifdef _WIN32
+    return WSAGetLastError() == WSAEINTR;
+#else
+    return errno == EINTR;
+#endif
+}
+
+/**
+ * Makes one socket nonblocking.
+ * @param fd Socket descriptor.
+ * @return KC_NETS_OK on success, otherwise KC_NETS_ENET.
+ */
+static int kc_nets_nonblocking(kc_nets_fd_t fd) {
+#ifdef _WIN32
+    u_long mode = 1UL;
+    return ioctlsocket(fd, FIONBIO, &mode) == 0
+        ? KC_NETS_OK
+        : KC_NETS_ENET;
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+
+    if (flags < 0) return KC_NETS_ENET;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0
+        ? KC_NETS_OK
+        : KC_NETS_ENET;
+#endif
+}
+
+/**
+ * Disables SIGPIPE delivery for one socket where supported.
+ * @param fd Socket descriptor.
+ * @return void.
+ */
+static void kc_nets_disable_sigpipe(kc_nets_fd_t fd) {
+#if !defined(_WIN32) && defined(SO_NOSIGPIPE)
+    int enabled = 1;
+
+    (void)setsockopt(
+        fd,
+        SOL_SOCKET,
+        SO_NOSIGPIPE,
+        &enabled,
+        (socklen_t)sizeof(enabled)
+    );
+#else
+    (void)fd;
+#endif
+}
+
+/**
+ * Opens one endpoint mutex.
+ * @param mutex Destination mutex.
+ * @return Zero on success, non-zero on failure.
+ */
+static int kc_nets_mutex_open(kc_nets_mutex_t *mutex) {
+#ifdef _WIN32
+    InitializeCriticalSection(mutex);
+    return 0;
+#else
+    return pthread_mutex_init(mutex, NULL);
+#endif
+}
+
+/**
+ * Releases one endpoint mutex.
+ * @param mutex Mutex to release.
+ * @return void.
+ */
+static void kc_nets_mutex_close(kc_nets_mutex_t *mutex) {
+#ifdef _WIN32
+    DeleteCriticalSection(mutex);
+#else
+    (void)pthread_mutex_destroy(mutex);
+#endif
+}
+
+/**
+ * Locks one endpoint.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_lock(kc_nets_t *nets) {
+#ifdef _WIN32
+    EnterCriticalSection(&nets->mutex);
+#else
+    (void)pthread_mutex_lock(&nets->mutex);
+#endif
+}
+
+/**
+ * Unlocks one endpoint.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_unlock(kc_nets_t *nets) {
+#ifdef _WIN32
+    LeaveCriticalSection(&nets->mutex);
+#else
+    (void)pthread_mutex_unlock(&nets->mutex);
+#endif
+}
+
+/**
+ * Requests socket shutdown without releasing the descriptor.
+ * @param fd Socket descriptor.
+ * @return void.
+ */
+static void kc_nets_socket_shutdown(kc_nets_fd_t fd) {
+#ifdef _WIN32
+    (void)shutdown(fd, SD_BOTH);
+#else
+    (void)shutdown(fd, SHUT_RDWR);
+#endif
+}
+
+/**
+ * Allocates one copied output buffer.
+ * @param data Source bytes.
+ * @param size Byte count.
+ * @return New output buffer, or NULL on allocation failure.
+ */
+static kc_nets_output_t *kc_nets_output_new(
     const void *data,
     size_t size
 ) {
-    unsigned char *next;
-    size_t cap;
+    kc_nets_output_t *output;
+    size_t allocation_size;
 
-    if (size == 0U) return KC_NETS_OK;
-    if (*used + size < *used) return KC_NETS_ENET;
-    if (*used + size > *capacity) {
-        cap = *capacity != 0U ? *capacity : 65536U;
-        while (cap < *used + size) {
-            if (cap > ((size_t)-1) / 2U) {
-                cap = *used + size;
-                break;
-            }
-            cap *= 2U;
-        }
-        next = (unsigned char *)realloc(*buffer, cap);
-        if (next == NULL) return KC_NETS_ENET;
-        *buffer = next;
-        *capacity = cap;
+    output = (kc_nets_output_t *)calloc(1, sizeof(*output));
+    if (output == NULL) return NULL;
+
+    allocation_size = size != 0U ? size : 1U;
+    output->data = (unsigned char *)malloc(allocation_size);
+    if (output->data == NULL) {
+        free(output);
+        return NULL;
     }
-    memcpy(*buffer + *used, data, size);
-    *used += size;
-    return KC_NETS_OK;
+    if (size != 0U) memcpy(output->data, data, size);
+    output->size = size;
+    return output;
 }
 
 /**
- * Send all stream bytes.
- * @param nets Transfer.
- * @param socket Connected socket.
- * @return Public status.
+ * Releases an output queue.
+ * @param output First queued output.
+ * @return void.
  */
-static int kc_nets_send_all(kc_nets_t *nets, kc_nets_socket_t socket) {
-    size_t sent;
+static void kc_nets_output_free(kc_nets_output_t *output) {
+    while (output != NULL) {
+        kc_nets_output_t *next = output->next;
 
-    sent = 0U;
-    while (sent < nets->data_size) {
-#ifdef _WIN32
-        int count;
-#else
-        ssize_t count;
-#endif
-        if (kc_nets_is_stopped(nets)) return KC_NETS_ESTOP;
-#ifdef _WIN32
-        count = send(
-            socket,
-            (const char *)nets->data + sent,
-            (int)(nets->data_size - sent),
-            0
-        );
-#else
-        count = send(
-            socket,
-            (const char *)nets->data + sent,
-            nets->data_size - sent,
-            0
-        );
-#endif
-        if (count <= 0) {
-            return kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
-        }
-        sent += (size_t)count;
+        free(output->data);
+        free(output);
+        output = next;
     }
-    return KC_NETS_OK;
 }
 
 /**
- * Receive a plain TCP response until peer EOF.
- * @param nets Transfer.
- * @param socket Connected socket.
- * @param out_data Receives owned response bytes.
- * @param out_size Receives response size.
- * @return Public status.
+ * Connects one socket to the configured destination.
+ * @param options Endpoint options.
+ * @param out_fd Destination socket descriptor.
+ * @return KC_NETS_OK on success, otherwise KC_NETS_ENET.
  */
-static int kc_nets_recv_plain(
-    kc_nets_t *nets,
-    kc_nets_socket_t socket,
-    unsigned char **out_data,
-    size_t *out_size
-) {
-    unsigned char *response;
-    size_t used;
-    size_t capacity;
-    int rc;
-
-    response = NULL;
-    used = 0U;
-    capacity = 0U;
-    rc = KC_NETS_OK;
-
-    for (;;) {
-        unsigned char buffer[65536];
-#ifdef _WIN32
-        int count;
-#else
-        ssize_t count;
-#endif
-        if (kc_nets_is_stopped(nets)) {
-            rc = KC_NETS_ESTOP;
-            break;
-        }
-#ifdef _WIN32
-        count = recv(socket, (char *)buffer, (int)sizeof(buffer), 0);
-#else
-        count = recv(socket, buffer, sizeof(buffer), 0);
-#endif
-        if (count == 0) {
-            if (kc_nets_is_stopped(nets)) rc = KC_NETS_ESTOP;
-            break;
-        }
-        if (count < 0) {
-            rc = kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
-            break;
-        }
-        rc = kc_nets_append(
-            &response,
-            &used,
-            &capacity,
-            buffer,
-            (size_t)count
-        );
-        if (rc != KC_NETS_OK) break;
-    }
-
-    if (rc != KC_NETS_OK) {
-        free(response);
-        return rc;
-    }
-    *out_data = response;
-    *out_size = used;
-    return KC_NETS_OK;
-}
-
-#ifdef KC_NETS_OPENSSL
-/**
- * Run one TLS stream transfer.
- * @param nets Transfer.
- * @param socket Connected socket.
- * @param out_data Receives owned response bytes.
- * @param out_size Receives response size.
- * @return Public status.
- */
-static int kc_nets_tls_transfer(
-    kc_nets_t *nets,
-    kc_nets_socket_t socket,
-    unsigned char **out_data,
-    size_t *out_size
-) {
-    SSL_CTX *context;
-    SSL *ssl;
-    unsigned char *response;
-    size_t used;
-    size_t capacity;
-    size_t sent;
-    int rc;
-
-    context = SSL_CTX_new(TLS_client_method());
-    if (context == NULL) return KC_NETS_ENET;
-    ssl = SSL_new(context);
-    if (ssl == NULL) {
-        SSL_CTX_free(context);
-        return KC_NETS_ENET;
-    }
-
-    SSL_set_fd(ssl, (int)socket);
-    SSL_set_tlsext_host_name(ssl, nets->host);
-    if (SSL_connect(ssl) != 1) {
-        SSL_free(ssl);
-        SSL_CTX_free(context);
-        return kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
-    }
-
-    sent = 0U;
-    while (sent < nets->data_size) {
-        int count;
-
-        if (kc_nets_is_stopped(nets)) {
-            SSL_free(ssl);
-            SSL_CTX_free(context);
-            return KC_NETS_ESTOP;
-        }
-        count = SSL_write(
-            ssl,
-            nets->data + sent,
-            (int)(nets->data_size - sent)
-        );
-        if (count <= 0) {
-            SSL_free(ssl);
-            SSL_CTX_free(context);
-            return kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
-        }
-        sent += (size_t)count;
-    }
-
-    response = NULL;
-    used = 0U;
-    capacity = 0U;
-    rc = KC_NETS_OK;
-    SSL_shutdown(ssl);
-
-    for (;;) {
-        unsigned char buffer[65536];
-        int count;
-
-        if (kc_nets_is_stopped(nets)) {
-            rc = KC_NETS_ESTOP;
-            break;
-        }
-        count = SSL_read(ssl, buffer, (int)sizeof(buffer));
-        if (count <= 0) break;
-        rc = kc_nets_append(
-            &response,
-            &used,
-            &capacity,
-            buffer,
-            (size_t)count
-        );
-        if (rc != KC_NETS_OK) break;
-    }
-
-    SSL_free(ssl);
-    SSL_CTX_free(context);
-    if (rc != KC_NETS_OK) {
-        free(response);
-        return rc;
-    }
-    *out_data = response;
-    *out_size = used;
-    return KC_NETS_OK;
-}
-#endif
-
-/**
- * Try one resolved destination address.
- * @param nets Transfer.
- * @param address Resolved address.
- * @param out_data Receives owned response bytes.
- * @param out_size Receives response size.
- * @return Public status.
- */
-static int kc_nets_transfer_address(
-    kc_nets_t *nets,
-    const struct addrinfo *address,
-    unsigned char **out_data,
-    size_t *out_size
-) {
-    kc_nets_socket_t sock;
-    int type;
-    int rc;
-
-    if (kc_nets_is_stopped(nets)) return KC_NETS_ESTOP;
-
-    type = nets->protocol == KC_NETS_UDP ? SOCK_DGRAM : SOCK_STREAM;
-    sock = socket(address->ai_family, type, address->ai_protocol);
-    if (sock == KC_NETS_BAD_SOCKET) return KC_NETS_ENET;
-    kc_nets_set_socket(nets, sock);
-
-    if (kc_nets_is_stopped(nets)) {
-        rc = KC_NETS_ESTOP;
-    } else if (nets->protocol == KC_NETS_UDP) {
-#ifdef _WIN32
-        int count = sendto(
-            sock,
-            (const char *)nets->data,
-            (int)nets->data_size,
-            0,
-            address->ai_addr,
-            (int)address->ai_addrlen
-        );
-#else
-        ssize_t count = sendto(
-            sock,
-            nets->data,
-            nets->data_size,
-            0,
-            address->ai_addr,
-            address->ai_addrlen
-        );
-#endif
-        if (count < 0 || (size_t)count != nets->data_size) {
-            rc = kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
-        } else {
-            rc = KC_NETS_OK;
-        }
-    } else if (connect(sock, address->ai_addr, address->ai_addrlen) != 0) {
-        rc = kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
-    } else {
-#ifdef KC_NETS_OPENSSL
-        if (nets->protocol == KC_NETS_TLS) {
-            rc = kc_nets_tls_transfer(nets, sock, out_data, out_size);
-        } else
-#endif
-        {
-            rc = kc_nets_send_all(nets, sock);
-            if (rc == KC_NETS_OK) {
-#ifdef _WIN32
-                shutdown(sock, SD_SEND);
-#else
-                shutdown(sock, SHUT_WR);
-#endif
-                rc = kc_nets_recv_plain(nets, sock, out_data, out_size);
-            }
-        }
-    }
-
-    kc_nets_clear_socket(nets, sock);
-    kc_nets_socket_close(sock);
-    return rc;
-}
-
-/**
- * Execute one transfer on the worker thread.
- * @param nets Transfer.
- * @param out_data Receives owned completion response bytes.
- * @param out_size Receives response size.
- * @return Public terminal status.
- */
-static int kc_nets_run(
-    kc_nets_t *nets,
-    unsigned char **out_data,
-    size_t *out_size
+static int kc_nets_connect(
+    const kc_nets_options_t *options,
+    kc_nets_fd_t *out_fd
 ) {
     struct addrinfo hints;
-    struct addrinfo *addresses;
-    struct addrinfo *address;
-    char port[16];
+    struct addrinfo *result;
+    struct addrinfo *item;
+    char service[16];
     int rc;
-
-    *out_data = NULL;
-    *out_size = 0U;
-
-#ifndef KC_NETS_OPENSSL
-    if (nets->protocol == KC_NETS_TLS) return KC_NETS_ENET;
-#endif
-    if (kc_nets_platform_init() != 0) return KC_NETS_ENET;
-    if (kc_nets_is_stopped(nets)) {
-        kc_nets_platform_cleanup();
-        return KC_NETS_ESTOP;
-    }
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype =
-        nets->protocol == KC_NETS_UDP ? SOCK_DGRAM : SOCK_STREAM;
-    snprintf(port, sizeof(port), "%u", (unsigned int)nets->port);
+    hints.ai_socktype = options->protocol == KC_NETS_UDP
+        ? SOCK_DGRAM
+        : SOCK_STREAM;
 
-    addresses = NULL;
-    if (getaddrinfo(nets->host, port, &hints, &addresses) != 0) {
-        kc_nets_platform_cleanup();
-        return kc_nets_is_stopped(nets) ? KC_NETS_ESTOP : KC_NETS_ENET;
+    snprintf(service, sizeof(service), "%u", (unsigned)options->port);
+    result = NULL;
+    rc = getaddrinfo(options->host, service, &hints, &result);
+    if (rc != 0) return KC_NETS_ENET;
+
+    for (item = result; item != NULL; item = item->ai_next) {
+        kc_nets_fd_t fd;
+
+        fd = socket(item->ai_family, item->ai_socktype, item->ai_protocol);
+        if (fd == KC_NETS_FD_INVALID) continue;
+        kc_nets_disable_sigpipe(fd);
+
+#ifdef _WIN32
+        rc = connect(
+            fd,
+            item->ai_addr,
+            (int)item->ai_addrlen
+        );
+#else
+        rc = connect(
+            fd,
+            item->ai_addr,
+            item->ai_addrlen
+        );
+#endif
+        if (rc == 0 && kc_nets_nonblocking(fd) == KC_NETS_OK) {
+            *out_fd = fd;
+            freeaddrinfo(result);
+            return KC_NETS_OK;
+        }
+
+        KC_NETS_CLOSE(fd);
     }
 
-    rc = KC_NETS_ENET;
-    for (address = addresses; address != NULL; address = address->ai_next) {
-        rc = kc_nets_transfer_address(nets, address, out_data, out_size);
-        if (rc == KC_NETS_OK || rc == KC_NETS_ESTOP) break;
-    }
-
-    freeaddrinfo(addresses);
-    kc_nets_platform_cleanup();
-    return rc;
+    freeaddrinfo(result);
+    return KC_NETS_ENET;
 }
 
 /**
- * Destroy transfer memory after its thread is no longer externally joinable.
- * @param nets Transfer.
- * @return None.
+ * Returns whether one endpoint can still exchange bytes.
+ * @param nets Endpoint.
+ * @return Non-zero while the endpoint is active.
+ */
+static int kc_nets_active(kc_nets_t *nets) {
+    int active;
+
+    kc_nets_lock(nets);
+    active = !nets->stop && !nets->terminal;
+    kc_nets_unlock(nets);
+    return active;
+}
+
+/**
+ * Returns whether one endpoint has queued output.
+ * @param nets Endpoint.
+ * @return Non-zero when output is queued.
+ */
+static int kc_nets_has_output(kc_nets_t *nets) {
+    int has_output;
+
+    kc_nets_lock(nets);
+    has_output = nets->out_head != NULL;
+    kc_nets_unlock(nets);
+    return has_output;
+}
+
+/**
+ * Delivers received bytes when the endpoint remains active.
+ * @param nets Endpoint.
+ * @param data Received bytes.
+ * @param size Byte count.
+ * @return void.
+ */
+static void kc_nets_deliver(
+    kc_nets_t *nets,
+    const void *data,
+    size_t size
+) {
+    kc_nets_receive_fn receive;
+    void *userdata;
+
+    receive = NULL;
+    userdata = NULL;
+
+    kc_nets_lock(nets);
+    if (!nets->stop && !nets->terminal) {
+        receive = nets->receive;
+        userdata = nets->userdata;
+    }
+    kc_nets_unlock(nets);
+
+    if (receive != NULL) receive(data, size, userdata);
+}
+
+/**
+ * Ends one TCP endpoint after a remote disconnect.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_disconnected(kc_nets_t *nets) {
+    kc_nets_disconnect_fn disconnect;
+    void *userdata;
+
+    disconnect = NULL;
+    userdata = NULL;
+
+    kc_nets_lock(nets);
+    if (!nets->stop && !nets->terminal) {
+        nets->terminal = 1;
+        disconnect = nets->disconnect;
+        userdata = nets->userdata;
+    }
+    kc_nets_unlock(nets);
+
+    if (disconnect != NULL) disconnect(userdata);
+}
+
+/**
+ * Ends one endpoint after an asynchronous network failure.
+ * @param nets Endpoint.
+ * @param status Public failure status.
+ * @return void.
+ */
+static void kc_nets_fail(kc_nets_t *nets, int status) {
+    kc_nets_error_fn error;
+    void *userdata;
+
+    error = NULL;
+    userdata = NULL;
+
+    kc_nets_lock(nets);
+    if (!nets->stop && !nets->terminal) {
+        nets->terminal = 1;
+        error = nets->error;
+        userdata = nets->userdata;
+    }
+    kc_nets_unlock(nets);
+
+    if (error != NULL) error(status, userdata);
+}
+
+/**
+ * Receives one TCP stream chunk.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_receive_tcp(kc_nets_t *nets) {
+    unsigned char buffer[KC_NETS_BUFFER_SIZE];
+    int received;
+
+    received = (int)recv(
+        nets->fd,
+        (char *)buffer,
+        (int)sizeof(buffer),
+        0
+    );
+    if (received > 0) {
+        kc_nets_deliver(nets, buffer, (size_t)received);
+        return;
+    }
+    if (received == 0) {
+        kc_nets_disconnected(nets);
+        return;
+    }
+    if (!kc_nets_would_block()) kc_nets_fail(nets, KC_NETS_ENET);
+}
+
+/**
+ * Receives one UDP datagram.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_receive_udp(kc_nets_t *nets) {
+    unsigned char buffer[KC_NETS_BUFFER_SIZE];
+    int received;
+
+    received = (int)recv(
+        nets->fd,
+        (char *)buffer,
+        (int)sizeof(buffer),
+        0
+    );
+    if (received >= 0) {
+        kc_nets_deliver(nets, buffer, (size_t)received);
+        return;
+    }
+    if (!kc_nets_would_block()) kc_nets_fail(nets, KC_NETS_ENET);
+}
+
+/**
+ * Flushes queued TCP stream bytes.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_flush_tcp(kc_nets_t *nets) {
+    int failed;
+
+    failed = 0;
+    kc_nets_lock(nets);
+    while (
+        nets->out_head != NULL &&
+        !nets->stop &&
+        !nets->terminal
+    ) {
+        kc_nets_output_t *output;
+        size_t remain;
+        int amount;
+        int sent;
+
+        output = nets->out_head;
+        remain = output->size - output->offset;
+        amount = remain > (size_t)INT_MAX ? INT_MAX : (int)remain;
+
+        if (amount == 0) {
+            nets->out_head = output->next;
+            if (nets->out_head == NULL) nets->out_tail = NULL;
+            free(output->data);
+            free(output);
+            continue;
+        }
+
+        sent = (int)send(
+            nets->fd,
+            (const char *)output->data + output->offset,
+            amount,
+            KC_NETS_SEND_FLAGS
+        );
+        if (sent > 0) {
+            output->offset += (size_t)sent;
+            continue;
+        }
+        if (sent < 0 && kc_nets_would_block()) break;
+
+        failed = 1;
+        break;
+    }
+    kc_nets_unlock(nets);
+
+    if (failed) kc_nets_fail(nets, KC_NETS_ENET);
+}
+
+/**
+ * Flushes queued UDP datagrams.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_flush_udp(kc_nets_t *nets) {
+    for (;;) {
+        kc_nets_output_t *output;
+        int sent;
+
+        kc_nets_lock(nets);
+        if (nets->stop || nets->terminal) {
+            kc_nets_unlock(nets);
+            return;
+        }
+
+        output = nets->out_head;
+        if (output == NULL) {
+            kc_nets_unlock(nets);
+            return;
+        }
+
+        sent = (int)send(
+            nets->fd,
+            (const char *)output->data,
+            (int)output->size,
+            KC_NETS_SEND_FLAGS
+        );
+        if (sent == (int)output->size) {
+            nets->out_head = output->next;
+            if (nets->out_head == NULL) nets->out_tail = NULL;
+            kc_nets_unlock(nets);
+            free(output->data);
+            free(output);
+            continue;
+        }
+        if (sent < 0 && kc_nets_would_block()) {
+            kc_nets_unlock(nets);
+            return;
+        }
+
+        kc_nets_unlock(nets);
+        kc_nets_fail(nets, KC_NETS_ENET);
+        return;
+    }
+}
+
+/**
+ * Closes the worker-owned socket.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_worker_socket_close(kc_nets_t *nets) {
+    kc_nets_fd_t fd;
+
+    fd = KC_NETS_FD_INVALID;
+
+    kc_nets_lock(nets);
+    if (nets->fd != KC_NETS_FD_INVALID) {
+        fd = nets->fd;
+        nets->fd = KC_NETS_FD_INVALID;
+    }
+    kc_nets_unlock(nets);
+
+    if (fd != KC_NETS_FD_INVALID) KC_NETS_CLOSE(fd);
+}
+
+/**
+ * Runs one endpoint worker loop.
+ * @param nets Endpoint.
+ * @return void.
+ */
+static void kc_nets_worker_run(kc_nets_t *nets) {
+    while (kc_nets_active(nets)) {
+        kc_nets_pollfd_t pollfd;
+        int ready;
+
+        memset(&pollfd, 0, sizeof(pollfd));
+        pollfd.fd = nets->fd;
+        pollfd.events = POLLIN;
+        if (kc_nets_has_output(nets)) pollfd.events |= POLLOUT;
+
+        ready = KC_NETS_POLL(&pollfd, 1U, KC_NETS_POLL_TIMEOUT_MS);
+        if (ready < 0) {
+            if (kc_nets_interrupted()) continue;
+            kc_nets_fail(nets, KC_NETS_ENET);
+            break;
+        }
+        if (ready == 0) continue;
+        if (!kc_nets_active(nets)) break;
+
+        if ((pollfd.revents & POLLIN) != 0) {
+            if (nets->protocol == KC_NETS_UDP) {
+                kc_nets_receive_udp(nets);
+            } else {
+                kc_nets_receive_tcp(nets);
+            }
+        }
+        if (!kc_nets_active(nets)) break;
+
+        if ((pollfd.revents & POLLOUT) != 0) {
+            if (nets->protocol == KC_NETS_UDP) {
+                kc_nets_flush_udp(nets);
+            } else {
+                kc_nets_flush_tcp(nets);
+            }
+        }
+        if (!kc_nets_active(nets)) break;
+
+        if ((pollfd.revents & (POLLERR | POLLNVAL)) != 0) {
+            kc_nets_fail(nets, KC_NETS_ENET);
+            break;
+        }
+        if ((pollfd.revents & POLLHUP) != 0) {
+            if (nets->protocol == KC_NETS_TCP) {
+                kc_nets_disconnected(nets);
+            } else {
+                kc_nets_fail(nets, KC_NETS_ENET);
+            }
+            break;
+        }
+    }
+}
+
+/**
+ * Destroys one endpoint after its worker is no longer joinable.
+ * @param nets Endpoint.
+ * @return void.
  */
 static void kc_nets_destroy(kc_nets_t *nets) {
-#ifdef _WIN32
-    DeleteCriticalSection(&nets->lock);
-#else
-    pthread_mutex_destroy(&nets->lock);
-#endif
-    free(nets->data);
-    free(nets->host);
+    if (nets == NULL) return;
+
+    if (nets->fd != KC_NETS_FD_INVALID) {
+        KC_NETS_CLOSE(nets->fd);
+        nets->fd = KC_NETS_FD_INVALID;
+    }
+    kc_nets_output_free(nets->out_head);
+    if (nets->mutex_ready) {
+        kc_nets_mutex_close(&nets->mutex);
+        nets->mutex_ready = 0;
+    }
+    if (nets->platform_ready) {
+        kc_nets_platform_close();
+        nets->platform_ready = 0;
+    }
     free(nets);
 }
 
+#ifdef _WIN32
 /**
- * Run one asynchronous transfer and deliver its terminal completion.
- * @param userdata Transfer pointer.
- * @return Platform thread return value.
+ * Runs one outbound endpoint worker thread.
+ * @param arg Endpoint pointer.
+ * @return Thread exit code.
  */
-#ifdef _WIN32
-static DWORD WINAPI kc_nets_worker(void *userdata)
-#else
-static void *kc_nets_worker(void *userdata)
-#endif
-{
+static DWORD WINAPI kc_nets_worker_entry(LPVOID arg) {
     kc_nets_t *nets;
-    unsigned char *response;
-    size_t response_size;
-    int status;
-    nets = (kc_nets_t *)userdata;
-    response = NULL;
-    response_size = 0U;
-    status = kc_nets_run(nets, &response, &response_size);
+    int self_close;
 
-    nets->complete(status, response, response_size, nets->userdata);
-    free(response);
+    nets = (kc_nets_t *)arg;
+    kc_nets_worker_run(nets);
+    kc_nets_worker_socket_close(nets);
 
-#ifdef _WIN32
+    kc_nets_lock(nets);
+    self_close = nets->self_close;
+    kc_nets_unlock(nets);
+
+    if (self_close) {
+        CloseHandle(nets->worker);
+        nets->worker = NULL;
+        nets->worker_started = 0;
+        kc_nets_destroy(nets);
+    }
     return 0;
+}
 #else
+/**
+ * Runs one outbound endpoint worker thread.
+ * @param arg Endpoint pointer.
+ * @return NULL.
+ */
+static void *kc_nets_worker_entry(void *arg) {
+    kc_nets_t *nets;
+    int self_close;
+
+    nets = (kc_nets_t *)arg;
+    kc_nets_worker_run(nets);
+    kc_nets_worker_socket_close(nets);
+
+    kc_nets_lock(nets);
+    self_close = nets->self_close;
+    kc_nets_unlock(nets);
+
+    if (self_close) {
+        (void)pthread_detach(pthread_self());
+        nets->worker_started = 0;
+        kc_nets_destroy(nets);
+    }
     return NULL;
+}
 #endif
+
+/**
+ * Starts one endpoint worker.
+ * @param nets Endpoint.
+ * @return KC_NETS_OK on success, otherwise KC_NETS_ENET.
+ */
+static int kc_nets_worker_start(kc_nets_t *nets) {
+#ifdef _WIN32
+    nets->worker = CreateThread(
+        NULL,
+        0,
+        kc_nets_worker_entry,
+        nets,
+        0,
+        &nets->worker_id
+    );
+    if (nets->worker == NULL) return KC_NETS_ENET;
+#else
+    if (
+        pthread_create(
+            &nets->worker,
+            NULL,
+            kc_nets_worker_entry,
+            nets
+        ) != 0
+    ) {
+        return KC_NETS_ENET;
+    }
+#endif
+    nets->worker_started = 1;
+    return KC_NETS_OK;
 }
 
 /**
- * Start one asynchronous network transfer.
- * @param out Receives the transfer handle.
- * @param host Destination host or IP address.
- * @param port Destination port.
- * @param protocol Transport selector.
- * @param data Input bytes copied by the library.
- * @param data_size Input size in bytes.
- * @param complete Terminal completion.
- * @param userdata Caller data passed to the completion.
- * @return KC_NETS_OK when launched, or a negative status code.
+ * Joins one endpoint worker.
+ * @param nets Endpoint.
+ * @return void.
  */
-int kc_nets_send(
+static void kc_nets_worker_join(kc_nets_t *nets) {
+    if (!nets->worker_started) return;
+#ifdef _WIN32
+    WaitForSingleObject(nets->worker, INFINITE);
+    CloseHandle(nets->worker);
+    nets->worker = NULL;
+#else
+    (void)pthread_join(nets->worker, NULL);
+#endif
+    nets->worker_started = 0;
+}
+
+/**
+ * Opens one persistent outbound TCP or UDP endpoint.
+ * @param out Destination endpoint pointer.
+ * @param options Endpoint options.
+ * @param receive Incoming byte callback.
+ * @param disconnect Optional TCP disconnect callback.
+ * @param error Optional asynchronous failure callback.
+ * @param userdata Consumer callback data.
+ * @return KC_NETS_OK on success, otherwise a negative status.
+ */
+int kc_nets_open(
     kc_nets_t **out,
-    const char *host,
-    unsigned short port,
-    int protocol,
-    const void *data,
-    size_t data_size,
-    kc_nets_complete_fn complete,
+    const kc_nets_options_t *options,
+    kc_nets_receive_fn receive,
+    kc_nets_disconnect_fn disconnect,
+    kc_nets_error_fn error,
     void *userdata
 ) {
     kc_nets_t *nets;
+    int rc;
 
     if (out == NULL) return KC_NETS_EINVAL;
     *out = NULL;
-    if (host == NULL || host[0] == '\0' || data == NULL || complete == NULL) {
+    if (
+        options == NULL ||
+        options->host == NULL ||
+        options->host[0] == '\0' ||
+        options->port == 0U ||
+        (
+            options->protocol != KC_NETS_TCP &&
+            options->protocol != KC_NETS_UDP
+        ) ||
+        receive == NULL
+    ) {
         return KC_NETS_EINVAL;
     }
-    if (protocol != KC_NETS_TCP &&
-        protocol != KC_NETS_UDP &&
-        protocol != KC_NETS_TLS) {
-        return KC_NETS_EINVAL;
-    }
-#ifndef KC_NETS_OPENSSL
-    if (protocol == KC_NETS_TLS) return KC_NETS_ENET;
-#endif
 
     nets = (kc_nets_t *)calloc(1, sizeof(*nets));
-    if (nets == NULL) return KC_NETS_ENET;
-    nets->host = kc_nets_dup(host);
-    if (data_size != 0U) {
-        nets->data = (unsigned char *)malloc(data_size);
-    } else {
-        nets->data = (unsigned char *)malloc(1U);
-    }
-    if (nets->host == NULL || nets->data == NULL) {
-        free(nets->data);
-        free(nets->host);
-        free(nets);
-        return KC_NETS_ENET;
-    }
-    if (data_size != 0U) memcpy(nets->data, data, data_size);
-
-    nets->port = port;
-    nets->protocol = protocol;
-    nets->data_size = data_size;
-    nets->complete = complete;
+    if (nets == NULL) return KC_NETS_ENOMEM;
+    nets->fd = KC_NETS_FD_INVALID;
+    nets->protocol = options->protocol;
+    nets->receive = receive;
+    nets->disconnect = disconnect;
+    nets->error = error;
     nets->userdata = userdata;
-    nets->socket = KC_NETS_BAD_SOCKET;
 
-#ifdef _WIN32
-    InitializeCriticalSection(&nets->lock);
-    nets->thread = CreateThread(
-        NULL,
-        0,
-        kc_nets_worker,
-        nets,
-        0,
-        &nets->thread_id
-    );
-    if (nets->thread == NULL) {
-        kc_nets_destroy(nets);
-        return KC_NETS_ENET;
-    }
-#else
-    if (pthread_mutex_init(&nets->lock, NULL) != 0) {
-        free(nets->data);
-        free(nets->host);
+    rc = kc_nets_platform_open();
+    if (rc != KC_NETS_OK) {
         free(nets);
-        return KC_NETS_ENET;
+        return rc;
     }
-    if (pthread_create(&nets->thread, NULL, kc_nets_worker, nets) != 0) {
+    nets->platform_ready = 1;
+
+    if (kc_nets_mutex_open(&nets->mutex) != 0) {
         kc_nets_destroy(nets);
         return KC_NETS_ENET;
     }
-#endif
+    nets->mutex_ready = 1;
+
+    rc = kc_nets_connect(options, &nets->fd);
+    if (rc != KC_NETS_OK) {
+        kc_nets_destroy(nets);
+        return rc;
+    }
+
+    rc = kc_nets_worker_start(nets);
+    if (rc != KC_NETS_OK) {
+        kc_nets_destroy(nets);
+        return rc;
+    }
 
     *out = nets;
     return KC_NETS_OK;
 }
 
 /**
- * Request graceful interruption of one transfer.
- * @param nets Transfer handle.
- * @return KC_NETS_OK on success, or KC_NETS_EINVAL for NULL.
+ * Queues bytes for one open endpoint.
+ * @param nets Endpoint.
+ * @param data Source bytes.
+ * @param data_size Byte count.
+ * @return KC_NETS_OK on success, otherwise a negative status.
  */
-int kc_nets_stop(kc_nets_t *nets) {
-    kc_nets_socket_t socket;
+int kc_nets_send(
+    kc_nets_t *nets,
+    const void *data,
+    size_t data_size
+) {
+    kc_nets_output_t *output;
 
-    if (nets == NULL) return KC_NETS_EINVAL;
+    if (nets == NULL || (data == NULL && data_size != 0U)) {
+        return KC_NETS_EINVAL;
+    }
+    if (nets->protocol == KC_NETS_UDP && data_size > (size_t)INT_MAX) {
+        return KC_NETS_EINVAL;
+    }
+
+    output = kc_nets_output_new(data, data_size);
+    if (output == NULL) return KC_NETS_ENOMEM;
 
     kc_nets_lock(nets);
-    nets->stopped = 1;
-    socket = nets->socket;
-    if (socket != KC_NETS_BAD_SOCKET) kc_nets_socket_shutdown(socket);
+    if (nets->stop || nets->terminal) {
+        kc_nets_unlock(nets);
+        kc_nets_output_free(output);
+        return KC_NETS_ECLOSED;
+    }
+
+    if (nets->out_tail != NULL) {
+        nets->out_tail->next = output;
+    } else {
+        nets->out_head = output;
+    }
+    nets->out_tail = output;
     kc_nets_unlock(nets);
+
     return KC_NETS_OK;
 }
 
 /**
- * Stop if necessary and release one transfer.
- * @param nets Transfer handle, or NULL.
- * @return None.
+ * Closes and releases one outbound endpoint.
+ * @param nets Endpoint, or NULL.
+ * @return void.
  */
 void kc_nets_close(kc_nets_t *nets) {
+    int from_worker;
+
     if (nets == NULL) return;
 
-    kc_nets_stop(nets);
 #ifdef _WIN32
-    WaitForSingleObject(nets->thread, INFINITE);
-    CloseHandle(nets->thread);
+    from_worker = nets->worker_started &&
+        GetCurrentThreadId() == nets->worker_id;
 #else
-    pthread_join(nets->thread, NULL);
+    from_worker = nets->worker_started &&
+        pthread_equal(pthread_self(), nets->worker);
 #endif
+
+    kc_nets_lock(nets);
+    nets->stop = 1;
+    if (from_worker) nets->self_close = 1;
+    if (nets->fd != KC_NETS_FD_INVALID) {
+        kc_nets_socket_shutdown(nets->fd);
+    }
+    kc_nets_unlock(nets);
+
+    if (from_worker) return;
+
+    kc_nets_worker_join(nets);
     kc_nets_destroy(nets);
 }
 
 /**
- * Return a static message for a public status code.
- * @param code Public status code.
+ * Returns a static message for one public status code.
+ * @param status Public status code.
  * @return Static status message.
  */
-const char *kc_nets_strerror(int code) {
-    switch (code) {
+const char *kc_nets_strerror(int status) {
+    switch (status) {
         case KC_NETS_OK: return "ok";
         case KC_NETS_EINVAL: return "invalid argument";
         case KC_NETS_ENET: return "network error";
-        case KC_NETS_ESTOP: return "operation stopped";
+        case KC_NETS_ECLOSED: return "endpoint closed";
+        case KC_NETS_ENOMEM: return "out of memory";
         default: return "unknown error";
     }
-}
-
-/**
- * Check whether TLS support is compiled in.
- * @return 1 when TLS is available, otherwise 0.
- */
-int kc_nets_tls_available(void) {
-#ifdef KC_NETS_OPENSSL
-    return 1;
-#else
-    return 0;
-#endif
 }
 
 #ifndef KC_NETS_BUILD_VERSION
@@ -756,8 +972,8 @@ int kc_nets_tls_available(void) {
 #endif
 
 /**
- * Return the build version generated at compile time.
- * @return Unix timestamp for the current build.
+ * Returns the build version generated at compile time.
+ * @return Build version.
  */
 uint64_t kc_nets_version(void) {
     return (uint64_t)KC_NETS_BUILD_VERSION;
