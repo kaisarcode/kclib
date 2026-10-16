@@ -41,6 +41,13 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     )
 endif()
 
+if(ANDROID)
+    set_source_files_properties(
+        lib/mbedtls/library/ctr_drbg.c
+        PROPERTIES COMPILE_OPTIONS "-w;-O2"
+    )
+endif()
+
 set(TLSIO_SOURCES
     src/libtlsio.c
     ${MBEDTLS_SOURCES}
@@ -59,9 +66,11 @@ if(NOT TLSIO_TEST_EXTERNAL_ARTIFACTS)
         lib/mbedtls/include
         lib/mbedtls/library
     )
-    target_compile_definitions(tlsio_static PRIVATE
-        MBEDTLS_USER_CONFIG_FILE="config.h"
-    )
+    if(NOT TLSIO_BUILD_TESTS)
+        target_compile_definitions(tlsio_static PRIVATE
+            MBEDTLS_USER_CONFIG_FILE="config.h"
+        )
+    endif()
 
     add_library(tlsio_shared SHARED ${TLSIO_SOURCES})
     set_target_properties(tlsio_shared PROPERTIES OUTPUT_NAME "tlsio")
@@ -72,9 +81,11 @@ if(NOT TLSIO_TEST_EXTERNAL_ARTIFACTS)
         lib/mbedtls/include
         lib/mbedtls/library
     )
-    target_compile_definitions(tlsio_shared PRIVATE
-        MBEDTLS_USER_CONFIG_FILE="config.h"
-    )
+    if(NOT TLSIO_BUILD_TESTS)
+        target_compile_definitions(tlsio_shared PRIVATE
+            MBEDTLS_USER_CONFIG_FILE="config.h"
+        )
+    endif()
 
     if(WIN32)
         target_link_libraries(tlsio_static PRIVATE ws2_32 bcrypt crypt32)
@@ -109,9 +120,24 @@ if(TLSIO_BUILD_TESTS)
         set(TLSIO_TEST_SHARED_TARGET tlsio_shared)
     endif()
 
+    foreach(tlsio_target tlsio_static tlsio_shared)
+        if(TARGET ${tlsio_target})
+            target_compile_definitions(${tlsio_target} PRIVATE TLSIO_BUILD_TESTS)
+        endif()
+    endforeach()
     add_executable(tlsio_contract_test src/test.c)
-    target_include_directories(tlsio_contract_test PRIVATE src)
-    target_link_libraries(tlsio_contract_test PRIVATE ${TLSIO_TEST_SHARED_TARGET})
+    target_include_directories(tlsio_contract_test PRIVATE
+        src lib/mbedtls lib/mbedtls/include lib/mbedtls/library
+    )
+    target_link_libraries(tlsio_contract_test PRIVATE
+        ${TLSIO_TEST_SHARED_TARGET}
+    )
+    if(WIN32)
+        target_link_libraries(tlsio_contract_test PRIVATE ws2_32)
+    else()
+        find_package(Threads REQUIRED)
+        target_link_libraries(tlsio_contract_test PRIVATE Threads::Threads)
+    endif()
     add_custom_command(TARGET tlsio_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:${TLSIO_TEST_SHARED_TARGET}>

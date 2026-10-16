@@ -25,6 +25,10 @@
 #include <mbedtls/x509_crt.h>
 #include <psa/crypto.h>
 
+#if defined(TLSIO_BUILD_TESTS) && !defined(_WIN32)
+extern const unsigned char kc_tlsio_test_ca_pem[];
+#endif
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
@@ -225,7 +229,7 @@ static int kc_tlsio_recv(
     return (int)count;
 }
 
-#if !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(TLSIO_BUILD_TESTS)
 
 /**
  * Loads trusted roots from the native Unix certificate store.
@@ -503,10 +507,20 @@ static int kc_tlsio_prepare_trust(kc_tlsio_t *tls) {
     mbedtls_ssl_conf_authmode(&tls->config, MBEDTLS_SSL_VERIFY_OPTIONAL);
     return KC_TLSIO_OK;
 #else
+#ifdef TLSIO_BUILD_TESTS
+    if (mbedtls_x509_crt_parse(
+            &tls->roots,
+            kc_tlsio_test_ca_pem,
+            strlen((const char *)kc_tlsio_test_ca_pem) + 1U
+        ) != 0) {
+        return KC_TLSIO_EVERIFY;
+    }
+#else
     int rc;
 
     rc = kc_tlsio_load_roots(&tls->roots);
     if (rc != KC_TLSIO_OK) return rc;
+#endif
     mbedtls_ssl_conf_ca_chain(&tls->config, &tls->roots, NULL);
     mbedtls_ssl_conf_authmode(&tls->config, MBEDTLS_SSL_VERIFY_REQUIRED);
     return KC_TLSIO_OK;
