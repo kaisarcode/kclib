@@ -1,5 +1,5 @@
 /**
- * test.c - libhpm public API contract tests.
+ * test.c - libpunch public API contract tests.
  * Summary: Validates direct and borrowed-UDP paths, datagrams, and lifecycle.
  *
  * Author:  KaisarCode
@@ -7,7 +7,7 @@
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
-#include "libhpm.h"
+#include "libpunch.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,9 +43,9 @@ static int test_case_total = 0;
 static int test_case_current = 0;
 
 typedef struct {
-    kc_hpm_endpoint_t peer;
-    kc_hpm_options_t options;
-    kc_hpm_path_t *path;
+    kc_punch_endpoint_t peer;
+    kc_punch_options_t options;
+    kc_punch_path_t *path;
     int status;
 } test_side_t;
 
@@ -116,7 +116,7 @@ static void *test_connect_thread(void *arg)
 #endif
 {
     test_side_t *side = (test_side_t *)arg;
-    side->status = kc_hpm_connect(&side->path, &side->options);
+    side->status = kc_punch_connect(&side->path, &side->options);
 #ifdef _WIN32
     return 0;
 #else
@@ -227,7 +227,7 @@ static int test_port_pair(int family, unsigned short *a, unsigned short *b)
  * @return 0 on success, 1 on failure.
  */
 static int test_start_pair(test_side_t *a, test_side_t *b,
-    kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
+    kc_punch_path_t **a_path, kc_punch_path_t **b_path)
 {
     test_thread_t a_thread;
     test_thread_t b_thread;
@@ -250,14 +250,14 @@ static int test_start_pair(test_side_t *a, test_side_t *b,
     if (started_b) pthread_join(b_thread, NULL);
 #endif
 
-    if (started_a && started_b && a->status == KC_HPM_OK &&
-        b->status == KC_HPM_OK && a->path && b->path) {
+    if (started_a && started_b && a->status == KC_PUNCH_OK &&
+        b->status == KC_PUNCH_OK && a->path && b->path) {
         *a_path = a->path;
         *b_path = b->path;
         return 0;
     }
-    kc_hpm_close(a->path);
-    kc_hpm_close(b->path);
+    kc_punch_close(a->path);
+    kc_punch_close(b->path);
     return 1;
 }
 
@@ -267,7 +267,7 @@ static int test_start_pair(test_side_t *a, test_side_t *b,
  * @param b_path Output path B.
  * @return 0 on success, 1 on failure.
  */
-static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
+static int test_pair(kc_punch_path_t **a_path, kc_punch_path_t **b_path)
 {
     unsigned attempt;
 
@@ -276,7 +276,7 @@ static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
     for (attempt = 0; attempt < 8U; ++attempt) {
         test_side_t a;
         test_side_t b;
-        kc_hpm_endpoint_t a_peers[2];
+        kc_punch_endpoint_t a_peers[2];
         unsigned short a_port;
         unsigned short b_port;
         unsigned short bad_port;
@@ -315,7 +315,7 @@ static int test_pair(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
  * @param b_path Output path B.
  * @return 0 on success, 1 on failure, 2 if IPv6 unavailable.
  */
-static int test_pair_ipv6(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
+static int test_pair_ipv6(kc_punch_path_t **a_path, kc_punch_path_t **b_path)
 {
     unsigned attempt;
 
@@ -356,7 +356,7 @@ static int test_pair_ipv6(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
  * @param b_path Output path B.
  * @return 0 on success, 1 on failure, 2 if IPv6 unavailable.
  */
-static int test_pair_mixed(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
+static int test_pair_mixed(kc_punch_path_t **a_path, kc_punch_path_t **b_path)
 {
     unsigned attempt;
 
@@ -367,7 +367,7 @@ static int test_pair_mixed(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
     for (attempt = 0; attempt < 4U; ++attempt) {
         test_side_t a;
         test_side_t b;
-        kc_hpm_endpoint_t a_peers[2];
+        kc_punch_endpoint_t a_peers[2];
         unsigned short a_port;
         unsigned short b_port;
         unsigned short dead_v6_port;
@@ -401,18 +401,18 @@ static int test_pair_mixed(kc_hpm_path_t **a_path, kc_hpm_path_t **b_path)
 }
 
 /**
- * Test case for kc_hpm_connect.
+ * Test case for kc_punch_connect.
  * @return 0 on pass, 1 on fail.
  */
-static int case_kc_hpm_connect(void)
+static int case_kc_punch_connect(void)
 {
-    const char *name = "kc_hpm_connect";
+    const char *name = "kc_punch_connect";
     const char *detail = "establishes a direct UDP path from supplied endpoints";
-    kc_hpm_path_t *a = NULL;
-    kc_hpm_path_t *b = NULL;
-    kc_hpm_options_t invalid;
-    kc_hpm_endpoint_t peer;
-    kc_hpm_options_t timeout_options;
+    kc_punch_path_t *a = NULL;
+    kc_punch_path_t *b = NULL;
+    kc_punch_options_t invalid;
+    kc_punch_endpoint_t peer;
+    kc_punch_options_t timeout_options;
     unsigned short timeout_port;
     int ipv6_rc;
     int mixed_rc;
@@ -420,24 +420,24 @@ static int case_kc_hpm_connect(void)
 
     memset(&invalid, 0, sizeof(invalid));
     fail += expect_true("rejects NULL destination",
-        kc_hpm_connect(NULL, &invalid) == KC_HPM_EINVAL);
+        kc_punch_connect(NULL, &invalid) == KC_PUNCH_EINVAL);
     fail += expect_true("rejects NULL options",
-        kc_hpm_connect(&a, NULL) == KC_HPM_EINVAL);
+        kc_punch_connect(&a, NULL) == KC_PUNCH_EINVAL);
     fail += expect_true("rejects empty peer set",
-        kc_hpm_connect(&a, &invalid) == KC_HPM_EINVAL);
+        kc_punch_connect(&a, &invalid) == KC_PUNCH_EINVAL);
     peer.host = NULL;
     peer.port = 1;
     invalid.peers = &peer;
     invalid.peer_count = 1;
     fail += expect_true("rejects invalid peer",
-        kc_hpm_connect(&a, &invalid) == KC_HPM_ENET);
-    peer.host = "not-a-valid-hpm-host.invalid";
+        kc_punch_connect(&a, &invalid) == KC_PUNCH_ENET);
+    peer.host = "not-a-valid-punch-host.invalid";
     fail += expect_true("rejects invalid host",
-        kc_hpm_connect(&a, &invalid) == KC_HPM_ENET);
+        kc_punch_connect(&a, &invalid) == KC_PUNCH_ENET);
     peer.host = "127.0.0.1";
     peer.port = 0;
     fail += expect_true("rejects invalid port",
-        kc_hpm_connect(&a, &invalid) == KC_HPM_ENET);
+        kc_punch_connect(&a, &invalid) == KC_PUNCH_ENET);
 
     timeout_port = test_ephemeral_port(AF_INET);
     memset(&timeout_options, 0, sizeof(timeout_options));
@@ -446,24 +446,24 @@ static int case_kc_hpm_connect(void)
     timeout_options.peers = &peer;
     timeout_options.peer_count = 1;
     timeout_options.timeout_ms = 30;
-    a = (kc_hpm_path_t *)(uintptr_t)1;
+    a = (kc_punch_path_t *)(uintptr_t)1;
     fail += expect_true("unreachable peer times out", timeout_port != 0 &&
-        kc_hpm_connect(&a, &timeout_options) == KC_HPM_ETIMEOUT);
+        kc_punch_connect(&a, &timeout_options) == KC_PUNCH_ETIMEOUT);
     fail += expect_true("failure clears path", a == NULL);
 
     fail += expect_true("IPv4 loopback pair establishes", test_pair(&a, &b) == 0);
     if (a && b) {
-        fail += expect_true("A reports local host", kc_hpm_local_host(a) != NULL);
-        fail += expect_true("A reports local port", kc_hpm_local_port(a) != 0);
-        fail += expect_true("A reports peer host", kc_hpm_peer_host(a) != NULL);
-        fail += expect_true("A reports peer port", kc_hpm_peer_port(a) != 0);
+        fail += expect_true("A reports local host", kc_punch_local_host(a) != NULL);
+        fail += expect_true("A reports local port", kc_punch_local_port(a) != 0);
+        fail += expect_true("A reports peer host", kc_punch_peer_host(a) != NULL);
+        fail += expect_true("A reports peer port", kc_punch_peer_port(a) != 0);
         fail += expect_true("A selected B endpoint",
-            kc_hpm_peer_port(a) == kc_hpm_local_port(b));
+            kc_punch_peer_port(a) == kc_punch_local_port(b));
         fail += expect_true("B selected A endpoint",
-            kc_hpm_peer_port(b) == kc_hpm_local_port(a));
+            kc_punch_peer_port(b) == kc_punch_local_port(a));
     }
-    kc_hpm_close(a);
-    kc_hpm_close(b);
+    kc_punch_close(a);
+    kc_punch_close(b);
     a = NULL;
     b = NULL;
 
@@ -473,8 +473,8 @@ static int case_kc_hpm_connect(void)
     } else {
         fail += expect_true("IPv6 loopback pair establishes", ipv6_rc == 0);
     }
-    kc_hpm_close(a);
-    kc_hpm_close(b);
+    kc_punch_close(a);
+    kc_punch_close(b);
     a = NULL;
     b = NULL;
 
@@ -484,25 +484,25 @@ static int case_kc_hpm_connect(void)
     } else {
         fail += expect_true("mixed-family list reaches viable IPv4 peer",
             mixed_rc == 0 && a && b &&
-            kc_hpm_peer_port(a) == kc_hpm_local_port(b));
+            kc_punch_peer_port(a) == kc_punch_local_port(b));
     }
-    kc_hpm_close(a);
-    kc_hpm_close(b);
+    kc_punch_close(a);
+    kc_punch_close(b);
 
     case_result(fail, name, detail);
     return fail ? 1 : 0;
 }
 
 /**
- * Test case for kc_hpm_datagrams.
+ * Test case for kc_punch_datagrams.
  * @return 0 on pass, 1 on fail.
  */
-static int case_kc_hpm_datagrams(void)
+static int case_kc_punch_datagrams(void)
 {
-    const char *name = "kc_hpm_datagrams";
+    const char *name = "kc_punch_datagrams";
     const char *detail = "sends and receives UDP datagrams through the path";
-    kc_hpm_path_t *a = NULL;
-    kc_hpm_path_t *b = NULL;
+    kc_punch_path_t *a = NULL;
+    kc_punch_path_t *b = NULL;
     void *data = NULL;
     size_t size = 0;
     unsigned char binary[] = { 0, 1, 0, 255 };
@@ -521,140 +521,140 @@ static int case_kc_hpm_datagrams(void)
     fail += expect_true("loopback pair establishes", test_pair(&a, &b) == 0);
     if (a && b) {
         fail += expect_true("send succeeds",
-            kc_hpm_send(a, "hello", 5) == KC_HPM_OK);
+            kc_punch_send(a, "hello", 5) == KC_PUNCH_OK);
         fail += expect_true("receive succeeds",
-            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK);
+            kc_punch_receive(b, &data, &size, 1000) == KC_PUNCH_OK);
         fail += expect_true("received size matches", size == 5);
         fail += expect_true("received bytes match",
             data && size == 5 && memcmp(data, "hello", 5) == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
         size = 0;
 
         fail += expect_true("control-sized application datagram succeeds",
-            kc_hpm_send(a, control_like, sizeof(control_like)) == KC_HPM_OK);
+            kc_punch_send(a, control_like, sizeof(control_like)) == KC_PUNCH_OK);
         fail += expect_true("control-like application datagram is delivered",
-            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            kc_punch_receive(b, &data, &size, 1000) == KC_PUNCH_OK &&
             size == sizeof(control_like) &&
             memcmp(data, control_like, sizeof(control_like)) == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
         size = 0;
 
         fail += expect_true("stale control packet can be sent",
-            kc_hpm_send(a, stale_control, sizeof(stale_control)) == KC_HPM_OK);
+            kc_punch_send(a, stale_control, sizeof(stale_control)) == KC_PUNCH_OK);
         fail += expect_true("application data after stale control can be sent",
-            kc_hpm_send(a, "after-stale", 11) == KC_HPM_OK);
+            kc_punch_send(a, "after-stale", 11) == KC_PUNCH_OK);
         fail += expect_true("stale control does not leak to application",
-            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            kc_punch_receive(b, &data, &size, 1000) == KC_PUNCH_OK &&
             size == 11 && memcmp(data, "after-stale", 11) == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
         size = 0;
 
         fail += expect_true("reverse send succeeds",
-            kc_hpm_send(b, binary, sizeof(binary)) == KC_HPM_OK);
+            kc_punch_send(b, binary, sizeof(binary)) == KC_PUNCH_OK);
         fail += expect_true("reverse binary receive succeeds",
-            kc_hpm_receive(a, &data, &size, 1000) == KC_HPM_OK);
+            kc_punch_receive(a, &data, &size, 1000) == KC_PUNCH_OK);
         fail += expect_true("binary datagram is preserved", data &&
             size == sizeof(binary) && memcmp(data, binary, sizeof(binary)) == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
         size = 0;
 
         fail += expect_true("empty datagram succeeds",
-            kc_hpm_send(a, NULL, 0) == KC_HPM_OK);
+            kc_punch_send(a, NULL, 0) == KC_PUNCH_OK);
         fail += expect_true("empty datagram is preserved",
-            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            kc_punch_receive(b, &data, &size, 1000) == KC_PUNCH_OK &&
             data && size == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
         size = 0;
 
         for (i = 0; i < sizeof(large); ++i) large[i] = (unsigned char)i;
         fail += expect_true("large datagram succeeds",
-            kc_hpm_send(a, large, sizeof(large)) == KC_HPM_OK);
+            kc_punch_send(a, large, sizeof(large)) == KC_PUNCH_OK);
         fail += expect_true("large datagram boundary is preserved",
-            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            kc_punch_receive(b, &data, &size, 1000) == KC_PUNCH_OK &&
             size == sizeof(large) && memcmp(data, large, sizeof(large)) == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
         size = 0;
 
         fail += expect_true("datagram above API maximum is rejected",
-            kc_hpm_send(a, large, 65536U) == KC_HPM_EINVAL);
+            kc_punch_send(a, large, 65536U) == KC_PUNCH_EINVAL);
         fail += expect_true("first consecutive datagram succeeds",
-            kc_hpm_send(a, "one", 3) == KC_HPM_OK);
+            kc_punch_send(a, "one", 3) == KC_PUNCH_OK);
         fail += expect_true("second consecutive datagram succeeds",
-            kc_hpm_send(a, "two", 3) == KC_HPM_OK);
+            kc_punch_send(a, "two", 3) == KC_PUNCH_OK);
         fail += expect_true("first datagram remains separate",
-            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            kc_punch_receive(b, &data, &size, 1000) == KC_PUNCH_OK &&
             size == 3 && memcmp(data, "one", 3) == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
         fail += expect_true("second datagram remains separate",
-            kc_hpm_receive(b, &data, &size, 1000) == KC_HPM_OK &&
+            kc_punch_receive(b, &data, &size, 1000) == KC_PUNCH_OK &&
             size == 3 && memcmp(data, "two", 3) == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
         size = 0;
 
         fail += expect_true("invalid send data is rejected",
-            kc_hpm_send(a, NULL, 1) == KC_HPM_EINVAL);
+            kc_punch_send(a, NULL, 1) == KC_PUNCH_EINVAL);
         fail += expect_true("invalid receive output is rejected",
-            kc_hpm_receive(a, NULL, &size, 1) == KC_HPM_EINVAL);
+            kc_punch_receive(a, NULL, &size, 1) == KC_PUNCH_EINVAL);
         fail += expect_true("receive timeout is observable",
-            kc_hpm_receive(b, &data, &size, 20) == KC_HPM_ETIMEOUT);
+            kc_punch_receive(b, &data, &size, 20) == KC_PUNCH_ETIMEOUT);
         fail += expect_true("timeout clears output", data == NULL && size == 0);
     }
-    kc_hpm_free(data);
-    kc_hpm_close(a);
-    kc_hpm_close(b);
+    kc_punch_free(data);
+    kc_punch_close(a);
+    kc_punch_close(b);
     case_result(fail, name, detail);
     return fail ? 1 : 0;
 }
 
 /**
- * Test case for kc_hpm_lifecycle.
+ * Test case for kc_punch_lifecycle.
  * @return 0 on pass, 1 on fail.
  */
-static int case_kc_hpm_lifecycle(void)
+static int case_kc_punch_lifecycle(void)
 {
-    const char *name = "kc_hpm_lifecycle";
+    const char *name = "kc_punch_lifecycle";
     const char *detail = "reports errors, version, and accepts NULL cleanup";
-    kc_hpm_path_t *first_a = NULL;
-    kc_hpm_path_t *first_b = NULL;
-    kc_hpm_path_t *second_a = NULL;
-    kc_hpm_path_t *second_b = NULL;
+    kc_punch_path_t *first_a = NULL;
+    kc_punch_path_t *first_b = NULL;
+    kc_punch_path_t *second_a = NULL;
+    kc_punch_path_t *second_b = NULL;
     int fail = 0;
 
-    kc_hpm_close(NULL);
-    kc_hpm_free(NULL);
-    fail += expect_true("version is nonzero", kc_hpm_version() != 0U);
+    kc_punch_close(NULL);
+    kc_punch_free(NULL);
+    fail += expect_true("version is nonzero", kc_punch_version() != 0U);
     fail += expect_true("known status has message",
-        strcmp(kc_hpm_strerror(KC_HPM_ETIMEOUT), "connection timed out") == 0);
+        strcmp(kc_punch_strerror(KC_PUNCH_ETIMEOUT), "connection timed out") == 0);
     fail += expect_true("all public statuses have messages",
-        kc_hpm_strerror(KC_HPM_OK) && kc_hpm_strerror(KC_HPM_EINVAL) &&
-        kc_hpm_strerror(KC_HPM_ENET) && kc_hpm_strerror(KC_HPM_ENOMEM) &&
-        kc_hpm_strerror(KC_HPM_ECLOSED));
+        kc_punch_strerror(KC_PUNCH_OK) && kc_punch_strerror(KC_PUNCH_EINVAL) &&
+        kc_punch_strerror(KC_PUNCH_ENET) && kc_punch_strerror(KC_PUNCH_ENOMEM) &&
+        kc_punch_strerror(KC_PUNCH_ECLOSED));
     fail += expect_true("unknown status has message",
-        kc_hpm_strerror(-999) != NULL);
+        kc_punch_strerror(-999) != NULL);
     fail += expect_true("closed path rejects send",
-        kc_hpm_send(NULL, "x", 1) == KC_HPM_ECLOSED);
+        kc_punch_send(NULL, "x", 1) == KC_PUNCH_ECLOSED);
     fail += expect_true("closed path rejects receive",
-        kc_hpm_receive(NULL, NULL, NULL, 1) == KC_HPM_EINVAL);
+        kc_punch_receive(NULL, NULL, NULL, 1) == KC_PUNCH_EINVAL);
 
     fail += expect_true("first independent pair establishes",
         test_pair(&first_a, &first_b) == 0);
-    kc_hpm_close(first_a);
-    kc_hpm_close(first_b);
+    kc_punch_close(first_a);
+    kc_punch_close(first_b);
     fail += expect_true("second independent pair establishes",
         test_pair(&second_a, &second_b) == 0);
     fail += expect_true("second pair has current endpoint",
-        second_a && second_b && kc_hpm_local_port(second_a) != 0 &&
-        kc_hpm_peer_port(second_a) == kc_hpm_local_port(second_b));
-    kc_hpm_close(second_a);
-    kc_hpm_close(second_b);
+        second_a && second_b && kc_punch_local_port(second_a) != 0 &&
+        kc_punch_peer_port(second_a) == kc_punch_local_port(second_b));
+    kc_punch_close(second_a);
+    kc_punch_close(second_b);
 
     case_result(fail, name, detail);
     return fail ? 1 : 0;
@@ -671,9 +671,9 @@ typedef struct {
 } test_over_udp_t;
 
 typedef struct {
-    kc_hpm_path_t *path;
-    kc_hpm_options_t options;
-    kc_hpm_udp_t udp;
+    kc_punch_path_t *path;
+    kc_punch_options_t options;
+    kc_punch_udp_t udp;
     int status;
 } test_over_side_t;
 
@@ -731,9 +731,9 @@ static void test_over_close(test_over_udp_t *udp)
 
 /**
  * Sends one datagram through a caller-owned UDP mapping.
- * @return KC_HPM_OK on success, error code on failure.
+ * @return KC_PUNCH_OK on success, error code on failure.
  */
-static int test_over_send(void *context, const kc_hpm_endpoint_t *peer,
+static int test_over_send(void *context, const kc_punch_endpoint_t *peer,
     const void *data, size_t size)
 {
     test_over_udp_t *udp = (test_over_udp_t *)context;
@@ -742,22 +742,22 @@ static int test_over_send(void *context, const kc_hpm_endpoint_t *peer,
 
     if (!udp || udp->fd == TEST_INVALID_SOCKET || !peer || !peer->host ||
         peer->port == 0 || (size > 0 && !data) || size > 65535U)
-        return KC_HPM_EINVAL;
+        return KC_PUNCH_EINVAL;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(peer->port);
     if (inet_pton(AF_INET, peer->host, &addr.sin_addr) != 1)
-        return KC_HPM_ENET;
+        return KC_PUNCH_ENET;
     sent = (int)sendto(udp->fd, (const char *)data, (int)size, 0,
         (const struct sockaddr *)&addr, (test_socklen_t)sizeof(addr));
-    return sent == (int)size ? KC_HPM_OK : KC_HPM_ENET;
+    return sent == (int)size ? KC_PUNCH_OK : KC_PUNCH_ENET;
 }
 
 /**
  * Receives one datagram through a caller-owned UDP mapping.
- * @return KC_HPM_OK on success, error code on failure.
+ * @return KC_PUNCH_OK on success, error code on failure.
  */
-static int test_over_receive(void *context, kc_hpm_datagram_t *out,
+static int test_over_receive(void *context, kc_punch_datagram_t *out,
     uint64_t timeout_ms)
 {
     test_over_udp_t *udp = (test_over_udp_t *)context;
@@ -770,7 +770,7 @@ static int test_over_receive(void *context, kc_hpm_datagram_t *out,
     int ready;
     int received;
 
-    if (!udp || udp->fd == TEST_INVALID_SOCKET || !out) return KC_HPM_EINVAL;
+    if (!udp || udp->fd == TEST_INVALID_SOCKET || !out) return KC_PUNCH_EINVAL;
     memset(out, 0, sizeof(*out));
     FD_ZERO(&set);
     FD_SET(udp->fd, &set);
@@ -784,31 +784,31 @@ static int test_over_receive(void *context, kc_hpm_datagram_t *out,
 #else
     ready = select(udp->fd + 1, &set, NULL, NULL, tvp);
 #endif
-    if (ready == 0) return KC_HPM_ETIMEOUT;
-    if (ready < 0) return KC_HPM_ENET;
+    if (ready == 0) return KC_PUNCH_ETIMEOUT;
+    if (ready < 0) return KC_PUNCH_ENET;
     received = (int)recvfrom(udp->fd, (char *)packet, (int)sizeof(packet), 0,
         (struct sockaddr *)&from, &from_len);
-    if (received < 0) return KC_HPM_ENET;
+    if (received < 0) return KC_PUNCH_ENET;
     out->host = (char *)malloc(10U);
     out->data = malloc(received > 0 ? (size_t)received : 1U);
     if (!out->host || !out->data) {
         free(out->host);
         free(out->data);
         memset(out, 0, sizeof(*out));
-        return KC_HPM_ENOMEM;
+        return KC_PUNCH_ENOMEM;
     }
     strcpy(out->host, "127.0.0.1");
     out->port = ntohs(from.sin_port);
     if (received > 0) memcpy(out->data, packet, (size_t)received);
     out->data_size = (size_t)received;
-    return KC_HPM_OK;
+    return KC_PUNCH_OK;
 }
 
 /**
  * Releases a datagram allocated by the caller-owned UDP test mapping.
  * @return None.
  */
-static void test_over_release(void *context, kc_hpm_datagram_t *packet)
+static void test_over_release(void *context, kc_punch_datagram_t *packet)
 {
     test_over_udp_t *udp = (test_over_udp_t *)context;
     if (!packet) return;
@@ -833,7 +833,7 @@ static void *test_over_connect_thread(void *arg)
 #endif
 {
     test_over_side_t *side = (test_over_side_t *)arg;
-    side->status = kc_hpm_connect_over(&side->path, &side->options, &side->udp);
+    side->status = kc_punch_connect_over(&side->path, &side->options, &side->udp);
 #ifdef _WIN32
     return 0;
 #else
@@ -867,25 +867,25 @@ static int test_over_pair(test_over_side_t *a, test_over_side_t *b)
     if (started_a) pthread_join(ta, NULL);
     if (started_b) pthread_join(tb, NULL);
 #endif
-    return started_a && started_b && a->status == KC_HPM_OK &&
-        b->status == KC_HPM_OK && a->path && b->path;
+    return started_a && started_b && a->status == KC_PUNCH_OK &&
+        b->status == KC_PUNCH_OK && a->path && b->path;
 }
 
 /**
- * Tests kc_hpm_connect_over with caller-owned UDP mappings.
+ * Tests kc_punch_connect_over with caller-owned UDP mappings.
  * @return 0 on pass, 1 on failure.
  */
-static int case_kc_hpm_connect_over(void)
+static int case_kc_punch_connect_over(void)
 {
-    const char *name = "kc_hpm_connect_over";
+    const char *name = "kc_punch_connect_over";
     const char *detail = "preserves caller-owned UDP mappings";
     test_over_udp_t au;
     test_over_udp_t bu;
     test_over_side_t a;
     test_over_side_t b;
-    kc_hpm_endpoint_t a_peer;
-    kc_hpm_endpoint_t b_peer;
-    kc_hpm_datagram_t raw;
+    kc_punch_endpoint_t a_peer;
+    kc_punch_endpoint_t b_peer;
+    kc_punch_datagram_t raw;
     void *data = NULL;
     size_t size = 0;
     int fail = 0;
@@ -926,38 +926,38 @@ static int case_kc_hpm_connect_over(void)
     b.udp.release = test_over_release;
 
     fail += expect_true("rejects NULL borrowed output",
-        kc_hpm_connect_over(NULL, &a.options, &a.udp) == KC_HPM_EINVAL);
+        kc_punch_connect_over(NULL, &a.options, &a.udp) == KC_PUNCH_EINVAL);
     fail += expect_true("borrowed UDP pair establishes", test_over_pair(&a, &b));
     if (!fail) {
         fail += expect_true("path preserves supplied local mapping",
-            kc_hpm_local_port(a.path) == au.port);
+            kc_punch_local_port(a.path) == au.port);
         fail += expect_true("path selects supplied remote endpoint",
-            kc_hpm_peer_port(a.path) == bu.port);
+            kc_punch_peer_port(a.path) == bu.port);
         fail += expect_true("received transport datagrams are released",
             au.release_count != 0 && bu.release_count != 0);
         fail += expect_true("path sends application datagram",
-            kc_hpm_send(a.path, "over", 4) == KC_HPM_OK);
+            kc_punch_send(a.path, "over", 4) == KC_PUNCH_OK);
         fail += expect_true("path receives application datagram",
-            kc_hpm_receive(b.path, &data, &size, 1000) == KC_HPM_OK &&
+            kc_punch_receive(b.path, &data, &size, 1000) == KC_PUNCH_OK &&
             size == 4 && data && memcmp(data, "over", 4) == 0);
-        kc_hpm_free(data);
+        kc_punch_free(data);
         data = NULL;
     }
-    kc_hpm_close(a.path);
-    kc_hpm_close(b.path);
+    kc_punch_close(a.path);
+    kc_punch_close(b.path);
     a.path = NULL;
     b.path = NULL;
     memset(&raw, 0, sizeof(raw));
     fail += expect_true("closing path preserves borrowed mapping",
-        test_over_send(&au, &a_peer, "raw", 3) == KC_HPM_OK &&
-        test_over_receive(&bu, &raw, 1000) == KC_HPM_OK &&
+        test_over_send(&au, &a_peer, "raw", 3) == KC_PUNCH_OK &&
+        test_over_receive(&bu, &raw, 1000) == KC_PUNCH_OK &&
         raw.data_size == 3 && raw.data && memcmp(raw.data, "raw", 3) == 0);
     test_over_release(&bu, &raw);
 
 done:
-    kc_hpm_free(data);
-    kc_hpm_close(a.path);
-    kc_hpm_close(b.path);
+    kc_punch_free(data);
+    kc_punch_close(a.path);
+    kc_punch_close(b.path);
     test_over_close(&au);
     test_over_close(&bu);
     case_result(fail, name, detail);
@@ -973,10 +973,10 @@ static int case_all(void)
     int rc = 0;
     test_case_total = 4;
     test_case_current = 0;
-    run_case(&rc, case_kc_hpm_connect);
-    run_case(&rc, case_kc_hpm_datagrams);
-    run_case(&rc, case_kc_hpm_lifecycle);
-    run_case(&rc, case_kc_hpm_connect_over);
+    run_case(&rc, case_kc_punch_connect);
+    run_case(&rc, case_kc_punch_datagrams);
+    run_case(&rc, case_kc_punch_lifecycle);
+    run_case(&rc, case_kc_punch_connect_over);
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
@@ -994,11 +994,11 @@ int main(int argc, char **argv)
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "kc_hpm_connect") == 0) return case_kc_hpm_connect();
-    if (strcmp(argv[1], "kc_hpm_datagrams") == 0) return case_kc_hpm_datagrams();
-    if (strcmp(argv[1], "kc_hpm_lifecycle") == 0) return case_kc_hpm_lifecycle();
-    if (strcmp(argv[1], "kc_hpm_connect_over") == 0)
-        return case_kc_hpm_connect_over();
+    if (strcmp(argv[1], "kc_punch_connect") == 0) return case_kc_punch_connect();
+    if (strcmp(argv[1], "kc_punch_datagrams") == 0) return case_kc_punch_datagrams();
+    if (strcmp(argv[1], "kc_punch_lifecycle") == 0) return case_kc_punch_lifecycle();
+    if (strcmp(argv[1], "kc_punch_connect_over") == 0)
+        return case_kc_punch_connect_over();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

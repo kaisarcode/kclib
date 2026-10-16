@@ -1,14 +1,14 @@
-# hpm scripting API
+# punch scripting API
 
 Direct bidirectional UDP channel establishment against peer endpoints supplied
-by the application. HPM can create its own local UDP mapping or use a live
+by the application. PUNCH can create its own local UDP mapping or use a live
 mapping supplied by the caller, then maintains the selected channel until it is
 closed or peer liveness is lost.
 
 ## Lua
 
 ```lua
-local path = hpm.connect {
+local path = punch.connect {
     host = "0.0.0.0",
     port = 5000,
     peers = {
@@ -30,7 +30,7 @@ path:close()
 A live UDP mapping may be supplied instead of `host` and `port`:
 
 ```lua
-local path = hpm.connect {
+local path = punch.connect {
     udp = mapping,
     peers = {
         { host = "203.0.113.20", port = 5000 }
@@ -40,12 +40,12 @@ local path = hpm.connect {
 ```
 
 `host` is optional. `port` may be zero to request an operating-system-selected
-local port. When `udp` is supplied, HPM uses that mapping directly and does not
+local port. When `udp` is supplied, PUNCH uses that mapping directly and does not
 open or close another local mapping. The mapping must remain alive until
 `path:close()` and must have one active receive owner while the path is active.
 `timeout_ms` zero uses the default connection timeout.
 
-The returned path object represents a live bidirectional channel. HPM maintains
+The returned path object represents a live bidirectional channel. PUNCH maintains
 peer liveness autonomously, including while application traffic is idle; callers
 do not send maintenance traffic themselves. `path:send(bytes)` writes one UDP
 datagram onto the channel and `path:receive(timeout_ms)` returns one datagram
@@ -56,7 +56,7 @@ from it. A zero receive timeout waits indefinitely.
 ## JavaScript
 
 ```js
-const path = await hpm.connect({
+const path = await punch.connect({
   host: "0.0.0.0",
   port: 5000,
   peers: [
@@ -78,7 +78,7 @@ await path.close();
 With an existing live UDP mapping:
 
 ```js
-const path = await hpm.connect({
+const path = await punch.connect({
   udp: mapping,
   peers: [
     { host: "203.0.113.20", port: 5000 }
@@ -90,9 +90,9 @@ const path = await hpm.connect({
 The scripting `udp` object projects the native borrowed-UDP contract as a live
 mapping with a numeric local endpoint and complete-datagram `send` and `receive`
 operations. Binding layers translate that object mechanically to the native
-adapter; HPM does not take ownership of it.
+adapter; PUNCH does not take ownership of it.
 
-Peer endpoint discovery and exchange remain outside HPM. The application
-supplies remote endpoints and HPM attempts a direct UDP path using them.
+Peer endpoint discovery and exchange remain outside PUNCH. The application
+supplies remote endpoints and PUNCH attempts a direct UDP path using them.
 
 `strerror(status)` and `version()` remain namespace functions.

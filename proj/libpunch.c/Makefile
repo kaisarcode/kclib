@@ -1,5 +1,5 @@
 ## Makefile
-## Summary: Cross-compilation builder for hpm.
+## Summary: Cross-compilation builder for punch.
 ##
 ## Author:  KaisarCode
 ## Website: https://kaisarcode.com
@@ -91,14 +91,14 @@ ifneq ($(filter MINGW% MSYS% CYGWIN%,$(HOST_SYSTEM)),)
 NATIVE_PLATFORM := windows
 endif
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
-NATIVE_SHARED_NAME := libhpm.so
+NATIVE_SHARED_NAME := libpunch.so
 NATIVE_IMPORT_LIBRARY :=
 ifeq ($(NATIVE_PLATFORM),windows)
-NATIVE_SHARED_NAME := libhpm.dll
-NATIVE_IMPORT_LIBRARY := -DHPM_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libhpm.dll.a
+NATIVE_SHARED_NAME := libpunch.dll
+NATIVE_IMPORT_LIBRARY := -DPUNCH_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libpunch.dll.a
 endif
 ifeq ($(NATIVE_PLATFORM),macos)
-NATIVE_SHARED_NAME := libhpm.dylib
+NATIVE_SHARED_NAME := libpunch.dylib
 endif
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 .PHONY: all test wine clean x86_64/linux x86_64/windows x86_64/macos x86_64/iossim i686/linux i686/windows aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim armv7/linux armv7/android armv7hf/linux riscv64/linux powerpc64le/linux mips/linux mipsel/linux mips64el/linux s390x/linux loongarch64/linux
@@ -106,10 +106,10 @@ all: x86_64/linux x86_64/windows x86_64/macos x86_64/iossim i686/linux i686/wind
 
 define build_target
 	@mkdir -p $(BIN_DIR)/$(1)/$(2)
-	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ]; then $(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DHPM_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null; fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DHPM_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null)
-	@cp src/libhpm.h $(BIN_DIR)/$(1)/$(2)/libhpm.h
-	@if [ "$(2)" = windows ]; then cp $(BUILD_DIR)/$(1)-$(2)/out/libhpm.dll $(BIN_DIR)/$(1)/$(2)/libhpm.dll; fi
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ]; then $(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DPUNCH_BUILD_VERSION=$(BUILD_VERSION) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null; fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release $(3) -DPUNCH_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null)
+	@cp src/libpunch.h $(BIN_DIR)/$(1)/$(2)/libpunch.h
+	@if [ "$(2)" = windows ]; then cp $(BUILD_DIR)/$(1)-$(2)/out/libpunch.dll $(BIN_DIR)/$(1)/$(2)/libpunch.dll; fi
 	@echo "OK $(1)/$(2)"
 endef
 define linux_target
@@ -157,7 +157,7 @@ endef
 aarch64/android: ; $(call android_target,aarch64,arm64-v8a)
 armv7/android: ; $(call android_target,armv7,armeabi-v7a)
 test:
-	@if [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then if ! command -v $(WINE) >/dev/null || ! command -v $(WINE_X86_64_CC) >/dev/null; then echo "Missing Wine or Windows cross-compiler" >&2; exit 1; fi; if [ ! -f $(BIN_DIR)/x86_64/windows/libhpm.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libhpm.dll.a ]; then echo "Missing Windows artifacts. Run 'make x86_64/windows' first." >&2; exit 1; fi; cmake -S . -B $(BUILD_DIR)/test-wine -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=$(WINE_X86_64_CC) -DHPM_BUILD_TESTS=ON -DHPM_BUILD_VERSION=$(BUILD_VERSION) -DHPM_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhpm.dll -DHPM_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhpm.dll.a -DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) -G Ninja -Wno-dev > /dev/null && cmake --build $(BUILD_DIR)/test-wine --target hpm_contract_test && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/hpm_contract_test.exe all; else if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then echo "Missing native artifacts. Run 'make' first." >&2; exit 1; fi; cmake -S . -B $(BUILD_DIR)/test -DCMAKE_BUILD_TYPE=Release -DHPM_BUILD_TESTS=ON -DHPM_BUILD_VERSION=$(BUILD_VERSION) -DHPM_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) $(NATIVE_IMPORT_LIBRARY) -G Ninja -Wno-dev > /dev/null && cmake --build $(BUILD_DIR)/test --target hpm_contract_test && $(BUILD_DIR)/test/hpm_contract_test all; fi
+	@if [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then if ! command -v $(WINE) >/dev/null || ! command -v $(WINE_X86_64_CC) >/dev/null; then echo "Missing Wine or Windows cross-compiler" >&2; exit 1; fi; if [ ! -f $(BIN_DIR)/x86_64/windows/libpunch.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libpunch.dll.a ]; then echo "Missing Windows artifacts. Run 'make x86_64/windows' first." >&2; exit 1; fi; cmake -S . -B $(BUILD_DIR)/test-wine -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=$(WINE_X86_64_CC) -DPUNCH_BUILD_TESTS=ON -DPUNCH_BUILD_VERSION=$(BUILD_VERSION) -DPUNCH_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libpunch.dll -DPUNCH_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libpunch.dll.a -DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) -G Ninja -Wno-dev > /dev/null && cmake --build $(BUILD_DIR)/test-wine --target punch_contract_test && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/punch_contract_test.exe all; else if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then echo "Missing native artifacts. Run 'make' first." >&2; exit 1; fi; cmake -S . -B $(BUILD_DIR)/test -DCMAKE_BUILD_TYPE=Release -DPUNCH_BUILD_TESTS=ON -DPUNCH_BUILD_VERSION=$(BUILD_VERSION) -DPUNCH_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) $(NATIVE_IMPORT_LIBRARY) -G Ninja -Wno-dev > /dev/null && cmake --build $(BUILD_DIR)/test --target punch_contract_test && $(BUILD_DIR)/test/punch_contract_test all; fi
 wine:
 	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then echo "Use 'make test wine'." >&2; exit 1; fi
 clean:

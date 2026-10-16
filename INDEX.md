@@ -41,7 +41,7 @@ index is the summary, not the contract.
 | :--- | :--- | :--- |
 | [`http`](https://github.com/kaisarcode/kclib/tree/master/proj/libhttp.c) | Parses and builds HTTP messages; it handles protocol, not transport. | Handling HTTP requests or responses over a socket. |
 | [`stun`](https://github.com/kaisarcode/kclib/tree/master/proj/libstun.c) | Discovers live UDP mappings and serves STUN Binding requests. | Discovering an observed UDP endpoint or providing a STUN endpoint for other machines. |
-| [`hpm`](https://github.com/kaisarcode/kclib/tree/master/proj/libhpm.c) | Establishes a direct UDP path using supplied remote endpoints, either on its own socket or an existing live UDP mapping. | Direct peer-to-peer UDP communication after endpoint exchange. |
+| [`punch`](https://github.com/kaisarcode/kclib/tree/master/proj/libpunch.c) | Establishes a direct UDP path using supplied remote endpoints, either on its own socket or an existing live UDP mapping. | Direct peer-to-peer UDP communication after endpoint exchange. |
 | [`netl`](https://github.com/kaisarcode/kclib/tree/master/proj/libnetl.c) | Maintains named TCP or UDP listeners and delivers incoming traffic to consumers. | Listening and serving on the network. |
 | [`nets`](https://github.com/kaisarcode/kclib/tree/master/proj/libnets.c) | Exchanges data with a TCP or UDP destination. | Connecting to a remote host and exchanging data. |
 | [`dmn`](https://github.com/kaisarcode/kclib/tree/master/proj/libdmn.c) | Maintains named resident processes and exchanges data through local IPC. | Persistent subprocess with a message channel. |

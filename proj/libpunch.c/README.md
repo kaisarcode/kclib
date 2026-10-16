@@ -1,16 +1,16 @@
-# libhpm.c - Hole-Punch-Man
+# libpunch.c - Punch
 
 ---
 
-`libhpm.c` establishes and maintains direct bidirectional UDP channels between
-peers. The caller supplies one or more remote endpoints; HPM performs the direct
+`libpunch.c` establishes and maintains direct bidirectional UDP channels between
+peers. The caller supplies one or more remote endpoints; PUNCH performs the direct
 connectivity attempt and returns a live channel when one of the supplied
 endpoints is reachable.
 
-HPM can either bind its own local UDP socket with `kc_hpm_connect()` or perform
+PUNCH can either bind its own local UDP socket with `kc_punch_connect()` or perform
 the same channel establishment over an already-open UDP mapping with
-`kc_hpm_connect_over()`. Using an existing mapping preserves that mapping while
-HPM establishes and maintains the channel; HPM borrows it and does not close it.
+`kc_punch_connect_over()`. Using an existing mapping preserves that mapping while
+PUNCH establishes and maintains the channel; PUNCH borrows it and does not close it.
 
 Peer endpoint discovery and exchange are outside the library. Remote endpoints
 may come from any source chosen by the application.
@@ -18,14 +18,14 @@ may come from any source chosen by the application.
 ## Public API
 
 ```c
-#include "libhpm.h"
+#include "libpunch.h"
 
-kc_hpm_endpoint_t peers[] = {
+kc_punch_endpoint_t peers[] = {
     { "203.0.113.20", 5000 },
     { "192.168.1.20", 5000 }
 };
 
-kc_hpm_options_t options = {
+kc_punch_options_t options = {
     .host = NULL,
     .port = 5000,
     .peers = peers,
@@ -33,69 +33,69 @@ kc_hpm_options_t options = {
     .timeout_ms = 5000
 };
 
-kc_hpm_path_t *path = NULL;
+kc_punch_path_t *path = NULL;
 
-if (kc_hpm_connect(&path, &options) == KC_HPM_OK) {
-    kc_hpm_send(path, "hello", 5);
+if (kc_punch_connect(&path, &options) == KC_PUNCH_OK) {
+    kc_punch_send(path, "hello", 5);
 
     void *data = NULL;
     size_t size = 0;
-    if (kc_hpm_receive(path, &data, &size, 1000) == KC_HPM_OK) {
+    if (kc_punch_receive(path, &data, &size, 1000) == KC_PUNCH_OK) {
         /* one UDP datagram is available in data/size */
-        kc_hpm_free(data);
+        kc_punch_free(data);
     }
 }
 
-kc_hpm_close(path);
+kc_punch_close(path);
 ```
 
 The public API contains:
 
 ```c
-int kc_hpm_connect(kc_hpm_path_t **out,
-    const kc_hpm_options_t *options);
-int kc_hpm_connect_over(kc_hpm_path_t **out,
-    const kc_hpm_options_t *options,
-    const kc_hpm_udp_t *udp);
-int kc_hpm_send(kc_hpm_path_t *path,
+int kc_punch_connect(kc_punch_path_t **out,
+    const kc_punch_options_t *options);
+int kc_punch_connect_over(kc_punch_path_t **out,
+    const kc_punch_options_t *options,
+    const kc_punch_udp_t *udp);
+int kc_punch_send(kc_punch_path_t *path,
     const void *data, size_t data_size);
-int kc_hpm_receive(kc_hpm_path_t *path,
+int kc_punch_receive(kc_punch_path_t *path,
     void **out_data, size_t *out_size, uint64_t timeout_ms);
-const char *kc_hpm_local_host(const kc_hpm_path_t *path);
-unsigned short kc_hpm_local_port(const kc_hpm_path_t *path);
-const char *kc_hpm_peer_host(const kc_hpm_path_t *path);
-unsigned short kc_hpm_peer_port(const kc_hpm_path_t *path);
-void kc_hpm_free(void *ptr);
-void kc_hpm_close(kc_hpm_path_t *path);
-const char *kc_hpm_strerror(int status);
-uint64_t kc_hpm_version(void);
+const char *kc_punch_local_host(const kc_punch_path_t *path);
+unsigned short kc_punch_local_port(const kc_punch_path_t *path);
+const char *kc_punch_peer_host(const kc_punch_path_t *path);
+unsigned short kc_punch_peer_port(const kc_punch_path_t *path);
+void kc_punch_free(void *ptr);
+void kc_punch_close(kc_punch_path_t *path);
+const char *kc_punch_strerror(int status);
+uint64_t kc_punch_version(void);
 ```
 
-`kc_hpm_connect()` establishes a direct UDP channel using endpoints supplied by
-the application and a local socket owned by HPM. `host` is the optional local
+`kc_punch_connect()` establishes a direct UDP channel using endpoints supplied by
+the application and a local socket owned by PUNCH. `host` is the optional local
 bind host. `port` is the preferred local UDP port; zero asks the operating
 system to select one.
 
-`kc_hpm_connect_over()` performs the same probing and path selection over a live
+`kc_punch_connect_over()` performs the same probing and path selection over a live
 UDP mapping supplied by the caller. The supplied mapping provides its numeric
-local endpoint and complete-datagram send/receive operations. HPM borrows it for
-the path lifetime; the caller retains ownership and closes it after the HPM path
-is closed. Because HPM consumes incoming probe and peer datagrams, the supplied
+local endpoint and complete-datagram send/receive operations. PUNCH borrows it for
+the path lifetime; the caller retains ownership and closes it after the PUNCH path
+is closed. Because PUNCH consumes incoming probe and peer datagrams, the supplied
 mapping must have one active receive owner while the path is alive.
 
-For both entry points, `peers` is the set of remote endpoints that HPM may try
+For both entry points, `peers` is the set of remote endpoints that PUNCH may try
 and `timeout_ms` bounds the direct connectivity attempt; zero uses the library
-default. HPM owns candidate probing, simultaneous punch behavior, selection, and
+default. PUNCH owns candidate probing, simultaneous punch behavior, selection, and
 the ongoing liveness of the selected channel. The application does not manage
 candidate pairs, probe phases, keepalives, retry state, or socket readiness.
 
 The returned path handle represents the lifetime of the live bidirectional
-channel. HPM exchanges private control traffic while the channel is idle and
+channel. PUNCH exchanges private control traffic while the channel is idle and
 marks the channel failed when peer liveness is lost. Applications may exchange
-datagrams at any time until `kc_hpm_close()` or a channel failure.
+datagrams at any time until `kc_punch_close()` or a channel failure.
 
-Application traffic preserves UDP datagram semantics. `kc_hpm_send()` writes one
-datagram onto the channel, and `kc_hpm_receive()` returns one datagram from it. A
+Application traffic preserves UDP datagram semantics. `kc_punch_send()` writes one
+datagram onto the channel, and `kc_punch_receive()` returns one datagram from it. A
 receive timeout of zero waits indefinitely. UDP itself does not guarantee
 delivery, ordering, or retransmission.
 
@@ -125,14 +125,14 @@ make x86_64/windows
 make test wine
 ```
 
-The contract tests establish loopback UDP paths using both HPM-owned sockets and
+The contract tests establish loopback UDP paths using both PUNCH-owned sockets and
 caller-supplied live UDP mappings. They verify path creation, mapping ownership,
 datagram exchange, endpoint reporting, timeout behavior, and cleanup.
 
 ### Multiarch Builds
 
 A plain `make` builds the current host target. `make all` builds the configured
-Linux, Windows, Android, macOS, and iOS target matrix. HPM deliberately has no
+Linux, Windows, Android, macOS, and iOS target matrix. PUNCH deliberately has no
 WebAssembly target because its capability requires real UDP sockets.
 
 ```bash
@@ -170,7 +170,7 @@ macOS:
 
 ### Dependencies
 
-`libhpm.c` has no third-party library dependencies.
+`libpunch.c` has no third-party library dependencies.
 
 ---
 
