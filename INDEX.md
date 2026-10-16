@@ -62,7 +62,7 @@ index is the summary, not the contract.
 
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
-| [`rdv`](https://github.com/kaisarcode/kclib/tree/master/proj/librdv.c) | Maintains named rendezvous points with one optional publication and independent ordered seekers. | Matching publishers and seekers without transport or application-specific policy. |
+| [`rdvz`](https://github.com/kaisarcode/kclib/tree/master/proj/librdvz.c) | Maintains named rendezvous points with one optional publication and independent ordered seekers. | Matching publishers and seekers without transport or application-specific policy. |
 | [`flow`](https://github.com/kaisarcode/kclib/tree/master/proj/libflow.c) | Runs branched command and child flows; branches remain independent and do not merge. | Branching or parallel execution paths. |
 | [`demo`](https://github.com/kaisarcode/kclib/tree/master/proj/libdemo.c) | Provides the reference blueprint for new libraries in the collection. | Only when creating a new primitive in the collection; not distributed. |
 

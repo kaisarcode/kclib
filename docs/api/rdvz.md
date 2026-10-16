@@ -1,4 +1,4 @@
-# rdv scripting API
+# rdvz scripting API
 
 Named rendezvous points with one optional publication and independent ordered
 seekers. Values are arbitrary bytes.
@@ -6,7 +6,7 @@ seekers. Values are arbitrary bytes.
 ## Lua
 
 ```lua
-local rendezvous = rdv.open({
+local rendezvous = rdvz.open({
     max_publications = 1000,
     max_seekers = 10000,
     max_seekers_per_point = 100,
@@ -30,7 +30,7 @@ rendezvous:close()
 ## JavaScript
 
 ```js
-const rendezvous = await rdv.open({
+const rendezvous = await rdvz.open({
   maxPublications: 1000,
   maxSeekers: 10000,
   maxSeekersPerPoint: 100,

@@ -1,6 +1,6 @@
-# librdv.c - Generic Rendezvous Registry
+# librdvz.c - Generic Rendezvous Registry
 
-`librdv.c` maintains named rendezvous points with one optional publication and
+`librdvz.c` maintains named rendezvous points with one optional publication and
 an independent ordered collection of seekers. It stores opaque bytes only and
 has no transport, networking, authentication, command, or process semantics.
 
@@ -11,34 +11,34 @@ participants that are still waiting.
 ## Public API
 
 ```c
-#include "librdv.h"
+#include "librdvz.h"
 
-kc_rdv_t *rdv = NULL;
-const kc_rdv_seeker_t *seeker = NULL;
-const kc_rdv_point_t *point = NULL;
+kc_rdvz_t *rdvz = NULL;
+const kc_rdvz_seeker_t *seeker = NULL;
+const kc_rdvz_point_t *point = NULL;
 
-kc_rdv_open(&rdv, NULL);
+kc_rdvz_open(&rdvz, NULL);
 
-kc_rdv_seek(rdv, "room", "consumer", 8, &seeker);
-kc_rdv_publish(rdv, "room", "publisher", 9, &point);
+kc_rdvz_seek(rdvz, "room", "consumer", 8, &seeker);
+kc_rdvz_publish(rdvz, "room", "publisher", 9, &point);
 
-for (const kc_rdv_seeker_t *it = point->head; it; it = it->next) {
+for (const kc_rdvz_seeker_t *it = point->head; it; it = it->next) {
     /* inspect it->data and decide what this application should do */
 }
 
-kc_rdv_remove(rdv, seeker);
-kc_rdv_unpublish(rdv, "room");
-kc_rdv_close(rdv);
+kc_rdvz_remove(rdvz, seeker);
+kc_rdvz_unpublish(rdvz, "room");
+kc_rdvz_close(rdvz);
 ```
 
-`kc_rdv_publish()` stores one publication for an identifier. Publishing the same
-identifier again while it is still published returns `KC_RDV_EEXIST`.
+`kc_rdvz_publish()` stores one publication for an identifier. Publishing the same
+identifier again while it is still published returns `KC_RDVZ_EEXIST`.
 
-`kc_rdv_seek()` always adds a seeker, whether or not a publication currently
+`kc_rdvz_seek()` always adds a seeker, whether or not a publication currently
 exists. Each seeker exposes its rendezvous point, so callers can inspect the
 current publication immediately when present.
 
-`kc_rdv_unpublish()` removes only the publication. `kc_rdv_remove()` removes
+`kc_rdvz_unpublish()` removes only the publication. `kc_rdvz_remove()` removes
 only the selected seeker.
 
 Publication and seeker data are copied and owned by the library. The public
@@ -47,11 +47,11 @@ ordinary C traversal while structural mutation remains library-owned.
 
 ## Limits and expiry
 
-`kc_rdv_options_t` can limit publications, total seekers, and seekers per point.
+`kc_rdvz_options_t` can limit publications, total seekers, and seekers per point.
 Zero means unlimited.
 
 Publication and seeker TTLs are independent. Zero disables expiry. Expiry is
-explicit: `kc_rdv_prune()` removes objects whose configured TTL elapsed.
+explicit: `kc_rdvz_prune()` removes objects whose configured TTL elapsed.
 Expiring or unpublishing a publication never removes seekers, and expiring or
 removing a seeker never removes a publication or sibling seekers.
 
