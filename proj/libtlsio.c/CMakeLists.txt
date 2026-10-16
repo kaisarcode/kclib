@@ -3,6 +3,10 @@ project(tlsio C)
 
 set(CMAKE_C_STANDARD 11)
 
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+endif()
+
 if(MINGW)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libgcc")
@@ -66,11 +70,9 @@ if(NOT TLSIO_TEST_EXTERNAL_ARTIFACTS)
         lib/mbedtls/include
         lib/mbedtls/library
     )
-    if(NOT TLSIO_BUILD_TESTS)
-        target_compile_definitions(tlsio_static PRIVATE
-            MBEDTLS_USER_CONFIG_FILE="config.h"
-        )
-    endif()
+    target_compile_definitions(tlsio_static PRIVATE
+        MBEDTLS_USER_CONFIG_FILE="config.h"
+    )
 
     add_library(tlsio_shared SHARED ${TLSIO_SOURCES})
     set_target_properties(tlsio_shared PROPERTIES OUTPUT_NAME "tlsio")
@@ -81,24 +83,26 @@ if(NOT TLSIO_TEST_EXTERNAL_ARTIFACTS)
         lib/mbedtls/include
         lib/mbedtls/library
     )
-    if(NOT TLSIO_BUILD_TESTS)
-        target_compile_definitions(tlsio_shared PRIVATE
-            MBEDTLS_USER_CONFIG_FILE="config.h"
-        )
-    endif()
+    target_compile_definitions(tlsio_shared PRIVATE
+        MBEDTLS_USER_CONFIG_FILE="config.h"
+    )
 
     if(WIN32)
-        target_link_libraries(tlsio_static PRIVATE ws2_32 bcrypt crypt32)
-        target_link_libraries(tlsio_shared PRIVATE ws2_32 bcrypt crypt32)
-    elseif(APPLE)
-        target_link_libraries(tlsio_static PRIVATE
-            "-framework Security"
-            "-framework CoreFoundation"
-        )
-        target_link_libraries(tlsio_shared PRIVATE
-            "-framework Security"
-            "-framework CoreFoundation"
-        )
+        target_link_libraries(tlsio_static bcrypt crypt32)
+        target_link_libraries(tlsio_shared bcrypt crypt32)
+    else()
+        target_link_libraries(tlsio_static Threads::Threads)
+        target_link_libraries(tlsio_shared Threads::Threads)
+        if(APPLE)
+            target_link_libraries(tlsio_static
+                "-framework Security"
+                "-framework CoreFoundation"
+            )
+            target_link_libraries(tlsio_shared
+                "-framework Security"
+                "-framework CoreFoundation"
+            )
+        endif()
     endif()
 endif()
 
@@ -120,24 +124,11 @@ if(TLSIO_BUILD_TESTS)
         set(TLSIO_TEST_SHARED_TARGET tlsio_shared)
     endif()
 
-    foreach(tlsio_target tlsio_static tlsio_shared)
-        if(TARGET ${tlsio_target})
-            target_compile_definitions(${tlsio_target} PRIVATE TLSIO_BUILD_TESTS)
-        endif()
-    endforeach()
     add_executable(tlsio_contract_test src/test.c)
-    target_include_directories(tlsio_contract_test PRIVATE
-        src lib/mbedtls lib/mbedtls/include lib/mbedtls/library
-    )
+    target_include_directories(tlsio_contract_test PRIVATE src)
     target_link_libraries(tlsio_contract_test PRIVATE
         ${TLSIO_TEST_SHARED_TARGET}
     )
-    if(WIN32)
-        target_link_libraries(tlsio_contract_test PRIVATE ws2_32)
-    else()
-        find_package(Threads REQUIRED)
-        target_link_libraries(tlsio_contract_test PRIVATE Threads::Threads)
-    endif()
     add_custom_command(TARGET tlsio_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:${TLSIO_TEST_SHARED_TARGET}>

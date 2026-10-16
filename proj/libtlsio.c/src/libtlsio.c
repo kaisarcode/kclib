@@ -1,6 +1,6 @@
 /**
- * libtlsio.c - Authenticated TLS byte connection.
- * Summary: Connects to TLS servers and exchanges verified plaintext bytes.
+ * libtlsio.c - Transport-independent TLS session.
+ * Summary: Runs client and server TLS over caller-supplied byte transport.
  *
  * Author: KaisarCode
  * Website: https://kaisarcode.com
@@ -14,36 +14,25 @@
 #include "libtlsio.h"
 
 #include <limits.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
-#include <mbedtls/net_sockets.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/platform_util.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 #include <psa/crypto.h>
 
-#if defined(TLSIO_BUILD_TESTS) && !defined(_WIN32)
-extern const unsigned char kc_tlsio_test_ca_pem[];
-#endif
-
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
 #include <wincrypt.h>
-typedef SOCKET kc_tlsio_socket_t;
-#define KC_TLSIO_BAD_SOCKET INVALID_SOCKET
+typedef CRITICAL_SECTION kc_tlsio_mutex_t;
 #else
-#include <netdb.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
-typedef int kc_tlsio_socket_t;
-#define KC_TLSIO_BAD_SOCKET (-1)
+#include <pthread.h>
+typedef pthread_mutex_t kc_tlsio_mutex_t;
 #endif
 
 #ifdef __APPLE__
@@ -57,184 +46,458 @@ typedef int kc_tlsio_socket_t;
 
 #define KC_TLSIO_READ_SIZE 65536U
 
+#define KC_TLSIO_EVENT_PLAINTEXT 1
+#define KC_TLSIO_EVENT_CIPHERTEXT 2
+
+typedef struct kc_tlsio_buffer {
+    unsigned char *data;
+    size_t size;
+    size_t offset;
+    struct kc_tlsio_buffer *next;
+} kc_tlsio_buffer_t;
+
+typedef struct kc_tlsio_event {
+    int type;
+    unsigned char *data;
+    size_t size;
+    struct kc_tlsio_event *next;
+} kc_tlsio_event_t;
+
 struct kc_tlsio {
-    kc_tlsio_socket_t socket;
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config config;
     mbedtls_ctr_drbg_context random;
     mbedtls_entropy_context entropy;
     mbedtls_x509_crt roots;
-    int platform_ready;
-    int tls_ready;
+    mbedtls_x509_crt certificate;
+    mbedtls_pk_context private_key;
+
+    kc_tlsio_mutex_t mutex;
+    int mutex_ready;
+
+    int role;
+    int native_trust;
+    int handshake_ready;
+    int close_sent;
+    int status;
+    char *host;
+
+    kc_tlsio_buffer_t *input_head;
+    kc_tlsio_buffer_t *input_tail;
+    kc_tlsio_buffer_t *pending_head;
+    kc_tlsio_buffer_t *pending_tail;
+
+    kc_tlsio_event_t *event_head;
+    kc_tlsio_event_t *event_tail;
+
+    kc_tlsio_plaintext_fn plaintext;
+    kc_tlsio_ciphertext_fn ciphertext;
+    void *userdata;
 };
 
 /**
- * Initializes native socket support.
- * @return KC_TLSIO_OK on success, or KC_TLSIO_ENET on failure.
+ * Initialize one private mutex.
+ * @return Zero on success, nonzero on failure.
  */
-static int kc_tlsio_platform_init(void) {
+static int kc_tlsio_mutex_open(kc_tlsio_mutex_t *mutex) {
 #ifdef _WIN32
-    WSADATA data;
-
-    return WSAStartup(MAKEWORD(2, 2), &data) == 0
-        ? KC_TLSIO_OK
-        : KC_TLSIO_ENET;
+    InitializeCriticalSection(mutex);
+    return 0;
 #else
-    return KC_TLSIO_OK;
+    return pthread_mutex_init(mutex, NULL);
 #endif
 }
 
 /**
- * Releases native socket support.
- * @return void.
+ * Release one private mutex.
+ * @return None.
  */
-static void kc_tlsio_platform_cleanup(void) {
+static void kc_tlsio_mutex_close(kc_tlsio_mutex_t *mutex) {
 #ifdef _WIN32
-    WSACleanup();
-#endif
-}
-
-/**
- * Closes one native socket.
- * @param socket Native socket.
- * @return void.
- */
-static void kc_tlsio_socket_close(kc_tlsio_socket_t socket) {
-#ifdef _WIN32
-    closesocket(socket);
+    DeleteCriticalSection(mutex);
 #else
-    close(socket);
+    (void)pthread_mutex_destroy(mutex);
 #endif
 }
 
 /**
- * Connects one TCP socket.
- * @param host Destination host.
- * @param port Destination port.
- * @param out_socket Destination native socket.
- * @return KC_TLSIO_OK on success, or KC_TLSIO_ENET on failure.
+ * Lock one TLS session.
+ * @return None.
  */
-static int kc_tlsio_socket_connect(
-    const char *host,
-    unsigned short port,
-    kc_tlsio_socket_t *out_socket
-) {
-    struct addrinfo hints;
-    struct addrinfo *addresses;
-    struct addrinfo *address;
-    char service[16];
-    int rc;
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    snprintf(service, sizeof(service), "%u", (unsigned int)port);
-
-    addresses = NULL;
-    if (getaddrinfo(host, service, &hints, &addresses) != 0) {
-        return KC_TLSIO_ENET;
-    }
-
-    *out_socket = KC_TLSIO_BAD_SOCKET;
-    rc = KC_TLSIO_ENET;
-    for (address = addresses; address != NULL; address = address->ai_next) {
-        kc_tlsio_socket_t socket_handle;
-
-        socket_handle = socket(
-            address->ai_family,
-            address->ai_socktype,
-            address->ai_protocol
-        );
-        if (socket_handle == KC_TLSIO_BAD_SOCKET) continue;
-        if (connect(
-                socket_handle,
-                address->ai_addr,
-                address->ai_addrlen
-            ) == 0) {
-            *out_socket = socket_handle;
-            rc = KC_TLSIO_OK;
-            break;
-        }
-        kc_tlsio_socket_close(socket_handle);
-    }
-
-    freeaddrinfo(addresses);
-    return rc;
+static void kc_tlsio_lock(kc_tlsio_t *tls) {
+#ifdef _WIN32
+    EnterCriticalSection(&tls->mutex);
+#else
+    (void)pthread_mutex_lock(&tls->mutex);
+#endif
 }
 
 /**
- * Sends encrypted bytes through the native socket.
- * @param context Native socket pointer.
- * @param data Bytes to send.
- * @param size Byte count.
- * @return Positive byte count or an Mbed TLS transport error.
+ * Unlock one TLS session.
+ * @return None.
  */
-static int kc_tlsio_send(
-    void *context,
-    const unsigned char *data,
+static void kc_tlsio_unlock(kc_tlsio_t *tls) {
+#ifdef _WIN32
+    LeaveCriticalSection(&tls->mutex);
+#else
+    (void)pthread_mutex_unlock(&tls->mutex);
+#endif
+}
+
+/**
+ * Duplicate one null-terminated string.
+ * @return Owned string, or NULL on allocation failure.
+ */
+static char *kc_tlsio_string_copy(const char *value) {
+    char *copy;
+    size_t size;
+
+    if (value == NULL) return NULL;
+    size = strlen(value);
+    if (size == SIZE_MAX) return NULL;
+    copy = (char *)malloc(size + 1U);
+    if (copy == NULL) return NULL;
+    memcpy(copy, value, size + 1U);
+    return copy;
+}
+
+/**
+ * Release a private byte-buffer queue.
+ * @return None.
+ */
+static void kc_tlsio_buffer_free(kc_tlsio_buffer_t *buffer) {
+    while (buffer != NULL) {
+        kc_tlsio_buffer_t *next;
+
+        next = buffer->next;
+        free(buffer->data);
+        free(buffer);
+        buffer = next;
+    }
+}
+
+/**
+ * Append bytes to one private byte-buffer queue.
+ * @return KC_TLSIO_OK or KC_TLSIO_ENOMEM.
+ */
+static int kc_tlsio_buffer_append(
+    kc_tlsio_buffer_t **head,
+    kc_tlsio_buffer_t **tail,
+    const void *data,
     size_t size
 ) {
-    kc_tlsio_socket_t socket_handle;
-#ifdef _WIN32
-    int count;
-#else
-    int flags;
-    ssize_t count;
-#endif
+    kc_tlsio_buffer_t *buffer;
 
-    socket_handle = *(kc_tlsio_socket_t *)context;
-#ifdef _WIN32
-    if (size > (size_t)INT_MAX) size = (size_t)INT_MAX;
-    count = send(socket_handle, (const char *)data, (int)size, 0);
-    if (count == SOCKET_ERROR) return MBEDTLS_ERR_NET_SEND_FAILED;
-#else
-    flags = 0;
-#ifdef MSG_NOSIGNAL
-    flags = MSG_NOSIGNAL;
-#endif
-    count = send(socket_handle, data, size, flags);
-    if (count < 0) return MBEDTLS_ERR_NET_SEND_FAILED;
-#endif
-    return (int)count;
+    if (size == 0U) return KC_TLSIO_OK;
+    buffer = (kc_tlsio_buffer_t *)calloc(1, sizeof(*buffer));
+    if (buffer == NULL) return KC_TLSIO_ENOMEM;
+    buffer->data = (unsigned char *)malloc(size);
+    if (buffer->data == NULL) {
+        free(buffer);
+        return KC_TLSIO_ENOMEM;
+    }
+    memcpy(buffer->data, data, size);
+    buffer->size = size;
+
+    if (*tail != NULL) {
+        (*tail)->next = buffer;
+    } else {
+        *head = buffer;
+    }
+    *tail = buffer;
+    return KC_TLSIO_OK;
 }
 
 /**
- * Receives encrypted bytes from the native socket.
- * @param context Native socket pointer.
- * @param data Destination buffer.
- * @param size Buffer size.
- * @return Non-negative byte count or an Mbed TLS transport error.
+ * Consume bytes from the head of one private byte-buffer queue.
+ * @return None.
  */
-static int kc_tlsio_recv(
+static void kc_tlsio_buffer_consume(
+    kc_tlsio_buffer_t **head,
+    kc_tlsio_buffer_t **tail,
+    size_t size
+) {
+    while (*head != NULL && size != 0U) {
+        kc_tlsio_buffer_t *buffer;
+        size_t available;
+
+        buffer = *head;
+        available = buffer->size - buffer->offset;
+        if (size < available) {
+            buffer->offset += size;
+            return;
+        }
+
+        size -= available;
+        *head = buffer->next;
+        if (*head == NULL) *tail = NULL;
+        free(buffer->data);
+        free(buffer);
+    }
+}
+
+/**
+ * Release a detached event list.
+ * @return None.
+ */
+static void kc_tlsio_event_free(kc_tlsio_event_t *event) {
+    while (event != NULL) {
+        kc_tlsio_event_t *next;
+
+        next = event->next;
+        free(event->data);
+        free(event);
+        event = next;
+    }
+}
+
+/**
+ * Record one terminal TLS status.
+ * @return The recorded status.
+ */
+static int kc_tlsio_fail(kc_tlsio_t *tls, int status) {
+    if (tls->status == KC_TLSIO_OK) tls->status = status;
+    return tls->status;
+}
+
+/**
+ * Queue one callback event.
+ * @return KC_TLSIO_OK or KC_TLSIO_ENOMEM.
+ */
+static int kc_tlsio_event_append(
+    kc_tlsio_t *tls,
+    int type,
+    const void *data,
+    size_t size
+) {
+    kc_tlsio_event_t *event;
+
+    if (size == 0U) return KC_TLSIO_OK;
+    event = (kc_tlsio_event_t *)calloc(1, sizeof(*event));
+    if (event == NULL) return kc_tlsio_fail(tls, KC_TLSIO_ENOMEM);
+    event->data = (unsigned char *)malloc(size);
+    if (event->data == NULL) {
+        free(event);
+        return kc_tlsio_fail(tls, KC_TLSIO_ENOMEM);
+    }
+    memcpy(event->data, data, size);
+    event->type = type;
+    event->size = size;
+
+    if (tls->event_tail != NULL) {
+        tls->event_tail->next = event;
+    } else {
+        tls->event_head = event;
+    }
+    tls->event_tail = event;
+    return KC_TLSIO_OK;
+}
+
+/**
+ * Detach all queued callback events from a TLS session.
+ * @return Detached event list.
+ */
+static kc_tlsio_event_t *kc_tlsio_event_take(kc_tlsio_t *tls) {
+    kc_tlsio_event_t *events;
+
+    events = tls->event_head;
+    tls->event_head = NULL;
+    tls->event_tail = NULL;
+    return events;
+}
+
+/**
+ * Dispatch one detached event list without touching the TLS session.
+ * @return None.
+ */
+static void kc_tlsio_event_dispatch(
+    kc_tlsio_event_t *event,
+    kc_tlsio_plaintext_fn plaintext,
+    kc_tlsio_ciphertext_fn ciphertext,
+    void *userdata
+) {
+    while (event != NULL) {
+        kc_tlsio_event_t *next;
+
+        next = event->next;
+        if (event->type == KC_TLSIO_EVENT_PLAINTEXT) {
+            plaintext(event->data, event->size, userdata);
+        } else {
+            ciphertext(event->data, event->size, userdata);
+        }
+        free(event->data);
+        free(event);
+        event = next;
+    }
+}
+
+/**
+ * Return whether bytes look like PEM text.
+ * @return Nonzero for PEM input.
+ */
+static int kc_tlsio_is_pem(const void *data, size_t size) {
+    static const char prefix[] = "-----BEGIN ";
+    return data != NULL &&
+        size >= sizeof(prefix) - 1U &&
+        memcmp(data, prefix, sizeof(prefix) - 1U) == 0;
+}
+
+/**
+ * Make a temporary NUL-terminated PEM copy.
+ * @return Owned copy, or NULL on failure.
+ */
+static unsigned char *kc_tlsio_pem_copy(const void *data, size_t size) {
+    unsigned char *copy;
+
+    if (size == SIZE_MAX) return NULL;
+    copy = (unsigned char *)malloc(size + 1U);
+    if (copy == NULL) return NULL;
+    memcpy(copy, data, size);
+    copy[size] = '\0';
+    return copy;
+}
+
+/**
+ * Parse one certificate/CA input that may be PEM or DER.
+ * @return KC_TLSIO_OK, KC_TLSIO_ETLS, or KC_TLSIO_ENOMEM.
+ */
+static int kc_tlsio_parse_certificate(
+    mbedtls_x509_crt *certificate,
+    const void *data,
+    size_t size
+) {
+    const unsigned char *bytes;
+    unsigned char *copy;
+    size_t parse_size;
+    int result;
+
+    if (data == NULL || size == 0U) return KC_TLSIO_EINVAL;
+    bytes = (const unsigned char *)data;
+    copy = NULL;
+    parse_size = size;
+
+    if (kc_tlsio_is_pem(data, size)) {
+        copy = kc_tlsio_pem_copy(data, size);
+        if (copy == NULL) return KC_TLSIO_ENOMEM;
+        bytes = copy;
+        parse_size = size + 1U;
+    }
+
+    result = mbedtls_x509_crt_parse(certificate, bytes, parse_size);
+    free(copy);
+    return result == 0 ? KC_TLSIO_OK : KC_TLSIO_ETLS;
+}
+
+/**
+ * Parse one private key input that may be PEM or DER.
+ * @return KC_TLSIO_OK, KC_TLSIO_ETLS, or KC_TLSIO_ENOMEM.
+ */
+static int kc_tlsio_parse_private_key(
+    kc_tlsio_t *tls,
+    const void *data,
+    size_t size
+) {
+    const unsigned char *bytes;
+    unsigned char *copy;
+    size_t parse_size;
+    int result;
+
+    if (data == NULL || size == 0U) return KC_TLSIO_EINVAL;
+    bytes = (const unsigned char *)data;
+    copy = NULL;
+    parse_size = size;
+
+    if (kc_tlsio_is_pem(data, size)) {
+        copy = kc_tlsio_pem_copy(data, size);
+        if (copy == NULL) return KC_TLSIO_ENOMEM;
+        bytes = copy;
+        parse_size = size + 1U;
+    }
+
+    result = mbedtls_pk_parse_key(
+        &tls->private_key,
+        bytes,
+        parse_size,
+        NULL,
+        0U,
+        mbedtls_ctr_drbg_random,
+        &tls->random
+    );
+    if (copy != NULL) {
+        mbedtls_platform_zeroize(copy, parse_size);
+        free(copy);
+    }
+    return result == 0 ? KC_TLSIO_OK : KC_TLSIO_ETLS;
+}
+
+/**
+ * Mbed TLS receive BIO backed by caller-supplied encrypted input.
+ * @return Bytes read or MBEDTLS_ERR_SSL_WANT_READ.
+ */
+static int kc_tlsio_bio_recv(
     void *context,
     unsigned char *data,
     size_t size
 ) {
-    kc_tlsio_socket_t socket_handle;
-#ifdef _WIN32
-    int count;
-#else
-    ssize_t count;
-#endif
+    kc_tlsio_t *tls;
+    size_t copied;
 
-    socket_handle = *(kc_tlsio_socket_t *)context;
-#ifdef _WIN32
+    tls = (kc_tlsio_t *)context;
     if (size > (size_t)INT_MAX) size = (size_t)INT_MAX;
-    count = recv(socket_handle, (char *)data, (int)size, 0);
-    if (count == SOCKET_ERROR) return MBEDTLS_ERR_NET_RECV_FAILED;
-#else
-    count = recv(socket_handle, data, size, 0);
-    if (count < 0) return MBEDTLS_ERR_NET_RECV_FAILED;
-#endif
-    return (int)count;
+    if (size == 0U) return 0;
+
+    copied = 0U;
+    while (copied < size && tls->input_head != NULL) {
+        kc_tlsio_buffer_t *buffer;
+        size_t available;
+        size_t part;
+
+        buffer = tls->input_head;
+        available = buffer->size - buffer->offset;
+        part = size - copied;
+        if (part > available) part = available;
+        memcpy(data + copied, buffer->data + buffer->offset, part);
+        copied += part;
+        kc_tlsio_buffer_consume(
+            &tls->input_head,
+            &tls->input_tail,
+            part
+        );
+    }
+
+    if (copied == 0U) return MBEDTLS_ERR_SSL_WANT_READ;
+    return (int)copied;
 }
 
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined(TLSIO_BUILD_TESTS)
+/**
+ * Mbed TLS send BIO that queues encrypted output for the consumer.
+ * @return Bytes accepted or MBEDTLS_ERR_SSL_ALLOC_FAILED.
+ */
+static int kc_tlsio_bio_send(
+    void *context,
+    const unsigned char *data,
+    size_t size
+) {
+    kc_tlsio_t *tls;
+
+    tls = (kc_tlsio_t *)context;
+    if (size > (size_t)INT_MAX) size = (size_t)INT_MAX;
+    if (kc_tlsio_event_append(
+            tls,
+            KC_TLSIO_EVENT_CIPHERTEXT,
+            data,
+            size
+        ) != KC_TLSIO_OK) {
+        return MBEDTLS_ERR_SSL_ALLOC_FAILED;
+    }
+    return (int)size;
+}
+
+#if !defined(_WIN32) && !defined(__APPLE__)
 
 /**
- * Loads trusted roots from the native Unix certificate store.
- * @param roots Destination certificate chain.
- * @return KC_TLSIO_OK on success, or KC_TLSIO_EVERIFY on failure.
+ * Load trusted roots from the native Unix certificate store.
+ * @return KC_TLSIO_OK on success, otherwise KC_TLSIO_EVERIFY.
  */
 static int kc_tlsio_load_roots(mbedtls_x509_crt *roots) {
     static const char *files[] = {
@@ -272,8 +535,7 @@ static int kc_tlsio_load_roots(mbedtls_x509_crt *roots) {
 #ifdef _WIN32
 
 /**
- * Converts UTF-8 host text to a Windows wide string.
- * @param host UTF-8 host name.
+ * Convert UTF-8 host text to one Windows wide string.
  * @return Owned wide string, or NULL on failure.
  */
 static wchar_t *kc_tlsio_wide_host(const char *host) {
@@ -299,10 +561,8 @@ static wchar_t *kc_tlsio_wide_host(const char *host) {
 }
 
 /**
- * Verifies one peer chain with the Windows system trust store.
- * @param peer Peer certificate chain.
- * @param host Expected peer host.
- * @return KC_TLSIO_OK on success, or KC_TLSIO_EVERIFY on failure.
+ * Verify one peer chain with the Windows system trust store.
+ * @return KC_TLSIO_OK or KC_TLSIO_EVERIFY.
  */
 static int kc_tlsio_windows_verify(
     const mbedtls_x509_crt *peer,
@@ -405,8 +665,7 @@ static int kc_tlsio_windows_verify(
 #elif defined(__APPLE__)
 
 /**
- * Creates one Apple certificate object from DER bytes.
- * @param certificate Mbed TLS certificate.
+ * Create one Apple certificate object from DER bytes.
  * @return Owned Apple certificate, or NULL on failure.
  */
 static SecCertificateRef kc_tlsio_apple_certificate(
@@ -427,10 +686,8 @@ static SecCertificateRef kc_tlsio_apple_certificate(
 }
 
 /**
- * Verifies one peer chain with the Apple system trust store.
- * @param peer Peer certificate chain.
- * @param host Expected peer host.
- * @return KC_TLSIO_OK on success, or KC_TLSIO_EVERIFY on failure.
+ * Verify one peer chain with the Apple system trust store.
+ * @return KC_TLSIO_OK or KC_TLSIO_EVERIFY.
  */
 static int kc_tlsio_apple_verify(
     const mbedtls_x509_crt *peer,
@@ -490,6 +747,7 @@ static int kc_tlsio_apple_verify(
         SecTrustEvaluateWithError(trust, NULL)) {
         rc = KC_TLSIO_OK;
     }
+
     if (trust != NULL) CFRelease(trust);
     CFRelease(policy);
     CFRelease(certificates);
@@ -498,73 +756,84 @@ static int kc_tlsio_apple_verify(
 #endif
 
 /**
- * Configures certificate trust before the TLS handshake.
- * @param tls TLS connection.
- * @return KC_TLSIO_OK on success, or KC_TLSIO_EVERIFY on failure.
+ * Configure client peer trust.
+ * @return KC_TLSIO_OK or a negative status.
  */
-static int kc_tlsio_prepare_trust(kc_tlsio_t *tls) {
-#if defined(_WIN32) || defined(__APPLE__)
-    mbedtls_ssl_conf_authmode(&tls->config, MBEDTLS_SSL_VERIFY_OPTIONAL);
-    return KC_TLSIO_OK;
-#else
-#ifdef TLSIO_BUILD_TESTS
-    if (mbedtls_x509_crt_parse(
-            &tls->roots,
-            kc_tlsio_test_ca_pem,
-            strlen((const char *)kc_tlsio_test_ca_pem) + 1U
-        ) != 0) {
-        return KC_TLSIO_EVERIFY;
-    }
-#else
+static int kc_tlsio_prepare_client_trust(
+    kc_tlsio_t *tls,
+    const kc_tlsio_options_t *options
+) {
     int rc;
 
+    if (options->ca != NULL || options->ca_size != 0U) {
+        if (options->ca == NULL || options->ca_size == 0U) {
+            return KC_TLSIO_EINVAL;
+        }
+        rc = kc_tlsio_parse_certificate(
+            &tls->roots,
+            options->ca,
+            options->ca_size
+        );
+        if (rc != KC_TLSIO_OK) return rc;
+        mbedtls_ssl_conf_ca_chain(&tls->config, &tls->roots, NULL);
+        mbedtls_ssl_conf_authmode(
+            &tls->config,
+            MBEDTLS_SSL_VERIFY_REQUIRED
+        );
+        return KC_TLSIO_OK;
+    }
+
+#if defined(_WIN32) || defined(__APPLE__)
+    tls->native_trust = 1;
+    mbedtls_ssl_conf_authmode(
+        &tls->config,
+        MBEDTLS_SSL_VERIFY_OPTIONAL
+    );
+    return KC_TLSIO_OK;
+#else
     rc = kc_tlsio_load_roots(&tls->roots);
     if (rc != KC_TLSIO_OK) return rc;
-#endif
     mbedtls_ssl_conf_ca_chain(&tls->config, &tls->roots, NULL);
-    mbedtls_ssl_conf_authmode(&tls->config, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_authmode(
+        &tls->config,
+        MBEDTLS_SSL_VERIFY_REQUIRED
+    );
     return KC_TLSIO_OK;
 #endif
 }
 
 /**
- * Verifies the peer after the TLS handshake.
- * @param tls TLS connection.
- * @param host Expected peer host.
- * @return KC_TLSIO_OK on success, or KC_TLSIO_EVERIFY on failure.
+ * Verify the client session peer after handshake.
+ * @return KC_TLSIO_OK or KC_TLSIO_EVERIFY.
  */
-static int kc_tlsio_verify_peer(kc_tlsio_t *tls, const char *host) {
+static int kc_tlsio_verify_peer(kc_tlsio_t *tls) {
 #if defined(_WIN32)
-    return kc_tlsio_windows_verify(
-        mbedtls_ssl_get_peer_cert(&tls->ssl),
-        host
-    );
+    if (tls->native_trust) {
+        return kc_tlsio_windows_verify(
+            mbedtls_ssl_get_peer_cert(&tls->ssl),
+            tls->host
+        );
+    }
 #elif defined(__APPLE__)
-    return kc_tlsio_apple_verify(
-        mbedtls_ssl_get_peer_cert(&tls->ssl),
-        host
-    );
-#else
-    (void)host;
+    if (tls->native_trust) {
+        return kc_tlsio_apple_verify(
+            mbedtls_ssl_get_peer_cert(&tls->ssl),
+            tls->host
+        );
+    }
+#endif
+
     return mbedtls_ssl_get_verify_result(&tls->ssl) == 0U
         ? KC_TLSIO_OK
         : KC_TLSIO_EVERIFY;
-#endif
 }
 
 /**
- * Runs the TLS handshake until it reaches a terminal result.
- * @param tls TLS connection.
- * @return KC_TLSIO_OK on success, or a negative status code.
+ * Map one Mbed TLS operation error to the public status model.
+ * @return Public negative status.
  */
-static int kc_tlsio_handshake(kc_tlsio_t *tls) {
-    int result;
-
-    do {
-        result = mbedtls_ssl_handshake(&tls->ssl);
-    } while (result == MBEDTLS_ERR_SSL_WANT_READ ||
-        result == MBEDTLS_ERR_SSL_WANT_WRITE);
-    if (result == 0) return KC_TLSIO_OK;
+static int kc_tlsio_map_tls_error(int result) {
+    if (result == MBEDTLS_ERR_SSL_ALLOC_FAILED) return KC_TLSIO_ENOMEM;
     if (result == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED ||
         result == MBEDTLS_ERR_SSL_BAD_CERTIFICATE) {
         return KC_TLSIO_EVERIFY;
@@ -573,49 +842,213 @@ static int kc_tlsio_handshake(kc_tlsio_t *tls) {
 }
 
 /**
- * Opens one authenticated TLS connection.
- * @param out Destination connection pointer.
- * @param options Connection options.
- * @return KC_TLSIO_OK on success, or a negative status code.
+ * Flush queued application plaintext through an established session.
+ * @return KC_TLSIO_OK or a terminal status.
  */
-int kc_tlsio_connect(
+static int kc_tlsio_flush_pending(kc_tlsio_t *tls) {
+    while (tls->pending_head != NULL) {
+        kc_tlsio_buffer_t *buffer;
+        size_t remaining;
+        int result;
+
+        buffer = tls->pending_head;
+        remaining = buffer->size - buffer->offset;
+        if (remaining > MBEDTLS_SSL_OUT_CONTENT_LEN) {
+            remaining = MBEDTLS_SSL_OUT_CONTENT_LEN;
+        }
+        result = mbedtls_ssl_write(
+            &tls->ssl,
+            buffer->data + buffer->offset,
+            remaining
+        );
+        if (tls->status != KC_TLSIO_OK) return tls->status;
+        if (result > 0) {
+            kc_tlsio_buffer_consume(
+                &tls->pending_head,
+                &tls->pending_tail,
+                (size_t)result
+            );
+            continue;
+        }
+        if (result == MBEDTLS_ERR_SSL_WANT_READ ||
+            result == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            return KC_TLSIO_OK;
+        }
+        return kc_tlsio_fail(tls, kc_tlsio_map_tls_error(result));
+    }
+    return KC_TLSIO_OK;
+}
+
+/**
+ * Send a reciprocal close_notify after peer shutdown.
+ * @return None.
+ */
+static void kc_tlsio_reply_close_notify(kc_tlsio_t *tls) {
+    int result;
+
+    if (tls->close_sent || !tls->handshake_ready) return;
+    result = mbedtls_ssl_close_notify(&tls->ssl);
+    if (tls->status == KC_TLSIO_OK &&
+        result != 0 &&
+        result != MBEDTLS_ERR_SSL_WANT_READ &&
+        result != MBEDTLS_ERR_SSL_WANT_WRITE) {
+        (void)kc_tlsio_fail(tls, kc_tlsio_map_tls_error(result));
+    }
+    tls->close_sent = 1;
+}
+
+/**
+ * Advance handshake, queued writes, and plaintext reads as far as possible.
+ * @return Current public status.
+ */
+static int kc_tlsio_pump(kc_tlsio_t *tls) {
+    unsigned char buffer[KC_TLSIO_READ_SIZE];
+
+    for (;;) {
+        int result;
+
+        if (tls->status != KC_TLSIO_OK) return tls->status;
+
+        if (!tls->handshake_ready) {
+            result = mbedtls_ssl_handshake(&tls->ssl);
+            if (tls->status != KC_TLSIO_OK) return tls->status;
+            if (result == 0) {
+                if (tls->role == KC_TLSIO_CLIENT) {
+                    int verify;
+
+                    verify = kc_tlsio_verify_peer(tls);
+                    if (verify != KC_TLSIO_OK) {
+                        return kc_tlsio_fail(tls, verify);
+                    }
+                }
+                tls->handshake_ready = 1;
+                continue;
+            }
+            if (result == MBEDTLS_ERR_SSL_WANT_READ ||
+                result == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                return KC_TLSIO_OK;
+            }
+            return kc_tlsio_fail(tls, kc_tlsio_map_tls_error(result));
+        }
+
+        result = kc_tlsio_flush_pending(tls);
+        if (result != KC_TLSIO_OK) return result;
+        if (tls->pending_head != NULL) return KC_TLSIO_OK;
+
+        result = mbedtls_ssl_read(&tls->ssl, buffer, sizeof(buffer));
+        if (tls->status != KC_TLSIO_OK) return tls->status;
+        if (result > 0) {
+            if (kc_tlsio_event_append(
+                    tls,
+                    KC_TLSIO_EVENT_PLAINTEXT,
+                    buffer,
+                    (size_t)result
+                ) != KC_TLSIO_OK) {
+                return tls->status;
+            }
+            continue;
+        }
+        if (result == MBEDTLS_ERR_SSL_WANT_READ ||
+            result == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            return KC_TLSIO_OK;
+        }
+        if (result == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
+            kc_tlsio_reply_close_notify(tls);
+            if (tls->status < 0) return tls->status;
+            tls->status = KC_TLSIO_CLOSED;
+            return KC_TLSIO_CLOSED;
+        }
+        if (result == 0) return KC_TLSIO_OK;
+        return kc_tlsio_fail(tls, kc_tlsio_map_tls_error(result));
+    }
+}
+
+/**
+ * Release initialized TLS internals. The caller must own the context.
+ * @return None.
+ */
+static void kc_tlsio_release(kc_tlsio_t *tls) {
+    if (tls == NULL) return;
+    kc_tlsio_buffer_free(tls->input_head);
+    kc_tlsio_buffer_free(tls->pending_head);
+    kc_tlsio_event_free(tls->event_head);
+    mbedtls_ssl_free(&tls->ssl);
+    mbedtls_ssl_config_free(&tls->config);
+    mbedtls_ctr_drbg_free(&tls->random);
+    mbedtls_entropy_free(&tls->entropy);
+    mbedtls_x509_crt_free(&tls->roots);
+    mbedtls_x509_crt_free(&tls->certificate);
+    mbedtls_pk_free(&tls->private_key);
+    free(tls->host);
+    if (tls->mutex_ready) kc_tlsio_mutex_close(&tls->mutex);
+    free(tls);
+}
+
+/**
+ * Open one client or server TLS session.
+ * @return KC_TLSIO_OK on success, otherwise a negative status.
+ */
+int kc_tlsio_open(
     kc_tlsio_t **out,
-    const kc_tlsio_options_t *options
+    const kc_tlsio_options_t *options,
+    kc_tlsio_plaintext_fn plaintext,
+    kc_tlsio_ciphertext_fn ciphertext,
+    void *userdata
 ) {
     static const unsigned char personalization[] = "kc_tlsio";
     kc_tlsio_t *tls;
-    unsigned short port;
+    kc_tlsio_event_t *events;
+    int endpoint;
     int rc;
 
     if (out == NULL) return KC_TLSIO_EINVAL;
     *out = NULL;
-    if (options == NULL || options->host == NULL || options->host[0] == '\0') {
+    if (options == NULL || plaintext == NULL || ciphertext == NULL) {
+        return KC_TLSIO_EINVAL;
+    }
+    if (options->role != KC_TLSIO_CLIENT &&
+        options->role != KC_TLSIO_SERVER) {
+        return KC_TLSIO_EINVAL;
+    }
+    if (options->role == KC_TLSIO_CLIENT &&
+        (options->host == NULL || options->host[0] == '\0')) {
+        return KC_TLSIO_EINVAL;
+    }
+    if (options->role == KC_TLSIO_SERVER &&
+        (options->certificate == NULL ||
+         options->certificate_size == 0U ||
+         options->private_key == NULL ||
+         options->private_key_size == 0U)) {
         return KC_TLSIO_EINVAL;
     }
     if (psa_crypto_init() != PSA_SUCCESS) return KC_TLSIO_ETLS;
 
     tls = (kc_tlsio_t *)calloc(1, sizeof(*tls));
     if (tls == NULL) return KC_TLSIO_ENOMEM;
-    tls->socket = KC_TLSIO_BAD_SOCKET;
     mbedtls_ssl_init(&tls->ssl);
     mbedtls_ssl_config_init(&tls->config);
     mbedtls_ctr_drbg_init(&tls->random);
     mbedtls_entropy_init(&tls->entropy);
     mbedtls_x509_crt_init(&tls->roots);
-    tls->tls_ready = 1;
+    mbedtls_x509_crt_init(&tls->certificate);
+    mbedtls_pk_init(&tls->private_key);
 
-    rc = kc_tlsio_platform_init();
-    if (rc != KC_TLSIO_OK) {
-        kc_tlsio_close(tls);
-        return rc;
+    if (kc_tlsio_mutex_open(&tls->mutex) != 0) {
+        kc_tlsio_release(tls);
+        return KC_TLSIO_ETLS;
     }
-    tls->platform_ready = 1;
+    tls->mutex_ready = 1;
+    tls->role = options->role;
+    tls->plaintext = plaintext;
+    tls->ciphertext = ciphertext;
+    tls->userdata = userdata;
 
-    port = options->port == 0U ? 443U : options->port;
-    rc = kc_tlsio_socket_connect(options->host, port, &tls->socket);
-    if (rc != KC_TLSIO_OK) {
-        kc_tlsio_close(tls);
-        return rc;
+    if (options->role == KC_TLSIO_CLIENT) {
+        tls->host = kc_tlsio_string_copy(options->host);
+        if (tls->host == NULL) {
+            kc_tlsio_release(tls);
+            return KC_TLSIO_ENOMEM;
+        }
     }
 
     if (mbedtls_ctr_drbg_seed(
@@ -625,16 +1058,20 @@ int kc_tlsio_connect(
             personalization,
             sizeof(personalization) - 1U
         ) != 0) {
-        kc_tlsio_close(tls);
+        kc_tlsio_release(tls);
         return KC_TLSIO_ETLS;
     }
+
+    endpoint = options->role == KC_TLSIO_CLIENT
+        ? MBEDTLS_SSL_IS_CLIENT
+        : MBEDTLS_SSL_IS_SERVER;
     if (mbedtls_ssl_config_defaults(
             &tls->config,
-            MBEDTLS_SSL_IS_CLIENT,
+            endpoint,
             MBEDTLS_SSL_TRANSPORT_STREAM,
             MBEDTLS_SSL_PRESET_DEFAULT
         ) != 0) {
-        kc_tlsio_close(tls);
+        kc_tlsio_release(tls);
         return KC_TLSIO_ETLS;
     }
 
@@ -647,159 +1084,220 @@ int kc_tlsio_connect(
         &tls->config,
         MBEDTLS_SSL_VERSION_TLS1_2
     );
-    rc = kc_tlsio_prepare_trust(tls);
-    if (rc != KC_TLSIO_OK) {
-        kc_tlsio_close(tls);
-        return rc;
+
+    if (options->role == KC_TLSIO_CLIENT) {
+        rc = kc_tlsio_prepare_client_trust(tls, options);
+        if (rc != KC_TLSIO_OK) {
+            kc_tlsio_release(tls);
+            return rc;
+        }
+    } else {
+        rc = kc_tlsio_parse_certificate(
+            &tls->certificate,
+            options->certificate,
+            options->certificate_size
+        );
+        if (rc == KC_TLSIO_OK) {
+            rc = kc_tlsio_parse_private_key(
+                tls,
+                options->private_key,
+                options->private_key_size
+            );
+        }
+        if (rc != KC_TLSIO_OK) {
+            kc_tlsio_release(tls);
+            return rc;
+        }
+        mbedtls_ssl_conf_authmode(
+            &tls->config,
+            MBEDTLS_SSL_VERIFY_NONE
+        );
+        if (mbedtls_ssl_conf_own_cert(
+                &tls->config,
+                &tls->certificate,
+                &tls->private_key
+            ) != 0) {
+            kc_tlsio_release(tls);
+            return KC_TLSIO_ETLS;
+        }
     }
 
-    if (mbedtls_ssl_setup(&tls->ssl, &tls->config) != 0 ||
-        mbedtls_ssl_set_hostname(&tls->ssl, options->host) != 0) {
-        kc_tlsio_close(tls);
+    if (mbedtls_ssl_setup(&tls->ssl, &tls->config) != 0) {
+        kc_tlsio_release(tls);
         return KC_TLSIO_ETLS;
     }
+    if (options->role == KC_TLSIO_CLIENT &&
+        mbedtls_ssl_set_hostname(&tls->ssl, tls->host) != 0) {
+        kc_tlsio_release(tls);
+        return KC_TLSIO_ETLS;
+    }
+
     mbedtls_ssl_set_bio(
         &tls->ssl,
-        &tls->socket,
-        kc_tlsio_send,
-        kc_tlsio_recv,
+        tls,
+        kc_tlsio_bio_send,
+        kc_tlsio_bio_recv,
         NULL
     );
 
-    rc = kc_tlsio_handshake(tls);
-    if (rc != KC_TLSIO_OK) {
-        kc_tlsio_close(tls);
-        return rc;
-    }
-    rc = kc_tlsio_verify_peer(tls, options->host);
-    if (rc != KC_TLSIO_OK) {
-        kc_tlsio_close(tls);
-        return rc;
+    events = NULL;
+    if (options->role == KC_TLSIO_CLIENT) {
+        kc_tlsio_lock(tls);
+        rc = kc_tlsio_pump(tls);
+        events = kc_tlsio_event_take(tls);
+        kc_tlsio_unlock(tls);
+        if (rc < 0) {
+            kc_tlsio_event_free(events);
+            kc_tlsio_release(tls);
+            return rc;
+        }
     }
 
+    kc_tlsio_event_dispatch(
+        events,
+        plaintext,
+        ciphertext,
+        userdata
+    );
     *out = tls;
     return KC_TLSIO_OK;
 }
 
 /**
- * Writes all supplied bytes to one TLS connection.
- * @param tls Connection handle.
- * @param data Input bytes.
- * @param size Input byte count.
- * @return KC_TLSIO_OK on success, or a negative status code.
+ * Send plaintext through one TLS session.
+ * @return KC_TLSIO_OK, KC_TLSIO_CLOSED, or a negative status.
  */
-int kc_tlsio_write(kc_tlsio_t *tls, const void *data, size_t size) {
-    const unsigned char *bytes;
-    size_t sent;
-
-    if (tls == NULL || !tls->tls_ready) return KC_TLSIO_EINVAL;
-    if (data == NULL && size != 0U) return KC_TLSIO_EINVAL;
-    if (size == 0U) return KC_TLSIO_OK;
-
-    bytes = (const unsigned char *)data;
-    sent = 0U;
-    while (sent < size) {
-        size_t remaining;
-        int result;
-
-        remaining = size - sent;
-        if (remaining > (size_t)INT_MAX) remaining = (size_t)INT_MAX;
-        result = mbedtls_ssl_write(&tls->ssl, bytes + sent, remaining);
-        if (result == MBEDTLS_ERR_SSL_WANT_READ ||
-            result == MBEDTLS_ERR_SSL_WANT_WRITE) {
-            continue;
-        }
-        if (result <= 0) return KC_TLSIO_ETLS;
-        sent += (size_t)result;
-    }
-    return KC_TLSIO_OK;
-}
-
-/**
- * Reads the next available TLS plaintext chunk.
- * @param tls Connection handle.
- * @param out_data Destination for allocated plaintext bytes.
- * @param out_size Destination plaintext byte count.
- * @return KC_TLSIO_OK, KC_TLSIO_EOF, or a negative status code.
- */
-int kc_tlsio_read(
+int kc_tlsio_send(
     kc_tlsio_t *tls,
-    void **out_data,
-    size_t *out_size
+    const void *data,
+    size_t data_size
 ) {
-    unsigned char *buffer;
-    int result;
+    kc_tlsio_event_t *events;
+    kc_tlsio_plaintext_fn plaintext;
+    kc_tlsio_ciphertext_fn ciphertext;
+    void *userdata;
+    int rc;
 
-    if (out_data == NULL || out_size == NULL) return KC_TLSIO_EINVAL;
-    *out_data = NULL;
-    *out_size = 0U;
-    if (tls == NULL || !tls->tls_ready) return KC_TLSIO_EINVAL;
+    if (tls == NULL) return KC_TLSIO_EINVAL;
+    if (data == NULL && data_size != 0U) return KC_TLSIO_EINVAL;
 
-    buffer = (unsigned char *)malloc(KC_TLSIO_READ_SIZE);
-    if (buffer == NULL) return KC_TLSIO_ENOMEM;
-    do {
-        result = mbedtls_ssl_read(&tls->ssl, buffer, KC_TLSIO_READ_SIZE);
-    } while (result == MBEDTLS_ERR_SSL_WANT_READ ||
-        result == MBEDTLS_ERR_SSL_WANT_WRITE);
-    if (result > 0) {
-        *out_data = buffer;
-        *out_size = (size_t)result;
-        return KC_TLSIO_OK;
+    kc_tlsio_lock(tls);
+    if (tls->status != KC_TLSIO_OK) {
+        rc = tls->status;
+    } else {
+        rc = kc_tlsio_buffer_append(
+            &tls->pending_head,
+            &tls->pending_tail,
+            data,
+            data_size
+        );
+        if (rc == KC_TLSIO_OK) rc = kc_tlsio_pump(tls);
     }
+    events = kc_tlsio_event_take(tls);
+    plaintext = tls->plaintext;
+    ciphertext = tls->ciphertext;
+    userdata = tls->userdata;
+    kc_tlsio_unlock(tls);
 
-    free(buffer);
-    if (result == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) return KC_TLSIO_EOF;
-    return KC_TLSIO_ETLS;
+    kc_tlsio_event_dispatch(events, plaintext, ciphertext, userdata);
+    return rc;
 }
 
 /**
- * Closes and releases one TLS connection.
- * @param tls Connection handle, or NULL.
- * @return void.
+ * Supply TLS wire bytes received from the underlying transport.
+ * @return KC_TLSIO_OK, KC_TLSIO_CLOSED, or a negative status.
+ */
+int kc_tlsio_receive(
+    kc_tlsio_t *tls,
+    const void *data,
+    size_t data_size
+) {
+    kc_tlsio_event_t *events;
+    kc_tlsio_plaintext_fn plaintext;
+    kc_tlsio_ciphertext_fn ciphertext;
+    void *userdata;
+    int rc;
+
+    if (tls == NULL) return KC_TLSIO_EINVAL;
+    if (data == NULL && data_size != 0U) return KC_TLSIO_EINVAL;
+
+    kc_tlsio_lock(tls);
+    if (tls->status != KC_TLSIO_OK) {
+        rc = tls->status;
+    } else {
+        rc = kc_tlsio_buffer_append(
+            &tls->input_head,
+            &tls->input_tail,
+            data,
+            data_size
+        );
+        if (rc == KC_TLSIO_OK) rc = kc_tlsio_pump(tls);
+    }
+    events = kc_tlsio_event_take(tls);
+    plaintext = tls->plaintext;
+    ciphertext = tls->ciphertext;
+    userdata = tls->userdata;
+    kc_tlsio_unlock(tls);
+
+    kc_tlsio_event_dispatch(events, plaintext, ciphertext, userdata);
+    return rc;
+}
+
+/**
+ * Close and release one TLS session.
+ * @return None.
  */
 void kc_tlsio_close(kc_tlsio_t *tls) {
+    kc_tlsio_event_t *events;
+    kc_tlsio_plaintext_fn plaintext;
+    kc_tlsio_ciphertext_fn ciphertext;
+    void *userdata;
+
     if (tls == NULL) return;
-    if (tls->tls_ready) {
-        if (tls->socket != KC_TLSIO_BAD_SOCKET) {
-            mbedtls_ssl_close_notify(&tls->ssl);
+
+    kc_tlsio_lock(tls);
+    if (tls->handshake_ready &&
+        !tls->close_sent &&
+        tls->status >= KC_TLSIO_OK) {
+        int result;
+
+        result = mbedtls_ssl_close_notify(&tls->ssl);
+        if (tls->status == KC_TLSIO_OK &&
+            result != 0 &&
+            result != MBEDTLS_ERR_SSL_WANT_READ &&
+            result != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            (void)kc_tlsio_fail(tls, kc_tlsio_map_tls_error(result));
         }
-        mbedtls_ssl_free(&tls->ssl);
-        mbedtls_ssl_config_free(&tls->config);
-        mbedtls_ctr_drbg_free(&tls->random);
-        mbedtls_entropy_free(&tls->entropy);
-        mbedtls_x509_crt_free(&tls->roots);
+        tls->close_sent = 1;
     }
-    if (tls->socket != KC_TLSIO_BAD_SOCKET) {
-        kc_tlsio_socket_close(tls->socket);
-    }
-    if (tls->platform_ready) kc_tlsio_platform_cleanup();
-    free(tls);
+
+    events = kc_tlsio_event_take(tls);
+    plaintext = tls->plaintext;
+    ciphertext = tls->ciphertext;
+    userdata = tls->userdata;
+    kc_tlsio_unlock(tls);
+
+    /*
+     * No public callback observes the TLS object itself. Free the session before
+     * dispatch so a callback may safely release or replace its surrounding
+     * application state.
+     */
+    kc_tlsio_release(tls);
+    kc_tlsio_event_dispatch(events, plaintext, ciphertext, userdata);
 }
 
 /**
- * Releases one allocation returned by tlsio.
- * @param ptr Allocation pointer, or NULL.
- * @return void.
- */
-void kc_tlsio_free(void *ptr) {
-    free(ptr);
-}
-
-/**
- * Returns a static message for one public status code.
- * @param code Public status code.
+ * Return a static message for one public status code.
  * @return Static status message.
  */
-const char *kc_tlsio_strerror(int code) {
-    switch (code) {
+const char *kc_tlsio_strerror(int status) {
+    switch (status) {
         case KC_TLSIO_OK:
             return "success";
-        case KC_TLSIO_EOF:
-            return "peer closed the TLS connection";
+        case KC_TLSIO_CLOSED:
+            return "TLS peer closed the session";
         case KC_TLSIO_EINVAL:
             return "invalid argument";
-        case KC_TLSIO_ENET:
-            return "network connection failed";
         case KC_TLSIO_ETLS:
             return "TLS operation failed";
         case KC_TLSIO_EVERIFY:
@@ -812,8 +1310,8 @@ const char *kc_tlsio_strerror(int code) {
 }
 
 /**
- * Returns the build version generated at compile time.
- * @return Unix timestamp for the current build.
+ * Return the build version generated at compile time.
+ * @return Build version.
  */
 uint64_t kc_tlsio_version(void) {
     return (uint64_t)KC_TLSIO_BUILD_VERSION;

@@ -1,6 +1,6 @@
 /**
- * libtlsio.h - Authenticated TLS byte connection.
- * Summary: Public API for connecting and exchanging bytes over TLS.
+ * libtlsio.h - Transport-independent TLS session.
+ * Summary: Public API for client and server TLS over caller-supplied byte transport.
  *
  * Author: KaisarCode
  * Website: https://kaisarcode.com
@@ -19,81 +19,113 @@ extern "C" {
 
 typedef struct kc_tlsio kc_tlsio_t;
 
-#define KC_TLSIO_OK 0
-#define KC_TLSIO_EOF 1
-#define KC_TLSIO_EINVAL -1
-#define KC_TLSIO_ENET -2
-#define KC_TLSIO_ETLS -3
-#define KC_TLSIO_EVERIFY -4
-#define KC_TLSIO_ENOMEM -5
+#define KC_TLSIO_OK        0
+#define KC_TLSIO_CLOSED    1
+#define KC_TLSIO_EINVAL   -1
+#define KC_TLSIO_ETLS     -2
+#define KC_TLSIO_EVERIFY  -3
+#define KC_TLSIO_ENOMEM   -4
+
+#define KC_TLSIO_CLIENT    1
+#define KC_TLSIO_SERVER    2
 
 typedef struct {
+    int role;
     const char *host;
-    unsigned short port;
+    const void *ca;
+    size_t ca_size;
+    const void *certificate;
+    size_t certificate_size;
+    const void *private_key;
+    size_t private_key_size;
 } kc_tlsio_options_t;
 
 /**
- * Opens one authenticated TLS connection.
- * Port zero selects the conventional TLS port 443. The peer certificate and
- * host name are verified against the default trust store.
- * @param out Destination connection pointer.
- * @param options Connection options.
- * @return KC_TLSIO_OK on success, or a negative status code.
+ * Receives authenticated plaintext produced by one TLS session.
+ *
+ * The supplied bytes are borrowed and remain valid only for the callback
+ * duration.
  */
-int kc_tlsio_connect(
+typedef void (*kc_tlsio_plaintext_fn)(
+    const void *data,
+    size_t data_size,
+    void *userdata
+);
+
+/**
+ * Receives TLS wire bytes that must be passed to the underlying byte transport.
+ *
+ * The supplied bytes are borrowed and remain valid only for the callback
+ * duration.
+ */
+typedef void (*kc_tlsio_ciphertext_fn)(
+    const void *data,
+    size_t data_size,
+    void *userdata
+);
+
+/**
+ * Open one client or server TLS session.
+ *
+ * Client sessions require a non-empty host for SNI and hostname verification.
+ * NULL ca selects the native trust store. Server sessions require a certificate
+ * chain and private key. Certificate, key, and CA inputs may be PEM or DER.
+ *
+ * Opening a client session starts the TLS handshake and may invoke ciphertext
+ * before returning. Server sessions wait for peer bytes supplied to receive.
+ *
+ * @return KC_TLSIO_OK on success, otherwise a negative status.
+ */
+int kc_tlsio_open(
     kc_tlsio_t **out,
-    const kc_tlsio_options_t *options
+    const kc_tlsio_options_t *options,
+    kc_tlsio_plaintext_fn plaintext,
+    kc_tlsio_ciphertext_fn ciphertext,
+    void *userdata
 );
 
 /**
- * Writes all supplied bytes to one TLS connection.
- * @param tls Connection handle.
- * @param data Input bytes.
- * @param size Input byte count.
- * @return KC_TLSIO_OK on success, or a negative status code.
+ * Send plaintext through one TLS session.
+ *
+ * The library copies the supplied bytes before returning. Data supplied before
+ * the handshake completes is retained and sent automatically once the peer is
+ * authenticated.
+ *
+ * @return KC_TLSIO_OK, KC_TLSIO_CLOSED, or a negative status.
  */
-int kc_tlsio_write(kc_tlsio_t *tls, const void *data, size_t size);
-
-/**
- * Reads the next available TLS plaintext chunk.
- * A successful read returns an owned allocation that must be released with
- * kc_tlsio_free(). Clean peer shutdown returns KC_TLSIO_EOF with no data.
- * @param tls Connection handle.
- * @param out_data Destination for allocated plaintext bytes.
- * @param out_size Destination plaintext byte count.
- * @return KC_TLSIO_OK, KC_TLSIO_EOF, or a negative status code.
- */
-int kc_tlsio_read(
+int kc_tlsio_send(
     kc_tlsio_t *tls,
-    void **out_data,
-    size_t *out_size
+    const void *data,
+    size_t data_size
 );
 
 /**
- * Closes and releases one TLS connection.
- * @param tls Connection handle, or NULL.
- * @return void.
+ * Supply TLS wire bytes received from the underlying byte transport.
+ *
+ * One call may emit zero, one, or multiple plaintext/ciphertext callbacks while
+ * handshake, record processing, and protocol responses are handled internally.
+ *
+ * @return KC_TLSIO_OK, KC_TLSIO_CLOSED after authenticated close_notify, or a
+ * negative status.
+ */
+int kc_tlsio_receive(
+    kc_tlsio_t *tls,
+    const void *data,
+    size_t data_size
+);
+
+/**
+ * Close and release one TLS session.
+ *
+ * An established session emits its TLS close_notify through ciphertext before
+ * being released. NULL is accepted.
  */
 void kc_tlsio_close(kc_tlsio_t *tls);
 
-/**
- * Releases one allocation returned by tlsio.
- * @param ptr Allocation pointer, or NULL.
- * @return void.
- */
-void kc_tlsio_free(void *ptr);
+/** Return a static message for one public status code. */
+const char *kc_tlsio_strerror(int status);
 
-/**
- * Returns a static message for one public status code.
- * @param code Public status code.
- * @return Static status message.
- */
-const char *kc_tlsio_strerror(int code);
-
-/**
- * Returns the build version generated at compile time.
- * @return Unix timestamp for the current build.
- */
+/** Return the build version generated at compile time. */
 uint64_t kc_tlsio_version(void);
 
 #ifdef __cplusplus

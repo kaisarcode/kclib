@@ -1,452 +1,104 @@
 /**
  * test.c - libtlsio public API contract tests.
- * Summary: Exercises verified TLS transport against a local server.
+ * Summary: Exercises client/server TLS through in-memory byte transport.
  *
  * Author: KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
-#ifndef _WIN32
-#define _POSIX_C_SOURCE 200809L
-#endif
-
 #include "libtlsio.h"
 
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/entropy.h>
-#include <mbedtls/net_sockets.h>
-#include <mbedtls/pk.h>
-#include <mbedtls/ssl.h>
-#include <mbedtls/x509_crt.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <process.h>
-#include <winsock2.h>
-#include <windows.h>
-typedef SOCKET test_socket_t;
-typedef HANDLE test_thread_t;
-#define TEST_BAD_SOCKET INVALID_SOCKET
-#else
-#include <arpa/inet.h>
-#include <pthread.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <unistd.h>
-typedef int test_socket_t;
-typedef pthread_t test_thread_t;
-#define TEST_BAD_SOCKET (-1)
-#endif
-
 #define TEST_HOST "localhost"
 #define TEST_LARGE_SIZE 70000U
+#define TEST_MAX_STEPS 200000U
 
-const unsigned char kc_tlsio_test_ca_pem[] =
+static const unsigned char test_ca[] =
     "-----BEGIN CERTIFICATE-----\n"
-    "MIIDETCCAfmgAwIBAgIUewod6mSAzSl1m4gck2DjeL8oioAwDQYJKoZIhvcNAQEL\n"
-    "BQAwGDEWMBQGA1UEAwwNdGxzaW8gdGVzdCBDQTAeFw0yNjEwMTYxNzEwNDJaFw0z\n"
-    "NjEwMTMxNzEwNDJaMBgxFjAUBgNVBAMMDXRsc2lvIHRlc3QgQ0EwggEiMA0GCSqG\n"
-    "SIb3DQEBAQUAA4IBDwAwggEKAoIBAQCevsIo51tKhnv6SP33CWYgsuS4Gh/Qj7cC\n"
-    "SFEEyZiVcVM+W+fXXyfQqkGsy2YTkJo+HYUf/nxAayreGJKSzwpV0wKiDA/zCmNY\n"
-    "+TR26AgNSZHP1hSb6qnFa3BskoSO/TEcUjU9l1T63k9LYbncLeodkAV0AcfZz6yP\n"
-    "hh1tjDvBzyrzSrpxWGROBkqJ6YRbZKwC40YcpKSmNneVVOwpx0rlpwOkyUFz9tgs\n"
-    "P/8nArsAPVyC+XW1vhkcguuDDj2G5lxlKtCz3WCPH2strkAzhn+bw55MGGlVfwuy\n"
-    "HhFqnUxdOF0r62/GJuHVgpyRUT5b5Yv9PeHkyro5lnRbwVgOr9sJAgMBAAGjUzBR\n"
-    "MB0GA1UdDgQWBBRU8rzAD65med70ABVn2hw5ztd1RDAfBgNVHSMEGDAWgBRU8rzA\n"
-    "D65med70ABVn2hw5ztd1RDAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUA\n"
-    "A4IBAQCISj/erLOSGmGwVEi6Eo4hs+u36+G9JCojrW1u32IyFsnv10ak5woISTIl\n"
-    "HKqvEAVoxMuvMh0WFg+OHKC3MFkdTbVKXf2ic0Q40x8dfCrgwriuafrYgouOEKfv\n"
-    "1SkDWc2VSXVcpY0miDQpiketdU+rij5wa0MB9uSxb1bLdP7kSA3PYEiMcymhcOps\n"
-    "BB9tDDatnDgpV8M+jPSGQlYlI3T8/OLuQbrdnILgYDt8T+UxycTN9hQ2gS61CDyn\n"
-    "j7xyeTNvoCGyvl2ERUzazU7VXE/3wIgeQGqN2As8NMLHFDhFNz/plpXkVeKwoMAg\n"
-    "VznfJJga5VUVZxuRE78bnFHIDwZp\n"
+    "MIIBhDCCASugAwIBAgIUdAI09dCzLbvdoEMrJ3iVBLNlZpowCgYIKoZIzj0EAwIw\n"
+    "GDEWMBQGA1UEAwwNdGxzaW8gdGVzdCBDQTAeFw0yNjEwMTYyMDE2MzBaFw0zNjEw\n"
+    "MTMyMDE2MzBaMBgxFjAUBgNVBAMMDXRsc2lvIHRlc3QgQ0EwWTATBgcqhkjOPQIB\n"
+    "BggqhkjOPQMBBwNCAARTGdP+upd/n2xdVJ4xu1mzuOXXc7jkuhnjKoW1vYuQK9UW\n"
+    "WaK8VcTDl0XXjy4G31/vgkmMje37zq7pElRQjYYRo1MwUTAdBgNVHQ4EFgQUl/Pu\n"
+    "LHzP5SwKhyiLo/NKMoXhivwwHwYDVR0jBBgwFoAUl/PuLHzP5SwKhyiLo/NKMoXh\n"
+    "ivwwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNHADBEAiBOjtAkbM2JevQx\n"
+    "wYGaJloVN1Up1MPrn2KSHs60Kt2TjgIgXIzD6xz5mT2H7r8Ey7Pg1wONq12bB2No\n"
+    "H9c5uRLOXME=\n"
     "-----END CERTIFICATE-----\n";
 
-static const unsigned char test_server_pem[] =
+static const unsigned char test_cert[] =
     "-----BEGIN CERTIFICATE-----\n"
-    "MIIDJzCCAg+gAwIBAgIUDOzScgtfy104UjGppKLRd2vF/WcwDQYJKoZIhvcNAQEL\n"
-    "BQAwGDEWMBQGA1UEAwwNdGxzaW8gdGVzdCBDQTAeFw0yNjEwMTYxNzEwNDJaFw0z\n"
-    "NjEwMTMxNzEwNDJaMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcN\n"
-    "AQEBBQADggEPADCCAQoCggEBAL4tN3DFGFHExUDce5CV5rBohKFA8ZJ7q//EhGyw\n"
-    "gvCpqWAb9r5VGq/SG0Ay9NoxU18eNOVJ2Hwui8IzWsBp3ZDCIZ+PKxooM/DyBbO/\n"
-    "piHYXnHAuaNy+d7z/Jj3uBnsKRrASAUwGb0xnXlC/KBt1XCKJUag/gkalRDx1vTu\n"
-    "x3lg0xFOFSONLhjWoVMS0X1meSwNvindsDtgLNi8mKTruvNhR/S3dRvEQznvooXj\n"
-    "2DPP/JILut7DjaxpRtgKTjhW4/kDTzOEX2NQ1cp2nQVeUKOKBVfSwUhoHjr/rGS6\n"
-    "NWfWRyBuBAZHPnsTmM0+gR9cP0W0FYWS66attNyQL5JIV+sCAwEAAaNtMGswFAYD\n"
-    "VR0RBA0wC4IJbG9jYWxob3N0MBMGA1UdJQQMMAoGCCsGAQUFBwMBMB0GA1UdDgQW\n"
-    "BBQ30T2zXs4umPMrR+ZvV+15ZscH+zAfBgNVHSMEGDAWgBRU8rzAD65med70ABVn\n"
-    "2hw5ztd1RDANBgkqhkiG9w0BAQsFAAOCAQEAj6GmphsJtOalruJxfj5beyPecZOY\n"
-    "0DLLfXyFZEQN32U/rUX/DjHl8DXISWWVEEXqzP5chWnNTWsSECy/7z4s5qUAAUbI\n"
-    "Kny4JOBEwO0vDceaFyZ3tp+In7MZjQ4XzsxlIpcU4skm6UJPg+XdTy0hAK2GV7/r\n"
-    "/OQC3NChiU6qfBBoaQ4/sXEcl9MjJr03OBKAtvJZzWzSuzCQnoxhBu3ceutoGDFz\n"
-    "eMUhE+F3WTQFZr1NX52A4ExJ29SBXe0D9xZfgS0sgGap18wgNedvHwEMorexacgu\n"
-    "DVJlxh8DtXdD6K71LqkcCfdx63rPHIt4olAd1NE5qnnX+Xo81PZMNmBUPw==\n"
+    "MIIBnDCCAUGgAwIBAgIUP4nY0m5PvQwX/EDP6fYUATc6TCwwCgYIKoZIzj0EAwIw\n"
+    "GDEWMBQGA1UEAwwNdGxzaW8gdGVzdCBDQTAeFw0yNjEwMTYyMDE2MzFaFw0zNjEw\n"
+    "MTMyMDE2MzFaMBQxEjAQBgNVBAMMCWxvY2FsaG9zdDBZMBMGByqGSM49AgEGCCqG\n"
+    "SM49AwEHA0IABFwKGLENj+lCLXfWFedw2TUCHn09mrEJlAH3+3X+EnFS9Zukf71A\n"
+    "JFO4LoTmxMA5K6A9EtXNofxVM+Lv74nGZn6jbTBrMBQGA1UdEQQNMAuCCWxvY2Fs\n"
+    "aG9zdDATBgNVHSUEDDAKBggrBgEFBQcDATAdBgNVHQ4EFgQUUYVjC9eJnrfUbkHt\n"
+    "9sDQxGr2GiEwHwYDVR0jBBgwFoAUl/PuLHzP5SwKhyiLo/NKMoXhivwwCgYIKoZI\n"
+    "zj0EAwIDSQAwRgIhAOVk87TY0Rdz+5iyLgaMJhGgK1InQaxCJDH/VtyAQIuEAiEA\n"
+    "9t0jx9dvAmb4B0qZOzTvcRqCKwt86OpiHx9RDpE6dfc=\n"
     "-----END CERTIFICATE-----\n";
 
-static const unsigned char test_server_key_pem[] =
-    "-----BEGIN PRIVATE KEY-----\n"
-    "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC+LTdwxRhRxMVA\n"
-    "3HuQleawaIShQPGSe6v/xIRssILwqalgG/a+VRqv0htAMvTaMVNfHjTlSdh8LovC\n"
-    "M1rAad2QwiGfjysaKDPw8gWzv6Yh2F5xwLmjcvne8/yY97gZ7CkawEgFMBm9MZ15\n"
-    "QvygbdVwiiVGoP4JGpUQ8db07sd5YNMRThUjjS4Y1qFTEtF9ZnksDb4p3bA7YCzY\n"
-    "vJik67rzYUf0t3UbxEM576KF49gzz/ySC7rew42saUbYCk44VuP5A08zhF9jUNXK\n"
-    "dp0FXlCjigVX0sFIaB46/6xkujVn1kcgbgQGRz57E5jNPoEfXD9FtBWFkuumrbTc\n"
-    "kC+SSFfrAgMBAAECggEAGlcemdbKsVn3gi4nn9U1+v1hpV4JN43mkEndQkVJFYvs\n"
-    "7ZFh9xHIMk2qaurD4Xa51++nSZIVUySKmfl379+Z3xjBrx0VeLgpyDe//29OKNuU\n"
-    "P91+43sjeF8Yf5gL8+yISEVqlEFfHJvDIQ5cpDHM7BtON2lJVjnMJ2kqVIlqr85d\n"
-    "XnRnyMhIhRLjR4CpOjsrNkIQllgh28BUwZhm8wIW+sXRqfTkrpemIbtM+8t/jBFN\n"
-    "Bw1D+7cnuAWDrKJRBdLFaJ9ZQqZRA7DAfo7G0ZpOSFdGy2B3pVtB8Z3mxQn//doh\n"
-    "Lsgvkgki88vTpQBN1UyJm2KeL06A1mzDePhZ4yQiYQKBgQDk5LapQoGxv3GtVNYA\n"
-    "Fj5VawlsaPOIfRS5KkYoPfyVaqlCZixQ6Q9uUYbTegyo3E8ArfPj0H+Bal6Yle9Q\n"
-    "o8lNzfPZV5UGmhYZJUDQ5efFB4PsDI9uobOX054W4dyMwcYEyLlK3ne2nuFjROFM\n"
-    "0CiS53iXh9Fd4lVmlOzzT8B2ywKBgQDUsr0tkJSydvVAVgZPVeBPJVI1wXCLYvNR\n"
-    "hVHn79CGCurSNfnq3M5Q2jYW9KAoGe18d1vn9+u0ehyDaguaAcc9ho+v3NI34Mo4\n"
-    "07CZjLFr7KOukPLx2I5ZVu3nnFlGVqagDZQ7uQZe/eGJgsgKY1GUhS7r1BmlNJRE\n"
-    "eQtSPBJfYQKBgQCQS8sHS0D9sCXW0ouSRHOJX8/yAvu8CLZewNK3ndQ00afgjw7S\n"
-    "9wneTxEDEocWkMRRNlhxPsiS6l62LJdQq+BE51gZpQfywIK72WtSBg2lfUZiMcze\n"
-    "Ppw8U5Du9fYW2jWeYHfHRhYMD38hGJQ722IosjmotVt8pymVYL876AP6HwKBgGaa\n"
-    "KkPWoMROOhRk6vpOVLwZJsUjoSS8AN/sTgxyVMa0cX4h54LyLNw3xyvfqXput275\n"
-    "LO6DW8JdvW9vMlWCUhhN1vZgsU+fMi2jgGcxxUxohLTq2ybq7hAOrQizFSWnGw3O\n"
-    "PxloMbiVA70Px2uraWkZrf64+/4DlRpKwblTnRFBAoGBAOMAvKDVs0UpMopn/EWx\n"
-    "ZJlV+kKIxTjeaKHIDgBSITQcIMDDPKZPruavGRO2WfL+LcE1ZeiR0ea2fArsPhG1\n"
-    "Pcb/h6JhpfByqz/oOr3hePB3gXij1HoJ8fIVJTWgi4RGECogBqJz2uYehgjcnw32\n"
-    "ZYUcQwI2bx2WUdEC3yPzX68s\n"
-    "-----END PRIVATE KEY-----\n";
+static const unsigned char test_key[] =
+    "-----BEGIN EC PRIVATE KEY-----\n"
+    "MHcCAQEEIDSENh4UYsMXDPv2XF6cF6+3O3vHcwReaeUNuRX25Ez9oAoGCCqGSM49\n"
+    "AwEHoUQDQgAEXAoYsQ2P6UItd9YV53DZNQIefT2asQmUAff7df4ScVL1m6R/vUAk\n"
+    "U7guhObEwDkroD0S1c2h/FUz4u/vicZmfg==\n"
+    "-----END EC PRIVATE KEY-----\n";
 
-enum test_mode { TEST_TLS, TEST_PLAIN, TEST_TLS11, TEST_UNCLEAN };
+typedef struct chunk {
+    unsigned char *data;
+    size_t size;
+    size_t offset;
+    struct chunk *next;
+} chunk_t;
+
 typedef struct {
-    test_socket_t listener;
-    test_thread_t thread;
-    unsigned short port;
-    enum test_mode mode;
-    int result;
-    int version;
-    char sni[64];
-    unsigned char *received;
-    size_t received_size;
-} test_server_t;
+    chunk_t *head;
+    chunk_t *tail;
+} wire_t;
+
+typedef struct {
+    wire_t *wire;
+    unsigned char *plain;
+    size_t size;
+    size_t capacity;
+    int failed;
+} side_t;
+
+typedef struct {
+    kc_tlsio_t *client;
+    kc_tlsio_t *server;
+    wire_t c2s;
+    wire_t s2c;
+    side_t client_side;
+    side_t server_side;
+} pair_t;
 
 static int case_total;
 static int case_current;
 
 /**
- * Closes one fixture socket.
- * @param value Socket to close.
- * @return void.
- */
-static void socket_close(test_socket_t value) {
-#ifdef _WIN32
-    closesocket(value);
-#else
-    close(value);
-#endif
-}
-
-/**
- * Initializes the platform socket layer for the fixture server.
- * @return Zero on success, nonzero on failure.
- */
-static int socket_start(void) {
-#ifdef _WIN32
-    WSADATA data;
-    return WSAStartup(MAKEWORD(2, 2), &data) == 0 ? 0 : 1;
-#else
-    signal(SIGPIPE, SIG_IGN);
-    return 0;
-#endif
-}
-
-/**
- * Releases the platform socket layer.
- * @return void.
- */
-static void socket_stop(void) {
-#ifdef _WIN32
-    WSACleanup();
-#endif
-}
-
-/**
- * Sends one TLS BIO payload over the fixture socket.
- * @param ctx Pointer to the fixture socket value.
- * @param data Bytes to send.
- * @param size Number of bytes to send.
- * @return Bytes sent or an mbedTLS net error code.
- */
-static int bio_send(void *ctx, const unsigned char *data, size_t size) {
-    test_socket_t socket_value;
-#ifdef _WIN32
-    int result;
-#else
-    ssize_t result;
-#endif
-
-    socket_value = *(test_socket_t *)ctx;
-#ifdef _WIN32
-    result = send(socket_value, (const char *)data, (int)size, 0);
-    return result == SOCKET_ERROR ? MBEDTLS_ERR_NET_SEND_FAILED : result;
-#else
-    result = send(socket_value, data, size, 0);
-    return result < 0 ? MBEDTLS_ERR_NET_SEND_FAILED : (int)result;
-#endif
-}
-
-/**
- * Receives one TLS BIO payload from the fixture socket.
- * @param ctx Pointer to the fixture socket value.
- * @param data Buffer to receive into.
- * @param size Buffer capacity in bytes.
- * @return Bytes received or an mbedTLS net error code.
- */
-static int bio_recv(void *ctx, unsigned char *data, size_t size) {
-    test_socket_t socket_value;
-#ifdef _WIN32
-    int result;
-#else
-    ssize_t result;
-#endif
-
-    socket_value = *(test_socket_t *)ctx;
-#ifdef _WIN32
-    result = recv(socket_value, (char *)data, (int)size, 0);
-    return result == SOCKET_ERROR ? MBEDTLS_ERR_NET_RECV_FAILED : result;
-#else
-    result = recv(socket_value, data, size, 0);
-    return result < 0 ? MBEDTLS_ERR_NET_RECV_FAILED : (int)result;
-#endif
-}
-
-/**
- * Records the SNI name offered by a connecting TLS client.
- * @param ctx Pointer to the fixture server state.
- * @param ssl TLS context supplied by mbedTLS.
- * @param name SNI hostname bytes.
- * @param name_size Length of the SNI hostname.
- * @return Zero on success.
- */
-static int observe_sni(void *ctx, mbedtls_ssl_context *ssl,
-    const unsigned char *name, size_t name_size) {
-    test_server_t *server;
-    size_t size;
-
-    (void)ssl;
-    server = (test_server_t *)ctx;
-    size = name_size < sizeof(server->sni) - 1U ? name_size : sizeof(server->sni) - 1U;
-    memcpy(server->sni, name, size);
-    server->sni[size] = '\0';
-    return 0;
-}
-
-/**
- * Runs a TLS handshake to completion, retrying want-read and want-write.
- * @param ssl TLS context to handshake on.
- * @return Zero on success, nonzero mbedTLS error code on failure.
- */
-static int tls_handshake(mbedtls_ssl_context *ssl) {
-    int result;
-
-    do {
-        result = mbedtls_ssl_handshake(ssl);
-    } while (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE);
-    return result;
-}
-
-/**
- * Writes the entire payload over TLS, retrying partial writes.
- * @param ssl TLS context to write on.
- * @param data Bytes to send.
- * @param size Number of bytes to send.
- * @return Zero on success, nonzero on failure.
- */
-static int tls_write_all(mbedtls_ssl_context *ssl, const unsigned char *data,
-    size_t size) {
-    size_t sent;
-
-    sent = 0U;
-    while (sent < size) {
-        int result;
-
-        result = mbedtls_ssl_write(ssl, data + sent, size - sent);
-        if (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
-        if (result <= 0) return 1;
-        sent += (size_t)result;
-    }
-    return 0;
-}
-
-/**
- * Serves one TLS or plain fixture connection on the accepted peer socket.
- * @param server Fixture server state to update.
- * @param peer Accepted client socket.
- * @return void.
- */
-static void run_tls_server(test_server_t *server, test_socket_t peer) {
-    static const unsigned char personalization[] = "tlsio-test";
-    mbedtls_ssl_context ssl;
-    mbedtls_ssl_config config;
-    mbedtls_ctr_drbg_context random;
-    mbedtls_entropy_context entropy;
-    mbedtls_x509_crt certificate;
-    mbedtls_pk_context key;
-    unsigned char buffer[4096];
-    unsigned char *response;
-    size_t total;
-    int result;
-
-    mbedtls_ssl_init(&ssl); mbedtls_ssl_config_init(&config);
-    mbedtls_ctr_drbg_init(&random); mbedtls_entropy_init(&entropy);
-    mbedtls_x509_crt_init(&certificate); mbedtls_pk_init(&key);
-    response = NULL; server->result = 1;
-    if (mbedtls_ctr_drbg_seed(&random, mbedtls_entropy_func, &entropy,
-            personalization, sizeof(personalization) - 1U) != 0 ||
-        mbedtls_x509_crt_parse(&certificate, test_server_pem, sizeof(test_server_pem)) != 0 ||
-        mbedtls_pk_parse_key(&key, test_server_key_pem, sizeof(test_server_key_pem),
-            NULL, 0U, mbedtls_ctr_drbg_random, &random) != 0 ||
-        mbedtls_ssl_config_defaults(&config, MBEDTLS_SSL_IS_SERVER,
-            MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT) != 0) goto done;
-    mbedtls_ssl_conf_rng(&config, mbedtls_ctr_drbg_random, &random);
-    mbedtls_ssl_conf_sni(&config, observe_sni, server);
-#ifdef MBEDTLS_SSL_VERSION_TLS1_1
-    if (server->mode == TEST_TLS11) {
-        mbedtls_ssl_conf_max_tls_version(&config, MBEDTLS_SSL_VERSION_TLS1_1);
-    }
-#endif
-    if (mbedtls_ssl_conf_own_cert(&config, &certificate, &key) != 0 ||
-        mbedtls_ssl_setup(&ssl, &config) != 0) goto done;
-    mbedtls_ssl_set_bio(&ssl, &peer, bio_send, bio_recv, NULL);
-    if (tls_handshake(&ssl) != 0) goto done;
-    server->version = mbedtls_ssl_get_version_number(&ssl);
-    if (server->mode == TEST_UNCLEAN) { server->result = 0; goto done; }
-    total = 0U;
-    while (total < TEST_LARGE_SIZE + 2U) {
-        result = mbedtls_ssl_read(&ssl, buffer, sizeof(buffer));
-        if (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
-        if (result <= 0 || total + (size_t)result > TEST_LARGE_SIZE + 2U) goto done;
-        memcpy(server->received + total, buffer, (size_t)result);
-        total += (size_t)result;
-    }
-    server->received_size = total;
-    response = (unsigned char *)malloc(TEST_LARGE_SIZE);
-    if (response == NULL) goto done;
-    for (total = 0U; total < TEST_LARGE_SIZE; total++) response[total] = (unsigned char)((total * 37U + 11U) & 255U);
-    if (tls_write_all(&ssl, response, TEST_LARGE_SIZE) != 0) goto done;
-    mbedtls_ssl_close_notify(&ssl);
-    server->result = 0;
-done:
-    free(response); mbedtls_ssl_free(&ssl); mbedtls_ssl_config_free(&config);
-    mbedtls_ctr_drbg_free(&random); mbedtls_entropy_free(&entropy);
-    mbedtls_x509_crt_free(&certificate); mbedtls_pk_free(&key);
-}
-
-/**
- * Accepts one client on the fixture listener and serves the configured mode.
- * @param ctx Pointer to the fixture server state.
- * @return Always zero; result is recorded in the server state.
- */
-#ifdef _WIN32
-static unsigned __stdcall server_thread(void *ctx)
-#else
-static void *server_thread(void *ctx)
-#endif
-{
-    test_server_t *server;
-    test_socket_t peer;
-
-    server = (test_server_t *)ctx;
-    peer = accept(server->listener, NULL, NULL);
-    if (peer == TEST_BAD_SOCKET) server->result = 1;
-    else if (server->mode == TEST_PLAIN) { server->result = 0; socket_close(peer); }
-    else { run_tls_server(server, peer); socket_close(peer); }
-    socket_close(server->listener);
-#ifdef _WIN32
-    return 0U;
-#else
-    return NULL;
-#endif
-}
-
-/**
- * Starts the fixture server in the requested mode on a loopback port.
- * @param server Fixture server state to initialize.
- * @param mode Fixture behavior to serve.
- * @return Zero on success, nonzero on failure.
- */
-static int server_start(test_server_t *server, enum test_mode mode) {
-    struct sockaddr_in address;
-#ifdef _WIN32
-    int length;
-#else
-    socklen_t length;
-#endif
-    int enabled;
-
-    memset(server, 0, sizeof(*server));
-    server->mode = mode; server->listener = socket(AF_INET, SOCK_STREAM, 0);
-    server->received = (unsigned char *)malloc(TEST_LARGE_SIZE + 2U);
-    if (server->listener == TEST_BAD_SOCKET || server->received == NULL) return 1;
-    enabled = 1;
-    setsockopt(server->listener, SOL_SOCKET, SO_REUSEADDR, (const char *)&enabled, sizeof(enabled));
-    memset(&address, 0, sizeof(address)); address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(server->listener, (struct sockaddr *)&address, sizeof(address)) != 0 || listen(server->listener, 1) != 0) return 1;
-    length = sizeof(address);
-    if (getsockname(server->listener, (struct sockaddr *)&address, &length) != 0) return 1;
-    server->port = ntohs(address.sin_port);
-#ifdef _WIN32
-    server->thread = (HANDLE)_beginthreadex(NULL, 0U, server_thread, server, 0U, NULL);
-    return server->thread == NULL ? 1 : 0;
-#else
-    return pthread_create(&server->thread, NULL, server_thread, server) == 0 ? 0 : 1;
-#endif
-}
-
-/**
- * Waits for the fixture server thread to finish.
- * @param server Fixture server state whose thread to join.
- * @return void.
- */
-static void server_join(test_server_t *server) {
-#ifdef _WIN32
-    WaitForSingleObject(server->thread, INFINITE); CloseHandle(server->thread);
-#else
-    pthread_join(server->thread, NULL);
-#endif
-}
-
-/**
- * Records one assertion result, printing a message on failure.
+ * Records one assertion result.
  * @param label Assertion description.
- * @param value Nonzero when the assertion holds.
- * @return One when the assertion failed, zero when it passed.
+ * @param condition Nonzero when the assertion holds.
+ * @return One when the assertion failed, otherwise zero.
  */
-static int expect(const char *label, int value) {
-    if (!value) printf("[FAIL] %s\n", label);
-    return value ? 0 : 1;
+static int expect(const char *label, int condition) {
+    if (!condition) printf("[FAIL] %s\n", label);
+    return condition ? 0 : 1;
 }
 
 /**
- * Connects to a loopback TLS endpoint with the given host and port.
- * @param tls Receives the connection handle on success.
- * @param port Server port to connect to.
- * @param host Expected hostname for SNI and verification.
- * @return Public tlsio status code.
- */
-static int connect_local(kc_tlsio_t **tls, unsigned short port, const char *host) {
-    kc_tlsio_options_t options;
-
-    options.host = host; options.port = port;
-    return kc_tlsio_connect(tls, &options);
-}
-
-/**
- * Prints one test-case result line.
+ * Prints one test case result.
  * @param fail Nonzero when the case failed.
  * @param name Case name.
- * @param detail Short case description.
+ * @param detail Case description.
  * @return void.
  */
 static void print_case(int fail, const char *name, const char *detail) {
@@ -455,135 +107,514 @@ static void print_case(int fail, const char *name, const char *detail) {
 }
 
 /**
- * Runs the public-API validation case for invalid arguments.
- * @return One when the case failed, zero when it passed.
+ * Releases all queued transport chunks.
+ * @param wire Transport queue.
+ * @return void.
+ */
+static void wire_clear(wire_t *wire) {
+    chunk_t *chunk;
+
+    chunk = wire->head;
+    while (chunk != NULL) {
+        chunk_t *next;
+
+        next = chunk->next;
+        free(chunk->data);
+        free(chunk);
+        chunk = next;
+    }
+    memset(wire, 0, sizeof(*wire));
+}
+
+/**
+ * Appends bytes to one transport queue.
+ * @param wire Transport queue.
+ * @param data Input bytes.
+ * @param size Input byte count.
+ * @return Zero on success, otherwise one.
+ */
+static int wire_append(wire_t *wire, const void *data, size_t size) {
+    chunk_t *chunk;
+
+    if (size == 0U) return 0;
+    chunk = (chunk_t *)calloc(1, sizeof(*chunk));
+    if (chunk == NULL) return 1;
+    chunk->data = (unsigned char *)malloc(size);
+    if (chunk->data == NULL) {
+        free(chunk);
+        return 1;
+    }
+    memcpy(chunk->data, data, size);
+    chunk->size = size;
+    if (wire->tail != NULL) wire->tail->next = chunk;
+    else wire->head = chunk;
+    wire->tail = chunk;
+    return 0;
+}
+
+/**
+ * Appends plaintext to one test side.
+ * @param side Test side.
+ * @param data Input bytes.
+ * @param size Input byte count.
+ * @return Zero on success, otherwise one.
+ */
+static int side_append(side_t *side, const void *data, size_t size) {
+    size_t need;
+    size_t capacity;
+    unsigned char *resized;
+
+    if (size == 0U) return 0;
+    if (side->size > SIZE_MAX - size) return 1;
+    need = side->size + size;
+    if (need > side->capacity) {
+        capacity = side->capacity != 0U ? side->capacity : 256U;
+        while (capacity < need) {
+            if (capacity > SIZE_MAX / 2U) {
+                capacity = need;
+                break;
+            }
+            capacity *= 2U;
+        }
+        resized = (unsigned char *)realloc(side->plain, capacity);
+        if (resized == NULL) return 1;
+        side->plain = resized;
+        side->capacity = capacity;
+    }
+    memcpy(side->plain + side->size, data, size);
+    side->size += size;
+    return 0;
+}
+
+/**
+ * Collects authenticated plaintext emitted by tlsio.
+ * @param data Plaintext bytes.
+ * @param size Plaintext byte count.
+ * @param userdata Test side.
+ * @return void.
+ */
+static void plaintext(const void *data, size_t size, void *userdata) {
+    side_t *side;
+
+    side = (side_t *)userdata;
+    if (side_append(side, data, size) != 0) side->failed = 1;
+}
+
+/**
+ * Collects TLS wire bytes emitted by tlsio.
+ * @param data TLS wire bytes.
+ * @param size TLS wire byte count.
+ * @param userdata Test side.
+ * @return void.
+ */
+static void ciphertext(const void *data, size_t size, void *userdata) {
+    side_t *side;
+
+    side = (side_t *)userdata;
+    if (wire_append(side->wire, data, size) != 0) side->failed = 1;
+}
+
+/**
+ * Initializes one in-memory client/server pair.
+ * @param pair Pair state.
+ * @return void.
+ */
+static void pair_init(pair_t *pair) {
+    memset(pair, 0, sizeof(*pair));
+    pair->client_side.wire = &pair->c2s;
+    pair->server_side.wire = &pair->s2c;
+}
+
+/**
+ * Closes one in-memory client/server pair.
+ * @param pair Pair state.
+ * @return void.
+ */
+static void pair_close(pair_t *pair) {
+    kc_tlsio_close(pair->client);
+    kc_tlsio_close(pair->server);
+    pair->client = NULL;
+    pair->server = NULL;
+    wire_clear(&pair->c2s);
+    wire_clear(&pair->s2c);
+    free(pair->client_side.plain);
+    free(pair->server_side.plain);
+}
+
+/**
+ * Opens the server side of one test pair.
+ * @param pair Pair state.
+ * @return Public tlsio status code.
+ */
+static int open_server(pair_t *pair) {
+    kc_tlsio_options_t options;
+
+    memset(&options, 0, sizeof(options));
+    options.role = KC_TLSIO_SERVER;
+    options.certificate = test_cert;
+    options.certificate_size = sizeof(test_cert) - 1U;
+    options.private_key = test_key;
+    options.private_key_size = sizeof(test_key) - 1U;
+    return kc_tlsio_open(
+        &pair->server,
+        &options,
+        plaintext,
+        ciphertext,
+        &pair->server_side
+    );
+}
+
+/**
+ * Opens the client side of one test pair.
+ * @param pair Pair state.
+ * @param host Expected server hostname.
+ * @return Public tlsio status code.
+ */
+static int open_client(pair_t *pair, const char *host) {
+    kc_tlsio_options_t options;
+
+    memset(&options, 0, sizeof(options));
+    options.role = KC_TLSIO_CLIENT;
+    options.host = host;
+    options.ca = test_ca;
+    options.ca_size = sizeof(test_ca) - 1U;
+    return kc_tlsio_open(
+        &pair->client,
+        &options,
+        plaintext,
+        ciphertext,
+        &pair->client_side
+    );
+}
+
+/**
+ * Delivers one queued TLS wire fragment.
+ * @param wire Transport queue.
+ * @param tls Destination TLS session.
+ * @param fragment Maximum fragment size, or zero for all bytes.
+ * @return Public tlsio status code, or 1000 when the queue is empty.
+ */
+static int deliver(wire_t *wire, kc_tlsio_t *tls, size_t fragment) {
+    chunk_t *chunk;
+    size_t available;
+    size_t size;
+    int result;
+
+    if (wire->head == NULL) return 1000;
+    chunk = wire->head;
+    available = chunk->size - chunk->offset;
+    size = available;
+    if (fragment != 0U && size > fragment) size = fragment;
+    result = kc_tlsio_receive(tls, chunk->data + chunk->offset, size);
+    chunk->offset += size;
+    if (chunk->offset == chunk->size) {
+        wire->head = chunk->next;
+        if (wire->head == NULL) wire->tail = NULL;
+        free(chunk->data);
+        free(chunk);
+    }
+    return result;
+}
+
+/**
+ * Pumps queued TLS bytes between both sides.
+ * @param pair Pair state.
+ * @param fragment Maximum delivery fragment size.
+ * @return Public tlsio status code.
+ */
+static int pump(pair_t *pair, size_t fragment) {
+    size_t steps;
+
+    for (steps = 0U; steps < TEST_MAX_STEPS; steps++) {
+        int progress;
+
+        progress = 0;
+        if (pair->c2s.head != NULL && pair->server != NULL) {
+            int result;
+
+            result = deliver(&pair->c2s, pair->server, fragment);
+            if (result != KC_TLSIO_OK) return result;
+            progress = 1;
+        }
+        if (pair->s2c.head != NULL && pair->client != NULL) {
+            int result;
+
+            result = deliver(&pair->s2c, pair->client, fragment);
+            if (result != KC_TLSIO_OK) return result;
+            progress = 1;
+        }
+        if (!progress) return KC_TLSIO_OK;
+    }
+    return KC_TLSIO_ETLS;
+}
+
+/**
+ * Validates public argument handling.
+ * @return One when the case failed, otherwise zero.
  */
 static int case_validation(void) {
     kc_tlsio_options_t options;
     kc_tlsio_t *tls;
-    void *data;
-    size_t size;
     int fail;
 
-    memset(&options, 0, sizeof(options)); tls = (kc_tlsio_t *)1;
-    data = (void *)1; size = 1U; fail = 0;
-    fail += expect("connect NULL output", kc_tlsio_connect(NULL, &options) == KC_TLSIO_EINVAL);
-    fail += expect("connect NULL options clears output", kc_tlsio_connect(&tls, NULL) == KC_TLSIO_EINVAL && tls == NULL);
+    memset(&options, 0, sizeof(options));
+    tls = (kc_tlsio_t *)1;
+    fail = 0;
+    fail += expect(
+        "open NULL output",
+        kc_tlsio_open(
+            NULL,
+            &options,
+            plaintext,
+            ciphertext,
+            NULL
+        ) == KC_TLSIO_EINVAL
+    );
+    fail += expect(
+        "open NULL options clears output",
+        kc_tlsio_open(
+            &tls,
+            NULL,
+            plaintext,
+            ciphertext,
+            NULL
+        ) == KC_TLSIO_EINVAL && tls == NULL
+    );
+    options.role = KC_TLSIO_CLIENT;
     options.host = "";
-    fail += expect("connect empty host", kc_tlsio_connect(&tls, &options) == KC_TLSIO_EINVAL && tls == NULL);
-    fail += expect("write NULL handle", kc_tlsio_write(NULL, "x", 1U) == KC_TLSIO_EINVAL);
-    fail += expect("write NULL data", kc_tlsio_write(NULL, NULL, 1U) == KC_TLSIO_EINVAL);
-    fail += expect("read NULL outputs", kc_tlsio_read(NULL, NULL, &size) == KC_TLSIO_EINVAL);
-    fail += expect("read clears outputs", kc_tlsio_read(NULL, &data, &size) == KC_TLSIO_EINVAL && data == NULL && size == 0U);
-    kc_tlsio_close(NULL); kc_tlsio_free(NULL);
-    print_case(fail, "validation", "covers invalid public arguments and output clearing");
+    fail += expect(
+        "client requires host",
+        kc_tlsio_open(
+            &tls,
+            &options,
+            plaintext,
+            ciphertext,
+            NULL
+        ) == KC_TLSIO_EINVAL
+    );
+    memset(&options, 0, sizeof(options));
+    options.role = KC_TLSIO_SERVER;
+    fail += expect(
+        "server requires credentials",
+        kc_tlsio_open(
+            &tls,
+            &options,
+            plaintext,
+            ciphertext,
+            NULL
+        ) == KC_TLSIO_EINVAL
+    );
+    fail += expect(
+        "send NULL handle",
+        kc_tlsio_send(NULL, "x", 1U) == KC_TLSIO_EINVAL
+    );
+    fail += expect(
+        "receive NULL handle",
+        kc_tlsio_receive(NULL, "x", 1U) == KC_TLSIO_EINVAL
+    );
+    kc_tlsio_close(NULL);
+    print_case(
+        fail,
+        "validation",
+        "covers roles, credentials, callbacks, and handles"
+    );
     return fail != 0;
 }
 
 /**
- * Runs the verified TLS exchange case against the fixture server.
- * @return One when the case failed, zero when it passed.
+ * Validates client/server exchange through memory transport.
+ * @return One when the case failed, otherwise zero.
  */
 static int case_exchange(void) {
-    test_server_t server;
-    kc_tlsio_t *tls;
-    unsigned char *payload;
+    pair_t pair;
+    unsigned char *request;
     unsigned char *response;
-    size_t size;
+    size_t i;
     int fail;
+    int result;
 
-    fail = 0; tls = NULL; payload = (unsigned char *)malloc(TEST_LARGE_SIZE);
+    pair_init(&pair);
+    request = (unsigned char *)malloc(TEST_LARGE_SIZE);
     response = (unsigned char *)malloc(TEST_LARGE_SIZE);
-    if (payload == NULL || response == NULL || server_start(&server, TEST_TLS) != 0) return 1;
-    for (size = 0U; size < TEST_LARGE_SIZE; size++) payload[size] = (unsigned char)((size * 19U + 3U) & 255U);
-    {
-        int result;
-
-        result = connect_local(&tls, server.port, TEST_HOST);
-        if (result != KC_TLSIO_OK) printf("[FAIL] TLS connect status %d\n", result);
-        fail += expect("authenticated TLS connection", result == KC_TLSIO_OK);
+    if (request == NULL || response == NULL) {
+        free(request);
+        free(response);
+        pair_close(&pair);
+        print_case(1, "exchange", "allocation failure");
+        return 1;
     }
-    fail += expect("valid zero write", kc_tlsio_write(tls, NULL, 0U) == KC_TLSIO_OK);
-    fail += expect("first sequential write", kc_tlsio_write(tls, "A", 1U) == KC_TLSIO_OK);
-    fail += expect("second sequential write", kc_tlsio_write(tls, "B", 1U) == KC_TLSIO_OK);
-    fail += expect("large binary write", kc_tlsio_write(tls, payload, TEST_LARGE_SIZE) == KC_TLSIO_OK);
-    size = 0U;
-    while (tls != NULL && size < TEST_LARGE_SIZE) {
-        void *data;
-        size_t part;
-        int result;
-
-        data = NULL; part = 0U; result = kc_tlsio_read(tls, &data, &part);
-        if (result != KC_TLSIO_OK || part > TEST_LARGE_SIZE - size) { fail++; kc_tlsio_free(data); break; }
-        memcpy(response + size, data, part); size += part; kc_tlsio_free(data);
+    for (i = 0U; i < TEST_LARGE_SIZE; i++) {
+        request[i] = (unsigned char)((i * 19U + 3U) & 255U);
+        response[i] = (unsigned char)((i * 37U + 11U) & 255U);
     }
-    fail += expect("large response exact size", size == TEST_LARGE_SIZE);
-    for (size = 0U; size < TEST_LARGE_SIZE; size++) if (response[size] != (unsigned char)((size * 37U + 11U) & 255U)) { fail += expect("large response bytes", 0); break; }
-    { void *data = (void *)1; size_t part = 1U; fail += expect("close notify EOF", kc_tlsio_read(tls, &data, &part) == KC_TLSIO_EOF && data == NULL && part == 0U); }
-    kc_tlsio_close(tls); server_join(&server);
-    fail += expect("server exact ordered bytes", server.received_size == TEST_LARGE_SIZE + 2U && server.received[0] == 'A' && server.received[1] == 'B' && memcmp(server.received + 2U, payload, TEST_LARGE_SIZE) == 0);
-    fail += expect("SNI observed", strcmp(server.sni, TEST_HOST) == 0);
-    fail += expect("TLS 1.2 negotiated", server.version >= MBEDTLS_SSL_VERSION_TLS1_2);
-    fail += expect("server completed", server.result == 0);
-    free(server.received); free(payload); free(response);
-    print_case(fail, "tls_exchange", "covers SNI, verified binary I/O, records, and close_notify");
+
+    fail = 0;
+    fail += expect("server open", open_server(&pair) == KC_TLSIO_OK);
+    fail += expect("client open", open_client(&pair, TEST_HOST) == KC_TLSIO_OK);
+    fail += expect("client hello produced", pair.c2s.head != NULL);
+    fail += expect(
+        "queued A",
+        kc_tlsio_send(pair.client, "A", 1U) == KC_TLSIO_OK
+    );
+    fail += expect(
+        "queued B",
+        kc_tlsio_send(pair.client, "B", 1U) == KC_TLSIO_OK
+    );
+    fail += expect(
+        "queued large payload",
+        kc_tlsio_send(pair.client, request, TEST_LARGE_SIZE) == KC_TLSIO_OK
+    );
+
+    result = pump(&pair, 7U);
+    fail += expect("fragmented handshake/request", result == KC_TLSIO_OK);
+    fail += expect(
+        "server exact plaintext size",
+        pair.server_side.size == TEST_LARGE_SIZE + 2U
+    );
+    if (pair.server_side.size == TEST_LARGE_SIZE + 2U) {
+        fail += expect(
+            "server plaintext order",
+            pair.server_side.plain[0] == 'A' &&
+            pair.server_side.plain[1] == 'B' &&
+            memcmp(
+                pair.server_side.plain + 2U,
+                request,
+                TEST_LARGE_SIZE
+            ) == 0
+        );
+    }
+
+    fail += expect(
+        "server response",
+        kc_tlsio_send(pair.server, response, TEST_LARGE_SIZE) == KC_TLSIO_OK
+    );
+    result = pump(&pair, 13U);
+    fail += expect("fragmented response", result == KC_TLSIO_OK);
+    fail += expect(
+        "client exact response",
+        pair.client_side.size == TEST_LARGE_SIZE &&
+        memcmp(pair.client_side.plain, response, TEST_LARGE_SIZE) == 0
+    );
+    fail += expect(
+        "callback allocations",
+        !pair.client_side.failed && !pair.server_side.failed
+    );
+
+    kc_tlsio_close(pair.server);
+    pair.server = NULL;
+    result = KC_TLSIO_OK;
+    while (pair.s2c.head != NULL && result == KC_TLSIO_OK) {
+        result = deliver(&pair.s2c, pair.client, 5U);
+    }
+    fail += expect("peer close_notify", result == KC_TLSIO_CLOSED);
+
+    wire_clear(&pair.c2s);
+    free(request);
+    free(response);
+    pair_close(&pair);
+    print_case(
+        fail,
+        "exchange",
+        "covers client/server TLS, queued sends, fragmentation, binary I/O"
+    );
     return fail != 0;
 }
 
 /**
- * Runs the connection-failure cases for rejected and invalid peers.
- * @return One when the case failed, zero when it passed.
+ * Validates hostname verification before plaintext delivery.
+ * @return One when the case failed, otherwise zero.
  */
-static int case_failures(void) {
-    test_server_t server;
-    kc_tlsio_t *tls;
+static int case_verification(void) {
+    pair_t pair;
     int fail;
+    int result;
 
-    fail = 0; tls = (kc_tlsio_t *)1;
-    fail += expect("unused loopback port", connect_local(&tls, 1U, TEST_HOST) == KC_TLSIO_ENET && tls == NULL);
-    if (server_start(&server, TEST_PLAIN) == 0) { tls = (kc_tlsio_t *)1; fail += expect("plain TCP handshake failure", connect_local(&tls, server.port, TEST_HOST) == KC_TLSIO_ETLS && tls == NULL); server_join(&server); free(server.received); } else fail++;
-    if (server_start(&server, TEST_TLS) == 0) { tls = (kc_tlsio_t *)1; fail += expect("hostname verification failure", connect_local(&tls, server.port, "127.0.0.1") == KC_TLSIO_EVERIFY && tls == NULL); server_join(&server); free(server.received); } else fail++;
-#ifdef MBEDTLS_SSL_VERSION_TLS1_1
-    if (server_start(&server, TEST_TLS11) == 0) { tls = (kc_tlsio_t *)1; fail += expect("TLS 1.1 peer rejected", connect_local(&tls, server.port, TEST_HOST) == KC_TLSIO_ETLS && tls == NULL); server_join(&server); free(server.received); } else fail++;
-#endif
-    print_case(fail, "failures", "rejects network, plaintext, hostname, and pre-TLS-1.2 peers");
+    pair_init(&pair);
+    fail = 0;
+    fail += expect("server open", open_server(&pair) == KC_TLSIO_OK);
+    fail += expect(
+        "wrong-host client open",
+        open_client(&pair, "wrong.example") == KC_TLSIO_OK
+    );
+    fail += expect(
+        "queue before verification",
+        kc_tlsio_send(pair.client, "secret", 6U) == KC_TLSIO_OK
+    );
+    result = pump(&pair, 3U);
+    fail += expect(
+        "hostname verification failure",
+        result == KC_TLSIO_EVERIFY
+    );
+    fail += expect(
+        "unverified plaintext withheld",
+        pair.server_side.size == 0U
+    );
+    pair_close(&pair);
+    print_case(
+        fail,
+        "verification",
+        "rejects hostname mismatch before application plaintext"
+    );
     return fail != 0;
 }
 
 /**
- * Runs the metadata case covering status strings and version.
- * @return One when the case failed, zero when it passed.
+ * Validates status strings and generated version metadata.
+ * @return One when the case failed, otherwise zero.
  */
 static int case_metadata(void) {
-    static const int codes[] = {KC_TLSIO_OK, KC_TLSIO_EOF, KC_TLSIO_EINVAL, KC_TLSIO_ENET, KC_TLSIO_ETLS, KC_TLSIO_EVERIFY, KC_TLSIO_ENOMEM};
-    size_t index;
+    static const int codes[] = {
+        KC_TLSIO_OK,
+        KC_TLSIO_CLOSED,
+        KC_TLSIO_EINVAL,
+        KC_TLSIO_ETLS,
+        KC_TLSIO_EVERIFY,
+        KC_TLSIO_ENOMEM
+    };
+    size_t i;
     int fail;
 
     fail = 0;
-    for (index = 0U; index < sizeof(codes) / sizeof(codes[0]); index++) fail += expect("status string", kc_tlsio_strerror(codes[index])[0] != '\0');
-    fail += expect("unknown status", strcmp(kc_tlsio_strerror(9999), "unknown tlsio status") == 0);
+    for (i = 0U; i < sizeof(codes) / sizeof(codes[0]); i++) {
+        fail += expect(
+            "status string",
+            kc_tlsio_strerror(codes[i])[0] != '\0'
+        );
+    }
+    fail += expect(
+        "unknown status",
+        strcmp(kc_tlsio_strerror(9999), "unknown tlsio status") == 0
+    );
     fail += expect("nonzero version", kc_tlsio_version() != 0U);
-    print_case(fail, "metadata", "covers all public statuses and generated version");
+    print_case(
+        fail,
+        "metadata",
+        "covers public statuses and generated version"
+    );
     return fail != 0;
 }
 
 /**
- * Runs all libtlsio contract cases when invoked with the all argument.
+ * Runs all libtlsio contract tests.
  * @param argc Argument count.
  * @param argv Argument vector; argv[1] must be all.
- * @return Zero when all cases pass, nonzero otherwise.
+ * @return Zero when all cases pass, otherwise nonzero.
  */
 int main(int argc, char **argv) {
     int failed;
 
     if (argc != 2 || strcmp(argv[1], "all") != 0) return 2;
-    if (socket_start() != 0) return 1;
-    case_total = 4; case_current = 0; failed = 0;
-    case_current++; failed += case_validation();
-    case_current++; failed += case_exchange();
-    case_current++; failed += case_failures();
-    case_current++; failed += case_metadata();
-    socket_stop();
+    case_total = 4;
+    case_current = 0;
+    failed = 0;
+    case_current++;
+    failed += case_validation();
+    case_current++;
+    failed += case_exchange();
+    case_current++;
+    failed += case_verification();
+    case_current++;
+    failed += case_metadata();
     printf("\n%d passed, %d failed\n", case_total - failed, failed);
     return failed == 0 ? 0 : 1;
 }
