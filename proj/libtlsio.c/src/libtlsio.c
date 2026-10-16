@@ -1016,9 +1016,9 @@ int kc_tlsio_open(
     }
     if (options->role == KC_TLSIO_SERVER &&
         (options->certificate == NULL ||
-         options->certificate_size == 0U ||
-         options->private_key == NULL ||
-         options->private_key_size == 0U)) {
+        options->certificate_size == 0U ||
+        options->private_key == NULL ||
+        options->private_key_size == 0U)) {
         return KC_TLSIO_EINVAL;
     }
     if (psa_crypto_init() != PSA_SUCCESS) return KC_TLSIO_ETLS;
@@ -1277,11 +1277,6 @@ void kc_tlsio_close(kc_tlsio_t *tls) {
     userdata = tls->userdata;
     kc_tlsio_unlock(tls);
 
-    /*
-     * No public callback observes the TLS object itself. Free the session before
-     * dispatch so a callback may safely release or replace its surrounding
-     * application state.
-     */
     kc_tlsio_release(tls);
     kc_tlsio_event_dispatch(events, plaintext, ciphertext, userdata);
 }
