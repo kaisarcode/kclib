@@ -1,14 +1,10 @@
-# libnetl.c - Incoming Network Listener
+# libnetl.c - Incoming network listener
 
-`libnetl.c` is a small C library for listening for inbound TCP or UDP traffic.
+`libnetl.c` listens for inbound TCP or UDP traffic and delivers received bytes
+with the remote peer that sent them. It handles transport only; application
+protocols remain separate.
 
-The library receives incoming bytes together with the remote peer that sent
-them. The application may process the input directly or pass it to another
-protocol library, and may optionally respond to the same peer.
-
----
-
-## Public API
+## Quick start
 
 ```c
 #include "libnetl.h"
@@ -19,159 +15,53 @@ static void receive(
 ) {
     (void)userdata;
 
-    if (should_respond(input->data, input->data_size)) {
-        static const char reply[] = "ok";
-
-        (void)kc_netl_respond(
-            input->peer,
-            reply,
-            sizeof(reply) - 1U
-        );
-    }
+    static const char reply[] = "ok";
+    kc_netl_respond(input->peer, reply, sizeof(reply) - 1);
 }
 
-int main(void) {
-    kc_netl_options_t options = {
-        .host = "0.0.0.0",
-        .port = 8080,
-        .protocol = KC_NETL_TCP
-    };
-    kc_netl_t *listener = NULL;
+kc_netl_options_t options = {
+    .host = "0.0.0.0",
+    .port = 8080,
+    .protocol = KC_NETL_TCP
+};
+kc_netl_t *listener = NULL;
 
-    if (
-        kc_netl_open(
-            &listener,
-            &options,
-            receive,
-            NULL,
-            NULL,
-            NULL
-        ) != KC_NETL_OK
-    ) {
-        return 1;
-    }
-
-    /* The listener is operational until the application closes it. */
-
+if (kc_netl_open(
+        &listener,
+        &options,
+        receive,
+        NULL,
+        NULL,
+        NULL
+    ) == KC_NETL_OK) {
     kc_netl_close(listener);
-    return 0;
 }
 ```
 
-Each input contains:
-
-- the remote `peer`;
-- `KC_NETL_TCP` or `KC_NETL_UDP`;
-- the remote host and port;
-- the bytes that arrived.
-
-A TCP peer keeps the same identity across successive receives, so an
-application can associate incremental protocol state with that peer. A UDP input
-represents one datagram and its origin.
-
-`kc_netl_respond()` replies to the supplied peer. The application does not
-choose a separate destination for the response.
-
-`kc_netl_peer_close()` stops communication with one peer without closing the
-listener. `kc_netl_port()` reports the actual bound port, including an
-ephemeral port selected by the operating system.
-
-### Protocol composition
-
-`libnetl.c` does not interpret application protocols. For example, TCP bytes can
-be passed incrementally to an HTTP parser while keeping one parser per peer:
-
-```text
-incoming bytes
-      |
-      v
-    netl
-      |
-      v
-per-peer HTTP parser
-      |
-      v
-application handling
-```
-
-This keeps transport listening independent from the protocol carried by the
-connection.
-
-### Platform scope
-
-The listener uses native operating-system TCP/UDP support and is intended for
-the native platforms built by the project.
-
----
+TCP peers keep a stable identity across receives so applications can associate
+incremental protocol state with a connection. UDP inputs represent individual
+datagrams.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-Build project artifacts first, then run the portable test entry point:
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-To run through Wine:
+Use `make all` for the configured cross-platform targets when their required
+toolchains are installed.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### Multiarch Builds
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- Other cross-compilation toolchains are required only by enabled targets.
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

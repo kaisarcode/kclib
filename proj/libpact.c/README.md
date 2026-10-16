@@ -1,344 +1,59 @@
-# libpact.c - Persistent Scoped Trust
+# libpact.c - Persistent scoped trust
 
-`libpact.c` is a small C library for establishing persistent scoped trusted
-relationships and protecting binary messages with the Noise Protocol
-Framework. It does not implement transport; applications move invitations,
-confirmations, UIDs, and protected messages themselves.
+`libpact.c` establishes persistent scoped trust relationships and protects
+binary messages with the Noise Protocol Framework. Applications remain
+responsible for moving invitations, confirmations, identifiers, and protected
+messages between endpoints.
 
----
-
-## Public API
-
-Initialize the local trust store:
+## Quick start
 
 ```c
 #include "libpact.h"
 
 kc_pact_t *pact = NULL;
-
-if (kc_pact_init(&pact) != KC_PACT_OK) {
-    return 1;
-}
-```
-
-Create an invitation:
-
-```c
-char *alice_uid = NULL;
+char *uid = NULL;
 char *code = NULL;
 
-if (kc_pact_invite(pact, &alice_uid, &code) != KC_PACT_OK) {
-    return 1;
+if (kc_pact_init(&pact) == KC_PACT_OK) {
+    if (kc_pact_invite(pact, &uid, &code) == KC_PACT_OK) {
+        /* Transport code to the invited endpoint. */
+    }
+
+    kc_pact_free(code);
+    kc_pact_free(uid);
+    kc_pact_close(pact);
 }
 ```
 
-On the invited endpoint, join with the invitation code:
+Trust relationships outlive the local handle. The library protects message
+contents but does not provide transport, ordering, retries, timeouts, or replay
+policy.
 
-```c
-char *bob_uid = NULL;
-char *confirmation = NULL;
+## Documentation
 
-if (kc_pact_join(
-    pact,
-    code,
-    &bob_uid,
-    &confirmation
-) != KC_PACT_OK) {
-    return 1;
-}
-```
-
-The application moves `confirmation` back to the endpoint that created the
-invitation, which confirms it:
-
-```c
-char *confirmed_uid = NULL;
-
-if (kc_pact_confirm(
-    pact,
-    confirmation,
-    &confirmed_uid
-) != KC_PACT_OK) {
-    return 1;
-}
-```
-
-`confirmed_uid` is the same UID returned by `kc_pact_invite()`.
-
-To protect a message for Alice:
-
-```c
-void *protected = NULL;
-size_t protected_size = 0;
-
-if (kc_pact_seal(
-    pact,
-    alice_uid,
-    message,
-    message_size,
-    &protected,
-    &protected_size
-) != KC_PACT_OK) {
-    return 1;
-}
-```
-
-The application transports `alice_uid` beside the protected bytes. On
-Alice's endpoint, that same UID is local and is passed to
-`kc_pact_unseal()`:
-
-```c
-void *message = NULL;
-size_t message_size = 0;
-
-if (kc_pact_unseal(
-    pact,
-    alice_uid,
-    protected,
-    protected_size,
-    &message,
-    &message_size
-) != KC_PACT_OK) {
-    return 1;
-}
-```
-
-When protected messages arrive through a byte stream, the application may
-accumulate leading bytes and ask Pact when the total protected message size is
-known:
-
-```c
-size_t protected_size = 0;
-int status = kc_pact_size(
-    pact,
-    alice_uid,
-    buffer,
-    buffered_size,
-    &protected_size
-);
-
-if (status == KC_PACT_INCOMPLETE) {
-    /* collect more leading bytes */
-} else if (status == KC_PACT_OK && buffered_size >= protected_size) {
-    /* exactly protected_size bytes form one complete Pact message */
-}
-```
-
-`kc_pact_size()` authenticates and decrypts Pact's encrypted logical-length
-record. It does not parse a transport header and does not require the complete
-protected message to be present. The caller remains responsible for buffering,
-transport, and consuming the indicated byte count.
-
-The reverse direction uses `bob_uid` in the same way.
-
-The public API is:
-
-```c
-typedef struct kc_pact kc_pact_t;
-
-#define KC_PACT_OK 0
-#define KC_PACT_INCOMPLETE 1
-#define KC_PACT_ERROR -1
-
-#define KC_PACT_UID_SIZE 36
-#define KC_PACT_MAX_MESSAGE (64 * 1024 * 1024)
-
-int kc_pact_init(kc_pact_t **out);
-
-int kc_pact_invite(
-    kc_pact_t *trust,
-    char **out_uid,
-    char **out_code
-);
-
-int kc_pact_join(
-    kc_pact_t *trust,
-    const char *code,
-    char **out_uid,
-    char **out_confirmation
-);
-
-int kc_pact_confirm(
-    kc_pact_t *trust,
-    const char *confirmation,
-    char **out_uid
-);
-
-int kc_pact_seal(
-    kc_pact_t *trust,
-    const char *uid,
-    const void *message,
-    size_t message_size,
-    void **out_data,
-    size_t *out_size
-);
-
-int kc_pact_size(
-    kc_pact_t *trust,
-    const char *uid,
-    const void *data,
-    size_t data_size,
-    size_t *out_size
-);
-
-int kc_pact_unseal(
-    kc_pact_t *trust,
-    const char *uid,
-    const void *data,
-    size_t data_size,
-    void **out_message,
-    size_t *out_message_size
-);
-
-int kc_pact_revoke(
-    kc_pact_t *trust,
-    const char *uid
-);
-
-void kc_pact_close(kc_pact_t *trust);
-void kc_pact_free(void *ptr);
-uint64_t kc_pact_version(void);
-```
-
-A relationship has two endpoint UIDs. The UID returned by
-`kc_pact_invite()` identifies the invited endpoint. The UID returned by
-`kc_pact_join()` identifies the inviter. They are distinct.
-
-`kc_pact_seal()` receives a remote UID. The application transports that UID
-with the protected message. On the receiving endpoint, the same UID is local
-and is passed to `kc_pact_size()` and `kc_pact_unseal()`.
-
-`kc_pact_revoke()` receives the remote UID known by the local endpoint.
-
-`kc_pact_seal()`, `kc_pact_size()`, and `kc_pact_unseal()` do not implement
-transport, ordering, retries, timeouts, buffering, or replay detection. A valid
-protected message may be passed to `kc_pact_unseal()` more than once.
-
-Messages may contain arbitrary binary data up to `KC_PACT_MAX_MESSAGE`.
-
-Use `kc_pact_free()` to release strings and buffers returned by the library.
-
-`kc_pact_close()` releases the local handle. It does not delete persistent
-trust relationships.
-
-Normal callers do not select a storage directory. On XDG environments,
-libpact.c uses `$XDG_DATA_HOME/kaisarcode/pact.c`, falling back to
-`$HOME/.local/share/kaisarcode/pact.c`. Windows uses the corresponding
-per-user application-data directory under `kaisarcode\pact.c`.
-
-`KC_PACT_DIR` is an advanced process-level override for tests and controlled
-deployments.
-
----
+Read the [integration guide](doc/integration.md) before implementing the full
+invite, join, confirm, seal, framing, and unseal flow.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-Native, Wine, and WebAssembly runs validate the reusable public API.
+Use `make all` for the configured cross-platform targets when their required
+toolchains are installed.
 
-To run through Wine:
+## Status
 
-```bash
-make x86_64/windows
-make test wine
-```
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-### WebAssembly (Emscripten)
-
-```bash
-make wasm32/wasm
-make test wasm
-```
-
-- Artifacts: `bin/wasm32/wasm/libpact.js` and `bin/wasm32/wasm/libpact.wasm`
-- Exports: `kc_pact_init`, `kc_pact_invite`, `kc_pact_join`,
-    `kc_pact_confirm`, `kc_pact_seal`, `kc_pact_size`, `kc_pact_unseal`,
-    `kc_pact_revoke`, `kc_pact_close`, `kc_pact_free`,
-    `kc_pact_version`
-`wasm32/wasm` is included in `make all`.
-
-### Multiarch Builds
-
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make x86_64/iossim
-make i686/linux
-make i686/windows
-make aarch64/linux
-make aarch64/android
-make aarch64/macos
-make aarch64/ios
-make aarch64/iossim
-make armv7/linux
-make armv7/android
-make armv7hf/linux
-make riscv64/linux
-make powerpc64le/linux
-make mips/linux
-make mipsel/linux
-make mips64el/linux
-make s390x/linux
-make loongarch64/linux
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- `osxcross` with Apple SDKs for macOS and iOS.
-- Android NDK for Android targets.
-- Emscripten SDK and Node.js for WebAssembly builds and tests.
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

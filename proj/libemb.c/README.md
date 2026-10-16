@@ -1,166 +1,61 @@
-# libemb.c - Vector Embedding Library
+# libemb.c - Vector embeddings
 
----
-## Public API
+`libemb.c` generates text embeddings with the embedded BGE small v1.5 model. It
+has no network or hosted-service dependency and exposes the model dimension so
+callers do not need to hardcode it.
 
-`libemb.c` exposes one embedding operation because it ships one predefined model and one input type: text.
-
-```c
-#include "libemb.h"
-
-#define KC_EMB_OK 0
-#define KC_EMB_ERROR -1
-
-size_t kc_emb_dimension(void);
-
-int kc_emb_embed(
-    const char *input,
-    float **out_data,
-    size_t *out_count
-);
-
-void kc_emb_free(void *ptr);
-uint64_t kc_emb_version(void);
-```
-
-- `kc_emb_dimension` returns the fixed vector dimension declared by the embedded model. It is a model property, not a caller option.
-- `kc_emb_embed` generates an embedding for one input string.
-- The embedded BGE small v1.5 model currently returns 384 floats.
-- Use `kc_emb_free()` to release returned vectors.
-
-### Example
+## Quick start
 
 ```c
 #include "libemb.h"
 
-float *vec = NULL;
+float *vector = NULL;
 size_t count = 0;
-size_t dimension = kc_emb_dimension();
 
-if (kc_emb_embed("The quick brown fox", &vec, &count) == KC_EMB_OK) {
-    /* use vec[0..count-1] */
+if (kc_emb_embed("The quick brown fox", &vector, &count) == KC_EMB_OK) {
+    size_t dimension = kc_emb_dimension();
+
+    if (count == dimension) {
+        /* Use the embedding while vector is owned by the caller. */
+    }
 }
 
-kc_emb_free(vec);
+kc_emb_free(vector);
 ```
 
-The dimension is fixed by the embedded model. Callers do not choose it. This lets
-a vector index such as `hnsw.c` use `emb.dimension()` directly when creating
-an index, without hardcoding the model's current 384-element output.
+The current embedded model produces 384-element vectors. Treat
+`kc_emb_dimension()` as the source of truth instead of depending on that value.
 
-### Runtime model
+## Model
 
-The embedded model is **BAAI/bge-small-en-v1.5**, published by the Beijing Academy of Artificial Intelligence (BAAI) as part of FlagEmbedding. The upstream model is distributed under the **MIT License**:
+The embedded model is
+[BAAI/bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5), from
+the [FlagEmbedding project](https://github.com/FlagOpen/FlagEmbedding). The
+upstream model is distributed under the MIT License.
 
-- Model: https://huggingface.co/BAAI/bge-small-en-v1.5
-- FlagEmbedding: https://github.com/FlagOpen/FlagEmbedding
-- Upstream license: MIT
+The local GGUF model is linked into project artifacts and is not downloaded at
+runtime.
 
-`lib/model.gguf` contains the local GGUF representation used by this project. The model is linked into the produced artifacts; `libemb.c` performs no downloads and has no network or hosted-service dependency.
-
----
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-To run through Wine:
+Use `make all` for the configured cross-platform targets when their required
+toolchains are installed.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### WebAssembly (Emscripten)
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-```bash
-make wasm32/wasm
-make test wasm
-```
-
-- Artifact: `bin/wasm32/wasm/emb.wasm`
-- Exports: `kc_emb_dimension`, `kc_emb_free`, `kc_emb_embed`, `kc_emb_version`
-    it.
-
-`wasm32/wasm` is included in `make all`.
-
-### Multiarch Builds
-
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- Emscripten SDK and Node.js for WebAssembly builds and tests.
-- Other cross-compilation toolchains are required only by enabled targets.
-
-### System Libraries
-
-Linux:
-- `libpthread`
-- `libdl`
-- `libm`
-
-Windows (MSVC or MinGW):
-- No additional system libraries required.
-
-macOS / iOS:
-- No additional system libraries required.
-
-### Dependencies
-
-| Path | Description |
-|------|-------------|
-| `lib/ggml/` | Tensor computation library for machine learning |
-| `lib/model.gguf` | Embedded GGUF representation of BAAI/bge-small-en-v1.5 |
-
----
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

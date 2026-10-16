@@ -1,11 +1,10 @@
-# libppn.c - Native Popup Notifications
+# libppn.c - Native popup notifications
 
-`libppn.c` displays native operating-system notifications on Linux, Windows,
-and macOS.
+`libppn.c` submits native desktop notifications on Linux, Windows, and macOS.
+The operating system controls presentation, duration, grouping, and user
+notification policy.
 
----
-
-## Public API
+## Quick start
 
 ```c
 #include "libppn.h"
@@ -15,105 +14,39 @@ kc_ppn_notification_t notification = {
     .message = "package.tar.gz is ready"
 };
 
-if (kc_ppn_show(&notification) != KC_PPN_OK) {
-    /* The notification could not be submitted to the operating system. */
-}
+kc_ppn_show(&notification);
 ```
 
-`title` and `message` are required UTF-8 strings.
+Title and message are required UTF-8 strings.
 
----
+## Platform support
 
-## Platform Scope
+Linux uses the current D-Bus notification service, Windows uses the shell
+notification-area API, and macOS uses Notification Center.
 
-| Platform | Behavior |
-| :--- | :--- |
-| Linux | Sends `org.freedesktop.Notifications.Notify` through the current D-Bus session. |
-| Windows | Uses the Windows shell notification-area API. |
-| macOS | Delivers the notification through Notification Center. |
-
-The operating system controls presentation, duration, grouping, and whether a
-notification is visible according to the user's notification settings.
-
----
+Native tests require an appropriate desktop session because they display a real
+notification.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/`.
-
-```bash
-make
-```
-
-### Tests
-
-Build the native library and run the tests:
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-`make test` exercises the public contract and displays a real native
-notification, so a desktop session is required.
+Use `make all` for the configured cross-platform targets when their required
+toolchains are installed.
 
-To run the tests through Wine:
+## Status
 
-```bash
-make x86_64/windows
-make test wine
-```
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-### Multiarch Builds
-
-A plain `make` builds the current Linux x86_64 target. `make all` builds all
-configured targets.
-
-```bash
-make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make aarch64/macos
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-Linux has no additional compile-time library dependency. A desktop session with
-a Freedesktop notification service is required to display notifications.
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- `osxcross` with Apple SDKs for macOS.
-
----
-
-## Beta Notice
-
-This is a beta project tested primarily on Debian x86_64. It was created out of
-a personal need for these libraries, but no guarantees are provided regarding
-its stability or future support. You are free to test it, use it, and modify it
-as you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

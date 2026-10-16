@@ -1,160 +1,56 @@
-# libinit.c - Persistent Startup Registration
+# libinit.c - Persistent startup registration
 
-Persistent operating-system startup registration.
+`libinit.c` registers named commands with the operating system so they start at
+boot or user startup. Registrations are persistent and use the current user's
+platform-native startup mechanism.
 
-`libinit.c` registers named commands so the operating system starts them during boot or user startup.
-
----
-
-## Public API
+## Quick start
 
 ```c
-typedef struct {
-    const char *cmd;
-} kc_init_options_t;
+#include "libinit.h"
 
-typedef struct {
-    const char *name;
-    const char *user;
-    const char *cmd;
-} kc_init_entry_t;
+kc_init_options_t options = {
+    .cmd = "my-service"
+};
 
-int kc_init_create(
-    const char *name,
-    const kc_init_options_t *options
-);
+if (kc_init_create("my-service", &options) == KC_INIT_OK) {
+    kc_init_entry_t *entry = NULL;
 
-int kc_init_get(
-    const char *name,
-    kc_init_entry_t **out_entry
-);
-
-int kc_init_list(
-    kc_init_entry_t **out_entries,
-    size_t *out_count
-);
-
-int kc_init_delete(const char *name);
-
-void kc_init_free(void *ptr);
-uint64_t kc_init_version(void);
+    if (kc_init_get("my-service", &entry) == KC_INIT_OK) {
+        kc_init_free(entry);
+    }
+}
 ```
 
-### Public Model
+`kc_init_create()` creates or replaces a named registration. Use
+`kc_init_delete()` to remove it.
 
-A startup registration is identified by its persistent name.
+## Platform support
 
-`kc_init_create()` creates or replaces that registration. `kc_init_get()`
-returns one complete entry, `kc_init_list()` returns all entries in the current
-user namespace, and `kc_init_delete()` removes one by name.
-
-Entries returned by `kc_init_get()` and `kc_init_list()` are caller-owned
-allocations released with `kc_init_free()`.
-
-### Metadata namespace
-
-The default metadata namespace is per-user.
-
-On Linux and other XDG environments:
-
-```text
-$XDG_DATA_HOME/kaisarcode/init.c
-```
-
-When `XDG_DATA_HOME` is not set:
-
-```text
-$HOME/.local/share/kaisarcode/init.c
-```
-
-On Windows, init.c uses the corresponding per-user application-data directory
-under `kaisarcode\init.c`.
-
-On macOS, init.c stores metadata under:
-
-```text
-$HOME/Library/Application Support/kaisarcode/init.c
-```
-
-Callers do not select a storage directory. The user namespace is resolved
-automatically from the platform convention.
-
-### Platform Scope
-
-Linux, macOS, and Windows are supported. Linux uses the available system
-startup mechanism automatically. macOS registers per-user LaunchAgents.
-
----
+Linux, macOS, and Windows are supported. The library selects the native
+per-user startup and metadata locations; callers do not choose a storage
+directory.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-To run through Wine:
+Use `make all` for the configured cross-platform targets when their required
+toolchains are installed.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### Multiarch Builds
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- Other cross-compilation toolchains are required only by enabled targets.
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

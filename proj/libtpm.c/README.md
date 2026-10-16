@@ -1,158 +1,47 @@
-# libtpm.c - Text Profile Matcher
+# libtpm.c - Text profile matcher
 
-`libtpm.c` tells you how similar a piece of text is to a reference text. Create a
-profile from representative samples, then score any input from 0.0 (dissimilar)
-to 1.0 (very similar).
+`libtpm.c` creates a reusable text profile from representative text and scores
+new text against that profile from `0.0` to `1.0`.
 
----
-## Public API
-
-### Types
+## Quick start
 
 ```c
-typedef struct kc_tpm kc_tpm_t;
+#include "libtpm.h"
 
-typedef struct {
-    const int *ngram_size;
-} kc_tpm_options_t;
-```
-
-### Status codes
-
-| Symbol | Value |
-| :----- | :---- |
-| `KC_TPM_OK` | 0 |
-| `KC_TPM_ERROR` | -1 |
-
-### Functions
-
-| Function | Returns | Description |
-| :------- | :------ | :---------- |
-| `kc_tpm_open(out, map_text, options)` | `int` | Create a ready-to-score profile. An omitted n-gram option uses size 3. |
-| `kc_tpm_score(tpm, input_text, out_score)` | `int` | Score input text against the profile and write a 0.0-1.0 result to `out_score`. |
-| `kc_tpm_close(tpm)` | `void` | Release the profile. |
-| `kc_tpm_version(void)` | `uint64_t` | Return the build version timestamp. |
-
-### Lifecycle
-
-```c
 kc_tpm_t *profile = NULL;
-double score;
+double score = 0.0;
 
-if (kc_tpm_open(&profile, map_text, NULL) == KC_TPM_OK) {
-    if (kc_tpm_score(profile, input_text, &score) == KC_TPM_OK) {
-        /* use score */
-    }
+if (kc_tpm_open(&profile, reference_text, NULL) == KC_TPM_OK) {
+    kc_tpm_score(profile, input_text, &score);
     kc_tpm_close(profile);
 }
 ```
 
-A successful `kc_tpm_open()` always returns a complete profile that can be
-scored immediately and repeatedly. There is no separate build phase.
+A successful open returns a profile that is ready to score repeatedly. The
+n-gram size defaults to 3 and accepts values from 1 through 8.
 
-The n-gram size defaults to 3 and accepts values from 1 through 8.
+A valid empty input or successfully created empty profile scores `0.0`.
 
-`kc_tpm_score()` returns `KC_TPM_ERROR` for invalid arguments, allocation
-failure, or input-profile capacity overflow. A valid empty input or a
-successfully created empty profile returns `KC_TPM_OK` with a score of
-`0.0`.
-
----
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-To run through Wine:
+Use `make all` for the configured cross-platform targets when their required
+toolchains are installed.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### WebAssembly (Emscripten)
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-```bash
-make wasm32/wasm
-make test wasm
-```
-
-- Artifact: `bin/wasm32/wasm/libtpm.wasm`
-- Exports: `kc_tpm_score`, `kc_tpm_open`, `kc_tpm_close`, `kc_tpm_version`
-`wasm32/wasm` is included in `make all`.
-
-### Multiarch Builds
-
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- Emscripten SDK and Node.js for WebAssembly builds and tests.
-- Other cross-compilation toolchains are required only by enabled targets.
-
-### System Libraries
-
-Linux:
-- `libm`
-
-Windows (MSVC or MinGW):
-- No additional system libraries required.
-
-macOS / iOS:
-- No additional system libraries required.
-
-### Test Dependencies
-
-- No additional test dependencies required.
-
----
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 
