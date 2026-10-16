@@ -37,7 +37,7 @@ NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
-.PHONY: all test clean $(NATIVE_TARGET)
+.PHONY: all test wine clean $(NATIVE_TARGET)
 
 all: $(NATIVE_TARGET)
 
@@ -60,6 +60,9 @@ test:
 		-G Ninja -Wno-dev > /dev/null
 	@cmake --build $(BUILD_DIR)/test
 	@$(BUILD_DIR)/test/tlsio_contract_test all
+
+wine:
+	@:
 
 clean:
 	@rm -rf $(BUILD_DIR) $(BIN_DIR)
