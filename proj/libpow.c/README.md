@@ -42,11 +42,6 @@ The effort value is an approximate expected number of nonce attempts, not a
 time duration. `kc_pow_size()` can determine one encoded entity's total size
 from its leading bytes.
 
-## Documentation
-
-See the [public header](src/libpow.h) for framing, return codes, and
-ownership rules.
-
 ## Build
 
 From this project directory:

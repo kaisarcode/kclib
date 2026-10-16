@@ -24,11 +24,6 @@ if (decoded != NULL) {
 Empty input is valid. Use `kc_b64_free()` for every buffer returned by the
 library.
 
-## Documentation
-
-See the [public header](src/libb64.h) for complete signatures and
-return-value details.
-
 ## Build
 
 From this project directory:

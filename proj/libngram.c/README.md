@@ -40,11 +40,6 @@ The default maximum is 10 tokens, the minimum is 1 token, and the default
 separator set is ASCII whitespace. A maximum of zero means all available
 tokens.
 
-## Documentation
-
-See the [public header](src/libngram.h) for chunk fields, option
-details, and return codes.
-
 ## Build
 
 From this project directory:

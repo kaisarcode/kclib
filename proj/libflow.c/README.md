@@ -48,9 +48,6 @@ cooperative and apply to one run.
 Read the [runtime model](doc/runtime-model.md) for snapshots, branch semantics,
 completion, and cooperative stopping.
 
-See the [public header](src/libflow.h) for the complete C interface and status
-codes.
-
 ## Build
 
 From this project directory:

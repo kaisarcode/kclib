@@ -22,11 +22,6 @@ kc_min_free(text);
 The minifiers preserve syntax-sensitive content such as quoted strings. HTML
 also preserves verbatim content inside `pre` and `textarea` elements.
 
-## Documentation
-
-See the [public header](src/libmin.h) for the complete C interface and
-ownership rules.
-
 ## Build
 
 From this project directory:

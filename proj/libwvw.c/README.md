@@ -40,9 +40,6 @@ Foundation.
 Read the [native bridge guide](doc/native-bridge.md) before exposing application
 methods, executable commands, or privileged origins to WebView content.
 
-See the [public header](src/libwvw.h) for the complete window and bridge
-interfaces.
-
 ## Build
 
 From this project directory:

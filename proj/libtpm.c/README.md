@@ -22,11 +22,6 @@ n-gram size defaults to 3 and accepts values from 1 through 8.
 
 A valid empty input or successfully created empty profile scores `0.0`.
 
-## Documentation
-
-See the [public header](src/libtpm.h) for options, return codes, and
-lifecycle details.
-
 ## Build
 
 From this project directory:

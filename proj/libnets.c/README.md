@@ -47,11 +47,6 @@ its terminal completion.
 TLS is optional at build time. Use `kc_nets_tls_available()` to determine
 whether the current build includes TLS support.
 
-## Documentation
-
-See the [public header](src/libnets.h) for lifecycle, completion
-semantics, and status codes.
-
 ## Build
 
 From this project directory:

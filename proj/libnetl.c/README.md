@@ -42,11 +42,6 @@ TCP peers keep a stable identity across receives so applications can associate
 incremental protocol state with a connection. UDP inputs represent individual
 datagrams.
 
-## Documentation
-
-See the [public header](src/libnetl.h) for peer operations, callbacks,
-and status codes.
-
 ## Build
 
 From this project directory:

@@ -32,11 +32,6 @@ Limits for publications and seekers are optional; zero means unlimited.
 Publication and seeker TTLs are independent. Expiry occurs when
 `kc_rdvz_prune()` is called.
 
-## Documentation
-
-See the [public header](src/librdvz.h) for structures, limits, TTL
-behavior, and ownership details.
-
 ## Build
 
 From this project directory:

@@ -18,10 +18,6 @@ if (greeting != NULL) {
 `kc_demo_greet()` returns an allocated greeting. Release it with
 `kc_demo_free()`.
 
-## Documentation
-
-See the [public header](src/libdemo.h) for the complete C interface.
-
 ## Build
 
 From this project directory:

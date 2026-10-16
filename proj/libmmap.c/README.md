@@ -24,11 +24,6 @@ if (kc_mmap_open(&value, "state.bin") == KC_MMAP_OK) {
 After `kc_mmap_del()`, the instance is invalid for operations other than final
 cleanup.
 
-## Documentation
-
-See the [public header](src/libmmap.h) for state transitions, return
-codes, and ownership details.
-
 ## Build
 
 From this project directory:

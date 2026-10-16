@@ -32,9 +32,6 @@ watcher when its persistent lifecycle should end.
 Read the [runtime model](doc/runtime-model.md) for persistent configuration,
 temporary subscriptions, restarts, and ownership.
 
-See the [public header](src/libwch.h) for the complete C interface and event
-names.
-
 ## Build
 
 From this project directory:

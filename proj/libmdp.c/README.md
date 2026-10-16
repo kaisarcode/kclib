@@ -33,9 +33,6 @@ is open.
 Read the [Markdown behavior guide](doc/markdown.md) for frontmatter, supported
 syntax, and renderer-specific behavior.
 
-See the [public header](src/libmdp.h) for the complete C interface and return
-values.
-
 ## Build
 
 From this project directory:

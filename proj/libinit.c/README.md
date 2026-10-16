@@ -31,11 +31,6 @@ Linux, macOS, and Windows are supported. The library selects the native
 per-user startup and metadata locations; callers do not choose a storage
 directory.
 
-## Documentation
-
-See the [public header](src/libinit.h) for entry fields, allocation rules, and status
-codes.
-
 ## Build
 
 From this project directory:

@@ -40,9 +40,6 @@ multiple messages.
 Read the [integration guide](doc/integration.md) for parser lifecycle, message
 builders, transport composition, defaults, and supported protocol behavior.
 
-See the [public header](src/libhttp.h) for the complete C interface, structures,
-and status codes.
-
 ## Build
 
 From this project directory:

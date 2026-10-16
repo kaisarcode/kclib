@@ -35,9 +35,6 @@ into later renders.
 Read the [template syntax guide](doc/template-syntax.md) for escaping, includes,
 variables, blocks, conditionals, and iteration.
 
-See the [public header](src/libtpl.h) for the complete C interface and error
-handling.
-
 ## Build
 
 From this project directory:

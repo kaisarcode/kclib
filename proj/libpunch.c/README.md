@@ -34,9 +34,6 @@ Peer discovery and endpoint exchange are intentionally outside the library.
 Read the [channel lifecycle](doc/channel-lifecycle.md) for owned versus borrowed
 UDP mappings, receive ownership, liveness, and datagram behavior.
 
-See the [public header](src/libpunch.h) for the complete C interface and status
-codes.
-
 ## Build
 
 From this project directory:

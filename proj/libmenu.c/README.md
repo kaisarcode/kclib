@@ -30,11 +30,6 @@ Description, icon, and category values are optional.
 Linux uses the current user's XDG application menu. Windows uses the current
 user's Start Menu Programs folder.
 
-## Documentation
-
-See the [public header](src/libmenu.h) for entry fields, platform
-behavior, and status codes.
-
 ## Build
 
 From this project directory:

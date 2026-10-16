@@ -34,9 +34,6 @@ policy.
 Read the [integration guide](doc/integration.md) before implementing the full
 invite, join, confirm, seal, framing, and unseal flow.
 
-See the [public header](src/libpact.h) for the complete C interface and status
-codes.
-
 ## Build
 
 From this project directory:

@@ -36,11 +36,6 @@ upstream model is distributed under the MIT License.
 The local GGUF model is linked into project artifacts and is not downloaded at
 runtime.
 
-## Documentation
-
-See the [public header](src/libemb.h) for the complete C interface and memory
-ownership.
-
 ## Build
 
 From this project directory:

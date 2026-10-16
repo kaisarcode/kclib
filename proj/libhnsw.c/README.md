@@ -35,9 +35,6 @@ search.
 Read the [index lifecycle](doc/index-lifecycle.md) for options, metrics,
 ownership, rebuild behavior, and concurrent searching.
 
-See the [public header](src/libhnsw.h) for the complete C interface and status
-codes.
-
 ## Build
 
 From this project directory:

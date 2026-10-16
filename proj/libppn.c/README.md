@@ -27,11 +27,6 @@ notification-area API, and macOS uses Notification Center.
 Native tests require an appropriate desktop session because they display a real
 notification.
 
-## Documentation
-
-See the [public header](src/libppn.h) for the complete public
-contract.
-
 ## Build
 
 From this project directory:

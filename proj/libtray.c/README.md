@@ -37,11 +37,6 @@ for a visible tray icon. Windows and macOS use native platform facilities.
 
 Native tests require a desktop session.
 
-## Documentation
-
-See the [public header](src/libtray.h) for properties, callbacks,
-platform behavior, and limits.
-
 ## Build
 
 From this project directory:

@@ -34,9 +34,6 @@ handled internally rather than returned as application datagrams.
 Read the [mapping lifecycle](doc/mapping-lifecycle.md) for discovery, refresh,
 listener behavior, address families, and application datagrams.
 
-See the [public header](src/libstun.h) for the complete C interface and status
-codes.
-
 ## Build
 
 From this project directory:

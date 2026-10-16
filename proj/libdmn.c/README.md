@@ -41,9 +41,6 @@ its persistent lifecycle should end.
 Read the [runtime model](doc/runtime-model.md) for daemon lifetime, EOT framing,
 configuration changes, signals, and persistent behavior.
 
-See the [public header](src/libdmn.h) for the complete C interface and status
-codes.
-
 ## Build
 
 From this project directory:
