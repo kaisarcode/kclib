@@ -26,6 +26,7 @@
 typedef SOCKET test_socket_t;
 typedef HANDLE test_thread_t;
 typedef CRITICAL_SECTION test_mutex_t;
+typedef int test_socklen_t;
 #define TEST_SOCKET_INVALID INVALID_SOCKET
 #else
 #include <arpa/inet.h>
@@ -37,6 +38,7 @@ typedef CRITICAL_SECTION test_mutex_t;
 typedef int test_socket_t;
 typedef pthread_t test_thread_t;
 typedef pthread_mutex_t test_mutex_t;
+typedef socklen_t test_socklen_t;
 #define TEST_SOCKET_INVALID (-1)
 #endif
 
@@ -510,10 +512,10 @@ static void *server_main(void *userdata)
 
         for (index = 0; index < 2; index++) {
             struct sockaddr_in peer;
-            socklen_t peer_size;
+            test_socklen_t peer_size;
             int received;
 
-            peer_size = (socklen_t)sizeof(peer);
+            peer_size = (test_socklen_t)sizeof(peer);
             received = (int)recvfrom(
                 listener,
                 (char *)server->received + server->received_size,

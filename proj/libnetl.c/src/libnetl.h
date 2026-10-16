@@ -47,7 +47,8 @@ typedef struct {
 
 /**
  * Receives bytes from one remote peer.
- * The input and its data and host values are borrowed for the callback duration.
+ * The input and its data and host values are borrowed for the
+ * callback duration.
  * TCP peer identity remains stable across receives until disconnect or peer
  * close. A UDP peer represents one datagram origin and is valid only for the
  * callback duration.
