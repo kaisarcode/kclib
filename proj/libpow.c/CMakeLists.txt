@@ -74,7 +74,10 @@ if(EMSCRIPTEN)
     )
 elseif(NOT POW_TEST_EXTERNAL_ARTIFACTS)
     add_library(pow_static STATIC ${POW_CORE_SOURCES})
-    set_target_properties(pow_static PROPERTIES OUTPUT_NAME "pow")
+    set_target_properties(pow_static PROPERTIES
+        OUTPUT_NAME "pow"
+        POSITION_INDEPENDENT_CODE ON
+    )
     target_include_directories(pow_static PRIVATE ${POW_INCLUDE_DIRS})
     target_compile_definitions(pow_static PRIVATE HASHWX_STATIC)
 
