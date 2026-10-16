@@ -1,36 +1,21 @@
-# libhttp.c - HTTP Protocol Parser and Builder
+# libhttp.c - HTTP parser and builder
 
-`libhttp.c` is an HTTP protocol layer. It incrementally parses HTTP byte streams
-into complete structured requests/responses and builds HTTP wire bytes from
-structured requests/responses.
+`libhttp.c` incrementally parses HTTP byte streams into structured requests and
+responses and builds HTTP wire bytes from structured values. It is a protocol
+layer only: sockets, listening, routing, and outgoing transport belong to other
+libraries.
 
-It does not listen on ports, own sockets, route requests, or perform outgoing
-network transfers. Those responsibilities belong to transport libraries such as
-`netl.c` and `nets.c`.
-
-One parser belongs to one HTTP byte stream. A write may complete zero, one, or
-multiple HTTP messages.
-
----
-
-## Public API
-
-The public surface has three semantic capabilities:
-
-```text
-parser
-request
-response
-```
-
-### Parser lifecycle
+## Quick start
 
 ```c
-static void on_request(const kc_http_request_t *request, void *userdata) {
-}
+#include "libhttp.h"
 
-static void on_error(int status, void *userdata) {
-    fprintf(stderr, "%s\n", kc_http_strerror(status));
+static void on_request(
+    const kc_http_request_t *request,
+    void *userdata
+) {
+    (void)request;
+    (void)userdata;
 }
 
 kc_http_parser_t *parser = NULL;
@@ -39,192 +24,46 @@ if (kc_http_parser_open(
         &parser,
         on_request,
         NULL,
-        on_error,
-        userdata) != KC_HTTP_OK) {
-    /* handle allocation/argument failure */
-}
-
-/* Feed chunks belonging to this one byte stream. */
-kc_http_parser_write(parser, chunk, chunk_size);
-
-/* Finalize when that stream closes. */
-kc_http_parser_close(parser);
-```
-
-The parser buffers incomplete messages internally. When one write completes
-multiple messages, the corresponding callback is invoked once per complete
-message.
-
-Header names are normalized lowercase. HTTP/1 chunked input is dechunked and
-trailers are reported separately.
-
-### Build a request
-
-```c
-const kc_http_field_t headers[] = {
-    { "Host", "example.com" }
-};
-
-kc_http_request_build_t request = {0};
-request.method = "GET";
-request.target = "/";
-request.headers = headers;
-request.header_count = 1;
-
-void *wire = NULL;
-size_t wire_size = 0;
-
-if (kc_http_request(&request, &wire, &wire_size) == KC_HTTP_OK) {
-    /* send wire bytes */
-    kc_http_free(wire);
+        NULL,
+        NULL
+    ) == KC_HTTP_OK) {
+    kc_http_parser_write(parser, bytes, byte_count);
+    kc_http_parser_close(parser);
 }
 ```
 
-### Build a response
+One parser belongs to one HTTP byte stream. A write may complete zero, one, or
+multiple messages.
 
-```c
-int status = 200;
-kc_http_response_build_t response = {0};
-response.status = &status;
-response.body = "hello";
-response.body_size = 5;
+## Documentation
 
-void *wire = NULL;
-size_t wire_size = 0;
+Read the [integration guide](doc/integration.md) for parser lifecycle, message
+builders, transport composition, defaults, and supported protocol behavior.
 
-if (kc_http_response(&response, &wire, &wire_size) == KC_HTTP_OK) {
-    /* send wire bytes */
-    kc_http_free(wire);
-}
-```
-
-`kc_http_request_t` and `kc_http_response_t` represent parsed messages. Request and response builders use their corresponding build types.
-Use `kc_http_free()` to release wire data returned by the builders.
-
-Defaults:
-
-- request method: `GET`
-- request target: `/`
-- request/response version: `1.1`
-- response status: `200` when `status == NULL`
-- response reason: derived from status when `reason == NULL`
-- chunk size when chunked: `8192` when `chunk_size == NULL`
-
-Non-NULL scalar pointers are explicit. An explicit response status outside
-`100..599` is invalid, including `0`. An explicit chunk size of `0` is
-invalid.
-
-### Transport composition
-
-`http.c` deliberately has no client/server socket API.
-
-For an HTTP server, `netl.c` owns listening, accepted TCP connections, and
-connection identity. Each accepted TCP connection gets its own HTTP parser:
-
-`nets.c` remains an independent outbound transfer API. Returned bytes may also
-be fed to an HTTP parser when that transfer carries HTTP.
-
-### Protocol support
-
-| Version | Status |
-| :--- | :--- |
-| HTTP/0.9 | Parsed |
-| HTTP/1.0 | Parse and build |
-| HTTP/1.1 | Incremental parse/build, Content-Length, chunked, trailers |
-| HTTP/2 | Existing HEADERS/DATA frame parse/build capability retained |
-| HTTP/3 | Existing HEADERS/DATA frame parse/build capability retained |
-
-### Source layout
-
-| File | Role |
-| :--- | :--- |
-| `src/libhttp.c` | Reusable parser and builders |
-| `src/libhttp.h` | Public C contract |
-| `src/test.c` | Public contract tests |
-
----
+See the [public header](src/libhttp.h) for the complete C interface, structures,
+and status codes.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-To run through Wine:
+Use `make all` for the configured cross-platform targets. See the
+[repository build guide](../../README.md#build) for shared toolchain and target
+information.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### WebAssembly (Emscripten)
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-```bash
-make wasm32/wasm
-make test wasm
-```
-
-- Artifact: `bin/wasm32/wasm/libhttp.wasm`
-- Exports: `kc_http_parser_open`, `kc_http_parser_write`, `kc_http_parser_close`, `kc_http_free`, `kc_http_request`, `kc_http_response`, `kc_http_strerror`, `kc_http_version`
-`wasm32/wasm` is included in `make all`.
-
-### Multiarch Builds
-
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- Emscripten SDK and Node.js for WebAssembly builds and tests.
-- Other cross-compilation toolchains are required only by enabled targets.
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

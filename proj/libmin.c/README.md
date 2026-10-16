@@ -1,9 +1,9 @@
-# libmin.c - Asset Minifier
+# libmin.c - Asset minifier
 
----
-## Public API
+`libmin.c` minifies CSS, JavaScript, HTML, and plain text through a small
+stateless API. Each operation returns allocated output owned by the caller.
 
-The reusable API is stateless and exposes each minification capability directly.
+## Quick start
 
 ```c
 #include "libmin.h"
@@ -11,126 +11,43 @@ The reusable API is stateless and exposes each minification capability directly.
 char *css = kc_min_css("body { color: red; }");
 char *js = kc_min_js("const x = 1; // comment");
 char *html = kc_min_html("<div>  hello  </div>");
-char *txt = kc_min_txt("  hello   world  ");
+char *text = kc_min_txt("  hello   world  ");
 
 kc_min_free(css);
 kc_min_free(js);
 kc_min_free(html);
-kc_min_free(txt);
+kc_min_free(text);
 ```
 
-The public operations are:
+The minifiers preserve syntax-sensitive content such as quoted strings. HTML
+also preserves verbatim content inside `pre` and `textarea` elements.
 
-Each minifier accepts source text and returns its minified form. Use `kc_min_free()` to release returned output.
+## Documentation
 
-There is no public context, mode enum, dispatcher, or lifecycle state.
+See the [public header](src/libmin.h) for the complete C interface and
+ownership rules.
 
----
-
-### Minification Behavior
-
-**CSS** - removes block comments, collapses whitespace, removes trailing semicolons before `}`, and strips unit suffixes from zero values. Preserves quoted strings and `calc()` spacing.
-
-**JS** - removes line and block comments, collapses whitespace between tokens. Preserves quoted strings, template literals, and regex literals. Regex detection is context-aware using the preceding significant character.
-
-**HTML** - removes HTML comments, collapses whitespace between tokens. Preserves content inside `<pre>` and `<textarea>` verbatim. Preserves spaces adjacent to inline elements.
-
-**Text** - collapses whitespace runs to a single space and trims leading and trailing whitespace. It does not interpret comments, markup, quotes, or other syntax.
-
----
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-To run through Wine:
+Use `make all` for the configured cross-platform targets. See the
+[repository build guide](../../README.md#build) for shared toolchain and target
+information.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### WebAssembly (Emscripten)
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-```bash
-make wasm32/wasm
-make test wasm
-```
-
-- Artifact: `bin/wasm32/wasm/libmin.wasm`
-- Exports: `kc_min_css`, `kc_min_js`, `kc_min_html`, `kc_min_txt`, `kc_min_free`, `kc_min_version`
-`wasm32/wasm` is included in `make all`.
-
-### Multiarch Builds
-
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- Emscripten SDK and Node.js for WebAssembly builds and tests.
-- Other cross-compilation toolchains are required only by enabled targets.
-
-### System Libraries
-
-Linux:
-- `libpthread`
-- `libm`
-
-Windows (MSVC or MinGW):
-- No additional system libraries required.
-
-macOS / iOS:
-- No additional system libraries required.
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

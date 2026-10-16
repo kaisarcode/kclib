@@ -1,166 +1,61 @@
-# liblng.c - Language Detection Library
+# liblng.c - Language detection
 
-`lng.c` detects the language of text and returns ranked language matches.
+`liblng.c` detects the language of text and returns ranked matches. Detection is
+stateless and uses local heuristic scoring with no network, external model, or
+persistent state.
 
----
-## Public API
-
-Language detection is stateless and requires no explicit initialization.
-
-Scores are heuristic ranking values in `[0, 1]` shaped for thresholding, not calibrated probabilities.
-
-```c
-#include "liblng.h"
-
-#define KC_LNG_OK 0
-#define KC_LNG_ERROR -1
-
-typedef struct {
-    const char *code;
-    double score;      // heuristic ranking value, not a probability
-} kc_lng_result_t;
-
-typedef struct {
-    const double *threshold;
-    const size_t *limit;
-} kc_lng_options_t;
-
-int kc_lng_detect(const char *text, const kc_lng_options_t *options,
-                  kc_lng_result_t **out_results, size_t *out_count);
-void kc_lng_free(void *ptr);
-uint64_t kc_lng_version(void);
-```
-
-- `kc_lng_detect` detects and ranks matching languages. Threshold defaults to `0.001` and limit defaults to `1`.
-- `kc_lng_free` releases detection results.
-- `kc_lng_version` - returns build version as Unix timestamp.
-- `kc_lng_options_t` configures threshold and result limit. Limits above 32 are clamped to 32.
-- Threshold filters results; limit bounds output count. Zero matches is a successful result with count zero, not an error. No network, external model, or persistent state is required.
-
-### Example
+## Quick start
 
 ```c
 #include "liblng.h"
 
 kc_lng_result_t *results = NULL;
 size_t count = 0;
-
 size_t limit = 3;
 kc_lng_options_t options = {
     .limit = &limit
 };
 
 if (kc_lng_detect(
-    "Hello world",
-    &options,
-    &results,
-    &count
-) == KC_LNG_OK) {
-    for (size_t i = 0; i < count; i++) {
-    }
+        "Hello world",
+        &options,
+        &results,
+        &count
+    ) == KC_LNG_OK) {
+    kc_lng_free(results);
 }
-
-kc_lng_free(results);
 ```
 
-### Lifecycle
+Scores are ranking values in the range `[0, 1]`, not calibrated probabilities.
+Results are sorted from highest to lowest score. Zero matches is a successful
+result.
 
-Results are sorted by descending heuristic score. Scores are ranking values, not probabilities or confidence percentages.
+## Documentation
 
----
+See the [public header](src/liblng.h) for option defaults, limits, and
+ownership details.
+
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-To run through Wine:
+Use `make all` for the configured cross-platform targets. See the
+[repository build guide](../../README.md#build) for shared toolchain and target
+information.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### WebAssembly (Emscripten)
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-```bash
-make wasm32/wasm
-make test wasm
-```
-
-- Artifact: `bin/wasm32/wasm/liblng.wasm`
-- Exports: `kc_lng_free`, `kc_lng_detect`, `kc_lng_version`
-`wasm32/wasm` is included in `make all`.
-
-### Multiarch Builds
-
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- Emscripten SDK and Node.js for WebAssembly builds and tests.
-- Other cross-compilation toolchains are required only by enabled targets.
-
-### System Libraries
-
-Linux:
-- `libpthread`
-- `libm`
-
-Windows (MSVC or MinGW):
-- No additional system libraries required.
-
-macOS / iOS:
-- No additional system libraries required.
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

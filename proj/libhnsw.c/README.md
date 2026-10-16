@@ -1,177 +1,64 @@
-# libhnsw.c - HNSW Vector Search
+# libhnsw.c - HNSW vector search
 
----
-## Public API
+`libhnsw.c` provides an in-memory HNSW approximate-nearest-neighbor index. The
+caller supplies vectors and identifiers, explicitly builds the graph, and then
+searches it with L2, cosine, or inner-product scoring.
 
-The index is a persistent in-memory object. The only required configuration is the vector dimension. Metric and tuning values have library defaults.
+## Quick start
 
 ```c
 #include "libhnsw.h"
 
-kc_hnsw_options_t options = {0};
+kc_hnsw_options_t options = {
+    .dimension = 384
+};
 kc_hnsw_t *index = NULL;
-kc_hnsw_result_t *results = NULL;
-size_t result_count = 0;
-
-options.dimension = 384;
 
 if (kc_hnsw_open(&index, &options) == KC_HNSW_OK) {
-    kc_hnsw_add(index, "id_1", values);
+    kc_hnsw_add(index, "item-1", values);
     kc_hnsw_build(index);
-    kc_hnsw_search(
-        index,
-        query,
-        5,
-        -1.0,
-        &results,
-        &result_count
-    );
 
-kc_hnsw_free(results);
+    kc_hnsw_result_t *results = NULL;
+    size_t count = 0;
+
+    kc_hnsw_search(index, query, 5, -1.0, &results, &count);
+    kc_hnsw_free(results);
     kc_hnsw_close(index);
 }
 ```
 
-### Options
+Adding vectors after a build invalidates the graph. Build again before the next
+search.
 
-`kc_hnsw_options_t` represents the required dimension plus independently optional configuration:
+## Documentation
 
-| Option | Meaning | Default |
-| :--- | :--- | :--- |
-| `dimension` | Number of values in every vector | Required |
-| `metric` | How vectors are compared | `KC_HNSW_METRIC_COSINE` |
-| `max_connections` | Maximum graph connections per level | `16` |
-| `build_effort` | Work spent building a higher-quality search graph | `64` |
-| `search_effort` | Work spent finding better matches during a search | `64` |
+Read the [index lifecycle](doc/index-lifecycle.md) for options, metrics,
+ownership, rebuild behavior, and concurrent searching.
 
-For example, to override only search effort:
+See the [public header](src/libhnsw.h) for the complete C interface and status
+codes.
 
-```c
-kc_hnsw_options_t options = {0};
-int search_effort = 128;
-
-options.dimension = 384;
-options.search_effort = &search_effort;
-```
-
-### Usage
-
-- `kc_hnsw_open()` creates one reusable in-memory index. `dimension` must be greater than zero.
-- `kc_hnsw_add()` copies both the identifier and vector values into the index.
-- Adding a vector after a build invalidates the graph; call `kc_hnsw_build()` again before searching.
-- `kc_hnsw_build()` explicitly constructs the approximate-neighbor graph.
-- `kc_hnsw_search()` queries a built graph. Searches may run concurrently after build.
-- Use `kc_hnsw_free()` to release search results.
-- Each result `id` borrows index storage and remains valid only while the index remains alive and unmodified.
-- `kc_hnsw_dimension()`, `kc_hnsw_metric()`, and `kc_hnsw_count()` expose stable index properties.
-- `kc_hnsw_close()` releases the index. Do not mutate or close it while searches are running.
-
-Cosine and inner-product scores are similarities, so thresholds are minimum accepted scores. L2 scores are squared distances, so thresholds are maximum accepted distances.
-
-The library performs approximate nearest-neighbor search. It is in-memory only and provides no persistence, embedding generation, network service, or database layer.
-
----
-
-### Metrics
-
-Available metrics:
-
-- `l2`: squared Euclidean distance
-- `cosine`: cosine similarity
-- `inner` (or `inner_product`): inner product similarity
-
-`l2` uses squared Euclidean distance:
-
-```
-d(a, b) = sum((a[i] - b[i])^2)
-```
-
-Note: no square root is applied. Rankings are identical to Euclidean distance.
-
----
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-To run through Wine:
+Use `make all` for the configured cross-platform targets. See the
+[repository build guide](../../README.md#build) for shared toolchain and target
+information.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### WebAssembly (Emscripten)
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-```bash
-make wasm32/wasm
-make test wasm
-```
-
-- Artifact: `bin/wasm32/wasm/hnsw.wasm`
-- Exports: `kc_hnsw_open`, `kc_hnsw_build`, `kc_hnsw_add`, `kc_hnsw_free`, `kc_hnsw_search`, `kc_hnsw_dimension`, `kc_hnsw_metric`, `kc_hnsw_count`, `kc_hnsw_close`, `kc_hnsw_strerror`, `kc_hnsw_version`
-    it.
-
-`wasm32/wasm` is included in `make all`.
-
-### Multiarch Builds
-
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- Emscripten SDK and Node.js for WebAssembly builds and tests.
-- Other cross-compilation toolchains are required only by enabled targets.
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

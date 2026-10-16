@@ -1,278 +1,69 @@
-# libwvw.c - Native WebView Window
+# libwvw.c - Native WebView window
 
-`libwvw.c` provides a reusable native WebView window library with portable
-contract tests and platform backends for Windows, Linux, and macOS.
+`libwvw.c` creates a native WebView window with a portable C API for navigation,
+window state, initialization scripts, and an optional native bridge. Backends
+use WebView2 on Windows, WebKitGTK on Linux, and WKWebView on macOS.
 
-The native backends are WebView2 on Windows, WebKitGTK on Linux, and WKWebView
-on macOS.
-
----
-
-## Public API
+## Quick start
 
 ```c
 #include "libwvw.h"
 
-kc_wvw_t *wvw = NULL;
+kc_wvw_t *window = NULL;
 int width = 800;
 int height = 600;
-int posx = 100;
-int posy = 100;
-
 kc_wvw_options_t options = {
-    .url = "https://example.com",
+    .url = "about:blank",
     .title = "Example",
     .width = &width,
-    .height = &height,
-    .posx = &posx,
-    .posy = &posy
+    .height = &height
 };
 
-if (kc_wvw_open(&wvw, &options) != KC_WVW_OK) {
-    const char *error = kc_wvw_get_error(wvw);
-    kc_wvw_close(wvw);
-    return 1;
+if (kc_wvw_open(&window, &options) == KC_WVW_OK) {
+    kc_wvw_set_title(window, "Ready");
+    kc_wvw_show(window);
+    kc_wvw_close(window);
 }
-
-kc_wvw_set_title(wvw, "Ready");
-kc_wvw_set_size(wvw, 1024, 768);
-kc_wvw_set_position(wvw, 200, 150);
-kc_wvw_navigate(wvw, "https://kaisarcode.com");
-
-kc_wvw_close(wvw);
 ```
 
-`kc_wvw_open()` opens a ready-to-use WebView window.
+The URL is required. Omitted size values default to 1280x720 and omitted
+boolean options are false.
 
-`url` is required. Omitted width and height use 1280x720. Omitted position
-values use native placement. Omitted boolean options are false.
+## Requirements
 
-The public window API includes:
+Linux builds require GTK 3, WebKitGTK 4.1, and `pkg-config`. Windows execution
+requires the Microsoft Edge WebView2 Runtime. macOS uses AppKit, WebKit, and
+Foundation.
 
-```c
-int kc_wvw_open(kc_wvw_t **out, const kc_wvw_options_t *options);
-const char *kc_wvw_get_error(const kc_wvw_t *wvw);
+## Documentation
 
-int kc_wvw_navigate(kc_wvw_t *wvw, const char *url);
-int kc_wvw_add_init_script(kc_wvw_t *wvw, const char *javascript);
-int kc_wvw_set_bridge_methods(
-    kc_wvw_t *wvw,
-    const kc_wvw_bridge_options_t *options
-);
-int kc_wvw_set_executables(
-    kc_wvw_t *wvw,
-    const kc_wvw_exec_options_t *options
-);
-int kc_wvw_post_bridge_event(kc_wvw_t *wvw, const char *json);
+Read the [native bridge guide](doc/native-bridge.md) before exposing application
+methods, executable commands, or privileged origins to WebView content.
 
-int kc_wvw_hide(kc_wvw_t *wvw);
-int kc_wvw_show(kc_wvw_t *wvw);
-int kc_wvw_list(kc_wvw_t *wvw);
-int kc_wvw_unlist(kc_wvw_t *wvw);
-int kc_wvw_minimize(kc_wvw_t *wvw);
-int kc_wvw_maximize(kc_wvw_t *wvw);
-int kc_wvw_restore(kc_wvw_t *wvw);
-
-int kc_wvw_set_title(kc_wvw_t *wvw, const char *title);
-const char *kc_wvw_get_title(const kc_wvw_t *wvw);
-int kc_wvw_set_icon(kc_wvw_t *wvw, const char *icon);
-const char *kc_wvw_get_icon(const kc_wvw_t *wvw);
-
-int kc_wvw_set_size(kc_wvw_t *wvw, int width, int height);
-int kc_wvw_get_size(
-    const kc_wvw_t *wvw,
-    int *out_width,
-    int *out_height
-);
-
-int kc_wvw_set_position(kc_wvw_t *wvw, int x, int y);
-int kc_wvw_get_position(
-    const kc_wvw_t *wvw,
-    int *out_x,
-    int *out_y
-);
-
-int kc_wvw_is_visible(const kc_wvw_t *wvw);
-int kc_wvw_is_listed(const kc_wvw_t *wvw);
-int kc_wvw_is_minimized(const kc_wvw_t *wvw);
-int kc_wvw_is_maximized(const kc_wvw_t *wvw);
-int kc_wvw_is_fullscreen(const kc_wvw_t *wvw);
-
-void kc_wvw_close(kc_wvw_t *wvw);
-uint64_t kc_wvw_version(void);
-```
-
-Actions remain actions. Named properties use `set_*` and `get_*`.
-Boolean window properties use `is_*`.
-
-### Native Bridge
-
-`NativeBridge` is permanent infrastructure for trusted content. Built-in window
-methods and `NativeBridge.exec(args)` always exist; application methods remain
-an explicit fixed whitelist.
-
-```c
-static int app_bridge(
-    kc_wvw_t *wvw,
-    const char *method,
-    const char *params_json,
-    const char **out_result_json,
-    void *userdata
-) {
-    (void)wvw;
-    (void)params_json;
-    (void)userdata;
-
-    if (!strcmp(method, "get_version")) {
-        *out_result_json = "{\"version\":1}";
-        return KC_WVW_OK;
-    }
-
-    *out_result_json =
-        "{\"code\":\"UNKNOWN_METHOD\",\"message\":\"Unknown method\"}";
-    return KC_WVW_ERROR;
-}
-
-const char *methods[] = { "get_version" };
-
-kc_wvw_bridge_options_t bridge = {
-    .methods = methods,
-    .method_count = 1,
-    .callback = app_bridge
-};
-
-kc_wvw_add_init_script(wvw, "window.APP_VERSION = '1.0';");
-kc_wvw_set_bridge_methods(wvw, &bridge);
-```
-
-Bridge callbacks return JSON responses for exposed methods.
-
-`file:`, `data:`, and localhost access are controlled by `allow_file`,
-`allow_data`, and `allow_localhost` in `kc_wvw_options_t`; origin restrictions
-apply to every built-in and custom bridge method.
-
-Executables are explicit and are addressed only by registered basename:
-
-```c
-const char *paths[] = { "/usr/local/bin/demo" };
-kc_wvw_exec_options_t executables = { paths, 1 };
-kc_wvw_set_executables(wvw, &executables);
-```
-
-```js
-NativeBridge.exec(["demo", "Kaisar"]);
-```
-
-### Window Options
-
-`background` accepts `RRGGBB` and `AARRGGBB`.
-
-`icon` accepts an icon file path or platform icon name, following the same
-convention as `libtray.c`. NULL leaves the platform default icon in use.
-
-`always_on_top`, `click_through`, and `no_focus` configure the native host
-window at startup.
-
-`hidden` creates the WebView without initially presenting its native window.
-The same window can later be shown with `kc_wvw_show()` and hidden again with
-`kc_wvw_hide()`; hiding does not close the WebView.
-
-`unlist` excludes the window from the platform window list. The default is
-listed. `kc_wvw_list()` and `kc_wvw_unlist()` change that state without
-changing window visibility.
-
-`KC_WVW_TITLE_MAX` is 4096 bytes and `KC_WVW_SIZE_MAX` is 16384 pixels.
-
----
+See the [public header](src/libwvw.h) for the complete window and bridge
+interfaces.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/`.
-
-```bash
-make
-```
-
-A plain `make` builds the current host target.
-
-### Tests
-
-Build project artifacts first, then run the native contract suite:
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-The test suite validates the reusable public API.
+Use `make all` for the configured cross-platform targets. See the
+[repository build guide](../../README.md#build) for shared toolchain and target
+information.
 
-To run the Windows contract suite through Wine:
+## Status
 
-```bash
-make x86_64/windows
-make test wine
-```
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-### Multiarch Builds
-
-`make all` builds all configured targets:
-
-```bash
-make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make aarch64/macos
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` with C11 support
-
-### Linux
-
-- GTK 3
-- WebKitGTK 4.1
-- `pkg-config`
-
-### Windows
-
-- MinGW for cross-compilation on Linux.
-- Microsoft Edge WebView2 Runtime for execution.
-- `wine` for Windows tests on Linux.
-
-The Windows build places `WebView2Loader.dll` beside the generated shared
-library.
-
-### macOS
-
-- AppKit
-- WebKit
-- Foundation
-- `osxcross` with a compatible Apple SDK when cross-compiling from Linux
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 

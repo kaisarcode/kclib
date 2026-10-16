@@ -1,124 +1,68 @@
-# libtray.c - Native System Tray
+# libtray.c - Native system tray
 
-`libtray.c` creates native system tray icons and menu items on Windows, Linux, and macOS.
+`libtray.c` creates native system tray icons and menu items on Windows, Linux,
+and macOS. Menu items can be added, updated, removed, and handled through
+callbacks while the tray remains open.
 
----
-
-## Public API
+## Quick start
 
 ```c
 #include "libtray.h"
 
-static void goodbye(kc_tray_item_t *item, void *userdata) {
+static void quit(
+    kc_tray_item_t *item,
+    void *userdata
+) {
     (void)item;
     kc_tray_close((kc_tray_t *)userdata);
 }
 
 kc_tray_t *tray = NULL;
-kc_tray_item_t *quit = NULL;
-kc_tray_options_t options = { .icon = NULL, .tooltip = "My app" };
+kc_tray_item_t *item = NULL;
+kc_tray_options_t options = {
+    .tooltip = "My app"
+};
 
 if (kc_tray_open(&tray, &options) == KC_TRAY_OK) {
-    kc_tray_add_item(tray, &quit, "Quit", goodbye, tray);
-    /* Continue other application work while the tray remains open. */
+    kc_tray_add_item(tray, &item, "Quit", quit, tray);
 }
 ```
 
-Menu items can be added, updated, removed, and handled through callbacks.
-
-### Properties and Errors
-
-`kc_tray_add_separator()` adds a separator. Icons, tooltips, and item text can be updated while the tray is running.
-
----
-
-## Platform Scope
-
-| Platform | Behavior |
-| :--- | :--- |
-| Windows | Icon values are `.ico` file paths; tooltips are limited to 127 UTF-16 units. A message window and loop run on a worker thread. |
-| Linux | Icons may be file paths or icon names. GTK status-icon and event-context work run on a worker thread; applications already using GTK should not access GTK objects from other threads concurrently. A notification-area host is required for visibility. |
-| macOS | Icons may be file paths or named AppKit images. |
-
 An unset icon uses the platform default.
 
----
+## Requirements
+
+Linux builds require GTK 3 development packages and a notification-area host
+for a visible tray icon. Windows and macOS use native platform facilities.
+
+Native tests require a desktop session.
+
+## Documentation
+
+See the [public header](src/libtray.h) for properties, callbacks,
+platform behavior, and limits.
 
 ## Build
 
-Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host
-architecture running the build.
-
-```bash
-make
-```
-
-### Tests
-
-The portable test entry point is `make test`. Build project artifacts first,
-then run tests.
+From this project directory:
 
 ```bash
 make
 make test
 ```
 
-`make test` runs the native API tests; a desktop session is needed for native
-cases. To run through Wine:
+Use `make all` for the configured cross-platform targets. See the
+[repository build guide](../../README.md#build) for shared toolchain and target
+information.
 
-```bash
-make x86_64/windows
-make test wine
-```
+## Status
 
-### Multiarch Builds
+This is beta software tested primarily on Debian x86_64. No guarantees are
+provided regarding stability or future support. You may test, use, and modify it.
 
-A plain `make` builds only the current host architecture. `make all` builds
-all configured targets.
-
-```bash
-make all
-make x86_64/linux
-make x86_64/windows
-make x86_64/macos
-make aarch64/macos
-```
-
----
-
-## Development Requirements
-
-### Build Tools
-
-- `make` (GNU Make)
-- `cmake` >= 3.14
-- `ninja`
-- `gcc` or `clang` (C11 compatible)
-- GTK 3 development packages for Linux builds
-
-### Optional Cross-Compilation SDKs
-
-Required only for the corresponding targets:
-
-- MinGW for Windows cross-compilation.
-- `wine` for Windows tests on Linux.
-- `osxcross` with Apple SDKs for macOS.
-
----
-
-## Beta Notice
-
-This is a beta project tested only on Debian x86_64. It was created out of a
-personal need for these libraries, but no guarantees are provided regarding its
-stability or future support. You are free to test it, use it, and modify it as
-you please.
-
-If you'd like to reach out, you can send an email to kaisar@kaisarcode.com.
-Please note that I do not accept pull requests; the goal is to avoid long-term
-dependency on platforms like GitHub, and I do not maintain fixed infrastructure
-to guarantee long-term stability for these projects.
-
----
+Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
+Pull requests are not accepted; the project avoids depending on GitHub as
+long-term infrastructure.
 
 ## License
 
