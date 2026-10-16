@@ -146,6 +146,10 @@ static void socket_close(test_socket_t value) {
 #endif
 }
 
+/**
+ * Initializes the platform socket layer for the fixture server.
+ * @return Zero on success, nonzero on failure.
+ */
 static int socket_start(void) {
 #ifdef _WIN32
     WSADATA data;
@@ -156,12 +160,23 @@ static int socket_start(void) {
 #endif
 }
 
+/**
+ * Releases the platform socket layer.
+ * @return void.
+ */
 static void socket_stop(void) {
 #ifdef _WIN32
     WSACleanup();
 #endif
 }
 
+/**
+ * Sends one TLS BIO payload over the fixture socket.
+ * @param ctx Pointer to the fixture socket value.
+ * @param data Bytes to send.
+ * @param size Number of bytes to send.
+ * @return Bytes sent or an mbedTLS net error code.
+ */
 static int bio_send(void *ctx, const unsigned char *data, size_t size) {
     test_socket_t socket_value;
 #ifdef _WIN32
@@ -180,6 +195,13 @@ static int bio_send(void *ctx, const unsigned char *data, size_t size) {
 #endif
 }
 
+/**
+ * Receives one TLS BIO payload from the fixture socket.
+ * @param ctx Pointer to the fixture socket value.
+ * @param data Buffer to receive into.
+ * @param size Buffer capacity in bytes.
+ * @return Bytes received or an mbedTLS net error code.
+ */
 static int bio_recv(void *ctx, unsigned char *data, size_t size) {
     test_socket_t socket_value;
 #ifdef _WIN32
@@ -198,6 +220,14 @@ static int bio_recv(void *ctx, unsigned char *data, size_t size) {
 #endif
 }
 
+/**
+ * Records the SNI name offered by a connecting TLS client.
+ * @param ctx Pointer to the fixture server state.
+ * @param ssl TLS context supplied by mbedTLS.
+ * @param name SNI hostname bytes.
+ * @param name_size Length of the SNI hostname.
+ * @return Zero on success.
+ */
 static int observe_sni(void *ctx, mbedtls_ssl_context *ssl,
     const unsigned char *name, size_t name_size) {
     test_server_t *server;
@@ -211,6 +241,11 @@ static int observe_sni(void *ctx, mbedtls_ssl_context *ssl,
     return 0;
 }
 
+/**
+ * Runs a TLS handshake to completion, retrying want-read and want-write.
+ * @param ssl TLS context to handshake on.
+ * @return Zero on success, nonzero mbedTLS error code on failure.
+ */
 static int tls_handshake(mbedtls_ssl_context *ssl) {
     int result;
 
@@ -220,6 +255,13 @@ static int tls_handshake(mbedtls_ssl_context *ssl) {
     return result;
 }
 
+/**
+ * Writes the entire payload over TLS, retrying partial writes.
+ * @param ssl TLS context to write on.
+ * @param data Bytes to send.
+ * @param size Number of bytes to send.
+ * @return Zero on success, nonzero on failure.
+ */
 static int tls_write_all(mbedtls_ssl_context *ssl, const unsigned char *data,
     size_t size) {
     size_t sent;
@@ -236,6 +278,12 @@ static int tls_write_all(mbedtls_ssl_context *ssl, const unsigned char *data,
     return 0;
 }
 
+/**
+ * Serves one TLS or plain fixture connection on the accepted peer socket.
+ * @param server Fixture server state to update.
+ * @param peer Accepted client socket.
+ * @return void.
+ */
 static void run_tls_server(test_server_t *server, test_socket_t peer) {
     static const unsigned char personalization[] = "tlsio-test";
     mbedtls_ssl_context ssl;
@@ -294,6 +342,11 @@ done:
     mbedtls_x509_crt_free(&certificate); mbedtls_pk_free(&key);
 }
 
+/**
+ * Accepts one client on the fixture listener and serves the configured mode.
+ * @param ctx Pointer to the fixture server state.
+ * @return Always zero; result is recorded in the server state.
+ */
 #ifdef _WIN32
 static unsigned __stdcall server_thread(void *ctx)
 #else
@@ -316,6 +369,12 @@ static void *server_thread(void *ctx)
 #endif
 }
 
+/**
+ * Starts the fixture server in the requested mode on a loopback port.
+ * @param server Fixture server state to initialize.
+ * @param mode Fixture behavior to serve.
+ * @return Zero on success, nonzero on failure.
+ */
 static int server_start(test_server_t *server, enum test_mode mode) {
     struct sockaddr_in address;
 #ifdef _WIN32
@@ -345,6 +404,11 @@ static int server_start(test_server_t *server, enum test_mode mode) {
 #endif
 }
 
+/**
+ * Waits for the fixture server thread to finish.
+ * @param server Fixture server state whose thread to join.
+ * @return void.
+ */
 static void server_join(test_server_t *server) {
 #ifdef _WIN32
     WaitForSingleObject(server->thread, INFINITE); CloseHandle(server->thread);
@@ -353,11 +417,24 @@ static void server_join(test_server_t *server) {
 #endif
 }
 
+/**
+ * Records one assertion result, printing a message on failure.
+ * @param label Assertion description.
+ * @param value Nonzero when the assertion holds.
+ * @return One when the assertion failed, zero when it passed.
+ */
 static int expect(const char *label, int value) {
     if (!value) printf("[FAIL] %s\n", label);
     return value ? 0 : 1;
 }
 
+/**
+ * Connects to a loopback TLS endpoint with the given host and port.
+ * @param tls Receives the connection handle on success.
+ * @param port Server port to connect to.
+ * @param host Expected hostname for SNI and verification.
+ * @return Public tlsio status code.
+ */
 static int connect_local(kc_tlsio_t **tls, unsigned short port, const char *host) {
     kc_tlsio_options_t options;
 
@@ -365,11 +442,22 @@ static int connect_local(kc_tlsio_t **tls, unsigned short port, const char *host
     return kc_tlsio_connect(tls, &options);
 }
 
+/**
+ * Prints one test-case result line.
+ * @param fail Nonzero when the case failed.
+ * @param name Case name.
+ * @param detail Short case description.
+ * @return void.
+ */
 static void print_case(int fail, const char *name, const char *detail) {
     printf("[%d/%d] [%s] %s: %s\n", case_current, case_total,
         fail ? "FAIL" : "PASS", name, detail);
 }
 
+/**
+ * Runs the public-API validation case for invalid arguments.
+ * @return One when the case failed, zero when it passed.
+ */
 static int case_validation(void) {
     kc_tlsio_options_t options;
     kc_tlsio_t *tls;
@@ -392,6 +480,10 @@ static int case_validation(void) {
     return fail != 0;
 }
 
+/**
+ * Runs the verified TLS exchange case against the fixture server.
+ * @return One when the case failed, zero when it passed.
+ */
 static int case_exchange(void) {
     test_server_t server;
     kc_tlsio_t *tls;
@@ -438,6 +530,10 @@ static int case_exchange(void) {
     return fail != 0;
 }
 
+/**
+ * Runs the connection-failure cases for rejected and invalid peers.
+ * @return One when the case failed, zero when it passed.
+ */
 static int case_failures(void) {
     test_server_t server;
     kc_tlsio_t *tls;
@@ -454,6 +550,10 @@ static int case_failures(void) {
     return fail != 0;
 }
 
+/**
+ * Runs the metadata case covering status strings and version.
+ * @return One when the case failed, zero when it passed.
+ */
 static int case_metadata(void) {
     static const int codes[] = {KC_TLSIO_OK, KC_TLSIO_EOF, KC_TLSIO_EINVAL, KC_TLSIO_ENET, KC_TLSIO_ETLS, KC_TLSIO_EVERIFY, KC_TLSIO_ENOMEM};
     size_t index;
@@ -467,6 +567,12 @@ static int case_metadata(void) {
     return fail != 0;
 }
 
+/**
+ * Runs all libtlsio contract cases when invoked with the all argument.
+ * @param argc Argument count.
+ * @param argv Argument vector; argv[1] must be all.
+ * @return Zero when all cases pass, nonzero otherwise.
+ */
 int main(int argc, char **argv) {
     int failed;
 
