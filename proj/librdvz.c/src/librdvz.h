@@ -99,7 +99,8 @@ const kc_rdvz_point_t *kc_rdvz_get(kc_rdvz_t *rdvz, const char *id);
  * Publishes one value at an identifier.
  *
  * Publishing does not modify existing seekers. Only one publication may exist
- * at a point; publishing an already-published identifier returns KC_RDVZ_EEXIST.
+ * at a point; publishing an already-published identifier returns
+ * KC_RDVZ_EEXIST.
  * The data bytes are copied by the library.
  *
  * @param rdvz Open registry.

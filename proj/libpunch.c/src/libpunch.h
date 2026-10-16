@@ -93,15 +93,16 @@ int kc_punch_connect(
  * mapping instead of binding a new local socket.
  *
  * The transport callbacks operate on complete UDP datagrams. send and receive
- * return KC_PUNCH_OK, KC_PUNCH_ETIMEOUT, or another public PUNCH status. receive
- * fills one datagram and release frees any storage owned by the transport.
- * local must describe the numeric local endpoint of the supplied mapping.
+ * return KC_PUNCH_OK, KC_PUNCH_ETIMEOUT, or another public PUNCH status.
+ * receive fills one datagram and release frees any storage owned by the
+ * transport. local must describe the numeric local endpoint of the supplied
+ * mapping.
  *
- * PUNCH borrows the transport: its context and callbacks must remain valid until
- * kc_punch_close() and PUNCH does not close the underlying mapping. The path must
- * have exclusive receive access to that mapping while it is active.
- * options.host and options.port are ignored; peers and timeout_ms retain their
- * normal meaning.
+ * PUNCH borrows the transport: its context and callbacks must remain valid
+ * until kc_punch_close() and PUNCH does not close the underlying mapping.
+ * The path must have exclusive receive access to that mapping while it is
+ * active. options.host and options.port are ignored; peers and timeout_ms
+ * retain their normal meaning.
  *
  * @return KC_PUNCH_OK on success, otherwise a negative status.
  */
