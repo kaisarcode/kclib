@@ -181,7 +181,7 @@ int kc_rstrm_shutdown(kc_rstrm_t *rstrm);
  * Closes and releases one stream locally.
  *
  * Close is abortive: it does not wait for queued bytes or a graceful shutdown
- * to reach the peer. Call shutdown first when graceful write completion matters.
+ * to reach the peer. Call shutdown first for graceful write completion.
  * NULL is accepted. Close may be called from a callback; release is deferred
  * until that callback returns. No callback is delivered after an external close
  * call returns.

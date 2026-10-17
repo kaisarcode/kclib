@@ -49,11 +49,18 @@ full. If a drain callback was supplied, it is called when sending can resume.
 continue receiving until the peer also shuts down. `kc_rstrm_close()` releases
 the local session immediately and does not wait for queued data.
 
-## Documentation
+## Transport and lifecycle
 
-Read the [lifecycle guide](doc/lifecycle.md) for transport ownership,
-backpressure, half-close, and callbacks. Read the [wire protocol](doc/protocol.md)
-for interoperability details.
+The caller owns the datagram channel for the entire rstrm lifetime. Each
+outgoing callback is one complete datagram and must be sent or copied before
+the callback returns; a nonzero callback result is a terminal transport error.
+Supply each incoming datagram once with `kc_rstrm_input()`. Datagrams may be
+lost, duplicated, delayed, or reordered. The library schedules KCP internally.
+
+`kc_rstrm_send()` is a byte stream: receive callback boundaries do not preserve
+send-call boundaries. `kc_rstrm_shutdown()` orders an end of stream after bytes
+already accepted for sending, while retaining the reverse read direction.
+`kc_rstrm_close()` aborts local state immediately.
 
 ## Build
 

@@ -1,7 +1,3 @@
-#ifndef _WIN32
-#define _POSIX_C_SOURCE 200809L
-#endif
-
 /**
  * test.c - librstrm public API contract tests.
  * Summary: Validates reliable ordered streams over lossy datagram transport.
@@ -10,6 +6,10 @@
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
+
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "librstrm.h"
 
@@ -80,6 +80,10 @@ typedef struct {
     int status;
 } writer_arg_t;
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void test_lock(test_mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -89,6 +93,10 @@ static void test_lock(test_mutex_t *mutex)
 #endif
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void test_unlock(test_mutex_t *mutex)
 {
 #ifdef _WIN32
@@ -98,6 +106,10 @@ static void test_unlock(test_mutex_t *mutex)
 #endif
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void sleep_ms(unsigned ms)
 {
 #ifdef _WIN32
@@ -110,18 +122,30 @@ static void sleep_ms(unsigned ms)
 #endif
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void case_result(int fail, const char *name, const char *detail)
 {
     printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
         fail ? "FAIL" : "PASS", name, detail);
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void run_case(int *rc, int (*fn)(void))
 {
     test_case_current++;
     *rc += fn();
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int expect_true(const char *name, int condition)
 {
     if (!condition) {
@@ -131,6 +155,10 @@ static int expect_true(const char *name, int condition)
     return 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void endpoint_init(endpoint_t *endpoint)
 {
     memset(endpoint, 0, sizeof(*endpoint));
@@ -141,6 +169,10 @@ static void endpoint_init(endpoint_t *endpoint)
 #endif
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void endpoint_fini(endpoint_t *endpoint)
 {
     free(endpoint->received);
@@ -152,6 +184,11 @@ static void endpoint_fini(endpoint_t *endpoint)
 #endif
 }
 
+/**
+ * Reads an endpoint stream under its test mutex.
+ * @param endpoint Test endpoint.
+ * @return Current stream, or NULL.
+ */
 static kc_rstrm_t *endpoint_stream(endpoint_t *endpoint)
 {
     kc_rstrm_t *stream;
@@ -161,6 +198,10 @@ static kc_rstrm_t *endpoint_stream(endpoint_t *endpoint)
     return stream;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void endpoint_set_stream(endpoint_t *endpoint, kc_rstrm_t *stream)
 {
     test_lock(&endpoint->mutex);
@@ -168,6 +209,10 @@ static void endpoint_set_stream(endpoint_t *endpoint, kc_rstrm_t *stream)
     test_unlock(&endpoint->mutex);
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int endpoint_deliver(endpoint_t *endpoint, const void *data, size_t size)
 {
     kc_rstrm_t *stream;
@@ -183,6 +228,10 @@ static int endpoint_deliver(endpoint_t *endpoint, const void *data, size_t size)
     return -1;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void receive_cb(const void *data, size_t data_size, void *userdata)
 {
     endpoint_t *endpoint = (endpoint_t *)userdata;
@@ -229,6 +278,10 @@ static void receive_cb(const void *data, size_t data_size, void *userdata)
         kc_rstrm_close(action_stream);
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int datagram_cb(const void *data, size_t data_size, void *userdata)
 {
     endpoint_t *endpoint = (endpoint_t *)userdata;
@@ -300,6 +353,10 @@ static int datagram_cb(const void *data, size_t data_size, void *userdata)
     return 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void eof_cb(void *userdata)
 {
     endpoint_t *endpoint = (endpoint_t *)userdata;
@@ -309,6 +366,10 @@ static void eof_cb(void *userdata)
     test_unlock(&endpoint->mutex);
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void drain_cb(void *userdata)
 {
     endpoint_t *endpoint = (endpoint_t *)userdata;
@@ -317,6 +378,10 @@ static void drain_cb(void *userdata)
     test_unlock(&endpoint->mutex);
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void error_cb(int status, void *userdata)
 {
     endpoint_t *endpoint = (endpoint_t *)userdata;
@@ -334,6 +399,10 @@ static void error_cb(int status, void *userdata)
     if (stream) kc_rstrm_close(stream);
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int pair_open(endpoint_t *a, endpoint_t *b, size_t mtu)
 {
     kc_rstrm_options_t options;
@@ -359,6 +428,10 @@ static int pair_open(endpoint_t *a, endpoint_t *b, size_t mtu)
     return KC_RSTRM_OK;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void pair_close(endpoint_t *a, endpoint_t *b)
 {
     kc_rstrm_t *a_stream = endpoint_stream(a);
@@ -369,6 +442,10 @@ static void pair_close(endpoint_t *a, endpoint_t *b)
     kc_rstrm_close(b_stream);
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int wait_size(endpoint_t *endpoint, size_t size, unsigned timeout_ms)
 {
     unsigned elapsed = 0;
@@ -387,6 +464,10 @@ static int wait_size(endpoint_t *endpoint, size_t size, unsigned timeout_ms)
     return 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int wait_counter(endpoint_t *endpoint, int field, int value,
     unsigned timeout_ms)
 {
@@ -406,6 +487,10 @@ static int wait_counter(endpoint_t *endpoint, int field, int value,
     return 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int endpoint_equals(endpoint_t *endpoint, const void *data, size_t size)
 {
     int equal;
@@ -416,6 +501,10 @@ static int endpoint_equals(endpoint_t *endpoint, const void *data, size_t size)
     return equal;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void fill_pattern(unsigned char *data, size_t size, unsigned seed)
 {
     size_t i;
@@ -428,6 +517,10 @@ static void fill_pattern(unsigned char *data, size_t size, unsigned seed)
     }
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return None.
+ */
 static void store32le(unsigned char out[4], uint32_t value)
 {
     out[0] = (unsigned char)(value & 0xffU);
@@ -436,6 +529,10 @@ static void store32le(unsigned char out[4], uint32_t value)
     out[3] = (unsigned char)((value >> 24) & 0xffU);
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static uint32_t load32le(const unsigned char in[4])
 {
     return (uint32_t)in[0] |
@@ -445,6 +542,11 @@ static uint32_t load32le(const unsigned char in[4])
 }
 
 #ifdef _WIN32
+
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static DWORD WINAPI writer_thread(LPVOID arg)
 #else
 static void *writer_thread(void *arg)
@@ -474,6 +576,10 @@ static void *writer_thread(void *arg)
 #endif
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_open(void)
 {
     const char *name = "kc_rstrm_open";
@@ -509,6 +615,10 @@ static int case_kc_rstrm_open(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_send(void)
 {
     const char *name = "kc_rstrm_send";
@@ -537,6 +647,10 @@ static int case_kc_rstrm_send(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_reliability(void)
 {
     const char *name = "kc_rstrm_reliability";
@@ -571,6 +685,10 @@ static int case_kc_rstrm_reliability(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_ordering(void)
 {
     const char *name = "kc_rstrm_ordering";
@@ -605,6 +723,10 @@ static int case_kc_rstrm_ordering(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_mtu(void)
 {
     const char *name = "kc_rstrm_mtu";
@@ -638,6 +760,10 @@ static int case_kc_rstrm_mtu(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_full_duplex(void)
 {
     const char *name = "kc_rstrm_full_duplex";
@@ -679,6 +805,10 @@ static int case_kc_rstrm_full_duplex(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_concurrency(void)
 {
     const char *name = "kc_rstrm_concurrency";
@@ -748,6 +878,10 @@ static int case_kc_rstrm_concurrency(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_shutdown(void)
 {
     const char *name = "kc_rstrm_shutdown";
@@ -786,6 +920,10 @@ static int case_kc_rstrm_shutdown(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_backpressure(void)
 {
     const char *name = "kc_rstrm_backpressure";
@@ -820,6 +958,10 @@ static int case_kc_rstrm_backpressure(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_receive_callback(void)
 {
     const char *name = "kc_rstrm_receive_callback";
@@ -845,6 +987,10 @@ static int case_kc_rstrm_receive_callback(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_close(void)
 {
     const char *name = "kc_rstrm_close";
@@ -888,6 +1034,10 @@ static int case_kc_rstrm_close(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_transport_error(void)
 {
     const char *name = "kc_rstrm_transport_error";
@@ -924,6 +1074,10 @@ static int case_kc_rstrm_transport_error(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_protocol_error(void)
 {
     const char *name = "kc_rstrm_protocol_error";
@@ -957,6 +1111,10 @@ static int case_kc_rstrm_protocol_error(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_error_callback(void)
 {
     const char *name = "kc_rstrm_error_callback";
@@ -988,6 +1146,10 @@ static int case_kc_rstrm_error_callback(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_input(void)
 {
     const char *name = "kc_rstrm_input";
@@ -1023,6 +1185,10 @@ static int case_kc_rstrm_input(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_kc_rstrm_status(void)
 {
     const char *name = "kc_rstrm_status";
@@ -1049,6 +1215,10 @@ static int case_kc_rstrm_status(void)
     return fail ? 1 : 0;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 static int case_all(void)
 {
     int rc = 0;
@@ -1074,6 +1244,10 @@ static int case_all(void)
     return rc;
 }
 
+/**
+ * Runs a reliable-stream contract operation.
+ * @return Operation result.
+ */
 int main(int argc, char **argv)
 {
     if (argc != 2) {
