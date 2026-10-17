@@ -88,4 +88,5 @@ long-term infrastructure.
 [![LGPLv3](https://www.gnu.org/graphics/lgplv3-147x51.png)](https://www.gnu.org/licenses/lgpl-3.0.html)
 
 This project is distributed under the **GNU Lesser General Public License version 3 (LGPLv3)**.
-KCP is vendored under its own permissive license in `lib/kcp/`.
+
+KCP is vendored under its own license in `lib/kcp/`.
