@@ -33,7 +33,7 @@ index is the summary, not the contract.
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
 | [`pact`](https://github.com/kaisarcode/kclib/tree/master/proj/libpact.c) | Establishes scoped identities by one-use Noise invitations and seals/unseals messages for confirmed UIDs. | Transport-agnostic identity trust and authenticated encryption. |
-| [`pow`](https://github.com/kaisarcode/kclib/tree/master/proj/libpow.c) | Creates, solves, and verifies portable proof-of-work challenge entities backed by HashWX. | Transport-agnostic computational admission proofs or client puzzles. |
+| [`pow`](https://github.com/kaisarcode/kclib/tree/master/proj/libpow.c) | Creates, solves, and verifies portable proof-of-work challenge entities with SHA-256 by default and explicit HashWX support. | Transport-agnostic computational admission proofs or client puzzles. |
 
 ## Network and IPC
 

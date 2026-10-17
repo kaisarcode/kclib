@@ -22,6 +22,13 @@ extern "C" {
 #define KC_POW_INVALID 2
 #define KC_POW_ERROR -1
 
+typedef enum {
+    KC_POW_BACKEND_INVALID = -1,
+    KC_POW_BACKEND_AUTO = 0,
+    KC_POW_BACKEND_SHA256 = 1,
+    KC_POW_BACKEND_HASHWX = 2
+} kc_pow_backend_t;
+
 /**
  * Returns the build version generated at compile time.
  * @return Unix timestamp for the current build.
@@ -42,6 +49,53 @@ uint64_t kc_pow_version(void);
  * @return KC_POW_OK on success, or KC_POW_ERROR on failure.
  */
 int kc_pow_challenge(uint64_t effort, void **out_challenge, size_t *out_size);
+
+/**
+ * Creates a challenge for one explicitly selected proof-of-work backend.
+ *
+ * KC_POW_BACKEND_AUTO resolves to KC_POW_BACKEND_SHA256. A request for an
+ * unavailable backend fails and does not use another backend.
+ *
+ * @param backend Selected backend identifier.
+ * @param effort Approximate expected nonce attempts, greater than zero.
+ * @param out_challenge Destination for the allocated challenge entity.
+ * @param out_size Destination challenge byte count.
+ * @return KC_POW_OK on success, or KC_POW_ERROR on invalid or unavailable
+ *         input.
+ */
+int kc_pow_challenge_with_backend(kc_pow_backend_t backend, uint64_t effort,
+    void **out_challenge, size_t *out_size);
+
+/**
+ * Returns the backend encoded by one challenge entity.
+ * @param challenge Challenge entity from kc_pow_challenge().
+ * @param challenge_size Challenge byte count.
+ * @param out_backend Destination backend identifier.
+ * @return KC_POW_OK on success, or KC_POW_ERROR on malformed input.
+ */
+int kc_pow_get_backend(const void *challenge, size_t challenge_size,
+    kc_pow_backend_t *out_backend);
+
+/**
+ * Determines whether one backend is available in this build.
+ * @param backend Backend identifier, including KC_POW_BACKEND_AUTO.
+ * @return 1 when available, or 0 otherwise.
+ */
+int kc_pow_backend_available(kc_pow_backend_t backend);
+
+/**
+ * Returns the stable public name of one backend identifier.
+ * @param backend Backend identifier.
+ * @return "auto", "sha256", "hashwx", or NULL for an unknown identifier.
+ */
+const char *kc_pow_backend_name(kc_pow_backend_t backend);
+
+/**
+ * Converts one stable public backend name to its identifier.
+ * @param name Backend name: "auto", "sha256", or "hashwx".
+ * @return Matching identifier, or KC_POW_BACKEND_INVALID for an unknown name.
+ */
+kc_pow_backend_t kc_pow_backend_from_name(const char *name);
 
 /**
  * Solves one proof-of-work challenge.

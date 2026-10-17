@@ -15,6 +15,53 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+static int expect_true(const char *name, int condition);
+
+/**
+ * Stores one big-endian 64-bit test value.
+ * @param p Destination bytes.
+ * @param value Value to encode.
+ * @return None.
+ */
+static void store64be(unsigned char *p, uint64_t value) {
+    int i;
+    for (i = 7; i >= 0; --i) {
+        p[i] = (unsigned char)value;
+        value >>= 8;
+    }
+}
+
+/**
+ * Creates a fixed SHA-256 challenge entity for a known vector.
+ * @param challenge Destination 48-byte challenge buffer.
+ * @param target Exclusive proof target.
+ * @param bytes Exact 32-byte SHA-256 challenge input.
+ * @return None.
+ */
+static void sha256_challenge(unsigned char challenge[48], uint64_t target,
+    const unsigned char bytes[32]) {
+    memset(challenge, 0, 48U);
+    challenge[0] = 'K'; challenge[1] = 'P'; challenge[2] = 'W';
+    challenge[3] = 2; challenge[4] = 1; challenge[5] = KC_POW_BACKEND_SHA256;
+    challenge[7] = 48;
+    store64be(challenge + 8U, target);
+    memcpy(challenge + 16U, bytes, 32U);
+}
+
+/**
+ * Creates a fixed SHA-256 solution entity for a known vector.
+ * @param solution Destination 16-byte solution buffer.
+ * @param nonce Candidate nonce.
+ * @return None.
+ */
+static void sha256_solution(unsigned char solution[16], uint64_t nonce) {
+    memset(solution, 0, 16U);
+    solution[0] = 'K'; solution[1] = 'P'; solution[2] = 'W';
+    solution[3] = 2; solution[4] = 2; solution[5] = KC_POW_BACKEND_SHA256;
+    solution[7] = 16;
+    store64be(solution + 8U, nonce);
+}
+
 /**
  * Prints one test-case result.
  * @param fail Non-zero when the case failed.
@@ -27,9 +74,146 @@ static void case_result(int fail, const char *name, const char *detail) {
         fail ? "FAIL" : "PASS", name, detail);
 }
 
+/**
+ * Runs one named contract test.
+ * @param rc Failure accumulator.
+ * @param fn Test function.
+ * @return None.
+ */
 static void run_case(int *rc, int (*fn)(void)) {
     test_case_current++;
     *rc += fn();
+}
+
+/**
+ * Tests backend names, availability, and explicit challenge selection.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_pow_backend(void) {
+    const char *name = "kc_pow_backend";
+    const char *detail = "selects explicit backends without fallback";
+    void *challenge = NULL;
+    void *solution = NULL;
+    size_t challenge_size = 0;
+    size_t solution_size = 0;
+    kc_pow_backend_t backend = KC_POW_BACKEND_AUTO;
+    int fail = 0;
+
+    fail += expect_true("SHA-256 is available",
+        kc_pow_backend_available(KC_POW_BACKEND_SHA256) == 1);
+    fail += expect_true("AUTO is available",
+        kc_pow_backend_available(KC_POW_BACKEND_AUTO) == 1);
+    fail += expect_true("invalid backend is unavailable",
+        kc_pow_backend_available((kc_pow_backend_t)99) == 0);
+    fail += expect_true("stable SHA-256 name",
+        strcmp(kc_pow_backend_name(KC_POW_BACKEND_SHA256), "sha256") == 0);
+    fail += expect_true("stable HashWX name",
+        strcmp(kc_pow_backend_name(KC_POW_BACKEND_HASHWX), "hashwx") == 0);
+    fail += expect_true("parses SHA-256 name",
+        kc_pow_backend_from_name("sha256") == KC_POW_BACKEND_SHA256);
+    fail += expect_true("unknown name is invalid",
+        kc_pow_backend_from_name("unknown") == KC_POW_BACKEND_INVALID);
+    fail += expect_true("default challenge uses SHA-256",
+        kc_pow_challenge(1, &challenge, &challenge_size) == KC_POW_OK &&
+        kc_pow_get_backend(challenge, challenge_size, &backend) == KC_POW_OK &&
+        backend == KC_POW_BACKEND_SHA256);
+    fail += expect_true("default SHA-256 solves and verifies",
+        kc_pow_solve(challenge, challenge_size, &solution, &solution_size) ==
+        KC_POW_OK && kc_pow_verify(challenge, challenge_size, solution,
+        solution_size) == KC_POW_OK);
+    kc_pow_free(solution);
+    kc_pow_free(challenge);
+    challenge = NULL;
+    solution = NULL;
+    fail += expect_true("AUTO resolves to SHA-256",
+        kc_pow_challenge_with_backend(KC_POW_BACKEND_AUTO, 1, &challenge,
+        &challenge_size) == KC_POW_OK && kc_pow_get_backend(challenge,
+        challenge_size, &backend) == KC_POW_OK && backend == KC_POW_BACKEND_SHA256);
+    fail += expect_true("AUTO SHA-256 solves and verifies",
+        kc_pow_solve(challenge, challenge_size, &solution, &solution_size) ==
+        KC_POW_OK && kc_pow_verify(challenge, challenge_size, solution,
+        solution_size) == KC_POW_OK);
+    kc_pow_free(solution);
+    kc_pow_free(challenge);
+    challenge = NULL;
+    solution = NULL;
+    fail += expect_true("explicit SHA-256 is selected",
+        kc_pow_challenge_with_backend(KC_POW_BACKEND_SHA256, 1, &challenge,
+        &challenge_size) == KC_POW_OK && kc_pow_get_backend(challenge,
+        challenge_size, &backend) == KC_POW_OK && backend == KC_POW_BACKEND_SHA256);
+    fail += expect_true("explicit SHA-256 solves and verifies",
+        kc_pow_solve(challenge, challenge_size, &solution, &solution_size) ==
+        KC_POW_OK && kc_pow_verify(challenge, challenge_size, solution,
+        solution_size) == KC_POW_OK);
+    kc_pow_free(solution);
+    kc_pow_free(challenge);
+    challenge = NULL;
+    solution = NULL;
+    fail += expect_true("unavailable backend does not fall back",
+        kc_pow_challenge_with_backend((kc_pow_backend_t)99, 1, &challenge,
+        &challenge_size) == KC_POW_ERROR && challenge == NULL);
+    if (kc_pow_backend_available(KC_POW_BACKEND_HASHWX)) {
+        fail += expect_true("explicit HashWX is selected",
+            kc_pow_challenge_with_backend(KC_POW_BACKEND_HASHWX, 1, &challenge,
+            &challenge_size) == KC_POW_OK && kc_pow_get_backend(challenge,
+            challenge_size, &backend) == KC_POW_OK && backend == KC_POW_BACKEND_HASHWX);
+        fail += expect_true("explicit HashWX solves and verifies",
+            kc_pow_solve(challenge, challenge_size, &solution, &solution_size) ==
+            KC_POW_OK && kc_pow_verify(challenge, challenge_size, solution,
+            solution_size) == KC_POW_OK);
+        kc_pow_free(solution);
+        kc_pow_free(challenge);
+    } else {
+        fail += expect_true("uncompiled HashWX does not fall back",
+            kc_pow_challenge_with_backend(KC_POW_BACKEND_HASHWX, 1, &challenge,
+            &challenge_size) == KC_POW_ERROR && challenge == NULL);
+    }
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
+}
+
+/**
+ * Tests canonical SHA-256 vectors and strict target boundaries.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_pow_sha256_vectors(void) {
+    const char *name = "kc_pow_sha256_vectors";
+    const char *detail = "uses big-endian nonce bytes and strict targets";
+    const unsigned char zeroes[32] = { 0 };
+    const unsigned char sequence[32] = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
+    };
+    unsigned char challenge[48];
+    unsigned char solution[16];
+    const uint64_t zero_value = UINT64_C(0x2c34ce1df23b838c);
+    const uint64_t max_value = UINT64_C(0x7e6bccb10cce4427);
+    int fail = 0;
+
+    sha256_solution(solution, 0);
+    sha256_challenge(challenge, zero_value + 1U, zeroes);
+    fail += expect_true("nonce zero vector is valid",
+        kc_pow_verify(challenge, sizeof(challenge), solution,
+        sizeof(solution)) == KC_POW_OK);
+    sha256_challenge(challenge, zero_value, zeroes);
+    fail += expect_true("target equal to value is invalid",
+        kc_pow_verify(challenge, sizeof(challenge), solution,
+        sizeof(solution)) == KC_POW_INVALID);
+    sha256_challenge(challenge, zero_value - 1U, zeroes);
+    fail += expect_true("target below value is invalid",
+        kc_pow_verify(challenge, sizeof(challenge), solution,
+        sizeof(solution)) == KC_POW_INVALID);
+    sha256_solution(solution, UINT64_MAX);
+    sha256_challenge(challenge, max_value + 1U, sequence);
+    fail += expect_true("UINT64_MAX nonce vector is valid",
+        kc_pow_verify(challenge, sizeof(challenge), solution,
+        sizeof(solution)) == KC_POW_OK);
+    sha256_challenge(challenge, max_value, sequence);
+    fail += expect_true("UINT64_MAX boundary is strict",
+        kc_pow_verify(challenge, sizeof(challenge), solution,
+        sizeof(solution)) == KC_POW_INVALID);
+    case_result(fail, name, detail);
+    return fail == 0 ? 0 : 1;
 }
 
 /**
@@ -234,8 +418,10 @@ static int case_kc_pow_lifecycle(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 5;
+    test_case_total = 7;
     test_case_current = 0;
+    run_case(&rc, case_kc_pow_backend);
+    run_case(&rc, case_kc_pow_sha256_vectors);
     run_case(&rc, case_kc_pow_challenge);
     run_case(&rc, case_kc_pow_size);
     run_case(&rc, case_kc_pow_solve);
@@ -257,6 +443,10 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
+    if (strcmp(argv[1], "kc_pow_backend") == 0) return case_kc_pow_backend();
+    if (strcmp(argv[1], "kc_pow_sha256_vectors") == 0) {
+        return case_kc_pow_sha256_vectors();
+    }
     if (strcmp(argv[1], "kc_pow_challenge") == 0) return case_kc_pow_challenge();
     if (strcmp(argv[1], "kc_pow_size") == 0) return case_kc_pow_size();
     if (strcmp(argv[1], "kc_pow_solve") == 0) return case_kc_pow_solve();

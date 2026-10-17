@@ -8,6 +8,7 @@ if(NOT DEFINED POW_BUILD_VERSION)
 endif()
 
 option(POW_BUILD_TESTS "Build pow tests" OFF)
+option(POW_ENABLE_HASHWX "Build the explicit HashWX backend" ON)
 
 set(POW_TEST_EXTERNAL_ARTIFACTS OFF)
 if(POW_BUILD_TESTS AND POW_TEST_SHARED_LIBRARY)
@@ -46,8 +47,13 @@ set(HASHWX_SOURCES
 
 set(POW_CORE_SOURCES
     src/libpow.c
-    ${HASHWX_SOURCES}
+    src/sha256.c
+    src/hashwx.c
 )
+
+if(POW_ENABLE_HASHWX)
+    list(APPEND POW_CORE_SOURCES ${HASHWX_SOURCES})
+endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(${HASHWX_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
@@ -55,14 +61,22 @@ endif()
 
 set(POW_INCLUDE_DIRS
     src
-    lib/hashwx/include
-    lib/hashwx/src
 )
+
+if(POW_ENABLE_HASHWX)
+    list(APPEND POW_INCLUDE_DIRS
+        lib/hashwx/include
+        lib/hashwx/src
+    )
+endif()
 
 if(EMSCRIPTEN)
     add_executable(libpow_wasm ${POW_CORE_SOURCES})
     target_include_directories(libpow_wasm PRIVATE ${POW_INCLUDE_DIRS})
-    target_compile_definitions(libpow_wasm PRIVATE HASHWX_STATIC)
+    target_compile_definitions(libpow_wasm PRIVATE
+        HASHWX_STATIC
+        KC_POW_ENABLE_HASHWX=$<BOOL:${POW_ENABLE_HASHWX}>
+    )
     set_target_properties(libpow_wasm PROPERTIES
         OUTPUT_NAME "libpow"
         SUFFIX ".wasm"
@@ -79,7 +93,10 @@ elseif(NOT POW_TEST_EXTERNAL_ARTIFACTS)
         POSITION_INDEPENDENT_CODE ON
     )
     target_include_directories(pow_static PRIVATE ${POW_INCLUDE_DIRS})
-    target_compile_definitions(pow_static PRIVATE HASHWX_STATIC)
+    target_compile_definitions(pow_static PRIVATE
+        HASHWX_STATIC
+        KC_POW_ENABLE_HASHWX=$<BOOL:${POW_ENABLE_HASHWX}>
+    )
 
     add_library(pow_shared SHARED ${POW_CORE_SOURCES})
     set_target_properties(pow_shared PROPERTIES
@@ -87,7 +104,10 @@ elseif(NOT POW_TEST_EXTERNAL_ARTIFACTS)
         WINDOWS_EXPORT_ALL_SYMBOLS ON
     )
     target_include_directories(pow_shared PRIVATE ${POW_INCLUDE_DIRS})
-    target_compile_definitions(pow_shared PRIVATE HASHWX_STATIC)
+    target_compile_definitions(pow_shared PRIVATE
+        HASHWX_STATIC
+        KC_POW_ENABLE_HASHWX=$<BOOL:${POW_ENABLE_HASHWX}>
+    )
 
     if(WIN32)
         target_link_libraries(pow_static PRIVATE bcrypt)
@@ -104,6 +124,9 @@ if(POW_BUILD_TESTS)
             ${POW_CORE_SOURCES}
         )
         target_include_directories(pow_contract_test PRIVATE ${POW_INCLUDE_DIRS})
+        target_compile_definitions(pow_contract_test PRIVATE
+            KC_POW_ENABLE_HASHWX=$<BOOL:${POW_ENABLE_HASHWX}>
+        )
     else()
         if(POW_TEST_SHARED_LIBRARY)
             add_library(pow_test_shared SHARED IMPORTED)
