@@ -79,12 +79,15 @@ int kc_rstrm_send(kc_rstrm_t *rstrm, const void *data, size_t data_size)
 {
     rstrm_buffer_t *buffer;
     if (!rstrm || (data_size > 0 && !data)) return KC_RSTRM_EINVAL;
-    if (data_size == 0) return KC_RSTRM_OK;
 
     rstrm_lock(rstrm);
     if (rstrm->closing || rstrm->failed || rstrm->local_shutdown) {
         rstrm_unlock(rstrm);
         return KC_RSTRM_ECLOSED;
+    }
+    if (data_size == 0) {
+        rstrm_unlock(rstrm);
+        return KC_RSTRM_OK;
     }
     if (data_size > RSTRM_MAX_PENDING_BYTES - rstrm->pending_bytes ||
         ikcp_waitsnd(rstrm->kcp) >= RSTRM_KCP_HIGH_SEGMENTS)
