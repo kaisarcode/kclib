@@ -488,6 +488,24 @@ static int wait_counter(endpoint_t *endpoint, int field, int value,
 }
 
 /**
+ * Waits for one local graceful shutdown acknowledgement.
+ * @param stream Open stream.
+ * @param timeout_ms Maximum wait time.
+ * @return Nonzero when the peer acknowledged shutdown.
+ */
+static int wait_shutdown(kc_rstrm_t *stream, unsigned timeout_ms)
+{
+    unsigned elapsed = 0;
+
+    while (elapsed <= timeout_ms) {
+        if (kc_rstrm_shutdown_complete(stream)) return 1;
+        sleep_ms(10);
+        elapsed += 10;
+    }
+    return 0;
+}
+
+/**
  * Runs a reliable-stream contract operation.
  * @return Operation result.
  */
@@ -902,6 +920,8 @@ static int case_kc_rstrm_shutdown(void)
         fail += expect_true("peer observes EOF", wait_counter(&b, 1, 1, 3000));
         fail += expect_true("all bytes precede EOF",
             endpoint_equals(&b, "before", 6) && b.eof_received_size == 6U);
+        fail += expect_true("peer acknowledges shutdown",
+            wait_shutdown(a.stream, 3000));
         fail += expect_true("non-empty send after shutdown is closed",
             kc_rstrm_send(a.stream, "x", 1) == KC_RSTRM_ECLOSED);
         fail += expect_true("zero-length send after shutdown is closed",

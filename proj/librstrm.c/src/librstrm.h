@@ -178,6 +178,13 @@ int kc_rstrm_input(
 int kc_rstrm_shutdown(kc_rstrm_t *rstrm);
 
 /**
+ * Checks whether the peer acknowledged the local graceful shutdown.
+ * @param rstrm Open stream.
+ * @return Nonzero when the local graceful shutdown reached the peer.
+ */
+int kc_rstrm_shutdown_complete(kc_rstrm_t *rstrm);
+
+/**
  * Closes and releases one stream locally.
  *
  * Close is abortive: it does not wait for queued bytes or a graceful shutdown

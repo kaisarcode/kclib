@@ -55,6 +55,7 @@ typedef pthread_cond_t rstrm_cond_t;
 #define RSTRM_RECORD_PAYLOAD       32768U
 #define RSTRM_RECORD_DATA          1U
 #define RSTRM_RECORD_FIN           2U
+#define RSTRM_RECORD_FIN_ACK       3U
 #define RSTRM_EVENT_DATA           1
 #define RSTRM_EVENT_EOF            2
 #define RSTRM_EVENT_DRAIN          3
@@ -111,6 +112,7 @@ struct kc_rstrm {
     int error_delivered;
     int local_shutdown;
     int local_fin_sent;
+    int local_fin_acked;
     int remote_eof;
     int full_latched;
     int output_error;
@@ -522,17 +524,31 @@ static int rstrm_collect_receive_locked(kc_rstrm_t *rstrm,
                 return status;
             }
         } else if (record[0] == RSTRM_RECORD_FIN) {
+            const unsigned char fin_ack = RSTRM_RECORD_FIN_ACK;
+
             if (size != 1 || rstrm->remote_eof) {
                 free(record);
                 return KC_RSTRM_EPROTO;
             }
             rstrm->remote_eof = 1;
+            if (ikcp_send(rstrm->kcp, (const char *)&fin_ack, 1) < 0) {
+                free(record);
+                return KC_RSTRM_ENOMEM;
+            }
             if (rstrm_event_push(events, events_tail, RSTRM_EVENT_EOF, 0,
                 NULL, 0) != 0)
             {
                 free(record);
                 return KC_RSTRM_ENOMEM;
             }
+        } else if (record[0] == RSTRM_RECORD_FIN_ACK) {
+            if (size != 1 || !rstrm->local_fin_sent ||
+                rstrm->local_fin_acked)
+            {
+                free(record);
+                return KC_RSTRM_EPROTO;
+            }
+            rstrm->local_fin_acked = 1;
         } else {
             free(record);
             return KC_RSTRM_EPROTO;
@@ -859,6 +875,22 @@ int kc_rstrm_shutdown(kc_rstrm_t *rstrm)
     rstrm_signal(rstrm);
     rstrm_unlock(rstrm);
     return KC_RSTRM_OK;
+}
+
+/**
+ * Checks whether the peer acknowledged the local graceful shutdown.
+ * @param rstrm Open stream.
+ * @return Nonzero when the local FIN reached the peer, zero otherwise.
+ */
+int kc_rstrm_shutdown_complete(kc_rstrm_t *rstrm)
+{
+    int complete;
+
+    if (!rstrm) return 0;
+    rstrm_lock(rstrm);
+    complete = rstrm->local_shutdown && rstrm->local_fin_acked;
+    rstrm_unlock(rstrm);
+    return complete;
 }
 
 /**
