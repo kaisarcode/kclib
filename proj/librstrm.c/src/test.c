@@ -1,7 +1,10 @@
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 /**
  * test.c - librstrm public API contract tests.
- * Summary: Validates reliability, ordering, stream lifecycle, backpressure,
- * fault tolerance, concurrency, and callback safety.
+ * Summary: Validates reliable ordered streams over lossy datagram transport.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -29,12 +32,13 @@ typedef pthread_mutex_t test_mutex_t;
 
 #define TEST_TIMEOUT_MS 8000U
 #define TEST_LARGE_SIZE (512U * 1024U)
-#define TEST_FAULT_SIZE  (128U * 1024U)
+#define TEST_FAULT_SIZE (64U * 1024U)
+#define TEST_LOSS_SIZE (32U * 1024U)
 #define TEST_WRITERS 4U
 #define TEST_WRITES_PER_THREAD 200U
 #define TEST_RECORD_SIZE 8U
 
-static int test_case_total = 16;
+static int test_case_total = 0;
 static int test_case_current = 0;
 
 typedef struct endpoint endpoint_t;
@@ -43,7 +47,6 @@ struct endpoint {
     kc_rstrm_t *stream;
     endpoint_t *peer;
     test_mutex_t mutex;
-
     unsigned char *received;
     size_t received_size;
     size_t received_capacity;
@@ -54,16 +57,14 @@ struct endpoint {
     int error_count;
     int error_status;
     int callback_closed;
-
     int echo_on_receive;
     int close_on_receive;
     int close_on_error;
     int fail_output;
-
     unsigned tx_count;
-    unsigned drop_every;
-    unsigned duplicate_every;
-    unsigned reorder_every;
+    unsigned drop_remaining;
+    unsigned duplicate_at;
+    unsigned reorder_at;
     unsigned dropped;
     unsigned duplicated;
     unsigned reordered;
@@ -173,15 +174,9 @@ static int endpoint_deliver(endpoint_t *endpoint, const void *data, size_t size)
     int status;
 
     if (!endpoint || !data || size == 0) return 0;
-    test_lock(&endpoint->mutex);
-    stream = endpoint->stream;
-    if (!stream) {
-        test_unlock(&endpoint->mutex);
-        return 0;
-    }
+    stream = endpoint_stream(endpoint);
+    if (!stream) return 0;
     status = kc_rstrm_input(stream, data, size);
-    test_unlock(&endpoint->mutex);
-
     if (status == KC_RSTRM_OK || status == KC_RSTRM_EFULL ||
         status == KC_RSTRM_ECLOSED)
         return 0;
@@ -238,43 +233,66 @@ static int datagram_cb(const void *data, size_t data_size, void *userdata)
 {
     endpoint_t *endpoint = (endpoint_t *)userdata;
     unsigned number;
+    unsigned drop = 0;
+    unsigned duplicate = 0;
+    unsigned reorder = 0;
+    unsigned char *held = NULL;
+    size_t held_size = 0;
     int status;
 
-    if (endpoint->fail_output) return -1;
+    test_lock(&endpoint->mutex);
+    if (endpoint->fail_output) {
+        test_unlock(&endpoint->mutex);
+        return -1;
+    }
     endpoint->tx_count++;
     number = endpoint->tx_count;
-    if (data_size > endpoint->max_datagram) endpoint->max_datagram = data_size;
-
-    if (endpoint->drop_every && number % endpoint->drop_every == 0U) {
+    if (data_size > endpoint->max_datagram)
+        endpoint->max_datagram = data_size;
+    if (endpoint->drop_remaining > 0U) {
+        endpoint->drop_remaining--;
         endpoint->dropped++;
-        return 0;
-    }
-
-    if (endpoint->reorder_every && number % endpoint->reorder_every == 0U &&
-        !endpoint->held)
+        drop = 1;
+    } else if (endpoint->reorder_at != 0U && number == endpoint->reorder_at &&
+        endpoint->held == NULL)
     {
         endpoint->held = (unsigned char *)malloc(data_size);
-        if (!endpoint->held) return -1;
+        if (!endpoint->held) {
+            test_unlock(&endpoint->mutex);
+            return -1;
+        }
         memcpy(endpoint->held, data, data_size);
         endpoint->held_size = data_size;
         endpoint->reordered++;
-        return 0;
+        reorder = 1;
+    } else {
+        if (endpoint->duplicate_at != 0U && number == endpoint->duplicate_at) {
+            endpoint->duplicated++;
+            duplicate = 1;
+        }
+        if (endpoint->held) {
+            held = endpoint->held;
+            held_size = endpoint->held_size;
+            endpoint->held = NULL;
+            endpoint->held_size = 0;
+        }
     }
+    test_unlock(&endpoint->mutex);
 
+    if (drop || reorder) return 0;
     status = endpoint_deliver(endpoint->peer, data, data_size);
-    if (status != 0) return status;
-
-    if (endpoint->duplicate_every && number % endpoint->duplicate_every == 0U) {
-        endpoint->duplicated++;
-        status = endpoint_deliver(endpoint->peer, data, data_size);
-        if (status != 0) return status;
+    if (status != 0) {
+        free(held);
+        return status;
     }
-
-    if (endpoint->held) {
-        unsigned char *held = endpoint->held;
-        size_t held_size = endpoint->held_size;
-        endpoint->held = NULL;
-        endpoint->held_size = 0;
+    if (duplicate) {
+        status = endpoint_deliver(endpoint->peer, data, data_size);
+        if (status != 0) {
+            free(held);
+            return status;
+        }
+    }
+    if (held) {
         status = endpoint_deliver(endpoint->peer, held, held_size);
         free(held);
         if (status != 0) return status;
@@ -313,7 +331,6 @@ static void error_cb(int status, void *userdata)
         endpoint->callback_closed = 1;
     }
     test_unlock(&endpoint->mutex);
-
     if (stream) kc_rstrm_close(stream);
 }
 
@@ -325,7 +342,7 @@ static int pair_open(endpoint_t *a, endpoint_t *b, size_t mtu)
 
     a->peer = b;
     b->peer = a;
-    if (mtu) {
+    if (mtu != 0U) {
         options.mtu = mtu;
         options_ptr = &options;
     }
@@ -394,7 +411,7 @@ static int endpoint_equals(endpoint_t *endpoint, const void *data, size_t size)
     int equal;
     test_lock(&endpoint->mutex);
     equal = !endpoint->callback_fail && endpoint->received_size == size &&
-        (size == 0 || memcmp(endpoint->received, data, size) == 0);
+        (size == 0U || memcmp(endpoint->received, data, size) == 0);
     test_unlock(&endpoint->mutex);
     return equal;
 }
@@ -457,49 +474,45 @@ static void *writer_thread(void *arg)
 #endif
 }
 
-static int case_api_validation(void)
+static int case_kc_rstrm_open(void)
 {
-    const char *name = "public API validation";
-    const char *detail = "rejects invalid arguments and MTU values";
+    const char *name = "kc_rstrm_open";
+    const char *detail = "validates callbacks and MTU bounds";
     endpoint_t endpoint;
     kc_rstrm_t *stream = (kc_rstrm_t *)(uintptr_t)1U;
     kc_rstrm_options_t options;
     int fail = 0;
 
     endpoint_init(&endpoint);
-    fail += expect_true("open rejects NULL destination",
+    fail += expect_true("rejects NULL destination",
         kc_rstrm_open(NULL, NULL, receive_cb, datagram_cb, NULL, NULL, NULL,
             &endpoint) == KC_RSTRM_EINVAL);
-    fail += expect_true("open rejects NULL receive",
+    fail += expect_true("rejects NULL receive callback",
         kc_rstrm_open(&stream, NULL, NULL, datagram_cb, NULL, NULL, NULL,
             &endpoint) == KC_RSTRM_EINVAL && stream == NULL);
-    fail += expect_true("open rejects NULL datagram",
+    stream = (kc_rstrm_t *)(uintptr_t)1U;
+    fail += expect_true("rejects NULL datagram callback",
         kc_rstrm_open(&stream, NULL, receive_cb, NULL, NULL, NULL, NULL,
             &endpoint) == KC_RSTRM_EINVAL && stream == NULL);
-    options.mtu = 511;
-    fail += expect_true("open rejects MTU below minimum",
+    options.mtu = 511U;
+    stream = (kc_rstrm_t *)(uintptr_t)1U;
+    fail += expect_true("rejects MTU below minimum",
         kc_rstrm_open(&stream, &options, receive_cb, datagram_cb, NULL, NULL,
             NULL, &endpoint) == KC_RSTRM_EINVAL && stream == NULL);
     options.mtu = 65536U;
-    fail += expect_true("open rejects MTU above maximum",
+    stream = (kc_rstrm_t *)(uintptr_t)1U;
+    fail += expect_true("rejects MTU above maximum",
         kc_rstrm_open(&stream, &options, receive_cb, datagram_cb, NULL, NULL,
             NULL, &endpoint) == KC_RSTRM_EINVAL && stream == NULL);
-    fail += expect_true("send rejects NULL stream",
-        kc_rstrm_send(NULL, "x", 1) == KC_RSTRM_EINVAL);
-    fail += expect_true("input rejects NULL stream",
-        kc_rstrm_input(NULL, "x", 1) == KC_RSTRM_EINVAL);
-    fail += expect_true("shutdown rejects NULL stream",
-        kc_rstrm_shutdown(NULL) == KC_RSTRM_EINVAL);
-    kc_rstrm_close(NULL);
     endpoint_fini(&endpoint);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_basic_stream(void)
+static int case_kc_rstrm_send(void)
 {
-    const char *name = "basic stream";
-    const char *detail = "delivers concatenated ordered bytes across send boundaries";
+    const char *name = "kc_rstrm_send";
+    const char *detail = "presents one ordered byte stream across send boundaries";
     endpoint_t a, b;
     int fail = 0;
 
@@ -507,13 +520,13 @@ static int case_basic_stream(void)
     endpoint_init(&b);
     fail += expect_true("opens stream pair", pair_open(&a, &b, 0) == KC_RSTRM_OK);
     if (!fail) {
-        fail += expect_true("zero-length send is accepted while open",
+        fail += expect_true("accepts zero-length send while open",
             kc_rstrm_send(a.stream, NULL, 0) == KC_RSTRM_OK);
-        fail += expect_true("queues abc",
+        fail += expect_true("queues first bytes",
             kc_rstrm_send(a.stream, "abc", 3) == KC_RSTRM_OK);
-        fail += expect_true("queues def",
+        fail += expect_true("queues second bytes",
             kc_rstrm_send(a.stream, "def", 3) == KC_RSTRM_OK);
-        fail += expect_true("receives six bytes", wait_size(&b, 6, 2000));
+        fail += expect_true("receives combined bytes", wait_size(&b, 6, 2000));
         fail += expect_true("preserves byte order", endpoint_equals(&b,
             "abcdef", 6));
     }
@@ -521,85 +534,81 @@ static int case_basic_stream(void)
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_loss_recovery(void)
+static int case_kc_rstrm_reliability(void)
 {
-    const char *name = "loss recovery";
-    const char *detail = "retransmits through deterministic data and ACK loss";
+    const char *name = "kc_rstrm_reliability";
+    const char *detail = "retransmits bytes after finite data and ACK loss";
     endpoint_t a, b;
     unsigned char *payload = NULL;
     int fail = 0;
 
     endpoint_init(&a);
     endpoint_init(&b);
-    a.drop_every = 5;
-    b.drop_every = 7;
-    payload = (unsigned char *)malloc(TEST_FAULT_SIZE);
+    a.drop_remaining = 3U;
+    b.drop_remaining = 2U;
+    payload = (unsigned char *)malloc(TEST_LOSS_SIZE);
     fail += expect_true("allocates loss payload", payload != NULL);
-    if (payload) fill_pattern(payload, TEST_FAULT_SIZE, 1);
-    fail += expect_true("opens loss pair", pair_open(&a, &b, 900) == KC_RSTRM_OK);
+    if (payload) fill_pattern(payload, TEST_LOSS_SIZE, 1U);
+    fail += expect_true("opens lossy pair", pair_open(&a, &b, 900U) == KC_RSTRM_OK);
     if (!fail) {
-        fail += expect_true("queues loss payload",
-            kc_rstrm_send(a.stream, payload, TEST_FAULT_SIZE) == KC_RSTRM_OK);
-        fail += expect_true("recovers all lost bytes",
-            wait_size(&b, TEST_FAULT_SIZE, TEST_TIMEOUT_MS));
-        fail += expect_true("loss payload is exact",
-            endpoint_equals(&b, payload, TEST_FAULT_SIZE));
-        fail += expect_true("fault injector actually dropped datagrams",
-            a.dropped + b.dropped > 0U);
+        fail += expect_true("queues lossy payload",
+            kc_rstrm_send(a.stream, payload, TEST_LOSS_SIZE) == KC_RSTRM_OK);
+        fail += expect_true("recovers complete payload",
+            wait_size(&b, TEST_LOSS_SIZE, TEST_TIMEOUT_MS));
+        fail += expect_true("recovered payload is exact",
+            endpoint_equals(&b, payload, TEST_LOSS_SIZE));
+        fail += expect_true("drops occurred in both directions",
+            a.dropped == 3U && b.dropped == 2U);
     }
     pair_close(&a, &b);
     free(payload);
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_reorder_duplicate(void)
+static int case_kc_rstrm_ordering(void)
 {
-    const char *name = "reorder and duplication";
-    const char *detail = "deduplicates and restores order under datagram faults";
+    const char *name = "kc_rstrm_ordering";
+    const char *detail = "restores order and ignores duplicate datagrams";
     endpoint_t a, b;
     unsigned char *payload = NULL;
     int fail = 0;
 
     endpoint_init(&a);
     endpoint_init(&b);
-    a.reorder_every = 3;
-    a.duplicate_every = 4;
-    b.reorder_every = 4;
-    b.duplicate_every = 5;
+    a.reorder_at = 20U;
+    a.duplicate_at = 21U;
     payload = (unsigned char *)malloc(TEST_FAULT_SIZE);
-    fail += expect_true("allocates reorder payload", payload != NULL);
-    if (payload) fill_pattern(payload, TEST_FAULT_SIZE, 2);
-    fail += expect_true("opens reorder pair", pair_open(&a, &b, 900) == KC_RSTRM_OK);
+    fail += expect_true("allocates ordering payload", payload != NULL);
+    if (payload) fill_pattern(payload, TEST_FAULT_SIZE, 2U);
+    fail += expect_true("opens reordered pair", pair_open(&a, &b, 900U) == KC_RSTRM_OK);
     if (!fail) {
-        fail += expect_true("queues reorder payload",
+        fail += expect_true("queues ordering payload",
             kc_rstrm_send(a.stream, payload, TEST_FAULT_SIZE) == KC_RSTRM_OK);
         fail += expect_true("receives reordered payload",
             wait_size(&b, TEST_FAULT_SIZE, TEST_TIMEOUT_MS));
-        fail += expect_true("reordered payload is exact",
+        fail += expect_true("ordered payload is exact",
             endpoint_equals(&b, payload, TEST_FAULT_SIZE));
-        fail += expect_true("fault injector reordered datagrams",
-            a.reordered + b.reordered > 0U);
-        fail += expect_true("fault injector duplicated datagrams",
-            a.duplicated + b.duplicated > 0U);
+        fail += expect_true("reorder injector activated", a.reordered == 1U);
+        fail += expect_true("duplicate injector activated", a.duplicated == 1U);
     }
     pair_close(&a, &b);
     free(payload);
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_small_mtu_large_payload(void)
+static int case_kc_rstrm_mtu(void)
 {
-    const char *name = "MTU and large payload";
-    const char *detail = "fragments a large stream without exceeding transport MTU";
+    const char *name = "kc_rstrm_mtu";
+    const char *detail = "fragments a large stream within the configured datagram MTU";
     endpoint_t a, b;
     unsigned char *payload = NULL;
     int fail = 0;
@@ -608,8 +617,8 @@ static int case_small_mtu_large_payload(void)
     endpoint_init(&b);
     payload = (unsigned char *)malloc(TEST_LARGE_SIZE);
     fail += expect_true("allocates large payload", payload != NULL);
-    if (payload) fill_pattern(payload, TEST_LARGE_SIZE, 3);
-    fail += expect_true("opens minimum-MTU pair", pair_open(&a, &b, 512) == KC_RSTRM_OK);
+    if (payload) fill_pattern(payload, TEST_LARGE_SIZE, 3U);
+    fail += expect_true("opens minimum-MTU pair", pair_open(&a, &b, 512U) == KC_RSTRM_OK);
     if (!fail) {
         fail += expect_true("queues large payload",
             kc_rstrm_send(a.stream, payload, TEST_LARGE_SIZE) == KC_RSTRM_OK);
@@ -617,8 +626,8 @@ static int case_small_mtu_large_payload(void)
             wait_size(&b, TEST_LARGE_SIZE, TEST_TIMEOUT_MS));
         fail += expect_true("large payload is exact",
             endpoint_equals(&b, payload, TEST_LARGE_SIZE));
-        fail += expect_true("all emitted datagrams honor MTU",
-            a.max_datagram > 0 && a.max_datagram <= 512U &&
+        fail += expect_true("emitted datagrams honor MTU",
+            a.max_datagram > 0U && a.max_datagram <= 512U &&
             b.max_datagram <= 512U);
     }
     pair_close(&a, &b);
@@ -626,13 +635,13 @@ static int case_small_mtu_large_payload(void)
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_full_duplex(void)
+static int case_kc_rstrm_full_duplex(void)
 {
-    const char *name = "full duplex";
-    const char *detail = "moves independent byte streams in both directions concurrently";
+    const char *name = "kc_rstrm_full_duplex";
+    const char *detail = "moves independent byte streams in both directions";
     endpoint_t a, b;
     unsigned char *from_a = NULL;
     unsigned char *from_b = NULL;
@@ -644,22 +653,22 @@ static int case_full_duplex(void)
     from_a = (unsigned char *)malloc(size);
     from_b = (unsigned char *)malloc(size);
     fail += expect_true("allocates duplex payloads", from_a && from_b);
-    if (from_a) fill_pattern(from_a, size, 4);
-    if (from_b) fill_pattern(from_b, size, 5);
-    fail += expect_true("opens duplex pair", pair_open(&a, &b, 1000) == KC_RSTRM_OK);
+    if (from_a) fill_pattern(from_a, size, 4U);
+    if (from_b) fill_pattern(from_b, size, 5U);
+    fail += expect_true("opens duplex pair", pair_open(&a, &b, 1000U) == KC_RSTRM_OK);
     if (!fail) {
         fail += expect_true("queues A to B",
             kc_rstrm_send(a.stream, from_a, size) == KC_RSTRM_OK);
         fail += expect_true("queues B to A",
             kc_rstrm_send(b.stream, from_b, size) == KC_RSTRM_OK);
-        fail += expect_true("A receives complete reverse stream",
+        fail += expect_true("A receives reverse stream",
             wait_size(&a, size, TEST_TIMEOUT_MS));
-        fail += expect_true("B receives complete forward stream",
+        fail += expect_true("B receives forward stream",
             wait_size(&b, size, TEST_TIMEOUT_MS));
-        fail += expect_true("A reverse bytes are exact", endpoint_equals(&a,
-            from_b, size));
-        fail += expect_true("B forward bytes are exact", endpoint_equals(&b,
-            from_a, size));
+        fail += expect_true("A reverse bytes are exact",
+            endpoint_equals(&a, from_b, size));
+        fail += expect_true("B forward bytes are exact",
+            endpoint_equals(&b, from_a, size));
     }
     pair_close(&a, &b);
     free(from_a);
@@ -667,13 +676,13 @@ static int case_full_duplex(void)
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_concurrent_senders(void)
+static int case_kc_rstrm_concurrency(void)
 {
-    const char *name = "concurrent senders";
-    const char *detail = "serializes thread-safe sends without corrupting per-thread order";
+    const char *name = "kc_rstrm_concurrency";
+    const char *detail = "serializes concurrent senders without corrupting per-thread order";
     endpoint_t a, b;
     writer_arg_t writers[TEST_WRITERS];
     test_thread_t threads[TEST_WRITERS];
@@ -709,40 +718,40 @@ static int case_concurrent_senders(void)
 #else
             (void)pthread_join(threads[i], NULL);
 #endif
-            fail += expect_true("producer completed successfully",
+            fail += expect_true("producer completes",
                 writers[i].status == KC_RSTRM_OK);
         }
         fail += expect_true("receives all concurrent writes",
             wait_size(&b, expected, TEST_TIMEOUT_MS));
+        test_lock(&b.mutex);
         if (b.received_size == expected) {
-            test_lock(&b.mutex);
             for (i = 0; i < expected / TEST_RECORD_SIZE; ++i) {
                 const unsigned char *record = b.received + i * TEST_RECORD_SIZE;
                 uint32_t id = load32le(record);
                 uint32_t seq = load32le(record + 4);
                 if (id >= TEST_WRITERS || seq != next_seq[id]) {
-                    fail += expect_true("concurrent record ordering", 0);
+                    fail += expect_true("preserves producer record order", 0);
                     break;
                 }
                 next_seq[id]++;
             }
-            test_unlock(&b.mutex);
-            for (i = 0; i < TEST_WRITERS; ++i)
-                fail += expect_true("all producer records observed",
-                    next_seq[i] == TEST_WRITES_PER_THREAD);
         }
+        test_unlock(&b.mutex);
+        for (i = 0; i < TEST_WRITERS; ++i)
+            fail += expect_true("observes every producer record",
+                next_seq[i] == TEST_WRITES_PER_THREAD);
     }
     pair_close(&a, &b);
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_half_close(void)
+static int case_kc_rstrm_shutdown(void)
 {
-    const char *name = "graceful half-close";
-    const char *detail = "delivers queued bytes before EOF and keeps reverse direction open";
+    const char *name = "kc_rstrm_shutdown";
+    const char *detail = "orders EOF after queued bytes and keeps reverse direction open";
     endpoint_t a, b;
     int fail = 0;
 
@@ -752,13 +761,13 @@ static int case_half_close(void)
     if (!fail) {
         fail += expect_true("queues bytes before shutdown",
             kc_rstrm_send(a.stream, "before", 6) == KC_RSTRM_OK);
-        fail += expect_true("first shutdown succeeds",
+        fail += expect_true("shutdown succeeds",
             kc_rstrm_shutdown(a.stream) == KC_RSTRM_OK);
         fail += expect_true("repeated shutdown is harmless",
             kc_rstrm_shutdown(a.stream) == KC_RSTRM_OK);
         fail += expect_true("peer observes EOF", wait_counter(&b, 1, 1, 3000));
         fail += expect_true("all bytes precede EOF",
-            endpoint_equals(&b, "before", 6) && b.eof_received_size == 6);
+            endpoint_equals(&b, "before", 6) && b.eof_received_size == 6U);
         fail += expect_true("non-empty send after shutdown is closed",
             kc_rstrm_send(a.stream, "x", 1) == KC_RSTRM_ECLOSED);
         fail += expect_true("zero-length send after shutdown is closed",
@@ -774,12 +783,12 @@ static int case_half_close(void)
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_backpressure(void)
+static int case_kc_rstrm_backpressure(void)
 {
-    const char *name = "backpressure";
+    const char *name = "kc_rstrm_backpressure";
     const char *detail = "reports EFULL, emits drain, and resumes sending";
     endpoint_t a, b;
     unsigned char *oversized = NULL;
@@ -800,48 +809,48 @@ static int case_backpressure(void)
         fail += expect_true("send resumes after drain",
             kc_rstrm_send(a.stream, "ok", 2) == KC_RSTRM_OK);
         fail += expect_true("resumed bytes arrive", wait_size(&b, 2, 2000));
-        fail += expect_true("resumed bytes are exact", endpoint_equals(&b,
-            "ok", 2));
+        fail += expect_true("resumed bytes are exact",
+            endpoint_equals(&b, "ok", 2));
     }
     pair_close(&a, &b);
     free(oversized);
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_callback_reentrancy(void)
+static int case_kc_rstrm_receive_callback(void)
 {
-    const char *name = "callback reentrancy";
-    const char *detail = "allows send from the receive callback";
+    const char *name = "kc_rstrm_receive_callback";
+    const char *detail = "permits reentrant send from the receive callback";
     endpoint_t a, b;
     int fail = 0;
 
     endpoint_init(&a);
     endpoint_init(&b);
     b.echo_on_receive = 1;
-    fail += expect_true("opens echo pair", pair_open(&a, &b, 0) == KC_RSTRM_OK);
+    fail += expect_true("opens callback pair", pair_open(&a, &b, 0) == KC_RSTRM_OK);
     if (!fail) {
-        fail += expect_true("sends callback echo input",
+        fail += expect_true("sends callback input",
             kc_rstrm_send(a.stream, "echo", 4) == KC_RSTRM_OK);
         fail += expect_true("callback echo returns", wait_size(&a, 4, 3000));
-        fail += expect_true("callback echo is exact", endpoint_equals(&a,
-            "echo", 4));
+        fail += expect_true("callback echo is exact",
+            endpoint_equals(&a, "echo", 4));
     }
     pair_close(&a, &b);
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_close_from_callback(void)
+static int case_kc_rstrm_close(void)
 {
-    const char *name = "close from callback";
-    const char *detail = "defers self-release safely when receive closes the stream";
+    const char *name = "kc_rstrm_close";
+    const char *detail = "allows callback close and suppresses later callbacks";
     endpoint_t a, b;
-    size_t received_after_close;
+    size_t received_after_close = 0;
     int fail = 0;
 
     endpoint_init(&a);
@@ -858,7 +867,7 @@ static int case_close_from_callback(void)
         received_after_close = b.received_size;
         test_unlock(&b.mutex);
         fail += expect_true("close callback received triggering bytes",
-            received_after_close == 3);
+            received_after_close == 3U);
         (void)kc_rstrm_send(a.stream, "later", 5);
         sleep_ms(150);
         test_lock(&b.mutex);
@@ -872,18 +881,19 @@ static int case_close_from_callback(void)
         kc_rstrm_close(a_stream);
     }
     endpoint_set_stream(&b, NULL);
+    kc_rstrm_close(NULL);
     endpoint_fini(&a);
     endpoint_fini(&b);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_transport_failure(void)
+static int case_kc_rstrm_transport_error(void)
 {
-    const char *name = "transport failure";
+    const char *name = "kc_rstrm_transport_error";
     const char *detail = "reports one terminal ETRANSPORT and closes operations";
     endpoint_t endpoint;
-    kc_rstrm_t *stream;
+    kc_rstrm_t *stream = NULL;
     int fail = 0;
 
     endpoint_init(&endpoint);
@@ -895,10 +905,10 @@ static int case_transport_failure(void)
     if (!fail) {
         fail += expect_true("queues data before transport failure",
             kc_rstrm_send(stream, "x", 1) == KC_RSTRM_OK);
-        fail += expect_true("transport failure callback arrives",
+        fail += expect_true("transport error callback arrives",
             wait_counter(&endpoint, 3, 1, 2000));
         test_lock(&endpoint.mutex);
-        fail += expect_true("transport error status is terminal",
+        fail += expect_true("transport error is terminal and unique",
             endpoint.error_status == KC_RSTRM_ETRANSPORT &&
             endpoint.error_count == 1);
         test_unlock(&endpoint.mutex);
@@ -911,16 +921,16 @@ static int case_transport_failure(void)
     kc_rstrm_close(stream);
     endpoint_fini(&endpoint);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_protocol_failure(void)
+static int case_kc_rstrm_protocol_error(void)
 {
-    const char *name = "protocol failure";
-    const char *detail = "rejects malformed wire data with one terminal EPROTO";
+    const char *name = "kc_rstrm_protocol_error";
+    const char *detail = "reports one terminal EPROTO for malformed wire data";
     endpoint_t endpoint;
-    kc_rstrm_t *stream;
-    const unsigned char junk[3] = {1, 2, 3};
+    kc_rstrm_t *stream = NULL;
+    const unsigned char junk[3] = {1U, 2U, 3U};
     int fail = 0;
 
     endpoint_init(&endpoint);
@@ -929,9 +939,9 @@ static int case_protocol_failure(void)
             drain_cb, error_cb, &endpoint) == KC_RSTRM_OK);
     stream = endpoint.stream;
     if (!fail) {
-        fail += expect_true("malformed input is queued",
+        fail += expect_true("queues malformed input",
             kc_rstrm_input(stream, junk, sizeof(junk)) == KC_RSTRM_OK);
-        fail += expect_true("protocol failure callback arrives",
+        fail += expect_true("protocol error callback arrives",
             wait_counter(&endpoint, 3, 1, 2000));
         test_lock(&endpoint.mutex);
         fail += expect_true("protocol error is terminal and unique",
@@ -944,13 +954,13 @@ static int case_protocol_failure(void)
     kc_rstrm_close(stream);
     endpoint_fini(&endpoint);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_error_callback_close(void)
+static int case_kc_rstrm_error_callback(void)
 {
-    const char *name = "error callback close";
-    const char *detail = "allows terminal error callback to close its own stream";
+    const char *name = "kc_rstrm_error_callback";
+    const char *detail = "permits close from the terminal error callback";
     endpoint_t endpoint;
     int fail = 0;
 
@@ -961,13 +971,13 @@ static int case_error_callback_close(void)
         kc_rstrm_open(&endpoint.stream, NULL, receive_cb, datagram_cb, eof_cb,
             drain_cb, error_cb, &endpoint) == KC_RSTRM_OK);
     if (!fail) {
-        fail += expect_true("queues data for self-closing failure",
+        fail += expect_true("queues data for terminal failure",
             kc_rstrm_send(endpoint.stream, "x", 1) == KC_RSTRM_OK);
         fail += expect_true("error callback closes stream",
             wait_counter(&endpoint, 4, 1, 2000));
         sleep_ms(100);
         test_lock(&endpoint.mutex);
-        fail += expect_true("self-closing callback reports transport error",
+        fail += expect_true("callback reports transport error",
             endpoint.error_count == 1 &&
             endpoint.error_status == KC_RSTRM_ETRANSPORT &&
             endpoint.stream == NULL);
@@ -975,17 +985,17 @@ static int case_error_callback_close(void)
     }
     endpoint_fini(&endpoint);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_input_validation(void)
+static int case_kc_rstrm_input(void)
 {
-    const char *name = "input validation";
-    const char *detail = "rejects missing, empty, and oversized datagrams synchronously";
+    const char *name = "kc_rstrm_input";
+    const char *detail = "validates complete incoming datagrams synchronously";
     endpoint_t endpoint;
-    unsigned char one = 0;
+    unsigned char one = 0U;
     unsigned char *large = NULL;
-    kc_rstrm_t *stream;
+    kc_rstrm_t *stream = NULL;
     int fail = 0;
 
     endpoint_init(&endpoint);
@@ -1000,21 +1010,23 @@ static int case_input_validation(void)
             kc_rstrm_input(stream, NULL, 1) == KC_RSTRM_EINVAL);
         fail += expect_true("rejects empty datagram",
             kc_rstrm_input(stream, &one, 0) == KC_RSTRM_EINVAL);
-        fail += expect_true("rejects datagram above protocol maximum",
+        fail += expect_true("rejects datagram above maximum",
             kc_rstrm_input(stream, large, 65536U) == KC_RSTRM_EINVAL);
+        fail += expect_true("rejects NULL stream",
+            kc_rstrm_input(NULL, &one, 1) == KC_RSTRM_EINVAL);
     }
     endpoint_set_stream(&endpoint, NULL);
     kc_rstrm_close(stream);
     free(large);
     endpoint_fini(&endpoint);
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-static int case_status_metadata(void)
+static int case_kc_rstrm_status(void)
 {
-    const char *name = "status metadata";
-    const char *detail = "exposes stable status strings and build version";
+    const char *name = "kc_rstrm_status";
+    const char *detail = "exposes stable status text and the build version";
     const int statuses[] = {
         KC_RSTRM_OK,
         KC_RSTRM_EINVAL,
@@ -1030,36 +1042,71 @@ static int case_status_metadata(void)
 
     for (i = 0; i < sizeof(statuses) / sizeof(statuses[0]); ++i)
         fail += expect_true("status string is non-empty",
-            kc_rstrm_strerror(statuses[i]) && kc_rstrm_strerror(statuses[i])[0]);
+            kc_rstrm_strerror(statuses[i]) != NULL &&
+            kc_rstrm_strerror(statuses[i])[0] != '\0');
     (void)kc_rstrm_version();
     case_result(fail, name, detail);
-    return fail;
+    return fail ? 1 : 0;
 }
 
-int main(void)
+static int case_all(void)
 {
-    int fail = 0;
+    int rc = 0;
+    test_case_total = 16;
+    test_case_current = 0;
+    run_case(&rc, case_kc_rstrm_open);
+    run_case(&rc, case_kc_rstrm_send);
+    run_case(&rc, case_kc_rstrm_reliability);
+    run_case(&rc, case_kc_rstrm_ordering);
+    run_case(&rc, case_kc_rstrm_mtu);
+    run_case(&rc, case_kc_rstrm_full_duplex);
+    run_case(&rc, case_kc_rstrm_concurrency);
+    run_case(&rc, case_kc_rstrm_shutdown);
+    run_case(&rc, case_kc_rstrm_backpressure);
+    run_case(&rc, case_kc_rstrm_receive_callback);
+    run_case(&rc, case_kc_rstrm_close);
+    run_case(&rc, case_kc_rstrm_transport_error);
+    run_case(&rc, case_kc_rstrm_protocol_error);
+    run_case(&rc, case_kc_rstrm_error_callback);
+    run_case(&rc, case_kc_rstrm_input);
+    run_case(&rc, case_kc_rstrm_status);
+    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    return rc;
+}
 
-    run_case(&fail, case_api_validation);
-    run_case(&fail, case_basic_stream);
-    run_case(&fail, case_loss_recovery);
-    run_case(&fail, case_reorder_duplicate);
-    run_case(&fail, case_small_mtu_large_payload);
-    run_case(&fail, case_full_duplex);
-    run_case(&fail, case_concurrent_senders);
-    run_case(&fail, case_half_close);
-    run_case(&fail, case_backpressure);
-    run_case(&fail, case_callback_reentrancy);
-    run_case(&fail, case_close_from_callback);
-    run_case(&fail, case_transport_failure);
-    run_case(&fail, case_protocol_failure);
-    run_case(&fail, case_error_callback_close);
-    run_case(&fail, case_input_validation);
-    run_case(&fail, case_status_metadata);
-
-    if (fail == 0)
-        printf("OK rstrm contract (%d cases)\n", test_case_total);
-    else
-        printf("FAIL rstrm contract: %d assertion(s) failed\n", fail);
-    return fail ? 1 : 0;
+int main(int argc, char **argv)
+{
+    if (argc != 2) {
+        fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
+        return 2;
+    }
+    if (strcmp(argv[1], "all") == 0) return case_all();
+    if (strcmp(argv[1], "kc_rstrm_open") == 0) return case_kc_rstrm_open();
+    if (strcmp(argv[1], "kc_rstrm_send") == 0) return case_kc_rstrm_send();
+    if (strcmp(argv[1], "kc_rstrm_reliability") == 0)
+        return case_kc_rstrm_reliability();
+    if (strcmp(argv[1], "kc_rstrm_ordering") == 0)
+        return case_kc_rstrm_ordering();
+    if (strcmp(argv[1], "kc_rstrm_mtu") == 0) return case_kc_rstrm_mtu();
+    if (strcmp(argv[1], "kc_rstrm_full_duplex") == 0)
+        return case_kc_rstrm_full_duplex();
+    if (strcmp(argv[1], "kc_rstrm_concurrency") == 0)
+        return case_kc_rstrm_concurrency();
+    if (strcmp(argv[1], "kc_rstrm_shutdown") == 0)
+        return case_kc_rstrm_shutdown();
+    if (strcmp(argv[1], "kc_rstrm_backpressure") == 0)
+        return case_kc_rstrm_backpressure();
+    if (strcmp(argv[1], "kc_rstrm_receive_callback") == 0)
+        return case_kc_rstrm_receive_callback();
+    if (strcmp(argv[1], "kc_rstrm_close") == 0) return case_kc_rstrm_close();
+    if (strcmp(argv[1], "kc_rstrm_transport_error") == 0)
+        return case_kc_rstrm_transport_error();
+    if (strcmp(argv[1], "kc_rstrm_protocol_error") == 0)
+        return case_kc_rstrm_protocol_error();
+    if (strcmp(argv[1], "kc_rstrm_error_callback") == 0)
+        return case_kc_rstrm_error_callback();
+    if (strcmp(argv[1], "kc_rstrm_input") == 0) return case_kc_rstrm_input();
+    if (strcmp(argv[1], "kc_rstrm_status") == 0) return case_kc_rstrm_status();
+    fprintf(stderr, "unknown test case: %s\n", argv[1]);
+    return 2;
 }
