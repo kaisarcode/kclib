@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.14)
-project(tlsio C)
+project(tls C)
 
 set(CMAKE_C_STANDARD 11)
 
 if(APPLE)
-    get_property(TLSIO_AR CACHE CMAKE_AR PROPERTY VALUE)
-    get_property(TLSIO_RANLIB CACHE CMAKE_RANLIB PROPERTY VALUE)
-    set(CMAKE_AR "${TLSIO_AR}")
-    set(CMAKE_RANLIB "${TLSIO_RANLIB}")
+    get_property(TLS_AR CACHE CMAKE_AR PROPERTY VALUE)
+    get_property(TLS_RANLIB CACHE CMAKE_RANLIB PROPERTY VALUE)
+    set(CMAKE_AR "${TLS_AR}")
+    set(CMAKE_RANLIB "${TLS_RANLIB}")
     set(CMAKE_C_ARCHIVE_CREATE
         "<CMAKE_AR> qc <TARGET> <LINK_FLAGS> <OBJECTS>"
     )
@@ -23,15 +23,15 @@ if(MINGW)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libgcc")
 endif()
 
-if(NOT DEFINED TLSIO_BUILD_VERSION)
-    set(TLSIO_BUILD_VERSION 0)
+if(NOT DEFINED TLS_BUILD_VERSION)
+    set(TLS_BUILD_VERSION 0)
 endif()
 
-option(TLSIO_BUILD_TESTS "Build tlsio tests" OFF)
+option(TLS_BUILD_TESTS "Build tls tests" OFF)
 
-set(TLSIO_TEST_EXTERNAL_ARTIFACTS OFF)
-if(TLSIO_BUILD_TESTS AND TLSIO_TEST_SHARED_LIBRARY)
-    set(TLSIO_TEST_EXTERNAL_ARTIFACTS ON)
+set(TLS_TEST_EXTERNAL_ARTIFACTS OFF)
+if(TLS_BUILD_TESTS AND TLS_TEST_SHARED_LIBRARY)
+    set(TLS_TEST_EXTERNAL_ARTIFACTS ON)
 endif()
 
 if(NOT MSVC)
@@ -49,7 +49,7 @@ if(NOT MBEDTLS_SOURCES)
     message(FATAL_ERROR "Missing vendored Mbed TLS sources in lib/mbedtls")
 endif()
 
-set(TLSIO_DISABLED_MBEDTLS_SOURCES
+set(TLS_DISABLED_MBEDTLS_SOURCES
     aria.c
     bignum_mod.c
     bignum_mod_raw.c
@@ -87,11 +87,11 @@ set(TLSIO_DISABLED_MBEDTLS_SOURCES
 )
 
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-    list(APPEND TLSIO_DISABLED_MBEDTLS_SOURCES aesce.c)
-    list(APPEND TLSIO_DISABLED_MBEDTLS_SOURCES padlock.c)
+    list(APPEND TLS_DISABLED_MBEDTLS_SOURCES aesce.c)
+    list(APPEND TLS_DISABLED_MBEDTLS_SOURCES padlock.c)
 endif()
 
-foreach(source IN LISTS TLSIO_DISABLED_MBEDTLS_SOURCES)
+foreach(source IN LISTS TLS_DISABLED_MBEDTLS_SOURCES)
     list(REMOVE_ITEM MBEDTLS_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/lib/mbedtls/library/${source}"
     )
@@ -111,53 +111,53 @@ if(ANDROID)
     )
 endif()
 
-set(TLSIO_SOURCES
-    src/libtlsio.c
+set(TLS_SOURCES
+    src/libtls.c
     ${MBEDTLS_SOURCES}
 )
 
-set_source_files_properties(src/libtlsio.c PROPERTIES
-    COMPILE_DEFINITIONS KC_TLSIO_BUILD_VERSION=${TLSIO_BUILD_VERSION}
+set_source_files_properties(src/libtls.c PROPERTIES
+    COMPILE_DEFINITIONS KC_TLS_BUILD_VERSION=${TLS_BUILD_VERSION}
 )
 
-if(NOT TLSIO_TEST_EXTERNAL_ARTIFACTS)
-    add_library(tlsio_static STATIC ${TLSIO_SOURCES})
-    set_target_properties(tlsio_static PROPERTIES OUTPUT_NAME "tlsio")
-    target_include_directories(tlsio_static PRIVATE
+if(NOT TLS_TEST_EXTERNAL_ARTIFACTS)
+    add_library(tls_static STATIC ${TLS_SOURCES})
+    set_target_properties(tls_static PROPERTIES OUTPUT_NAME "tls")
+    target_include_directories(tls_static PRIVATE
         src
         lib/mbedtls
         lib/mbedtls/include
         lib/mbedtls/library
     )
-    target_compile_definitions(tlsio_static PRIVATE
+    target_compile_definitions(tls_static PRIVATE
         MBEDTLS_USER_CONFIG_FILE="config.h"
     )
 
-    add_library(tlsio_shared SHARED ${TLSIO_SOURCES})
-    set_target_properties(tlsio_shared PROPERTIES OUTPUT_NAME "tlsio")
-    set_target_properties(tlsio_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-    target_include_directories(tlsio_shared PRIVATE
+    add_library(tls_shared SHARED ${TLS_SOURCES})
+    set_target_properties(tls_shared PROPERTIES OUTPUT_NAME "tls")
+    set_target_properties(tls_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    target_include_directories(tls_shared PRIVATE
         src
         lib/mbedtls
         lib/mbedtls/include
         lib/mbedtls/library
     )
-    target_compile_definitions(tlsio_shared PRIVATE
+    target_compile_definitions(tls_shared PRIVATE
         MBEDTLS_USER_CONFIG_FILE="config.h"
     )
 
     if(WIN32)
-        target_link_libraries(tlsio_static ws2_32 bcrypt crypt32)
-        target_link_libraries(tlsio_shared ws2_32 bcrypt crypt32)
+        target_link_libraries(tls_static ws2_32 bcrypt crypt32)
+        target_link_libraries(tls_shared ws2_32 bcrypt crypt32)
     else()
-        target_link_libraries(tlsio_static Threads::Threads)
-        target_link_libraries(tlsio_shared Threads::Threads)
+        target_link_libraries(tls_static Threads::Threads)
+        target_link_libraries(tls_shared Threads::Threads)
         if(APPLE)
-            target_link_libraries(tlsio_static
+            target_link_libraries(tls_static
                 "-framework Security"
                 "-framework CoreFoundation"
             )
-            target_link_libraries(tlsio_shared
+            target_link_libraries(tls_shared
                 "-framework Security"
                 "-framework CoreFoundation"
             )
@@ -165,32 +165,32 @@ if(NOT TLSIO_TEST_EXTERNAL_ARTIFACTS)
     endif()
 endif()
 
-if(TLSIO_BUILD_TESTS)
+if(TLS_BUILD_TESTS)
     enable_testing()
 
-    if(TLSIO_TEST_SHARED_LIBRARY)
-        add_library(tlsio_test_shared SHARED IMPORTED)
-        set_target_properties(tlsio_test_shared PROPERTIES
-            IMPORTED_LOCATION "${TLSIO_TEST_SHARED_LIBRARY}"
+    if(TLS_TEST_SHARED_LIBRARY)
+        add_library(tls_test_shared SHARED IMPORTED)
+        set_target_properties(tls_test_shared PROPERTIES
+            IMPORTED_LOCATION "${TLS_TEST_SHARED_LIBRARY}"
         )
-        if(TLSIO_TEST_IMPORT_LIBRARY)
-            set_target_properties(tlsio_test_shared PROPERTIES
-                IMPORTED_IMPLIB "${TLSIO_TEST_IMPORT_LIBRARY}"
+        if(TLS_TEST_IMPORT_LIBRARY)
+            set_target_properties(tls_test_shared PROPERTIES
+                IMPORTED_IMPLIB "${TLS_TEST_IMPORT_LIBRARY}"
             )
         endif()
-        set(TLSIO_TEST_SHARED_TARGET tlsio_test_shared)
+        set(TLS_TEST_SHARED_TARGET tls_test_shared)
     else()
-        set(TLSIO_TEST_SHARED_TARGET tlsio_shared)
+        set(TLS_TEST_SHARED_TARGET tls_shared)
     endif()
 
-    add_executable(tlsio_contract_test src/test.c)
-    target_include_directories(tlsio_contract_test PRIVATE src)
-    target_link_libraries(tlsio_contract_test PRIVATE
-        ${TLSIO_TEST_SHARED_TARGET}
+    add_executable(tls_contract_test src/test.c)
+    target_include_directories(tls_contract_test PRIVATE src)
+    target_link_libraries(tls_contract_test PRIVATE
+        ${TLS_TEST_SHARED_TARGET}
     )
-    add_custom_command(TARGET tlsio_contract_test POST_BUILD
+    add_custom_command(TARGET tls_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:${TLSIO_TEST_SHARED_TARGET}>
-            $<TARGET_FILE_DIR:tlsio_contract_test>
+            $<TARGET_FILE:${TLS_TEST_SHARED_TARGET}>
+            $<TARGET_FILE_DIR:tls_contract_test>
     )
 endif()

@@ -1,12 +1,12 @@
-# tlsio scripting API
+# tls scripting API
 
 Authenticated client or server TLS sessions over caller-supplied byte transport.
 
 ## Lua
 
 ```lua
-local session = tlsio.open({
-    role = tlsio.CLIENT,
+local session = tls.open({
+    role = tls.CLIENT,
     host = "example.com",
 
     plaintext = function(data)
@@ -26,7 +26,7 @@ session:receive(wire_bytes)
 session:close()
 ```
 
-Server sessions use `tlsio.SERVER` and provide `certificate` and `privateKey`
+Server sessions use `tls.SERVER` and provide `certificate` and `privateKey`
 bytes instead of `host`. Clients may provide `ca` bytes to override the native
 trust store.
 
@@ -34,14 +34,14 @@ trust store.
 until the peer is authenticated. `receive()` accepts arbitrary stream chunks and
 may invoke either callback zero, one, or multiple times.
 
-Authenticated peer shutdown is exposed as the capability-level `tlsio.CLOSED`
+Authenticated peer shutdown is exposed as the capability-level `tls.CLOSED`
 status.
 
 ## JavaScript
 
 ```js
-const session = await tlsio.open({
-  role: tlsio.CLIENT,
+const session = await tls.open({
+  role: tls.CLIENT,
   host: "example.com",
 
   plaintext(data) {

@@ -1,6 +1,6 @@
-# libtlsio.c - TLS session layer
+# libtls.c - TLS session layer
 
-`libtlsio.c` maintains authenticated client or server TLS sessions over a
+`libtls.c` maintains authenticated client or server TLS sessions over a
 caller-supplied byte transport. It accepts TLS wire bytes, emits authenticated
 plaintext, and produces TLS wire bytes for the caller to transport.
 
@@ -10,7 +10,7 @@ application protocols.
 ## Quick start
 
 ```c
-#include "libtlsio.h"
+#include "libtls.h"
 
 static void plaintext(const void *data, size_t size, void *userdata) {
     /* consume authenticated application bytes */
@@ -20,35 +20,35 @@ static void ciphertext(const void *data, size_t size, void *userdata) {
     /* pass TLS wire bytes to the chosen byte transport */
 }
 
-kc_tlsio_t *tls = NULL;
-kc_tlsio_options_t options = {
-    .role = KC_TLSIO_CLIENT,
+kc_tls_t *tls = NULL;
+kc_tls_options_t options = {
+    .role = KC_TLS_CLIENT,
     .host = "example.com"
 };
 
-if (kc_tlsio_open(
+if (kc_tls_open(
         &tls,
         &options,
         plaintext,
         ciphertext,
         NULL
-    ) == KC_TLSIO_OK) {
-    kc_tlsio_send(tls, "hello", 5U);
+    ) == KC_TLS_OK) {
+    kc_tls_send(tls, "hello", 5U);
 
     /* As wire bytes arrive from the transport: */
-    /* kc_tlsio_receive(tls, wire_data, wire_size); */
+    /* kc_tls_receive(tls, wire_data, wire_size); */
 
-    kc_tlsio_close(tls);
+    kc_tls_close(tls);
 }
 ```
 
 Client sessions start the handshake when opened. Application bytes passed to
-`kc_tlsio_send()` before authentication completes are retained and sent
+`kc_tls_send()` before authentication completes are retained and sent
 automatically after the peer is verified.
 
-`kc_tlsio_receive()` accepts arbitrary TLS stream chunks. One call may produce
+`kc_tls_receive()` accepts arbitrary TLS stream chunks. One call may produce
 zero, one, or multiple plaintext or ciphertext callbacks. An authenticated peer
-`close_notify` is reported as `KC_TLSIO_CLOSED`.
+`close_notify` is reported as `KC_TLS_CLOSED`.
 
 ## Client authentication
 
@@ -67,8 +67,8 @@ When `ca` is omitted, peer trust uses the native platform trust roots:
 Server mode requires a certificate chain and private key:
 
 ```c
-kc_tlsio_options_t options = {
-    .role = KC_TLSIO_SERVER,
+kc_tls_options_t options = {
+    .role = KC_TLS_SERVER,
     .certificate = certificate_bytes,
     .certificate_size = certificate_size,
     .private_key = private_key_bytes,

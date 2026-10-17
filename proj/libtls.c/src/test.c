@@ -1,5 +1,5 @@
 /**
- * test.c - libtlsio public API contract tests.
+ * test.c - libtls public API contract tests.
  * Summary: Exercises client/server TLS through in-memory byte transport.
  *
  * Author: KaisarCode
@@ -7,7 +7,7 @@
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
-#include "libtlsio.h"
+#include "libtls.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -72,8 +72,8 @@ typedef struct {
 } side_t;
 
 typedef struct {
-    kc_tlsio_t *client;
-    kc_tlsio_t *server;
+    kc_tls_t *client;
+    kc_tls_t *server;
     wire_t c2s;
     wire_t s2c;
     side_t client_side;
@@ -187,7 +187,7 @@ static int side_append(side_t *side, const void *data, size_t size) {
 }
 
 /**
- * Collects authenticated plaintext emitted by tlsio.
+ * Collects authenticated plaintext emitted by tls.
  * @param data Plaintext bytes.
  * @param size Plaintext byte count.
  * @param userdata Test side.
@@ -201,7 +201,7 @@ static void plaintext(const void *data, size_t size, void *userdata) {
 }
 
 /**
- * Collects TLS wire bytes emitted by tlsio.
+ * Collects TLS wire bytes emitted by tls.
  * @param data TLS wire bytes.
  * @param size TLS wire byte count.
  * @param userdata Test side.
@@ -231,8 +231,8 @@ static void pair_init(pair_t *pair) {
  * @return void.
  */
 static void pair_close(pair_t *pair) {
-    kc_tlsio_close(pair->client);
-    kc_tlsio_close(pair->server);
+    kc_tls_close(pair->client);
+    kc_tls_close(pair->server);
     pair->client = NULL;
     pair->server = NULL;
     wire_clear(&pair->c2s);
@@ -244,18 +244,18 @@ static void pair_close(pair_t *pair) {
 /**
  * Opens the server side of one test pair.
  * @param pair Pair state.
- * @return Public tlsio status code.
+ * @return Public tls status code.
  */
 static int open_server(pair_t *pair) {
-    kc_tlsio_options_t options;
+    kc_tls_options_t options;
 
     memset(&options, 0, sizeof(options));
-    options.role = KC_TLSIO_SERVER;
+    options.role = KC_TLS_SERVER;
     options.certificate = test_cert;
     options.certificate_size = sizeof(test_cert) - 1U;
     options.private_key = test_key;
     options.private_key_size = sizeof(test_key) - 1U;
-    return kc_tlsio_open(
+    return kc_tls_open(
         &pair->server,
         &options,
         plaintext,
@@ -268,17 +268,17 @@ static int open_server(pair_t *pair) {
  * Opens the client side of one test pair.
  * @param pair Pair state.
  * @param host Expected server hostname.
- * @return Public tlsio status code.
+ * @return Public tls status code.
  */
 static int open_client(pair_t *pair, const char *host) {
-    kc_tlsio_options_t options;
+    kc_tls_options_t options;
 
     memset(&options, 0, sizeof(options));
-    options.role = KC_TLSIO_CLIENT;
+    options.role = KC_TLS_CLIENT;
     options.host = host;
     options.ca = test_ca;
     options.ca_size = sizeof(test_ca) - 1U;
-    return kc_tlsio_open(
+    return kc_tls_open(
         &pair->client,
         &options,
         plaintext,
@@ -292,9 +292,9 @@ static int open_client(pair_t *pair, const char *host) {
  * @param wire Transport queue.
  * @param tls Destination TLS session.
  * @param fragment Maximum fragment size, or zero for all bytes.
- * @return Public tlsio status code, or 1000 when the queue is empty.
+ * @return Public tls status code, or 1000 when the queue is empty.
  */
-static int deliver(wire_t *wire, kc_tlsio_t *tls, size_t fragment) {
+static int deliver(wire_t *wire, kc_tls_t *tls, size_t fragment) {
     chunk_t *chunk;
     size_t available;
     size_t size;
@@ -305,7 +305,7 @@ static int deliver(wire_t *wire, kc_tlsio_t *tls, size_t fragment) {
     available = chunk->size - chunk->offset;
     size = available;
     if (fragment != 0U && size > fragment) size = fragment;
-    result = kc_tlsio_receive(tls, chunk->data + chunk->offset, size);
+    result = kc_tls_receive(tls, chunk->data + chunk->offset, size);
     chunk->offset += size;
     if (chunk->offset == chunk->size) {
         wire->head = chunk->next;
@@ -320,7 +320,7 @@ static int deliver(wire_t *wire, kc_tlsio_t *tls, size_t fragment) {
  * Pumps queued TLS bytes between both sides.
  * @param pair Pair state.
  * @param fragment Maximum delivery fragment size.
- * @return Public tlsio status code.
+ * @return Public tls status code.
  */
 static int pump(pair_t *pair, size_t fragment) {
     size_t steps;
@@ -333,19 +333,19 @@ static int pump(pair_t *pair, size_t fragment) {
             int result;
 
             result = deliver(&pair->c2s, pair->server, fragment);
-            if (result != KC_TLSIO_OK) return result;
+            if (result != KC_TLS_OK) return result;
             progress = 1;
         }
         if (pair->s2c.head != NULL && pair->client != NULL) {
             int result;
 
             result = deliver(&pair->s2c, pair->client, fragment);
-            if (result != KC_TLSIO_OK) return result;
+            if (result != KC_TLS_OK) return result;
             progress = 1;
         }
-        if (!progress) return KC_TLSIO_OK;
+        if (!progress) return KC_TLS_OK;
     }
-    return KC_TLSIO_ETLS;
+    return KC_TLS_ETLS;
 }
 
 /**
@@ -353,66 +353,66 @@ static int pump(pair_t *pair, size_t fragment) {
  * @return One when the case failed, otherwise zero.
  */
 static int case_validation(void) {
-    kc_tlsio_options_t options;
-    kc_tlsio_t *tls;
+    kc_tls_options_t options;
+    kc_tls_t *tls;
     int fail;
 
     memset(&options, 0, sizeof(options));
-    tls = (kc_tlsio_t *)1;
+    tls = (kc_tls_t *)1;
     fail = 0;
     fail += expect(
         "open NULL output",
-        kc_tlsio_open(
+        kc_tls_open(
             NULL,
             &options,
             plaintext,
             ciphertext,
             NULL
-        ) == KC_TLSIO_EINVAL
+        ) == KC_TLS_EINVAL
     );
     fail += expect(
         "open NULL options clears output",
-        kc_tlsio_open(
+        kc_tls_open(
             &tls,
             NULL,
             plaintext,
             ciphertext,
             NULL
-        ) == KC_TLSIO_EINVAL && tls == NULL
+        ) == KC_TLS_EINVAL && tls == NULL
     );
-    options.role = KC_TLSIO_CLIENT;
+    options.role = KC_TLS_CLIENT;
     options.host = "";
     fail += expect(
         "client requires host",
-        kc_tlsio_open(
+        kc_tls_open(
             &tls,
             &options,
             plaintext,
             ciphertext,
             NULL
-        ) == KC_TLSIO_EINVAL
+        ) == KC_TLS_EINVAL
     );
     memset(&options, 0, sizeof(options));
-    options.role = KC_TLSIO_SERVER;
+    options.role = KC_TLS_SERVER;
     fail += expect(
         "server requires credentials",
-        kc_tlsio_open(
+        kc_tls_open(
             &tls,
             &options,
             plaintext,
             ciphertext,
             NULL
-        ) == KC_TLSIO_EINVAL
+        ) == KC_TLS_EINVAL
     );
     fail += expect(
         "send NULL handle",
-        kc_tlsio_send(NULL, "x", 1U) == KC_TLSIO_EINVAL
+        kc_tls_send(NULL, "x", 1U) == KC_TLS_EINVAL
     );
     fail += expect(
         "receive NULL handle",
-        kc_tlsio_receive(NULL, "x", 1U) == KC_TLSIO_EINVAL
+        kc_tls_receive(NULL, "x", 1U) == KC_TLS_EINVAL
     );
-    kc_tlsio_close(NULL);
+    kc_tls_close(NULL);
     print_case(
         fail,
         "validation",
@@ -449,24 +449,24 @@ static int case_exchange(void) {
     }
 
     fail = 0;
-    fail += expect("server open", open_server(&pair) == KC_TLSIO_OK);
-    fail += expect("client open", open_client(&pair, TEST_HOST) == KC_TLSIO_OK);
+    fail += expect("server open", open_server(&pair) == KC_TLS_OK);
+    fail += expect("client open", open_client(&pair, TEST_HOST) == KC_TLS_OK);
     fail += expect("client hello produced", pair.c2s.head != NULL);
     fail += expect(
         "queued A",
-        kc_tlsio_send(pair.client, "A", 1U) == KC_TLSIO_OK
+        kc_tls_send(pair.client, "A", 1U) == KC_TLS_OK
     );
     fail += expect(
         "queued B",
-        kc_tlsio_send(pair.client, "B", 1U) == KC_TLSIO_OK
+        kc_tls_send(pair.client, "B", 1U) == KC_TLS_OK
     );
     fail += expect(
         "queued large payload",
-        kc_tlsio_send(pair.client, request, TEST_LARGE_SIZE) == KC_TLSIO_OK
+        kc_tls_send(pair.client, request, TEST_LARGE_SIZE) == KC_TLS_OK
     );
 
     result = pump(&pair, 7U);
-    fail += expect("fragmented handshake/request", result == KC_TLSIO_OK);
+    fail += expect("fragmented handshake/request", result == KC_TLS_OK);
     fail += expect(
         "server exact plaintext size",
         pair.server_side.size == TEST_LARGE_SIZE + 2U
@@ -486,10 +486,10 @@ static int case_exchange(void) {
 
     fail += expect(
         "server response",
-        kc_tlsio_send(pair.server, response, TEST_LARGE_SIZE) == KC_TLSIO_OK
+        kc_tls_send(pair.server, response, TEST_LARGE_SIZE) == KC_TLS_OK
     );
     result = pump(&pair, 13U);
-    fail += expect("fragmented response", result == KC_TLSIO_OK);
+    fail += expect("fragmented response", result == KC_TLS_OK);
     fail += expect(
         "client exact response",
         pair.client_side.size == TEST_LARGE_SIZE &&
@@ -500,13 +500,13 @@ static int case_exchange(void) {
         !pair.client_side.failed && !pair.server_side.failed
     );
 
-    kc_tlsio_close(pair.server);
+    kc_tls_close(pair.server);
     pair.server = NULL;
-    result = KC_TLSIO_OK;
-    while (pair.s2c.head != NULL && result == KC_TLSIO_OK) {
+    result = KC_TLS_OK;
+    while (pair.s2c.head != NULL && result == KC_TLS_OK) {
         result = deliver(&pair.s2c, pair.client, 5U);
     }
-    fail += expect("peer close_notify", result == KC_TLSIO_CLOSED);
+    fail += expect("peer close_notify", result == KC_TLS_CLOSED);
 
     wire_clear(&pair.c2s);
     free(request);
@@ -531,19 +531,19 @@ static int case_verification(void) {
 
     pair_init(&pair);
     fail = 0;
-    fail += expect("server open", open_server(&pair) == KC_TLSIO_OK);
+    fail += expect("server open", open_server(&pair) == KC_TLS_OK);
     fail += expect(
         "wrong-host client open",
-        open_client(&pair, "wrong.example") == KC_TLSIO_OK
+        open_client(&pair, "wrong.example") == KC_TLS_OK
     );
     fail += expect(
         "queue before verification",
-        kc_tlsio_send(pair.client, "secret", 6U) == KC_TLSIO_OK
+        kc_tls_send(pair.client, "secret", 6U) == KC_TLS_OK
     );
     result = pump(&pair, 3U);
     fail += expect(
         "hostname verification failure",
-        result == KC_TLSIO_EVERIFY
+        result == KC_TLS_EVERIFY
     );
     fail += expect(
         "unverified plaintext withheld",
@@ -564,12 +564,12 @@ static int case_verification(void) {
  */
 static int case_metadata(void) {
     static const int codes[] = {
-        KC_TLSIO_OK,
-        KC_TLSIO_CLOSED,
-        KC_TLSIO_EINVAL,
-        KC_TLSIO_ETLS,
-        KC_TLSIO_EVERIFY,
-        KC_TLSIO_ENOMEM
+        KC_TLS_OK,
+        KC_TLS_CLOSED,
+        KC_TLS_EINVAL,
+        KC_TLS_ETLS,
+        KC_TLS_EVERIFY,
+        KC_TLS_ENOMEM
     };
     size_t i;
     int fail;
@@ -578,14 +578,14 @@ static int case_metadata(void) {
     for (i = 0U; i < sizeof(codes) / sizeof(codes[0]); i++) {
         fail += expect(
             "status string",
-            kc_tlsio_strerror(codes[i])[0] != '\0'
+            kc_tls_strerror(codes[i])[0] != '\0'
         );
     }
     fail += expect(
         "unknown status",
-        strcmp(kc_tlsio_strerror(9999), "unknown tlsio status") == 0
+        strcmp(kc_tls_strerror(9999), "unknown tls status") == 0
     );
-    fail += expect("nonzero version", kc_tlsio_version() != 0U);
+    fail += expect("nonzero version", kc_tls_version() != 0U);
     print_case(
         fail,
         "metadata",
@@ -595,7 +595,7 @@ static int case_metadata(void) {
 }
 
 /**
- * Runs all libtlsio contract tests.
+ * Runs all libtls contract tests.
  * @param argc Argument count.
  * @param argv Argument vector; argv[1] must be all.
  * @return Zero when all cases pass, otherwise nonzero.
