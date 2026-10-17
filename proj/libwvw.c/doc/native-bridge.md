@@ -8,9 +8,14 @@ window behavior that should be considered together.
 
 `NativeBridge` is infrastructure provided to WebView content.
 
-Built-in window methods and `NativeBridge.exec(args)` are available through the
-bridge. Application-defined methods are exposed only through an explicit
-whitelist supplied with `kc_wvw_set_bridge_methods()`.
+The root names reserved by `wvw` are `Window` and `exec`.
+
+Built-in window control is available through `NativeBridge.Window.*`.
+
+The executable facility is available through `NativeBridge.exec(args)`.
+
+Application-defined methods are exposed as `NativeBridge.<method>` through an
+explicit whitelist supplied with `kc_wvw_set_bridge_methods()`.
 
 Bridge callbacks receive the requested method and JSON parameters and return a
 JSON result.
@@ -43,6 +48,10 @@ Register allowed executable paths with `kc_wvw_set_executables()`. WebView
 content addresses an executable by its registered basename through
 `NativeBridge.exec(args)`.
 
+```js
+const result = await NativeBridge.exec(["foo", "..."]);
+```
+
 Do not expose a general shell. Register only executables that are part of the
 application's intended capability set.
 
@@ -55,6 +64,14 @@ it from the platform's normal window list without changing its visibility.
 
 Minimize, maximize, restore, size, position, title, and icon operations modify
 the same live native host window.
+
+```js
+await NativeBridge.Window.minimize();
+
+await NativeBridge.Window.setTitle("Connected");
+
+const state = await NativeBridge.Window.getState();
+```
 
 Boolean startup options such as always-on-top, click-through, and no-focus are
 applied to the native host at creation time.

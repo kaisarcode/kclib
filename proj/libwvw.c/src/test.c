@@ -187,13 +187,15 @@ static void case_kc_wvw_navigation(void) {
 static void case_kc_wvw_bridge(void) {
     kc_wvw_t *wvw = NULL;
     char *url = NULL;
-    const char *methods[] = { "ping" };
+    const char *methods[] = { "ping", "minimize", "setTitle" };
+    const char *reserved_window[] = { "Window" };
+    const char *reserved_exec[] = { "exec" };
     kc_wvw_bridge_options_t bridge = {0};
     int ok = open_test(&wvw, &url, NULL, NULL);
 
     if (ok) {
         bridge.methods = methods;
-        bridge.method_count = 1;
+        bridge.method_count = 3;
         bridge.callback = bridge_callback;
         ok =
             kc_wvw_add_init_script(
@@ -201,6 +203,11 @@ static void case_kc_wvw_bridge(void) {
             kc_wvw_set_bridge_methods(wvw, &bridge) == KC_WVW_OK &&
             kc_wvw_post_bridge_event(
                 wvw, "{\"type\":\"test\"}") == KC_WVW_OK;
+        bridge.methods = reserved_window;
+        bridge.method_count = 1;
+        ok = ok && kc_wvw_set_bridge_methods(wvw, &bridge) == KC_WVW_ERROR;
+        bridge.methods = reserved_exec;
+        ok = ok && kc_wvw_set_bridge_methods(wvw, &bridge) == KC_WVW_ERROR;
     }
     kc_wvw_close(wvw);
     free(url);

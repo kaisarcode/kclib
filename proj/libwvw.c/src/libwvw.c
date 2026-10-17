@@ -876,8 +876,7 @@ static int kc_wvw_bridge_method_valid(const char *method) {
     size_t i;
 
     static const char *const reserved[] = {
-        "exec", "minimize", "maximize", "restore", "close",
-        "setTitle", "setSize", "getState"
+        "exec", "Window"
     };
 
     if (!method || !method[0]) {
@@ -1348,7 +1347,7 @@ static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge, const
         kc_wvw_text_buf_append(&buf, KC_WVW_BRIDGE_EVENT_NAME) != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, "',{detail:msg}));}window.__kcWvwReceive=__kcWvwReceive;window.NativeBridge={};function __kcWvwSend(method,params){return new Promise(function(resolve,reject){var id=String(++__kcWvwSeq);__kcWvwPending[id]={resolve:resolve,reject:reject};(") != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, sender_expr) != KC_WVW_OK ||
-        kc_wvw_text_buf_append(&buf, ")(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));});}window.NativeBridge.exec=function(args){return __kcWvwSend('exec',args);};window.NativeBridge.minimize=function(){return __kcWvwSend('minimize');};window.NativeBridge.maximize=function(){return __kcWvwSend('maximize');};window.NativeBridge.restore=function(){return __kcWvwSend('restore');};window.NativeBridge.close=function(){return __kcWvwSend('close');};window.NativeBridge.setTitle=function(title){return __kcWvwSend('setTitle',{title:title});};window.NativeBridge.setSize=function(width,height){return __kcWvwSend('setSize',{width:width,height:height});};window.NativeBridge.getState=function(){return __kcWvwSend('getState');};") != KC_WVW_OK) {
+        kc_wvw_text_buf_append(&buf, ")(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));});}window.NativeBridge.exec=function(args){return __kcWvwSend('exec',args);};window.NativeBridge.Window={};window.NativeBridge.Window.minimize=function(){return __kcWvwSend('Window.minimize');};window.NativeBridge.Window.maximize=function(){return __kcWvwSend('Window.maximize');};window.NativeBridge.Window.restore=function(){return __kcWvwSend('Window.restore');};window.NativeBridge.Window.close=function(){return __kcWvwSend('Window.close');};window.NativeBridge.Window.setTitle=function(title){return __kcWvwSend('Window.setTitle',{title:title});};window.NativeBridge.Window.setSize=function(width,height){return __kcWvwSend('Window.setSize',{width:width,height:height});};window.NativeBridge.Window.getState=function(){return __kcWvwSend('Window.getState');};") != KC_WVW_OK) {
         free(buf.data);
         return NULL;
     }
@@ -3018,7 +3017,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
 
-    if (strcmp(method, "minimize") == 0) {
+    if (strcmp(method, "Window.minimize") == 0) {
         rc = kc_wvw_minimize(ctx);
         if (rc == KC_WVW_OK) {
             result = kc_wvw_strdup("{\"ok\":true}");
@@ -3032,7 +3031,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "maximize") == 0) {
+    if (strcmp(method, "Window.maximize") == 0) {
         rc = kc_wvw_maximize(ctx);
         if (rc == KC_WVW_OK) {
             result = kc_wvw_strdup("{\"ok\":true}");
@@ -3046,7 +3045,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "restore") == 0) {
+    if (strcmp(method, "Window.restore") == 0) {
         rc = kc_wvw_restore(ctx);
         if (rc == KC_WVW_OK) {
             result = kc_wvw_strdup("{\"ok\":true}");
@@ -3060,14 +3059,14 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "close") == 0) {
+    if (strcmp(method, "Window.close") == 0) {
         kc_wvw_request_close(ctx);
         result = kc_wvw_strdup("{\"ok\":true}");
         response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "setTitle") == 0) {
+    if (strcmp(method, "Window.setTitle") == 0) {
         char *title = kc_wvw_bridge_param_string(params, "title");
         if (!title) {
             error = kc_wvw_bridge_error_object("INVALID_ARGUMENT", "title must be a string.");
@@ -3098,7 +3097,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "setSize") == 0) {
+    if (strcmp(method, "Window.setSize") == 0) {
         int width = 0, height = 0;
         if (kc_wvw_bridge_param_int(params, "width", &width) != KC_WVW_OK ||
             kc_wvw_bridge_param_int(params, "height", &height) != KC_WVW_OK) {
@@ -3128,7 +3127,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "getState") == 0) {
+    if (strcmp(method, "Window.getState") == 0) {
         kc_wvw_window_state_t st;
         JSON_Value *rv;
         JSON_Object *ro;
@@ -3514,8 +3513,7 @@ static int kc_wvw_bridge_method_valid(const char *method) {
     size_t i;
 
     static const char *const reserved[] = {
-        "exec", "minimize", "maximize", "restore", "close",
-        "setTitle", "setSize", "getState"
+        "exec", "Window"
     };
 
     if (!method || !method[0]) {
@@ -3982,7 +3980,7 @@ static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge) {
 
     if (kc_wvw_text_buf_append(&buf, "(function(){if(window.NativeBridge){return;}var __kcWvwPending={};var __kcWvwSeq=0;function __kcWvwReceive(msg){if(msg&&typeof msg.id==='string'){var p=__kcWvwPending[msg.id];if(p){delete __kcWvwPending[msg.id];if(msg.ok){p.resolve(msg.result!==undefined?msg.result:{ok:true});}else{p.reject(msg.error||{code:'INTERNAL_ERROR',message:'Bridge error'});}}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, KC_WVW_BRIDGE_EVENT_NAME) != KC_WVW_OK ||
-        kc_wvw_text_buf_append(&buf, "',{detail:msg}));}window.__kcWvwReceive=__kcWvwReceive;window.NativeBridge={};function __kcWvwSend(method,params){return new Promise(function(resolve,reject){var id=String(++__kcWvwSeq);__kcWvwPending[id]={resolve:resolve,reject:reject};window.webkit.messageHandlers.kc_wvw_native.postMessage(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));});}window.NativeBridge.exec=function(args){return __kcWvwSend('exec',args);};window.NativeBridge.minimize=function(){return __kcWvwSend('minimize');};window.NativeBridge.maximize=function(){return __kcWvwSend('maximize');};window.NativeBridge.restore=function(){return __kcWvwSend('restore');};window.NativeBridge.close=function(){return __kcWvwSend('close');};window.NativeBridge.setTitle=function(title){return __kcWvwSend('setTitle',{title:title});};window.NativeBridge.setSize=function(width,height){return __kcWvwSend('setSize',{width:width,height:height});};window.NativeBridge.getState=function(){return __kcWvwSend('getState');};") != KC_WVW_OK) {
+        kc_wvw_text_buf_append(&buf, "',{detail:msg}));}window.__kcWvwReceive=__kcWvwReceive;window.NativeBridge={};function __kcWvwSend(method,params){return new Promise(function(resolve,reject){var id=String(++__kcWvwSeq);__kcWvwPending[id]={resolve:resolve,reject:reject};window.webkit.messageHandlers.kc_wvw_native.postMessage(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));});}window.NativeBridge.exec=function(args){return __kcWvwSend('exec',args);};window.NativeBridge.Window={};window.NativeBridge.Window.minimize=function(){return __kcWvwSend('Window.minimize');};window.NativeBridge.Window.maximize=function(){return __kcWvwSend('Window.maximize');};window.NativeBridge.Window.restore=function(){return __kcWvwSend('Window.restore');};window.NativeBridge.Window.close=function(){return __kcWvwSend('Window.close');};window.NativeBridge.Window.setTitle=function(title){return __kcWvwSend('Window.setTitle',{title:title});};window.NativeBridge.Window.setSize=function(width,height){return __kcWvwSend('Window.setSize',{width:width,height:height});};window.NativeBridge.Window.getState=function(){return __kcWvwSend('Window.getState');};") != KC_WVW_OK) {
         free(buf.data);
         return NULL;
     }
@@ -4309,7 +4307,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
 
-    if (strcmp(method, "minimize") == 0) {
+    if (strcmp(method, "Window.minimize") == 0) {
         rc = kc_wvw_minimize(ctx);
         if (rc == KC_WVW_OK) {
             result = kc_wvw_strdup("{\"ok\":true}");
@@ -4323,7 +4321,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "maximize") == 0) {
+    if (strcmp(method, "Window.maximize") == 0) {
         rc = kc_wvw_maximize(ctx);
         if (rc == KC_WVW_OK) {
             result = kc_wvw_strdup("{\"ok\":true}");
@@ -4337,7 +4335,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "restore") == 0) {
+    if (strcmp(method, "Window.restore") == 0) {
         rc = kc_wvw_restore(ctx);
         if (rc == KC_WVW_OK) {
             result = kc_wvw_strdup("{\"ok\":true}");
@@ -4351,14 +4349,14 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "close") == 0) {
+    if (strcmp(method, "Window.close") == 0) {
         kc_wvw_request_close(ctx);
         result = kc_wvw_strdup("{\"ok\":true}");
         response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "setTitle") == 0) {
+    if (strcmp(method, "Window.setTitle") == 0) {
         char *title = kc_wvw_bridge_param_string(params, "title");
         if (!title) {
             error = kc_wvw_bridge_error_object("INVALID_ARGUMENT", "title must be a string.");
@@ -4389,7 +4387,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "setSize") == 0) {
+    if (strcmp(method, "Window.setSize") == 0) {
         int width = 0, height = 0;
         if (kc_wvw_bridge_param_int(params, "width", &width) != KC_WVW_OK ||
             kc_wvw_bridge_param_int(params, "height", &height) != KC_WVW_OK) {
@@ -4419,7 +4417,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "getState") == 0) {
+    if (strcmp(method, "Window.getState") == 0) {
         kc_wvw_window_state_t st;
         JSON_Value *rv;
         JSON_Object *ro;
