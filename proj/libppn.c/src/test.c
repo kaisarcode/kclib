@@ -55,7 +55,11 @@ static int ppn_cli_run(const char *args) {
  */
 int main(void) {
     kc_ppn_notification_t notification;
+#ifdef __EMSCRIPTEN__
+    int total = 5;
+#else
     int total = 6;
+#endif
 
     if (kc_ppn_show(NULL) != KC_PPN_ERROR) {
         return 1;
@@ -98,5 +102,6 @@ int main(void) {
     pass(6, total, "ppn_cli: validates notification command arguments");
 #endif
 
+    printf("%d passed, 0 failed\n", total);
     return 0;
 }
