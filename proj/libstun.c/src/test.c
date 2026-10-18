@@ -42,7 +42,11 @@ typedef socklen_t test_socklen_t;
 
 #define TEST_STUN_MAGIC 0x2112A442U
 
+#ifdef __EMSCRIPTEN__
+static int test_case_total = 5;
+#else
 static int test_case_total = 6;
+#endif
 static int test_case_current = 0;
 
 #ifndef __EMSCRIPTEN__
