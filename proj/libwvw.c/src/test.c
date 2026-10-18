@@ -380,7 +380,11 @@ static void case_kc_wvw_booleans(void) {
  * @return None.
  */
 static void run_all(void) {
+#ifdef __EMSCRIPTEN__
+    total = 10;
+#else
     total = 11;
+#endif
     case_kc_wvw_version();
     case_kc_wvw_open();
     case_kc_wvw_navigation();
