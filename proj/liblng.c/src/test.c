@@ -479,7 +479,7 @@ static int case_all(void) {
 #ifndef __EMSCRIPTEN__
     run_case(&rc, case_lng_cli);
 #endif
-    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
@@ -657,7 +657,7 @@ static int case_lng_cli(void) {
         lng_cli_run("\"Hello world\" --limit 0") != 0);
     lng_cli_result("unknown", "unknown option fails",
         lng_cli_run("\"Hello world\" --unknown") != 0);
-    printf("%d passed, %d failed\n\n", 12 - lng_cli_failed, lng_cli_failed);
+    printf("%d passed, %d failed\n", 12 - lng_cli_failed, lng_cli_failed);
     return lng_cli_failed ? 1 : 0;
 }
 #endif

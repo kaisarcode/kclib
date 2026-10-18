@@ -297,7 +297,7 @@ static int case_all(void) {
 #ifndef __EMSCRIPTEN__
     run_case(&rc, case_tpl_cli);
 #endif
-    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
@@ -475,7 +475,7 @@ static int case_tpl_cli(void)
             "Argument"));
     remove(file_path);
 
-    printf("%d passed, %d failed\n\n", test_total - test_failed, test_failed);
+    printf("%d passed, %d failed\n", test_total - test_failed, test_failed);
     return test_failed ? 1 : 0;
 }
 #endif

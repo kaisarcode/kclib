@@ -450,7 +450,7 @@ static int case_all(void) {
     rc += case_menu_cli();
 #endif
 
-    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 

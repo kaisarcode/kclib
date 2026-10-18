@@ -617,7 +617,7 @@ int main(int argc, char **argv) {
 #ifndef __EMSCRIPTEN__
     test_run(&rc, case_http_cli);
 #endif
-    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 

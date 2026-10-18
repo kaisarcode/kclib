@@ -623,7 +623,7 @@ int main(int argc, char **argv) {
     case_current++;
     failed += case_tls_cli();
 #endif
-    printf("%d passed, %d failed\n\n", case_total - failed, failed);
+    printf("%d passed, %d failed\n", case_total - failed, failed);
     return failed == 0 ? 0 : 1;
 }
 
@@ -707,7 +707,7 @@ static int case_tls_cli(void) {
         tls_cli_run("client localhost 443 --ca") != 0);
     tls_cli_result("unknown option", "unknown options fail",
         tls_cli_run("client localhost 443 --unknown") != 0);
-    printf("%d passed, %d failed\n\n", TLS_CLI_TEST_COUNT - tls_cli_test_failures,
+    printf("%d passed, %d failed\n", TLS_CLI_TEST_COUNT - tls_cli_test_failures,
         tls_cli_test_failures);
     return tls_cli_test_failures == 0 ? 0 : 1;
 }

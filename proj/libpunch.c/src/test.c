@@ -1027,7 +1027,7 @@ static int case_all(void)
 #ifndef __EMSCRIPTEN__
     run_case(&rc, case_punch_cli);
 #endif
-    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 

@@ -317,7 +317,7 @@ int main(int argc, char **argv) {
     current++;
     failures += case_tray_cli();
 #endif
-    printf("%d passed, %d failed\n\n", total - failures, failures);
+    printf("%d passed, %d failed\n", total - failures, failures);
     return failures ? 1 : 0;
 }
 
@@ -378,7 +378,7 @@ static int case_tray_cli(void) {
     tray_cli_result("item", "--item requires text and command",
         tray_cli_run("--item label") != 0);
     tray_cli_result("quit", "--quit requires a label", tray_cli_run("--quit") != 0);
-    printf("%d passed, %d failed\n\n", 7 - tray_cli_failures,
+    printf("%d passed, %d failed\n", 7 - tray_cli_failures,
         tray_cli_failures);
     return tray_cli_failures ? 1 : 0;
 }

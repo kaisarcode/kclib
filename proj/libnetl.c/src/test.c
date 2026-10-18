@@ -964,7 +964,7 @@ static int case_all(void) {
 #ifndef __EMSCRIPTEN__
     run_case(&result, case_netl_cli);
 #endif
-    printf("%d passed, %d failed\n\n", test_case_total - result, result);
+    printf("%d passed, %d failed\n", test_case_total - result, result);
     return result;
 }
 

@@ -930,7 +930,7 @@ int main(void) {
 #endif
 
     socket_stop();
-    printf("%d passed, %d failed\n\n", test_case_total - result, result);
+    printf("%d passed, %d failed\n", test_case_total - result, result);
     return result == 0 ? 0 : 1;
 }
 
@@ -1006,7 +1006,7 @@ static int case_nets_cli(void) {
         nets_cli_run("localhost 9 --tls") != 0);
     nets_cli_result("extra positional", "extra endpoint arguments fail",
         nets_cli_run("localhost 9 extra") != 0);
-    printf("%d passed, %d failed\n\n", 12 - nets_cli_failures,
+    printf("%d passed, %d failed\n", 12 - nets_cli_failures,
         nets_cli_failures);
     return nets_cli_failures == 0 ? 0 : 1;
 }

@@ -394,7 +394,7 @@ static void run_all(void) {
 #ifndef __EMSCRIPTEN__
     failures += case_wvw_cli();
 #endif
-    printf("%d passed, %d failed\n\n", total - failures, failures);
+    printf("%d passed, %d failed\n", total - failures, failures);
 }
 
 #ifndef __EMSCRIPTEN__
