@@ -143,7 +143,7 @@ ifneq ($(filter MINGW% MSYS% CYGWIN%,$(HOST_SYSTEM)),)
 NATIVE_PLATFORM := windows
 endif
 
-NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
+NATIVE_TARGET := $(NATIVE_PLATFORM)/$(NATIVE_ARCH)
 NATIVE_SHARED_NAME := libpact.so
 NATIVE_CLI_NAME := pact
 NATIVE_IMPORT_LIBRARY :=
@@ -161,118 +161,118 @@ endif
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
 .PHONY: all test wine wasm clean \
-	x86_64/linux x86_64/windows x86_64/macos \
-	x86_64/iossim \
-	i686/linux i686/windows \
-	aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim \
-	armv7/linux armv7/android \
-	armv7hf/linux \
-	riscv64/linux \
-	powerpc64le/linux \
-	mips/linux mipsel/linux mips64el/linux \
-	s390x/linux \
-	loongarch64/linux \
-	wasm32/wasm
+	linux/x86_64 windows/x86_64 macos/x86_64 \
+	iossim/x86_64 \
+	linux/i686 windows/i686 \
+	linux/aarch64 android/aarch64 macos/aarch64 ios/aarch64 iossim/aarch64 \
+	linux/armv7 android/armv7 \
+	linux/armv7hf \
+	linux/riscv64 \
+	linux/powerpc64le \
+	linux/mips linux/mipsel linux/mips64el \
+	linux/s390x \
+	linux/loongarch64 \
+	wasm/wasm32
 
 all: \
-	x86_64/linux x86_64/windows x86_64/macos \
-	x86_64/iossim \
-	i686/linux i686/windows \
-	aarch64/linux aarch64/android aarch64/macos aarch64/ios aarch64/iossim \
-	armv7/linux armv7/android \
-	armv7hf/linux \
-	riscv64/linux \
-	powerpc64le/linux \
-	mips/linux mipsel/linux mips64el/linux \
-	s390x/linux \
-	loongarch64/linux \
-	wasm32/wasm
+	linux/x86_64 windows/x86_64 macos/x86_64 \
+	iossim/x86_64 \
+	linux/i686 windows/i686 \
+	linux/aarch64 android/aarch64 macos/aarch64 ios/aarch64 iossim/aarch64 \
+	linux/armv7 android/armv7 \
+	linux/armv7hf \
+	linux/riscv64 \
+	linux/powerpc64le \
+	linux/mips linux/mipsel linux/mips64el \
+	linux/s390x \
+	linux/loongarch64 \
+	wasm/wasm32
 
 ## Linux
 
 define linux_target
-	@mkdir -p $(BIN_DIR)/$(1)/linux
-	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
+	@mkdir -p $(BIN_DIR)/linux/$(1)
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/linux/$(1)' $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Linux \
 			-DPACT_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DPACT_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@echo "OK $(1)/linux"
+	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DPACT_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) -G Ninja -Wno-dev > /dev/null)
+	@echo "OK linux/$(1)"
 endef
 
-x86_64/linux:
+linux/x86_64:
 	$(call linux_target,x86_64,gcc)
 
-i686/linux:
+linux/i686:
 	$(call linux_target,i686,i686-linux-gnu-gcc)
 
-aarch64/linux:
+linux/aarch64:
 	$(call linux_target,aarch64,aarch64-linux-gnu-gcc)
 
-armv7hf/linux:
+linux/armv7hf:
 	$(call linux_target,armv7hf,arm-linux-gnueabihf-gcc)
 
-armv7/linux:
+linux/armv7:
 	$(call linux_target,armv7,arm-linux-gnueabi-gcc)
 
-riscv64/linux:
+linux/riscv64:
 	$(call linux_target,riscv64,riscv64-linux-gnu-gcc)
 
-powerpc64le/linux:
+linux/powerpc64le:
 	$(call linux_target,powerpc64le,powerpc64le-linux-gnu-gcc)
 
-mips/linux:
+linux/mips:
 	$(call linux_target,mips,mips-linux-gnu-gcc)
 
-mipsel/linux:
+linux/mipsel:
 	$(call linux_target,mipsel,mipsel-linux-gnu-gcc)
 
-mips64el/linux:
+linux/mips64el:
 	$(call linux_target,mips64el,mips64el-linux-gnuabi64-gcc)
 
-s390x/linux:
+linux/s390x:
 	$(call linux_target,s390x,s390x-linux-gnu-gcc)
 
-loongarch64/linux:
+linux/loongarch64:
 	$(call linux_target,loongarch64,loongarch64-linux-gnu-gcc)
 
 ## Windows
 
 define windows_target
-	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ]; then \
+	@mkdir -p $(BIN_DIR)/windows/$(1)
+	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/windows/$(1)' $(BUILD_DIR)/$(1)-windows/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Windows \
 			-DPACT_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DPACT_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/libpact.dll $(BIN_DIR)/$(1)/windows/libpact.dll
-	@echo "OK $(1)/windows"
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DPACT_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/$(1)-windows/out/libpact.dll $(BIN_DIR)/windows/$(1)/libpact.dll
+	@echo "OK windows/$(1)"
 endef
 
-x86_64/windows:
+windows/x86_64:
 	$(call windows_target,x86_64,x86_64-w64-mingw32-gcc)
 
-i686/windows:
+windows/i686:
 	$(call windows_target,i686,i686-w64-mingw32-gcc)
 
 ## macOS
 
 define macos_target
-	@mkdir -p $(BIN_DIR)/$(1)/macos
+	@mkdir -p $(BIN_DIR)/macos/$(1)
 	@if ! $(2) --version > /dev/null 2>&1; then \
 		echo "Missing macOS cross-compiler wrapper: $(2)" >&2; \
 		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
@@ -282,7 +282,7 @@ define macos_target
 	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache"; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/macos/$(1)' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
 		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Darwin \
@@ -292,24 +292,24 @@ define macos_target
 			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
 			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DPACT_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar -DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos -G Ninja -Wno-dev > /dev/null,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
-	@echo "OK $(1)/macos"
+	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DPACT_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar -DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) -G Ninja -Wno-dev > /dev/null,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
+	@echo "OK macos/$(1)"
 endef
 
-x86_64/macos:
+macos/x86_64:
 	$(call macos_target,x86_64,$(OSXCROSS_X86_64_CC))
 
-aarch64/macos:
+macos/aarch64:
 	$(call macos_target,aarch64,$(OSXCROSS_AARCH64_CC))
 
 ## iOS
 
 define ios_target
-	@mkdir -p $(BIN_DIR)/$(1)/$(2)
+	@mkdir -p $(BIN_DIR)/$(2)/$(1)
 	@if ! $(3) --version > /dev/null 2>&1; then \
 		echo "Missing iOS cross-compiler wrapper: $(3)" >&2; \
 		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
@@ -324,7 +324,7 @@ define ios_target
 	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_C_COMPILER:.*=$(3)$$' "$$cache" || ! grep -q '^CMAKE_OSX_SYSROOT:.*=$(5)$$' "$$cache"; }; then \
 		rm -f "$$cache" && rm -rf $(BUILD_DIR)/$(1)-$(2)/CMakeFiles; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ]; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/$(2)/$(1)' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
 		LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=iOS \
@@ -335,32 +335,32 @@ define ios_target
 			-DPACT_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(3) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(5) -DCMAKE_OSX_ARCHITECTURES=$(6) -DPACT_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(3) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/$(2) -G Ninja -Wno-dev > /dev/null,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
-	@echo "OK $(1)/$(2)"
+	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH" cmake -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(5) -DCMAKE_OSX_ARCHITECTURES=$(6) -DPACT_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(3) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) -G Ninja -Wno-dev > /dev/null,LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" PATH="$(OSXCROSS_ROOT)/bin:$$PATH")
+	@echo "OK $(2)/$(1)"
 endef
 
-aarch64/ios:
+ios/aarch64:
 	$(call ios_target,aarch64,ios,$(OSXCROSS_IOS_AARCH64_CC),IPHONEOS_SDK,$(IPHONEOS_SDK),arm64)
 
-aarch64/iossim:
+iossim/aarch64:
 	$(call ios_target,aarch64,iossim,$(OSXCROSS_IOSSIM_AARCH64_CC),IPHONESIMULATOR_SDK,$(IPHONESIMULATOR_SDK),arm64)
 
-x86_64/iossim:
+iossim/x86_64:
 	$(call ios_target,x86_64,iossim,$(OSXCROSS_IOSSIM_X86_64_CC),IPHONESIMULATOR_SDK,$(IPHONESIMULATOR_SDK),x86_64)
 
 ## Android
 
 define android_target
-	@mkdir -p $(BIN_DIR)/$(1)/android
+	@mkdir -p $(BIN_DIR)/android/$(1)
 	@cache=$(BUILD_DIR)/$(1)-android/CMakeCache.txt && \
 	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_TOOLCHAIN_FILE:.*=$(NDK_TOOLCHAIN)$$' "$$cache" || ! grep -q '^ANDROID_ABI:.*=$(2)$$' "$$cache"; }; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-android/build.ninja && rm -rf $(BUILD_DIR)/$(1)-android/CMakeFiles; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-android/CMakeCache.txt ]; then \
+	@if [ ! -f $(BUILD_DIR)/$(1)-android/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/android/$(1)' $(BUILD_DIR)/$(1)-android/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-android \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
@@ -368,24 +368,24 @@ define android_target
 			-DANDROID_ABI=$(2) \
 			-DANDROID_PLATFORM=android-21 \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/android/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/android/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DPACT_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
-	@echo "OK $(1)/android"
+	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DPACT_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/android/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/android/$(1) -G Ninja -Wno-dev > /dev/null)
+	@echo "OK android/$(1)"
 endef
 
-aarch64/android:
+android/aarch64:
 	$(call android_target,aarch64,arm64-v8a)
 
-armv7/android:
+android/armv7:
 	$(call android_target,armv7,armeabi-v7a)
 
 ## WebAssembly
 
 define wasm_target
-	@mkdir -p $(BIN_DIR)/wasm32/wasm
+	@mkdir -p $(BIN_DIR)/wasm/wasm32
 	@if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1 || ! command -v $(WASM_EMCC) >/dev/null 2>&1; then \
 		echo "Missing Emscripten SDK toolchain: $(WASM_EMCMAKE)/$(WASM_EMCC)" >&2; \
 		echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
@@ -399,12 +399,12 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,wasm_log=$$(mktemp); if ! $(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DPACT_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > "$$wasm_log" 2>&1; then cat "$$wasm_log"; rm -f "$$wasm_log"; exit 1; fi; rm -f "$$wasm_log")
-	@cp $(BUILD_DIR)/wasm32-wasm/out/libpact.wasm $(BIN_DIR)/wasm32/wasm/libpact.wasm
-	@cp $(BUILD_DIR)/wasm32-wasm/out/libpact.js $(BIN_DIR)/wasm32/wasm/libpact.js
-	@echo "OK wasm32/wasm"
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libpact.wasm $(BIN_DIR)/wasm/wasm32/libpact.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libpact.js $(BIN_DIR)/wasm/wasm32/libpact.js
+	@echo "OK wasm/wasm32"
 endef
 
-wasm32/wasm:
+wasm/wasm32:
 	$(call wasm_target)
 
 ## Utility
@@ -419,20 +419,20 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libpact.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libpact.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/pact.exe ]; then \
-			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
+		if [ ! -f $(BIN_DIR)/windows/x86_64/libpact.dll ] || [ ! -f $(BIN_DIR)/windows/x86_64/libpact.dll.a ] || [ ! -f $(BIN_DIR)/windows/x86_64/pact.exe ]; then \
+			echo "Missing Windows artifacts. Run 'make windows/x86_64' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/windows/x86_64' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
 				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
 				-DPACT_BUILD_TESTS=ON \
 				-DPACT_BUILD_VERSION=$(BUILD_VERSION) \
-				-DPACT_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libpact.dll \
-				-DPACT_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libpact.dll.a \
-				-DPACT_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/pact.exe \
+				-DPACT_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/windows/x86_64/libpact.dll \
+				-DPACT_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/windows/x86_64/libpact.dll.a \
+				-DPACT_CLI_PATH=$(CURDIR)/$(BIN_DIR)/windows/x86_64/pact.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -444,8 +444,8 @@ test:
 			echo "Install the Emscripten SDK and add emcmake/emcc to PATH (e.g. 'source emsdk_env.sh')." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/wasm32/wasm/libpact.wasm ]; then \
-			echo "Missing $(BIN_DIR)/wasm32/wasm/libpact.wasm. Run 'make wasm32/wasm' first." >&2; \
+		if [ ! -f $(BIN_DIR)/wasm/wasm32/libpact.wasm ]; then \
+			echo "Missing $(BIN_DIR)/wasm/wasm32/libpact.wasm. Run 'make wasm/wasm32' first." >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wasm/CMakeCache.txt ]; then \
@@ -471,7 +471,7 @@ test:
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)' $(BUILD_DIR)/test/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DPACT_BUILD_TESTS=ON \

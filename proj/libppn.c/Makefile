@@ -27,57 +27,57 @@ ifeq ($(HOST_SYSTEM),Linux)
 NATIVE_PLATFORM := linux
 endif
 
-NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
+NATIVE_TARGET := $(NATIVE_PLATFORM)/$(NATIVE_ARCH)
 NATIVE_SHARED_LIBRARY := libppn.so
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
-.PHONY: all test wine clean x86_64/linux x86_64/windows \
-	x86_64/macos aarch64/macos
+.PHONY: all test wine clean linux/x86_64 windows/x86_64 \
+	macos/x86_64 macos/aarch64
 
-all: x86_64/linux x86_64/windows x86_64/macos aarch64/macos
+all: linux/x86_64 windows/x86_64 macos/x86_64 macos/aarch64
 
 ## Linux
 
-x86_64/linux:
-	@mkdir -p $(BIN_DIR)/x86_64/linux
-	@if [ ! -f $(BUILD_DIR)/x86_64-linux/CMakeCache.txt ]; then \
+linux/x86_64:
+	@mkdir -p $(BIN_DIR)/linux/x86_64
+	@if [ ! -f $(BUILD_DIR)/x86_64-linux/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/linux/x86_64' $(BUILD_DIR)/x86_64-linux/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/x86_64-linux \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DPPN_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=gcc \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/x86_64/linux \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/x86_64/linux \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/x86_64 \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/x86_64 \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	@cmake --build $(BUILD_DIR)/x86_64-linux
-	@cd $(BIN_DIR)/x86_64/linux && sha256sum libppn.a libppn.so > SHA256SUMS
-	@echo "OK x86_64/linux"
+	@cd $(BIN_DIR)/linux/x86_64 && sha256sum libppn.a libppn.so > SHA256SUMS
+	@echo "OK linux/x86_64"
 
 ## Windows
 
-x86_64/windows:
-	@mkdir -p $(BIN_DIR)/x86_64/windows
-	@if [ ! -f $(BUILD_DIR)/x86_64-windows/CMakeCache.txt ]; then \
+windows/x86_64:
+	@mkdir -p $(BIN_DIR)/windows/x86_64
+	@if [ ! -f $(BUILD_DIR)/x86_64-windows/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/windows/x86_64' $(BUILD_DIR)/x86_64-windows/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/x86_64-windows \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Windows \
 			-DPPN_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/x86_64-windows/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/x86_64/windows \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/x86_64/windows \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/x86_64 \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/x86_64 \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	@cmake --build $(BUILD_DIR)/x86_64-windows
-	@cp $(BUILD_DIR)/x86_64-windows/out/libppn.dll $(BIN_DIR)/x86_64/windows/libppn.dll
-	@cd $(BIN_DIR)/x86_64/windows && sha256sum libppn.a libppn.dll libppn.dll.a > SHA256SUMS
-	@echo "OK x86_64/windows"
+	@cp $(BUILD_DIR)/x86_64-windows/out/libppn.dll $(BIN_DIR)/windows/x86_64/libppn.dll
+	@cd $(BIN_DIR)/windows/x86_64 && sha256sum libppn.a libppn.dll libppn.dll.a > SHA256SUMS
+	@echo "OK windows/x86_64"
 
 ## macOS
 
 define macos_target
-	@mkdir -p $(BIN_DIR)/$(1)/macos
+	@mkdir -p $(BIN_DIR)/macos/$(1)
 	@if ! $(2) --version > /dev/null 2>&1; then \
 		echo "Missing macOS cross-compiler wrapper: $(2)" >&2; \
 		exit 1; \
@@ -88,7 +88,7 @@ define macos_target
 	export OSXCROSS_SDK=$(MACOSX_SDK) && \
 	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
-	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
+	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/macos/$(1)' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-macos \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Darwin \
@@ -99,49 +99,49 @@ define macos_target
 			-DCMAKE_INSTALL_NAME_TOOL=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-install_name_tool \
 			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
 			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos && \
-	cd $(BIN_DIR)/$(1)/macos && \
+	cd $(BIN_DIR)/macos/$(1) && \
 	shasum -a 256 libppn.a libppn.dylib > SHA256SUMS && \
-	echo "OK $(1)/macos"
+	echo "OK macos/$(1)"
 endef
 
-x86_64/macos:
+macos/x86_64:
 	$(call macos_target,x86_64,$(OSXCROSS_ROOT)/bin/o64-clang)
 
-aarch64/macos:
+macos/aarch64:
 	$(call macos_target,aarch64,$(OSXCROSS_ROOT)/bin/oa64-clang)
 
 ## Test
 
 test:
 	@if [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/windows/x86_64' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
 				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
 				-DPPN_BUILD_TESTS=ON \
 				-DPPN_BUILD_VERSION=$(BUILD_VERSION) \
-				-DPPN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libppn.dll \
-				-DPPN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libppn.dll.a \
-				-DPPN_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/ppn.exe \
+				-DPPN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/windows/x86_64/libppn.dll \
+				-DPPN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/windows/x86_64/libppn.dll.a \
+				-DPPN_CLI_PATH=$(CURDIR)/$(BIN_DIR)/windows/x86_64/ppn.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=wine \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target ppn_contract_test || exit 1; \
 		WINEDEBUG=-all wine $(BUILD_DIR)/test-wine/ppn_contract_test.exe 2>/dev/null; \
 	else \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)' $(BUILD_DIR)/test/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DPPN_BUILD_TESTS=ON \
 				-DPPN_BUILD_VERSION=$(BUILD_VERSION) \
-				-DPPN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/$(NATIVE_SHARED_LIBRARY) \
-				-DPPN_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/ppn \
+				-DPPN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_PLATFORM)/$(NATIVE_ARCH)/$(NATIVE_SHARED_LIBRARY) \
+				-DPPN_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_PLATFORM)/$(NATIVE_ARCH)/ppn \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target ppn_contract_test || exit 1; \
