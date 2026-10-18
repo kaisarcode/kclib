@@ -338,4 +338,3 @@ int main(int argc, char **argv)
         return kc_dmn_create(name, &options) == KC_DMN_OK ? 0 : 1;
     }
 }
-

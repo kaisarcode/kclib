@@ -274,4 +274,3 @@ int main(int argc, char **argv) {
         return kc_init_create(name, &options) == KC_INIT_OK ? 0 : 1;
     }
 }
-

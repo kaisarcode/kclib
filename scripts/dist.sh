@@ -190,7 +190,8 @@ load_manifest_state() {
     [ -f "$manifest" ] || return 0
 
     while IFS=$'\t' read -r sha build_sha license_sha readme_sha path; do
-        [ -n "$sha" ] && [ -n "$path" ] || continue
+        [ -n "$sha" ] || continue
+        [ -n "$path" ] || continue
         MANIFEST_SHA["$path"]="$sha"
         MANIFEST_BUILD_SHA["$path"]="$build_sha"
         MANIFEST_LICENSE_SHA["$path"]="$license_sha"
@@ -299,7 +300,8 @@ sync_target() {
     count=0
     : > "$stage_dir/SHA256SUMS"
     while read -r sha file; do
-        [ -n "$sha" ] && [ -n "$file" ] || continue
+        [ -n "$sha" ] || continue
+        [ -n "$file" ] || continue
         case "$file" in
             *.h) continue ;;
             "lib$name."*|"$name"|"$name.exe") ;;
@@ -397,7 +399,7 @@ prune_stale_targets() {
     for archive in "$project_dist"/lib"$name"-*.zip; do
         [ -f "$archive" ] || continue
         tail="${archive##*/}"
-        tail="${tail#lib$name-}"
+        tail="${tail#lib"$name"-}"
         tail="${tail%.zip}"
         platform="${tail%%-*}"
         arch="${tail#*-}"
@@ -519,7 +521,7 @@ generate_manifest() {
         for archive in "$project_dist"/lib"$name"-*.zip; do
             [ -f "$archive" ] || continue
             archive_name=$(basename "$archive")
-            tail="${archive_name#lib$name-}"
+            tail="${archive_name#lib"$name"-}"
             tail="${tail%.zip}"
             platform="${tail%%-*}"
             arch="${tail#*-}"
