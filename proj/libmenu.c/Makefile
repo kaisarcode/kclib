@@ -88,7 +88,7 @@ ifneq ($(filter MINGW% MSYS% CYGWIN%,$(HOST_SYSTEM)),)
 NATIVE_PLATFORM := windows
 endif
 
-NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
+NATIVE_TARGET := $(NATIVE_PLATFORM)/$(NATIVE_ARCH)
 NATIVE_SHARED_NAME := libmenu.so
 NATIVE_IMPORT_LIBRARY :=
 
@@ -100,99 +100,99 @@ endif
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
 .PHONY: all test wine clean \
-	x86_64/linux x86_64/windows \
-	i686/linux i686/windows \
-	aarch64/linux armv7/linux armv7hf/linux \
-	riscv64/linux powerpc64le/linux \
-	mips/linux mipsel/linux mips64el/linux \
-	s390x/linux loongarch64/linux
+	linux/x86_64 windows/x86_64 \
+	linux/i686 windows/i686 \
+	linux/aarch64 linux/armv7 linux/armv7hf \
+	linux/riscv64 linux/powerpc64le \
+	linux/mips linux/mipsel linux/mips64el \
+	linux/s390x linux/loongarch64
 
 all: \
-	x86_64/linux x86_64/windows \
-	i686/linux i686/windows \
-	aarch64/linux armv7/linux armv7hf/linux \
-	riscv64/linux powerpc64le/linux \
-	mips/linux mipsel/linux mips64el/linux \
-	s390x/linux loongarch64/linux
+	linux/x86_64 windows/x86_64 \
+	linux/i686 windows/i686 \
+	linux/aarch64 linux/armv7 linux/armv7hf \
+	linux/riscv64 linux/powerpc64le \
+	linux/mips linux/mipsel linux/mips64el \
+	linux/s390x linux/loongarch64
 
 ## Linux
 
 define linux_target
-	@mkdir -p $(BIN_DIR)/$(1)/linux
-	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
+	@mkdir -p $(BIN_DIR)/linux/$(1)
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/linux/$(1)' $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Linux \
 			-DMENU_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
-			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DMENU_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@echo "OK $(1)/linux"
+	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DMENU_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) -G Ninja -Wno-dev > /dev/null)
+	@echo "OK linux/$(1)"
 endef
 
-x86_64/linux:
+linux/x86_64:
 	$(call linux_target,x86_64,gcc)
 
-i686/linux:
+linux/i686:
 	$(call linux_target,i686,i686-linux-gnu-gcc)
 
-aarch64/linux:
+linux/aarch64:
 	$(call linux_target,aarch64,aarch64-linux-gnu-gcc)
 
-armv7hf/linux:
+linux/armv7hf:
 	$(call linux_target,armv7hf,arm-linux-gnueabihf-gcc)
 
-armv7/linux:
+linux/armv7:
 	$(call linux_target,armv7,arm-linux-gnueabi-gcc)
 
-riscv64/linux:
+linux/riscv64:
 	$(call linux_target,riscv64,riscv64-linux-gnu-gcc)
 
-powerpc64le/linux:
+linux/powerpc64le:
 	$(call linux_target,powerpc64le,powerpc64le-linux-gnu-gcc)
 
-mips/linux:
+linux/mips:
 	$(call linux_target,mips,mips-linux-gnu-gcc)
 
-mipsel/linux:
+linux/mipsel:
 	$(call linux_target,mipsel,mipsel-linux-gnu-gcc)
 
-mips64el/linux:
+linux/mips64el:
 	$(call linux_target,mips64el,mips64el-linux-gnuabi64-gcc)
 
-s390x/linux:
+linux/s390x:
 	$(call linux_target,s390x,s390x-linux-gnu-gcc)
 
-loongarch64/linux:
+linux/loongarch64:
 	$(call linux_target,loongarch64,loongarch64-linux-gnu-gcc)
 
 ## Windows
 
 define windows_target
-	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ]; then \
+	@mkdir -p $(BIN_DIR)/windows/$(1)
+	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/windows/$(1)' $(BUILD_DIR)/$(1)-windows/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Windows \
 			-DMENU_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
-			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DMENU_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@echo "OK $(1)/windows"
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DMENU_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) -G Ninja -Wno-dev > /dev/null)
+	@echo "OK windows/$(1)"
 endef
 
-x86_64/windows:
+windows/x86_64:
 	$(call windows_target,x86_64,x86_64-w64-mingw32-gcc)
 
-i686/windows:
+windows/i686:
 	$(call windows_target,i686,i686-w64-mingw32-gcc)
 
 ## Utility
@@ -207,8 +207,8 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libmenu.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmenu.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/menu.exe ]; then \
-			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
+		if [ ! -f $(BIN_DIR)/windows/x86_64/libmenu.dll ] || [ ! -f $(BIN_DIR)/windows/x86_64/libmenu.dll.a ] || [ ! -f $(BIN_DIR)/windows/x86_64/menu.exe ]; then \
+			echo "Missing Windows artifacts. Run 'make windows/x86_64' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
 		cmake -S . -B $(BUILD_DIR)/test-wine \
@@ -216,11 +216,11 @@ test:
 			-DCMAKE_SYSTEM_NAME=Windows \
 			-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
 			-DMENU_BUILD_TESTS=ON \
-			-DMENU_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmenu.dll \
-			-DMENU_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libmenu.dll.a \
+			-DMENU_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/windows/x86_64/libmenu.dll \
+			-DMENU_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/windows/x86_64/libmenu.dll.a \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
-		cmake -S . -B $(BUILD_DIR)/test-wine -DMENU_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/menu.exe > /dev/null || exit 1; \
+		cmake -S . -B $(BUILD_DIR)/test-wine -DMENU_CLI_PATH=$(CURDIR)/$(BIN_DIR)/windows/x86_64/menu.exe > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test-wine --target menu_contract_test || exit 1; \
 		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) menu_contract_test.exe all; \
 	else \
