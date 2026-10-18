@@ -161,20 +161,51 @@ update_project_checksums() {
     done
 }
 
+# Counts the targets declared by make all without executing their recipes.
+# @param project_dir Project directory.
+# @return 0 on success; the target count is written to stdout.
+count_build_steps() {
+    local project_dir="$1"
+    local count
+
+    count=$(
+        cd "$project_dir"
+        make -qp all 2>/dev/null | awk '
+            /^all:([[:space:]]|$)/ {
+                for (i = 2; i <= NF; i++) {
+                    if ($i != "|" && $i != ".WAIT") {
+                        count++
+                    }
+                }
+                print count
+                exit
+            }
+        '
+    )
+
+    if [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
+        printf '%s\n' "$count"
+    else
+        printf '1\n'
+    fi
+}
+
 # Builds one kclib project for every configured target.
 # @param project_dir Project directory.
-# @param project_index One-based position of this project in the build run.
-# @param project_count Total projects in the build run.
+# @param step_index One-based index of the first target for this project.
+# @param step_count Total targets in the build run.
+# @param project_steps Number of targets for this project.
 # @return 0 on success.
 build_project() {
     local project_dir="$1"
-    local project_index="$2"
-    local project_count="$3"
+    local step_index="$2"
+    local step_count="$3"
+    local project_steps="$4"
     local project_name status
 
     project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
-    echo "[$project_index/$project_count] $project_name: building"
+    echo "[$step_index/$step_count] $project_name: building"
 
     status=0
     (
@@ -182,11 +213,16 @@ build_project() {
         set -o pipefail
         make all 2>&1 | awk \
             -v project_name="$project_name" \
-            -v project_count="$project_count" \
-            -v project_index="$project_index" '
+            -v step_count="$step_count" \
+            -v step_index="$step_index" \
+            -v last_step="$((step_index + project_steps - 1))" '
                 {
-                    printf "[%d/%d] %s: %s\n", project_index,
-                        project_count, project_name, $0
+                    printf "[%d/%d] %s: %s\n", step_index,
+                        step_count, project_name, $0
+                    if ($0 ~ /^OK [^[:space:]]+\/[^[:space:]]+$/ &&
+                        step_index < last_step) {
+                        step_index++
+                    }
                 }
             '
     ) || status=$?
@@ -204,7 +240,8 @@ build_project() {
 # @return 0 on success.
 main() {
     local script_dir root_dir proj_dir target project_dir project_name
-    local failed_projects project_count project_index
+    local failed_projects step_count step_index steps i
+    local -a project_dirs project_steps
 
     [ "$#" -eq 1 ] || {
         usage
@@ -223,19 +260,26 @@ main() {
 
     if [ "$target" = "all" ]; then
         failed_projects=""
-        project_count=0
+        project_dirs=()
+        project_steps=()
+        step_count=0
         for project_dir in "$proj_dir"/lib*.c; do
             [ -d "$project_dir" ] || continue
-            project_count=$((project_count + 1))
+            steps=$(count_build_steps "$project_dir")
+            project_dirs+=("$project_dir")
+            project_steps+=("$steps")
+            step_count=$((step_count + steps))
         done
-        project_index=1
-        for project_dir in "$proj_dir"/lib*.c; do
-            [ -d "$project_dir" ] || continue
-            if ! build_project "$project_dir" "$project_index" "$project_count"; then
+
+        step_index=1
+        for i in "${!project_dirs[@]}"; do
+            project_dir="${project_dirs[$i]}"
+            steps="${project_steps[$i]}"
+            if ! build_project "$project_dir" "$step_index" "$step_count" "$steps"; then
                 project_name=$(basename "$project_dir")
                 failed_projects="$failed_projects $project_name"
             fi
-            project_index=$((project_index + 1))
+            step_index=$((step_index + steps))
         done
 
         if [ -n "$failed_projects" ]; then
@@ -258,7 +302,8 @@ main() {
         exit 1
     }
 
-    build_project "$project_dir" 1 1
+    steps=$(count_build_steps "$project_dir")
+    build_project "$project_dir" 1 "$steps" "$steps"
 }
 
 main "$@"
