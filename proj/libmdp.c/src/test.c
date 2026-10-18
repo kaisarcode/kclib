@@ -450,7 +450,11 @@ static int case_kc_mdp_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 9;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 8;
+#else
+    test_case_total = 20;
+#endif
     test_case_current = 0;
     run_case(&rc, case_kc_mdp_open);
     run_case(&rc, case_kc_mdp_html);
@@ -461,7 +465,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_mdp_close);
     run_case(&rc, case_kc_mdp_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_mdp_cli);
+    rc += case_mdp_cli();
 #endif
     printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -491,7 +495,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_mdp_close") == 0) return case_kc_mdp_close();
     if (strcmp(argv[1], "kc_mdp_version") == 0) return case_kc_mdp_version();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "mdp_cli") == 0) return case_mdp_cli();
+    if (strcmp(argv[1], "mdp_cli") == 0) {
+        int failures;
+
+        test_case_total = 12;
+        failures = case_mdp_cli();
+        printf("%d passed, %d failed\n", test_case_total - failures, failures);
+        return failures ? 1 : 0;
+    }
 #endif
 
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
@@ -506,9 +517,6 @@ int main(int argc, char **argv) {
 #ifndef KC_CLI_PATH
 #define KC_CLI_PATH "mdp"
 #endif
-
-static int test_total = 0;
-static int test_failed = 0;
 
 /**
  * Writes one text fixture file.
@@ -640,18 +648,17 @@ static int run_cli(const char *args)
 }
 
 /**
- * Prints one contract-test result.
+ * Prints one CLI result using the shared test counter.
  * @param name Test name.
  * @param detail Behavior under test.
  * @param ok Nonzero on success.
- * @return None.
+ * @return Zero on success, one on failure.
  */
-static void result(const char *name, const char *detail, int ok)
+static int result(const char *name, const char *detail, int ok)
 {
-    test_total++;
-    if (!ok) test_failed++;
-    printf("[%d/12] [%s] %s: %s\n", test_total, ok ? "PASS" : "FAIL",
-        name, detail);
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -663,39 +670,39 @@ static int case_mdp_cli(void)
     const char *document = "---\ntitle: Home\n---\n# Hello";
     const char *file_path = "mdp-cli-file.md";
     int fixture_ok;
+    int failures = 0;
 
-    result("help", "--help succeeds", run_cli("--help") == 0);
-    result("version", "--version succeeds", run_cli("--version") == 0);
-    result("html arg", "positional text renders HTML by default",
+    failures += result("help", "--help succeeds", run_cli("--help") == 0);
+    failures += result("version", "--version succeeds", run_cli("--version") == 0);
+    failures += result("html arg", "positional text renders HTML by default",
         output_equals("Hello", NULL, "<p>Hello</p>\n"));
-    result("html stdin", "stdin renders HTML when argument is absent",
+    failures += result("html stdin", "stdin renders HTML when argument is absent",
         output_equals("", "# Hello", "<h1>Hello</h1>\n"));
-    result("ansi", "--ansi renders terminal output", ansi_heading_output());
+    failures += result("ansi", "--ansi renders terminal output", ansi_heading_output());
 
     fixture_ok = write_text_file(file_path, "# File");
-    result("input file", "-i reads file when higher-priority input is absent",
+    failures += result("input file", "-i reads file when higher-priority input is absent",
         fixture_ok && output_equals("-i mdp-cli-file.md", NULL,
             "<h1>File</h1>\n"));
-    result("stdin priority", "stdin takes priority over -i",
+    failures += result("stdin priority", "stdin takes priority over -i",
         fixture_ok && output_equals("-i mdp-cli-file.md", "# Stdin",
             "<h1>Stdin</h1>\n"));
-    result("argument priority", "argument takes priority over stdin and -i",
+    failures += result("argument priority", "argument takes priority over stdin and -i",
         fixture_ok && output_equals("-i mdp-cli-file.md Hello", "# Stdin",
             "<p>Hello</p>\n"));
     remove(file_path);
 
-    result("body", "--body returns Markdown body",
+    failures += result("body", "--body returns Markdown body",
         output_equals("--body", document, "# Hello"));
-    result("meta", "--meta returns raw frontmatter",
+    failures += result("meta", "--meta returns raw frontmatter",
         output_equals("--meta", document, "title: Home"));
-    result("exclusive", "output modes are mutually exclusive",
+    failures += result("exclusive", "output modes are mutually exclusive",
         run_cli("--ansi --body Hello") != 0 &&
         run_cli("--body --meta Hello") != 0);
-    result("unknown", "unknown option fails",
+    failures += result("unknown", "unknown option fails",
         run_cli("--unknown Hello") != 0);
 
-    printf("%d passed, %d failed\n", test_total - test_failed, test_failed);
-    return test_failed ? 1 : 0;
+    return failures;
 }
 
 #endif
