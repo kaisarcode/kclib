@@ -144,6 +144,17 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
+NATIVE_SHARED_NAME := liblng.so
+NATIVE_CLI_NAME := lng
+
+ifeq ($(NATIVE_PLATFORM),windows)
+NATIVE_SHARED_NAME := liblng.dll
+NATIVE_CLI_NAME := lng.exe
+endif
+
+ifeq ($(NATIVE_PLATFORM),macos)
+NATIVE_SHARED_NAME := liblng.dylib
+endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
@@ -424,6 +435,10 @@ test:
 			echo "missing Windows import library: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/lng.exe" ]; then \
+			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
+			exit 1; \
+		fi; \
 		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -436,6 +451,8 @@ test:
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine \
+			-DLNG_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/lng.exe > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test-wine --target lng_contract_test; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/lng_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
@@ -467,17 +484,23 @@ test:
 			echo "Unsupported native target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/liblng.so" ]; then \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME)" ]; then \
 			echo "missing native shared library: run make first" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME)" ]; then \
+			echo "missing native CLI: run make first" >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DLNG_BUILD_TESTS=ON \
-				-DLNG_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/liblng.so \
+				-DLNG_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test \
+			-DLNG_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test --target lng_contract_test; \
 		$(BUILD_DIR)/test/lng_contract_test all; \
 	fi

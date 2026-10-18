@@ -73,6 +73,10 @@ typedef struct {
 static int test_case_total;
 static int test_case_current;
 
+#ifndef __EMSCRIPTEN__
+static int case_nets_cli(void);
+#endif
+
 /**
  * Returns a process-specific base port for local tests.
  * @return Local port base.
@@ -916,12 +920,94 @@ int main(void) {
     if (socket_start() != 0) return 1;
 
     result = 0;
-    test_case_total = 3;
+    test_case_total = 4;
     test_case_current = 0;
     run_case(&result, case_validation);
     run_case(&result, case_tcp);
     run_case(&result, case_udp);
+#ifndef __EMSCRIPTEN__
+    run_case(&result, case_nets_cli);
+#endif
 
     socket_stop();
+    printf("%d passed, %d failed\n\n", test_case_total - result, result);
     return result == 0 ? 0 : 1;
 }
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "nets"
+#endif
+
+#ifdef _WIN32
+#define NETS_CLI_DEV_NULL "NUL"
+#else
+#define NETS_CLI_DEV_NULL "/dev/null"
+#endif
+
+static int nets_cli_current;
+static int nets_cli_failures;
+
+/**
+ * Prints one nets CLI result.
+ * @param name Test name.
+ * @param detail Tested behavior.
+ * @param ok Nonzero when the test passed.
+ * @return None.
+ */
+static void nets_cli_result(const char *name, const char *detail, int ok) {
+    nets_cli_current++;
+    if (!ok) nets_cli_failures++;
+    printf("[%d/12] [%s] %s: %s\n", nets_cli_current,
+        ok ? "PASS" : "FAIL", name, detail);
+}
+
+/**
+ * Executes nets with one argument string.
+ * @param args Command arguments.
+ * @return Shell exit status.
+ */
+static int nets_cli_run(const char *args) {
+    char command[4096];
+    int count;
+
+    count = snprintf(command, sizeof(command), "%s %s > " NETS_CLI_DEV_NULL
+        " 2> " NETS_CLI_DEV_NULL, KC_CLI_PATH, args);
+    if (count < 0 || (size_t)count >= sizeof(command)) return 1;
+    return system(command);
+}
+
+/**
+ * Runs the nets CLI contract tests.
+ * @return Zero when every test passes.
+ */
+static int case_nets_cli(void) {
+    nets_cli_current = 0;
+    nets_cli_failures = 0;
+    nets_cli_result("help", "long help succeeds", nets_cli_run("--help") == 0);
+    nets_cli_result("short help", "short help succeeds", nets_cli_run("-h") == 0);
+    nets_cli_result("version", "long version succeeds",
+        nets_cli_run("--version") == 0);
+    nets_cli_result("short version", "short version succeeds",
+        nets_cli_run("-v") == 0);
+    nets_cli_result("missing endpoint", "empty invocation fails",
+        nets_cli_run("") != 0);
+    nets_cli_result("missing port", "host without port fails",
+        nets_cli_run("localhost") != 0);
+    nets_cli_result("zero port", "port zero fails",
+        nets_cli_run("localhost 0") != 0);
+    nets_cli_result("invalid port", "non-numeric port fails",
+        nets_cli_run("localhost invalid") != 0);
+    nets_cli_result("invalid transport", "transport requires tcp or udp",
+        nets_cli_run("localhost 9 --transport tls") != 0);
+    nets_cli_result("transport value", "transport requires a following value",
+        nets_cli_run("localhost 9 --transport") != 0);
+    nets_cli_result("removed tls option", "TLS option is not accepted",
+        nets_cli_run("localhost 9 --tls") != 0);
+    nets_cli_result("extra positional", "extra endpoint arguments fail",
+        nets_cli_run("localhost 9 extra") != 0);
+    printf("%d passed, %d failed\n\n", 12 - nets_cli_failures,
+        nets_cli_failures);
+    return nets_cli_failures == 0 ? 0 : 1;
+}
+#endif

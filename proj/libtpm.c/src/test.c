@@ -549,7 +549,7 @@ static int case_tpm_cli(void)
     result("unknown", "unknown option fails",
         run_cli("\"hello world\" \"hello world\" --unknown") != 0);
 
-    printf("\n%d passed, %d failed\n", test_total - test_failed, test_failed);
+    printf("%d passed, %d failed\n\n", test_total - test_failed, test_failed);
     return test_failed ? 1 : 0;
 }
 #endif

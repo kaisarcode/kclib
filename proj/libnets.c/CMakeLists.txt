@@ -81,6 +81,11 @@ if(NETS_BUILD_TESTS)
         PRIVATE
         ${NETS_TEST_SHARED_TARGET}
     )
+    if(NETS_CLI_PATH)
+        target_compile_definitions(nets_contract_test PRIVATE
+            KC_CLI_PATH="${NETS_CLI_PATH}"
+        )
+    endif()
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(nets_contract_test PRIVATE pthread m)

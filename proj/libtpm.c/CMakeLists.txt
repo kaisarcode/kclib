@@ -102,6 +102,11 @@ if(TPM_BUILD_TESTS)
         add_executable(tpm_contract_test src/test.c)
         target_include_directories(tpm_contract_test PRIVATE src)
         target_link_libraries(tpm_contract_test PRIVATE ${TPM_TEST_SHARED_TARGET})
+        if(TPM_CLI_PATH)
+            target_compile_definitions(tpm_contract_test PRIVATE
+                KC_CLI_PATH="${TPM_CLI_PATH}"
+            )
+        endif()
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(tpm_contract_test PRIVATE m)
         elseif(ANDROID)

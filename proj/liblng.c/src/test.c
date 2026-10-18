@@ -20,6 +20,10 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+#ifndef __EMSCRIPTEN__
+static int case_lng_cli(void);
+#endif
+
 /**
  * Prints a test case result line.
  * @param fail Non-zero when the case failed.
@@ -465,13 +469,16 @@ static int case_kc_lng_free(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 5;
+    test_case_total = 6;
     test_case_current = 0;
     run_case(&rc, case_kc_lng_version);
     run_case(&rc, case_kc_lng_detect);
     run_case(&rc, case_kc_lng_detect_ranking);
     run_case(&rc, case_kc_lng_detect_contract);
     run_case(&rc, case_kc_lng_free);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_lng_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -498,6 +505,159 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "ranking") == 0) { test_case_total = 1; test_case_current = 1; return case_kc_lng_detect_ranking(); }
     if (strcmp(argv[1], "contract") == 0) { test_case_total = 1; test_case_current = 1; return case_kc_lng_detect_contract(); }
     if (strcmp(argv[1], "determinism") == 0) { test_case_total = 1; test_case_current = 1; return case_kc_lng_free(); }
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "lng_cli") == 0) return case_lng_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "lng"
+#endif
+
+static int lng_cli_total;
+static int lng_cli_failed;
+
+/**
+ * Writes one CLI text fixture.
+ * @param path Destination path.
+ * @param text Fixture text.
+ * @return Nonzero on success.
+ */
+static int lng_cli_write(const char *path, const char *text) {
+    FILE *file;
+    size_t size;
+
+    file = fopen(path, "wb");
+    if (!file) return 0;
+    size = strlen(text);
+    if (fwrite(text, 1, size, file) != size) {
+        fclose(file);
+        return 0;
+    }
+    fclose(file);
+    return 1;
+}
+
+/**
+ * Runs the CLI, optionally supplying stdin, and captures stdout.
+ * @param args Command arguments.
+ * @param stdin_text Optional stdin text.
+ * @param output Destination output buffer.
+ * @param output_size Destination buffer size.
+ * @return Nonzero on success.
+ */
+static int lng_cli_capture(const char *args, const char *stdin_text,
+    char *output, size_t output_size) {
+    const char *input_path = "lng-cli-stdin.txt";
+    const char *output_path = "lng-cli-output.txt";
+    char command[4096];
+    FILE *file;
+    size_t size;
+
+    if (stdin_text && !lng_cli_write(input_path, stdin_text)) return 0;
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s %s> %s 2>NUL\"",
+        KC_CLI_PATH, args ? args : "", stdin_text ? "< lng-cli-stdin.txt " : "",
+        output_path);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s %s> %s 2>/dev/null",
+        KC_CLI_PATH, args ? args : "", stdin_text ? "< lng-cli-stdin.txt " : "",
+        output_path);
+#endif
+    if (system(command) != 0) {
+        if (stdin_text) remove(input_path);
+        remove(output_path);
+        return 0;
+    }
+    if (stdin_text) remove(input_path);
+    file = fopen(output_path, "rb");
+    if (!file) return 0;
+    size = fread(output, 1, output_size - 1U, file);
+    fclose(file);
+    remove(output_path);
+    output[size] = '\0';
+    return 1;
+}
+
+/**
+ * Runs the CLI without retaining its output.
+ * @param args Command arguments.
+ * @return Shell exit status.
+ */
+static int lng_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args ? args : "");
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args ? args : "");
+#endif
+    return system(command);
+}
+
+/**
+ * Prints one CLI contract result.
+ * @param name Test name.
+ * @param detail Tested behavior.
+ * @param ok Nonzero when the test passed.
+ * @return None.
+ */
+static void lng_cli_result(const char *name, const char *detail, int ok) {
+    lng_cli_total++;
+    if (!ok) lng_cli_failed++;
+    printf("[%d/12] [%s] %s: %s\n", lng_cli_total,
+        ok ? "PASS" : "FAIL", name, detail);
+}
+
+/**
+ * Runs all lng CLI contract tests.
+ * @return Zero when every test passes.
+ */
+static int case_lng_cli(void) {
+    const char *file_path = "lng-cli-file.txt";
+    char expected[256];
+    char actual[256];
+    int fixture_ok;
+    char output[256];
+
+    lng_cli_total = 0;
+    lng_cli_failed = 0;
+    lng_cli_result("help", "--help succeeds", lng_cli_run("--help") == 0);
+    lng_cli_result("version", "--version succeeds", lng_cli_run("--version") == 0);
+    lng_cli_result("detect", "text detection succeeds",
+        lng_cli_run("\"Hello world\"") == 0);
+    lng_cli_result("tsv", "output is headerless TSV",
+        lng_cli_capture("\"Hello world\"", NULL, output, sizeof(output)) &&
+        strchr(output, '\t') != NULL && strchr(output, ',') == NULL &&
+        strncmp(output, "code\tscore", 10) != 0);
+    fixture_ok = lng_cli_write(file_path, "Bonjour le monde");
+    lng_cli_result("input file", "-i detects text from file",
+        fixture_ok && lng_cli_run("-i lng-cli-file.txt") == 0);
+    lng_cli_result("stdin priority", "stdin takes priority over -i",
+        fixture_ok && lng_cli_capture(NULL, "Hello world", expected,
+        sizeof(expected)) && lng_cli_capture("-i lng-cli-file.txt", "Hello world",
+        actual, sizeof(actual)) && strcmp(expected, actual) == 0);
+    lng_cli_result("argument priority", "argument takes priority over stdin and -i",
+        fixture_ok && lng_cli_capture("\"Hello world\"", NULL, expected,
+        sizeof(expected)) && lng_cli_capture("\"Hello world\" -i lng-cli-file.txt",
+        "Bonjour le monde", actual, sizeof(actual)) && strcmp(expected, actual) == 0);
+    remove(file_path);
+    lng_cli_result("threshold", "valid threshold succeeds",
+        lng_cli_run("\"Hello world\" --threshold 0.1") == 0);
+    lng_cli_result("limit", "valid limit succeeds",
+        lng_cli_run("\"Hello world\" --limit 3") == 0);
+    lng_cli_result("bad threshold", "invalid threshold fails",
+        lng_cli_run("\"Hello world\" --threshold 2") != 0);
+    lng_cli_result("bad limit", "zero limit fails",
+        lng_cli_run("\"Hello world\" --limit 0") != 0);
+    lng_cli_result("unknown", "unknown option fails",
+        lng_cli_run("\"Hello world\" --unknown") != 0);
+    printf("%d passed, %d failed\n\n", 12 - lng_cli_failed, lng_cli_failed);
+    return lng_cli_failed ? 1 : 0;
+}
+#endif

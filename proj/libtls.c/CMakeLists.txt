@@ -188,6 +188,11 @@ if(TLS_BUILD_TESTS)
     target_link_libraries(tls_contract_test PRIVATE
         ${TLS_TEST_SHARED_TARGET}
     )
+    if(TLS_CLI_PATH)
+        target_compile_definitions(tls_contract_test PRIVATE
+            KC_CLI_PATH="${TLS_CLI_PATH}"
+        )
+    endif()
     add_custom_command(TARGET tls_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:${TLS_TEST_SHARED_TARGET}>

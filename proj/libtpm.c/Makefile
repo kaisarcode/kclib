@@ -422,7 +422,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libtpm.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libtpm.dll.a ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libtpm.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libtpm.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/tpm.exe ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -438,6 +438,8 @@ test:
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		$(CMAKE) -S . -B $(BUILD_DIR)/test-wine \
+			-DTPM_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/tpm.exe > /dev/null; \
 		$(CMAKE) --build $(BUILD_DIR)/test-wine --target tpm_contract_test; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/tpm_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
@@ -469,7 +471,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/tpm ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -482,6 +484,8 @@ test:
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		$(CMAKE) -S . -B $(BUILD_DIR)/test \
+			-DTPM_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/tpm > /dev/null; \
 		$(CMAKE) --build $(BUILD_DIR)/test --target tpm_contract_test; \
 		$(BUILD_DIR)/test/tpm_contract_test all; \
 	fi

@@ -141,6 +141,17 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
+NATIVE_SHARED_NAME := libnets.so
+NATIVE_CLI_NAME := nets
+
+ifeq ($(NATIVE_PLATFORM),windows)
+NATIVE_SHARED_NAME := libnets.dll
+NATIVE_CLI_NAME := nets.exe
+endif
+
+ifeq ($(NATIVE_PLATFORM),macos)
+NATIVE_SHARED_NAME := libnets.dylib
+endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
@@ -399,6 +410,10 @@ test:
 			echo "missing Windows import library: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/nets.exe" ]; then \
+			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
+			exit 1; \
+		fi; \
 		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -410,6 +425,8 @@ test:
 				-DNETS_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll.a \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine \
+			-DNETS_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/nets.exe > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test-wine --target nets_contract_test; \
 		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) nets_contract_test.exe all; \
 	else \
@@ -417,17 +434,23 @@ test:
 			echo "Unsupported native target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libnets.so" ]; then \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME)" ]; then \
 			echo "missing native shared library: run make first" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME)" ]; then \
+			echo "missing native CLI: run make first" >&2; \
 			exit 1; \
 		fi; \
 		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DNETS_BUILD_TESTS=ON \
-				-DNETS_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libnets.so \
+				-DNETS_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test \
+			-DNETS_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test --target nets_contract_test; \
 		$(BUILD_DIR)/test/nets_contract_test all; \
 	fi

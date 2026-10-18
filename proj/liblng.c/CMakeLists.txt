@@ -106,6 +106,11 @@ if(LNG_BUILD_TESTS)
         add_executable(lng_contract_test src/test.c)
         target_include_directories(lng_contract_test PRIVATE src)
         target_link_libraries(lng_contract_test ${LNG_TEST_SHARED_TARGET})
+        if(LNG_CLI_PATH)
+            target_compile_definitions(lng_contract_test PRIVATE
+                KC_CLI_PATH="${LNG_CLI_PATH}"
+            )
+        endif()
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(lng_contract_test pthread m)
         elseif(ANDROID)

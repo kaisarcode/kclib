@@ -113,6 +113,17 @@ NATIVE_PLATFORM := windows
 endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
+NATIVE_SHARED_NAME := libtls.so
+NATIVE_CLI_NAME := tls
+
+ifeq ($(NATIVE_PLATFORM),windows)
+NATIVE_SHARED_NAME := libtls.dll
+NATIVE_CLI_NAME := tls.exe
+endif
+
+ifeq ($(NATIVE_PLATFORM),macos)
+NATIVE_SHARED_NAME := libtls.dylib
+endif
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
@@ -373,6 +384,10 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libtls.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/tls.exe ]; then \
+			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
+			exit 1; \
+		fi; \
 		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
 			$(CMAKE) -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -383,10 +398,16 @@ test:
 				-DTLS_BUILD_VERSION=$(BUILD_VERSION) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		$(CMAKE) -S . -B $(BUILD_DIR)/test-wine \
+			-DTLS_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/tls.exe > /dev/null; \
 		$(CMAKE) --build $(BUILD_DIR)/test-wine --target tls_contract_test; \
 		WINEDEBUG=-all $(WINE) \
 			$(BUILD_DIR)/test-wine/tls_contract_test.exe all; \
 	else \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) ]; then \
+			echo "Missing native artifacts. Run 'make' first." >&2; \
+			exit 1; \
+		fi; \
 		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
 			$(CMAKE) -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -394,6 +415,8 @@ test:
 				-DTLS_BUILD_VERSION=$(BUILD_VERSION) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		$(CMAKE) -S . -B $(BUILD_DIR)/test \
+			-DTLS_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) > /dev/null; \
 		$(CMAKE) --build $(BUILD_DIR)/test --target tls_contract_test; \
 		$(BUILD_DIR)/test/tls_contract_test all; \
 	fi
