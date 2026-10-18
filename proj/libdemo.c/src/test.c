@@ -199,7 +199,7 @@ static int case_demo_cli(void)
     demo_cli_result("missing", "missing name fails", demo_cli_run(NULL) != 0);
     demo_cli_result("unknown", "unknown option fails", demo_cli_run("--unknown") != 0);
 
-    printf("\n%d passed, %d failed\n", demo_cli_total - demo_cli_failed, demo_cli_failed);
+    printf("%d passed, %d failed\n\n", demo_cli_total - demo_cli_failed, demo_cli_failed);
     return demo_cli_failed ? 1 : 0;
 }
 
@@ -223,7 +223,7 @@ static int case_all(void) {
     run_case(&rc, case_demo_cli);
 #endif
 
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
 

@@ -1260,7 +1260,7 @@ static int case_all(void)
     run_case(&rc, case_kc_rstrm_error_callback);
     run_case(&rc, case_kc_rstrm_input);
     run_case(&rc, case_kc_rstrm_status);
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
 

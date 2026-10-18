@@ -439,7 +439,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_menu_validation);
     run_case(&rc, case_kc_menu_version);
 
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
 

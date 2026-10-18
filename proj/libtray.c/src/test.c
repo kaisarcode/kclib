@@ -309,6 +309,6 @@ int main(int argc, char **argv) {
     total = 8;
     case_version(); case_open_close(); case_options(); case_icon();
     case_tooltip(); case_items(); case_lifecycle(); case_error();
-    printf("\n%d passed, %d failed\n", total - failures, failures);
+    printf("%d passed, %d failed\n\n", total - failures, failures);
     return failures ? 1 : 0;
 }

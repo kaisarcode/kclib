@@ -478,7 +478,7 @@ static int case_all(void) {
     rc += run_case(case_kc_hnsw_contract);
     rc += run_case(case_kc_hnsw_concurrency);
     rc += run_case(case_kc_hnsw_version);
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
 

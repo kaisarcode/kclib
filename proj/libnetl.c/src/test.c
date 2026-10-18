@@ -915,7 +915,7 @@ static int case_all(void) {
     run_case(&result, case_kc_netl_listener_close);
     run_case(&result, case_kc_netl_udp);
     run_case(&result, case_kc_netl_status);
-    printf("\n%d passed, %d failed\n", test_case_total - result, result);
+    printf("%d passed, %d failed\n\n", test_case_total - result, result);
     return result;
 }
 

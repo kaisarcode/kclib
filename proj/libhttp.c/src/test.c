@@ -607,6 +607,6 @@ int main(int argc, char **argv) {
     test_run(&rc, case_kc_http_free);
     test_run(&rc, case_kc_http_strerror);
     test_run(&rc, case_kc_http_version);
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }

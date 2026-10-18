@@ -398,7 +398,7 @@ static int case_b64_cli(void)
     b64_cli_result("invalid", "invalid Base64 fails", b64_cli_run("-d invalid") != 0);
     b64_cli_result("unknown", "unknown option fails", b64_cli_run("-e --unknown") != 0);
 
-    printf("\n%d passed, %d failed\n", b64_cli_total - b64_cli_failed,
+    printf("%d passed, %d failed\n\n", b64_cli_total - b64_cli_failed,
         b64_cli_failed);
     return b64_cli_failed ? 1 : 0;
 }
@@ -425,7 +425,7 @@ static int case_all(void) {
     run_case(&rc, case_b64_cli);
 #endif
 
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
 

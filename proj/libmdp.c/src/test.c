@@ -457,7 +457,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_mdp_meta);
     run_case(&rc, case_kc_mdp_close);
     run_case(&rc, case_kc_mdp_version);
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
 

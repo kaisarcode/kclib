@@ -615,6 +615,6 @@ int main(int argc, char **argv) {
     failed += case_verification();
     case_current++;
     failed += case_metadata();
-    printf("\n%d passed, %d failed\n", case_total - failed, failed);
+    printf("%d passed, %d failed\n\n", case_total - failed, failed);
     return failed == 0 ? 0 : 1;
 }

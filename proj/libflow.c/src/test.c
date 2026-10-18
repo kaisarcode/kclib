@@ -870,7 +870,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_flow_run_failure);
     run_case(&rc, case_kc_flow_free);
     run_case(&rc, case_kc_flow_version);
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
 

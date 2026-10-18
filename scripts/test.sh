@@ -5,7 +5,7 @@
 # Website: https://kaisarcode.com
 # License: GNU Lesser General Public License v3.0
 
-set -e
+set -eo pipefail
 
 # Prints command usage information.
 # @return 0 on success.
@@ -29,6 +29,22 @@ resolve_project() {
     return 1
 }
 
+# Runs one test command and labels its case results with the project name.
+# @param project_name Project directory basename.
+# @param command Test command and arguments.
+# @return Command status.
+run_test_command() {
+    local project_name="$1"
+
+    shift
+    "$@" 2>&1 | awk -v project_name="$project_name" '
+        /^\[[0-9]+\/[0-9]+\] \[(PASS|FAIL)\] / {
+            sub(/^\[[0-9]+\/[0-9]+\] \[(PASS|FAIL)\] /, "&" project_name ": ")
+        }
+        { print }
+    '
+}
+
 # Tests one kclib project on every supported test runtime.
 # @param project_dir Project directory.
 # @return 0 on success.
@@ -40,10 +56,10 @@ test_project() {
     echo "Testing $project_name..."
     (
         cd "$project_dir"
-        make test
-        make test wine
+        run_test_command "$project_name" make test
+        run_test_command "$project_name" make test wine
         if grep -Eq '^wasm[[:space:]]*:' Makefile; then
-            make test wasm
+            run_test_command "$project_name" make test wasm
         fi
     )
 }

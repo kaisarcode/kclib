@@ -584,7 +584,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_pact_revoke);
     run_case(&rc, case_kc_pact_free);
     run_case(&rc, case_kc_pact_protocol);
-    printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
 
