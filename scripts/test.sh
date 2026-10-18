@@ -57,8 +57,10 @@ test_project() {
     (
         cd "$project_dir"
         run_test_command "$project_name" make test
+        printf '\n'
         run_test_command "$project_name" make test wine
         if grep -Eq '^wasm[[:space:]]*:' Makefile; then
+            printf '\n'
             run_test_command "$project_name" make test wasm
         fi
     )
