@@ -332,14 +332,18 @@ static int case_kc_tpm_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 5;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 4;
+#else
+    test_case_total = 16;
+#endif
     test_case_current = 0;
     run_case(&rc, case_kc_tpm_open);
     run_case(&rc, case_kc_tpm_score);
     run_case(&rc, case_kc_tpm_close);
     run_case(&rc, case_kc_tpm_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_tpm_cli);
+    rc += case_tpm_cli();
 #endif
     printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -362,7 +366,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_tpm_close") == 0) return case_kc_tpm_close();
     if (strcmp(argv[1], "kc_tpm_version") == 0) return case_kc_tpm_version();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "tpm_cli") == 0) return case_tpm_cli();
+    if (strcmp(argv[1], "tpm_cli") == 0) {
+        int failures;
+
+        test_case_total = 12;
+        failures = case_tpm_cli();
+        printf("%d passed, %d failed\n", test_case_total - failures, failures);
+        return failures ? 1 : 0;
+    }
 #endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
@@ -375,9 +386,6 @@ int main(int argc, char **argv) {
 #ifndef KC_CLI_PATH
 #define KC_CLI_PATH "tpm"
 #endif
-
-static int test_total = 0;
-static int test_failed = 0;
 
 /**
  * Writes one text fixture file.
@@ -490,18 +498,17 @@ static int score_output_ok(void)
 }
 
 /**
- * Prints one contract-test result.
+ * Prints one CLI result using the shared test counter.
  * @param name Test name.
  * @param detail Behavior under test.
  * @param ok Nonzero on success.
- * @return None.
+ * @return Zero on success, one on failure.
  */
-static void result(const char *name, const char *detail, int ok)
+static int result(const char *name, const char *detail, int ok)
 {
-    test_total++;
-    if (!ok) test_failed++;
-    printf("[%d/12] [%s] %s: %s\n", test_total, ok ? "PASS" : "FAIL",
-        name, detail);
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -514,23 +521,24 @@ static int case_tpm_cli(void)
     char expected[256];
     char actual[256];
     int fixture_ok;
+    int failures = 0;
 
-    result("help", "--help succeeds", run_cli("--help") == 0);
-    result("version", "--version succeeds", run_cli("--version") == 0);
-    result("missing map", "map text is required", run_cli("") != 0);
-    result("score", "map and input text score successfully",
+    failures += result("help", "--help succeeds", run_cli("--help") == 0);
+    failures += result("version", "--version succeeds", run_cli("--version") == 0);
+    failures += result("missing map", "map text is required", run_cli("") != 0);
+    failures += result("score", "map and input text score successfully",
         run_cli("\"hello world\" \"hello world\"") == 0);
-    result("output", "score is one number in range 0..1", score_output_ok());
+    failures += result("output", "score is one number in range 0..1", score_output_ok());
 
     fixture_ok = write_text_file(file_path, "completely different text");
-    result("input file", "-i reads input text from file",
+    failures += result("input file", "-i reads input text from file",
         fixture_ok && run_cli("\"hello world\" -i tpm-cli-file.txt") == 0);
-    result("stdin priority", "stdin takes priority over -i",
+    failures += result("stdin priority", "stdin takes priority over -i",
         fixture_ok && capture_output("\"hello world\"", "hello world",
             expected, sizeof(expected)) &&
         capture_output("\"hello world\" -i tpm-cli-file.txt", "hello world",
             actual, sizeof(actual)) && strcmp(expected, actual) == 0);
-    result("argument priority", "argument takes priority over stdin and -i",
+    failures += result("argument priority", "argument takes priority over stdin and -i",
         fixture_ok && capture_output(
             "\"hello world\" \"hello world\"", NULL,
             expected, sizeof(expected)) &&
@@ -540,16 +548,15 @@ static int case_tpm_cli(void)
         strcmp(expected, actual) == 0);
     remove(file_path);
 
-    result("ngram", "positive ngram size is accepted by the CLI",
+    failures += result("ngram", "positive ngram size is accepted by the CLI",
         run_cli("\"hello world\" \"hello world\" --ngram 4") == 0);
-    result("bad ngram", "non-positive ngram size fails",
+    failures += result("bad ngram", "non-positive ngram size fails",
         run_cli("\"hello world\" \"hello world\" --ngram 0") != 0);
-    result("missing value", "--input requires a following file",
+    failures += result("missing value", "--input requires a following file",
         run_cli("\"hello world\" --input") != 0);
-    result("unknown", "unknown option fails",
+    failures += result("unknown", "unknown option fails",
         run_cli("\"hello world\" \"hello world\" --unknown") != 0);
 
-    printf("%d passed, %d failed\n", test_total - test_failed, test_failed);
-    return test_failed ? 1 : 0;
+    return failures;
 }
 #endif
