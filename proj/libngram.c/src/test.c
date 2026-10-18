@@ -640,7 +640,11 @@ static int case_kc_ngram_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 10;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 9;
+#else
+    test_case_total = 20;
+#endif
     test_case_current = 0;
     run_case(&rc, case_kc_ngram_traverse_validation);
     run_case(&rc, case_kc_ngram_traverse_empty);
@@ -652,7 +656,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_ngram_traverse_abort);
     run_case(&rc, case_kc_ngram_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_ngram_cli);
+    rc += case_ngram_cli();
 #endif
     printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -681,7 +685,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_ngram_traverse_abort") == 0) return case_kc_ngram_traverse_abort();
     if (strcmp(argv[1], "kc_ngram_version") == 0) return case_kc_ngram_version();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "ngram_cli") == 0) return case_ngram_cli();
+    if (strcmp(argv[1], "ngram_cli") == 0) {
+        int failures;
+
+        test_case_total = 11;
+        failures = case_ngram_cli();
+        printf("%d passed, %d failed\n", test_case_total - failures, failures);
+        return failures ? 1 : 0;
+    }
 #endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
@@ -694,9 +705,6 @@ int main(int argc, char **argv) {
 #ifndef KC_CLI_PATH
 #define KC_CLI_PATH "ngram"
 #endif
-
-static int test_total = 0;
-static int test_failed = 0;
 
 /**
  * Writes one text fixture file.
@@ -810,18 +818,17 @@ static void normalize_newlines(char *text)
 }
 
 /**
- * Prints one contract-test result.
+ * Prints one CLI result using the shared test counter.
  * @param name Test name.
  * @param detail Behavior under test.
  * @param ok Nonzero on success.
- * @return None.
+ * @return Zero on success, one on failure.
  */
-static void result(const char *name, const char *detail, int ok)
+static int result(const char *name, const char *detail, int ok)
 {
-    test_total++;
-    if (!ok) test_failed++;
-    printf("[%d/11] [%s] %s: %s\n", test_total, ok ? "PASS" : "FAIL",
-        name, detail);
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -834,6 +841,7 @@ static int case_ngram_cli(void)
     char output[2048];
     char expected[2048];
     int fixture_ok;
+    int failures = 0;
 
 #ifdef _WIN32
     const char *filter_command = "more";
@@ -841,50 +849,49 @@ static int case_ngram_cli(void)
     const char *filter_command = "cat";
 #endif
 
-    result("help", "--help succeeds", run_cli("--help") == 0);
-    result("version", "--version succeeds", run_cli("--version") == 0);
-    result("unknown", "unknown option fails",
+    failures += result("help", "--help succeeds", run_cli("--help") == 0);
+    failures += result("version", "--version succeeds", run_cli("--version") == 0);
+    failures += result("unknown", "unknown option fails",
         run_cli("\"a b\" --unknown") != 0);
 
     strcpy(expected, "a b\nb c\n");
-    result("literal", "literal text traverses requested window size",
+    failures += result("literal", "literal text traverses requested window size",
         capture_output("\"a b c\" --max 2 --min 2", NULL,
             output, sizeof(output)) &&
         (normalize_newlines(output), strcmp(output, expected) == 0));
 
-    result("stdin", "stdin provides text input",
+    failures += result("stdin", "stdin provides text input",
         capture_output("--max 2 --min 2", "a b c",
             output, sizeof(output)) &&
         (normalize_newlines(output), strcmp(output, expected) == 0));
 
     fixture_ok = write_text_file(file_path, "a b c");
-    result("input file", "-i reads text from file",
+    failures += result("input file", "-i reads text from file",
         fixture_ok && capture_output("-i ngram-cli-file.txt --max 2 --min 2",
             NULL, output, sizeof(output)) &&
         (normalize_newlines(output), strcmp(output, expected) == 0));
 
     strcpy(expected, "a,b\nb,c\n");
-    result("separators", "custom separators delimit tokens",
+    failures += result("separators", "custom separators delimit tokens",
         capture_output("\"a,b,c\" --max 2 --min 2 --separators \",\"",
             NULL, output, sizeof(output)) &&
         (normalize_newlines(output), strcmp(output, expected) == 0));
 
     snprintf(expected, sizeof(expected), "\"a b c\" --filter %s",
         filter_command);
-    result("filter", "filter output closes the visited span",
+    failures += result("filter", "filter output closes the visited span",
         capture_output(expected, NULL, output, sizeof(output)) &&
         (normalize_newlines(output), strcmp(output, "a b c\n") == 0));
 
-    result("bad min", "--min rejects zero",
+    failures += result("bad min", "--min rejects zero",
         run_cli("\"a b\" --min 0") != 0);
-    result("range", "nonzero --max cannot be smaller than --min",
+    failures += result("range", "nonzero --max cannot be smaller than --min",
         run_cli("\"a b c\" --max 1 --min 2") != 0);
-    result("missing filter", "--filter requires a command",
+    failures += result("missing filter", "--filter requires a command",
         run_cli("\"a b\" --filter") != 0);
 
     remove(file_path);
 
-    printf("%d passed, %d failed\n", test_total - test_failed, test_failed);
-    return test_failed ? 1 : 0;
+    return failures;
 }
 #endif
