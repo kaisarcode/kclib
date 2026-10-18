@@ -38,6 +38,7 @@ readonly EXCLUDED_PROJECTS=("liblibr.c")
 declare -A MANIFEST_SHA=()
 declare -A MANIFEST_BUILD_SHA=()
 declare -A MANIFEST_LICENSE_SHA=()
+declare -A MANIFEST_README_SHA=()
 
 # Prints command usage information.
 # @return 0 on success.
@@ -149,6 +150,15 @@ compute_license_sha256() {
     ) | compute_sha256 -
 }
 
+# Writes the minimal README included in every published ZIP.
+# @param name Project capability name without the lib prefix.
+# @return 0 on success.
+write_archive_readme() {
+    local name="$1"
+
+    printf '# lib%s.c\n\nAuthor: Kaisarcode\nWebsite: https://kaisarcode.com/\n' "$name"
+}
+
 # Maps one bin/<platform>/<arch> directory to its published ZIP path.
 # @param project_dir Project directory.
 # @param target_dir Built target directory.
@@ -170,19 +180,21 @@ target_archive_path() {
 # Loads previous archive and build checksums for incremental publication.
 # @return 0 on success.
 load_manifest_state() {
-    local manifest sha build_sha license_sha path
+    local manifest sha build_sha license_sha readme_sha path
 
     MANIFEST_SHA=()
     MANIFEST_BUILD_SHA=()
     MANIFEST_LICENSE_SHA=()
+    MANIFEST_README_SHA=()
     manifest="$DIST_DIR/manifest.json"
     [ -f "$manifest" ] || return 0
 
-    while IFS=$'\t' read -r sha build_sha license_sha path; do
+    while IFS=$'\t' read -r sha build_sha license_sha readme_sha path; do
         [ -n "$sha" ] && [ -n "$path" ] || continue
         MANIFEST_SHA["$path"]="$sha"
         MANIFEST_BUILD_SHA["$path"]="$build_sha"
         MANIFEST_LICENSE_SHA["$path"]="$license_sha"
+        MANIFEST_README_SHA["$path"]="$readme_sha"
     done < <(
         awk '
             /"sha256":/ {
@@ -200,16 +212,22 @@ load_manifest_state() {
                 sub(/^.*"license_sha256": "/, "", license_sha)
                 sub(/".*$/, "", license_sha)
             }
+            /"readme_sha256":/ {
+                readme_sha = $0
+                sub(/^.*"readme_sha256": "/, "", readme_sha)
+                sub(/".*$/, "", readme_sha)
+            }
             /"path":/ {
                 path = $0
                 sub(/^.*"path": "/, "", path)
                 sub(/".*$/, "", path)
                 if (sha != "" && path != "") {
-                    printf "%s\t%s\t%s\t%s\n", sha, build_sha, license_sha, path
+                    printf "%s\t%s\t%s\t%s\t%s\n", sha, build_sha, license_sha, readme_sha, path
                 }
                 sha = ""
                 build_sha = ""
                 license_sha = ""
+                readme_sha = ""
             }
         ' "$manifest"
     )
@@ -229,7 +247,7 @@ remove_legacy_metadata() {
 dist_target_is_current() {
     local project_dir="$1"
     local target_dir="$2"
-    local archive key checksum build_sha license_sha archive_sha
+    local archive key checksum build_sha license_sha readme_sha name archive_sha
 
     project_dir="${project_dir%/}"
     checksum="$target_dir/SHA256SUMS"
@@ -248,6 +266,10 @@ dist_target_is_current() {
 
     license_sha=$(compute_license_sha256 "$project_dir") || return 2
     [ "${MANIFEST_LICENSE_SHA["$key"]:-}" = "$license_sha" ] || return 1
+
+    name=$(capability_name "$(basename "$project_dir")")
+    readme_sha=$(write_archive_readme "$name" | compute_sha256 -) || return 2
+    [ "${MANIFEST_README_SHA["$key"]:-}" = "$readme_sha" ] || return 1
 
     archive_sha=$(compute_sha256 "$archive") || return 2
     [ "${MANIFEST_SHA["$key"]:-}" = "$archive_sha" ]
@@ -328,6 +350,16 @@ sync_target() {
         }
         printf '%s  %s\n' "$actual_sha" "$file" >> "$stage_dir/SHA256SUMS"
     done
+
+    if ! write_archive_readme "$name" > "$stage_dir/README.md"; then
+        rm -rf "$staging"
+        return 1
+    fi
+    actual_sha=$(compute_sha256 "$stage_dir/README.md") || {
+        rm -rf "$staging"
+        return 1
+    }
+    printf '%s  README.md\n' "$actual_sha" >> "$stage_dir/SHA256SUMS"
 
     if ! (cd "$staging" && zip -q -X -r package.zip "lib$name"); then
         rm -rf "$staging"
@@ -455,7 +487,7 @@ prune_stale_projects() {
 generate_manifest() {
     local manifest_file first_project first_archive updated_at
     local project_dir project_name project_dist name archive archive_name
-    local tail platform arch target_dir checksum build_sha license_sha zip_sha filesize
+    local tail platform arch target_dir checksum build_sha license_sha readme_sha zip_sha filesize
 
     manifest_file=$(mktemp "$DIST_DIR/.manifest.XXXXXXXX") || return 1
     first_project=true
@@ -509,6 +541,10 @@ generate_manifest() {
                 rm -f "$manifest_file"
                 return 1
             }
+            readme_sha=$(write_archive_readme "$name" | compute_sha256 -) || {
+                rm -f "$manifest_file"
+                return 1
+            }
             zip_sha=$(compute_sha256 "$archive") || {
                 rm -f "$manifest_file"
                 return 1
@@ -533,6 +569,7 @@ generate_manifest() {
         "sha256": "$zip_sha",
         "build_sha256": "$build_sha",
         "license_sha256": "$license_sha",
+        "readme_sha256": "$readme_sha",
         "path": "$project_name/$archive_name"
       }
 MANIFEST_ENTRY
