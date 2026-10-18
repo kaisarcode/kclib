@@ -187,9 +187,11 @@ For example, `make linux/x86_64` builds to `proj/libdemo.c/bin/linux/x86_64/`,
 while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Distribution
 publishes one ZIP per platform and architecture, for example,
 `dist/libdemo.c/libdemo-linux-x86_64.zip`. Each ZIP contains a single
-`libdemo/` directory with the compiled artifacts for that target and
-`SHA256SUMS`. The distribution manifest (`dist/manifest.json`) lists ZIP
-paths, sizes, archive SHA-256 hashes, and source build-checksum hashes.
+`libdemo/` directory with the compiled artifacts, `LICENSE`, optional
+`COPYING`, and `SHA256SUMS` covering all included files. The distribution
+manifest (`dist/manifest.json`) lists ZIP paths, sizes, archive SHA-256
+hashes, source build-checksum hashes, and license checksums. ZIPs are updated
+when either the binaries or licensing files change.
 
 Publish every kclib (omitting `all` is equivalent) or one project:
 
