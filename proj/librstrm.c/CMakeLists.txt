@@ -80,6 +80,9 @@ if(TARGET rstrm_shared AND NOT EMSCRIPTEN AND
     )
     target_include_directories(rstrm_cli PRIVATE src)
     target_link_libraries(rstrm_cli PRIVATE rstrm_shared)
+    if(WIN32)
+        target_link_libraries(rstrm_cli PRIVATE ws2_32)
+    endif()
     if(APPLE)
         set_target_properties(rstrm_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
