@@ -422,7 +422,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libb64.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libb64.dll.a ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libb64.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libb64.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/b64.exe ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -437,6 +437,7 @@ test:
 				-DB64_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libb64.dll.a \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine -DB64_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/b64.exe > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test-wine --target b64_contract_test || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/b64_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
@@ -464,7 +465,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/b64$(NATIVE_EXE_EXT) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -476,6 +477,7 @@ test:
 				-DB64_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test -DB64_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/b64$(NATIVE_EXE_EXT) > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test --target b64_contract_test || exit 1; \
 		$(BUILD_DIR)/test/b64_contract_test all; \
 	fi
@@ -497,27 +499,3 @@ wasm:
 clean:
 	@rm -rf $(BUILD_DIR)
 	@echo "OK clean"
-
-# Run the CLI contract tests alongside the library contract tests.
-.PHONY: cli-test
-test: cli-test
-cli-test:
-	@if [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
-		echo "CLI tests are not applicable to WebAssembly"; \
-	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
-		$(MAKE) --no-print-directory x86_64/windows || exit 1; \
-		mkdir -p '$(BUILD_DIR)/cli-test-wine'; \
-		cp '$(BIN_DIR)/x86_64/windows/b64.exe' '$(BUILD_DIR)/cli-test-wine/'; \
-		cp '$(BIN_DIR)/x86_64/windows/libb64.dll' '$(BUILD_DIR)/cli-test-wine/'; \
-		$(WINE_X86_64_CC) -std=c11 -O2 -Wall -Wextra -Werror \
-			-DKC_CLI_PATH=\"b64.exe\" src/cli_test.c \
-			-o '$(BUILD_DIR)/cli-test-wine/kccli_test.exe' || exit 1; \
-		cd '$(BUILD_DIR)/cli-test-wine' && WINEDEBUG=-all $(WINE) kccli_test.exe; \
-	else \
-		$(MAKE) --no-print-directory '$(NATIVE_TARGET)' || exit 1; \
-		mkdir -p '$(BUILD_DIR)/cli-test'; \
-		$(CC) -std=c11 -O2 -Wall -Wextra -Werror \
-			-DKC_CLI_PATH=\"$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/b64\" \
-			src/cli_test.c -o '$(BUILD_DIR)/cli-test/kccli_test' || exit 1; \
-		cd '$(BUILD_DIR)/cli-test' && ./kccli_test; \
-	fi

@@ -283,7 +283,7 @@ define macos_target
 	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
 	cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
-	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache"; then \
+	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache" || ! grep -q '^CMAKE_OSX_ARCHITECTURES:.*=$(3)$$' "$$cache"; }; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
 	fi && \
 	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
@@ -293,6 +293,7 @@ define macos_target
 			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
 			-DPOW_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_OSX_ARCHITECTURES=$(3) \
 			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
 			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
@@ -305,10 +306,10 @@ define macos_target
 endef
 
 x86_64/macos:
-	$(call macos_target,x86_64,$(OSXCROSS_X86_64_CC))
+	$(call macos_target,x86_64,$(OSXCROSS_X86_64_CC),x86_64)
 
 aarch64/macos:
-	$(call macos_target,aarch64,$(OSXCROSS_AARCH64_CC))
+	$(call macos_target,aarch64,$(OSXCROSS_AARCH64_CC),arm64)
 
 ## iOS
 

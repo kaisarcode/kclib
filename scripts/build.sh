@@ -70,7 +70,7 @@ write_target_file_list() {
     name=$(capability_name "$project_name")
 
     find "$target_dir" -maxdepth 1 -type f \
-        -name "lib$name.*" \
+        \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" \) \
         ! -name "*.sync-conflict-*" \
         -printf '%f\n' | LC_ALL=C sort -u > "$output_file"
 }
@@ -91,7 +91,7 @@ target_checksum_is_current() {
     [ -f "$checksum" ] || return 1
 
     if find "$target_dir" -maxdepth 1 -type f \
-        -name "lib$name.*" \
+        \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" \) \
         ! -name "*.sync-conflict-*" \
         -newer "$checksum" -print -quit | grep -q .; then
         return 1
@@ -136,7 +136,7 @@ update_target_checksum() {
         printf '%s  %s\n' "$sha256" "$filename" >> "$temporary"
     done < <(
         find "$target_dir" -maxdepth 1 -type f \
-            -name "lib$name.*" \
+            \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" \) \
             ! -name "*.sync-conflict-*" \
             -print0 | sort -z
     )
@@ -161,28 +161,63 @@ update_project_checksums() {
     done
 }
 
+# Counts configured platform targets for one project.
+# @param project_dir Project directory.
+# @return 0 on success; the count is written to stdout.
+count_project_targets() {
+    local project_dir="$1"
+
+    (
+        cd "$project_dir"
+        make -n all | grep -c 'echo "OK '
+    )
+}
+
 # Builds one kclib project for every configured target.
 # @param project_dir Project directory.
+# @param target_index Completed target count before this project.
+# @param target_count Total target count.
 # @return 0 on success.
 build_project() {
     local project_dir="$1"
-    local project_name status
+    local target_index="$2"
+    local target_count="$3"
+    local project_name progress_file status
 
     project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
-    echo "Building $project_name..."
+    echo "[$((target_index + 1))/$target_count] $project_name: building"
+    progress_file=$(mktemp)
 
     status=0
     (
         cd "$project_dir"
-        make all
+        set -o pipefail
+        make all 2>&1 | awk \
+            -v project_name="$project_name" \
+            -v target_count="$target_count" \
+            -v target_index="$target_index" \
+            -v progress_file="$progress_file" '
+                {
+                    printf "[%d/%d] %s: %s\n", target_index + 1,
+                        target_count, project_name, $0
+                    if ($0 ~ /^OK /) target_index++
+                }
+                END {
+                    print target_index > progress_file
+                }
+            '
     ) || status=$?
+
+    BUILD_TARGET_INDEX=$(cat "$progress_file")
+    rm -f "$progress_file"
 
     if [ "$status" -ne 0 ]; then
         return "$status"
     fi
 
     update_project_checksums "$project_dir"
+    printf '\n'
 }
 
 # Dispatches one project build or all project builds.
@@ -190,7 +225,7 @@ build_project() {
 # @return 0 on success.
 main() {
     local script_dir root_dir proj_dir target project_dir project_name
-    local failed_projects
+    local failed_projects target_count target_index
 
     [ "$#" -eq 1 ] || {
         usage
@@ -209,12 +244,19 @@ main() {
 
     if [ "$target" = "all" ]; then
         failed_projects=""
+        target_count=0
         for project_dir in "$proj_dir"/lib*.c; do
             [ -d "$project_dir" ] || continue
-            if ! build_project "$project_dir"; then
+            target_count=$((target_count + $(count_project_targets "$project_dir")))
+        done
+        target_index=0
+        for project_dir in "$proj_dir"/lib*.c; do
+            [ -d "$project_dir" ] || continue
+            if ! build_project "$project_dir" "$target_index" "$target_count"; then
                 project_name=$(basename "$project_dir")
                 failed_projects="$failed_projects $project_name"
             fi
+            target_index=$BUILD_TARGET_INDEX
         done
 
         if [ -n "$failed_projects" ]; then
@@ -237,7 +279,7 @@ main() {
         exit 1
     }
 
-    build_project "$project_dir"
+    build_project "$project_dir" 0 "$(count_project_targets "$project_dir")"
 }
 
 main "$@"

@@ -96,6 +96,9 @@ if(DEMO_BUILD_TESTS)
         add_executable(demo_contract_test src/test.c)
         target_include_directories(demo_contract_test PRIVATE src)
         target_link_libraries(demo_contract_test PRIVATE ${DEMO_TEST_SHARED_TARGET})
+        target_compile_definitions(demo_contract_test PRIVATE
+            KC_CLI_PATH=\"${DEMO_CLI_PATH}\"
+        )
 
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(demo_contract_test PRIVATE pthread m)
@@ -105,6 +108,28 @@ if(DEMO_BUILD_TESTS)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:${DEMO_TEST_SHARED_TARGET}>
                 $<TARGET_FILE_DIR:demo_contract_test>
+        )
+    endif()
+endif()
+
+if(TARGET demo_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(demo_cli src/demo.c)
+    set_target_properties(demo_cli PROPERTIES
+        OUTPUT_NAME "demo"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(demo_cli PRIVATE src)
+    target_link_libraries(demo_cli PRIVATE demo_shared)
+    if(APPLE)
+        set_target_properties(demo_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(demo_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
         )
     endif()
 endif()

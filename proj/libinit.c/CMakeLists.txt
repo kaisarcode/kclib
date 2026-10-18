@@ -86,3 +86,26 @@ if(INIT_BUILD_TESTS)
             $<TARGET_FILE_DIR:init_contract_test>
     )
 endif()
+
+
+if(TARGET init_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(init_cli src/init.c)
+    set_target_properties(init_cli PROPERTIES
+        OUTPUT_NAME "init"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(init_cli PRIVATE src)
+    target_link_libraries(init_cli PRIVATE init_shared)
+    if(APPLE)
+        set_target_properties(init_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(init_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()

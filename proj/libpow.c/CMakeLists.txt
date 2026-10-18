@@ -34,9 +34,6 @@ set_source_files_properties(src/libpow.c PROPERTIES
 
 set(HASHWX_SOURCES
     lib/hashwx/src/compiler.c
-    lib/hashwx/src/compiler_a64.c
-    lib/hashwx/src/compiler_wasm.c
-    lib/hashwx/src/compiler_x86.c
     lib/hashwx/src/context.c
     lib/hashwx/src/hashwx.c
     lib/hashwx/src/program.c
@@ -44,6 +41,22 @@ set(HASHWX_SOURCES
     lib/hashwx/src/siphash_rng.c
     lib/hashwx/src/virtual_memory.c
 )
+
+if(EMSCRIPTEN)
+    list(APPEND HASHWX_SOURCES lib/hashwx/src/compiler_wasm.c)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64" OR
+       CMAKE_OSX_ARCHITECTURES MATCHES "arm64" OR
+       CMAKE_C_COMPILER MATCHES "aarch64|oa64")
+    list(APPEND HASHWX_SOURCES lib/hashwx/src/compiler_a64.c)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i686|i386" OR
+       CMAKE_OSX_ARCHITECTURES MATCHES "x86_64" OR
+       CMAKE_C_COMPILER MATCHES "x86_64|i686|o64" OR
+       (NOT CMAKE_CROSSCOMPILING AND
+        CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i686|i386"))
+    list(APPEND HASHWX_SOURCES lib/hashwx/src/compiler_x86.c)
+else()
+    list(APPEND HASHWX_SOURCES lib/hashwx/src/compiler_x86.c)
+endif()
 
 set(POW_CORE_SOURCES
     src/libpow.c

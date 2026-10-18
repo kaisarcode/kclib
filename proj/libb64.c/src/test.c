@@ -245,6 +245,166 @@ static int case_kc_b64_version(void) {
     return fail == 0 ? 0 : 1;
 }
 
+#ifndef __EMSCRIPTEN__
+
+static int b64_cli_total = 0;
+static int b64_cli_failed = 0;
+
+/**
+ * Writes one fixture file.
+ * @param path Output file path.
+ * @param text Text to write.
+ * @return Nonzero on success.
+ */
+static int b64_cli_write_text_file(const char *path, const char *text)
+{
+    FILE *file = fopen(path, "wb");
+    size_t size = strlen(text);
+    int ok;
+
+    if (!file) return 0;
+    ok = fwrite(text, 1, size, file) == size;
+    fclose(file);
+    return ok;
+}
+
+/**
+ * Executes the CLI and compares captured stdout exactly.
+ * @param args CLI arguments.
+ * @param stdin_text Optional stdin content.
+ * @param expected Expected stdout.
+ * @return Nonzero on success.
+ */
+static int b64_cli_output_equals(
+    const char *args,
+    const char *stdin_text,
+    const char *expected
+)
+{
+    const char *input_path = "b64-cli-stdin.txt";
+    const char *output_path = "b64-cli-output.txt";
+    char command[4096];
+    char buffer[4096];
+    FILE *file;
+    size_t size;
+    int status;
+
+    if (stdin_text && !b64_cli_write_text_file(input_path, stdin_text)) return 0;
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command),
+        "\"\"%s\" %s %s> %s 2>NUL\"",
+        KC_CLI_PATH,
+        args ? args : "",
+        stdin_text ? "< b64-cli-stdin.txt " : "",
+        output_path);
+#else
+    snprintf(command, sizeof(command),
+        "\"%s\" %s %s> %s 2>/dev/null",
+        KC_CLI_PATH,
+        args ? args : "",
+        stdin_text ? "< b64-cli-stdin.txt " : "",
+        output_path);
+#endif
+
+    status = system(command);
+    if (stdin_text) remove(input_path);
+    if (status != 0) {
+        remove(output_path);
+        return 0;
+    }
+
+    file = fopen(output_path, "rb");
+    if (!file) return 0;
+    size = fread(buffer, 1, sizeof(buffer) - 1, file);
+    fclose(file);
+    remove(output_path);
+    buffer[size] = '\0';
+    return strcmp(buffer, expected) == 0;
+}
+
+/**
+ * Executes the CLI with output discarded.
+ * @param args Arguments appended after executable.
+ * @return Child process status from system().
+ */
+static int b64_cli_run(const char *args)
+{
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args ? args : "");
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args ? args : "");
+#endif
+    return system(command);
+}
+
+/**
+ * Prints one contract-test result.
+ * @param name Test name.
+ * @param detail Behavior under test.
+ * @param ok Nonzero on success.
+ * @return None.
+ */
+static void b64_cli_result(const char *name, const char *detail, int ok)
+{
+    b64_cli_total++;
+    if (!ok) b64_cli_failed++;
+    printf("[%d/13] [%s] %s: %s\n", b64_cli_total, ok ? "PASS" : "FAIL",
+        name, detail);
+}
+
+/**
+ * Runs all b64 CLI contract tests.
+ * @return Zero when all tests pass.
+ */
+static int case_b64_cli(void)
+{
+    const char *file_path = "b64-cli-file.txt";
+    int fixture_ok;
+
+    b64_cli_result("help", "--help succeeds", b64_cli_run("--help") == 0);
+    b64_cli_result("version", "--version succeeds", b64_cli_run("--version") == 0);
+    b64_cli_result("encode arg", "-e encodes text argument",
+        b64_cli_output_equals("-e \"hello world\"", NULL, "aGVsbG8gd29ybGQ="));
+    b64_cli_result("encode stdin", "-e reads stdin when argument is absent",
+        b64_cli_output_equals("-e", "hello world", "aGVsbG8gd29ybGQ="));
+
+    fixture_ok = b64_cli_write_text_file(file_path, "file");
+    b64_cli_result("encode file", "-e -i reads file",
+        fixture_ok && b64_cli_output_equals("-e -i b64-cli-file.txt", NULL,
+            "ZmlsZQ=="));
+    b64_cli_result("stdin priority", "stdin takes priority over -i",
+        fixture_ok && b64_cli_output_equals("-e -i b64-cli-file.txt", "stdin",
+            "c3RkaW4="));
+    b64_cli_result("argument priority", "argument takes priority over stdin and -i",
+        fixture_ok && b64_cli_output_equals(
+            "-e \"argument\" -i b64-cli-file.txt", "stdin",
+            "YXJndW1lbnQ="));
+
+    b64_cli_result("decode arg", "-d decodes Base64 argument",
+        b64_cli_output_equals("-d aGVsbG8=", NULL, "hello"));
+    b64_cli_result("decode stdin", "-d reads Base64 from stdin",
+        b64_cli_output_equals("-d", "aGVsbG8=", "hello"));
+    fixture_ok = fixture_ok && b64_cli_write_text_file(file_path, "aGVsbG8=");
+    b64_cli_result("decode file", "-d -i reads Base64 file",
+        fixture_ok && b64_cli_output_equals("-d -i b64-cli-file.txt", NULL, "hello"));
+    remove(file_path);
+
+    b64_cli_result("missing mode", "encode or decode mode is required", b64_cli_run("") != 0);
+    b64_cli_result("invalid", "invalid Base64 fails", b64_cli_run("-d invalid") != 0);
+    b64_cli_result("unknown", "unknown option fails", b64_cli_run("-e --unknown") != 0);
+
+    printf("\n%d passed, %d failed\n", b64_cli_total - b64_cli_failed,
+        b64_cli_failed);
+    return b64_cli_failed ? 1 : 0;
+}
+
+#endif
+
 /**
  * Runs all test cases in a single process.
  * @return 0 on success, 1 on failure.
@@ -253,11 +413,17 @@ static int case_all(void) {
     int rc = 0;
 
     test_case_total = 4;
+#ifndef __EMSCRIPTEN__
+    test_case_total++;
+#endif
     test_case_current = 0;
     run_case(&rc, case_kc_b64_encode);
     run_case(&rc, case_kc_b64_decode);
     run_case(&rc, case_kc_b64_free);
     run_case(&rc, case_kc_b64_version);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_b64_cli);
+#endif
 
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -279,6 +445,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_b64_decode") == 0) return case_kc_b64_decode();
     if (strcmp(argv[1], "kc_b64_free") == 0) return case_kc_b64_free();
     if (strcmp(argv[1], "kc_b64_version") == 0) return case_kc_b64_version();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "b64_cli") == 0) return case_b64_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

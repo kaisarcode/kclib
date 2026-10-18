@@ -110,6 +110,16 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "loongarch64")
     )
 endif()
 
+list(REMOVE_ITEM GGML_BASE_SOURCES
+    "${CMAKE_SOURCE_DIR}/lib/ggml/src/ggml-cpu/hbm.cpp"
+)
+
+if(APPLE AND CMAKE_CROSSCOMPILING)
+    list(REMOVE_ITEM GGML_ARCH_SOURCES
+        "${CMAKE_SOURCE_DIR}/lib/ggml/src/ggml-cpu/arch/x86/cpu-feats.cpp"
+    )
+endif()
+
 set(GGML_SOURCES ${GGML_BASE_SOURCES} ${GGML_ARCH_SOURCES})
 set(GGML_C_SOURCES "")
 set(GGML_CXX_SOURCES "")
@@ -280,4 +290,27 @@ endif()
 
 if(EMB_BUILD_TESTS)
     
+endif()
+
+
+if(TARGET emb_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(emb_cli src/emb.c)
+    set_target_properties(emb_cli PROPERTIES
+        OUTPUT_NAME "emb"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(emb_cli PRIVATE src)
+    target_link_libraries(emb_cli PRIVATE emb_shared)
+    if(APPLE)
+        set_target_properties(emb_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(emb_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
 endif()

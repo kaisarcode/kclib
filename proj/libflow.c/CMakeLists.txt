@@ -90,3 +90,26 @@ if(FLOW_BUILD_TESTS)
     )
 
 endif()
+
+
+if(TARGET flow_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(flow_cli src/flow.c)
+    set_target_properties(flow_cli PROPERTIES
+        OUTPUT_NAME "flow"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(flow_cli PRIVATE src)
+    target_link_libraries(flow_cli PRIVATE flow_shared)
+    if(APPLE)
+        set_target_properties(flow_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(flow_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()

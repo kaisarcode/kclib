@@ -95,6 +95,9 @@ if(B64_BUILD_TESTS)
         add_executable(b64_contract_test src/test.c)
         target_include_directories(b64_contract_test PRIVATE src)
         target_link_libraries(b64_contract_test PRIVATE ${B64_TEST_SHARED_TARGET})
+        target_compile_definitions(b64_contract_test PRIVATE
+            KC_CLI_PATH=\"${B64_CLI_PATH}\"
+        )
 
         add_custom_command(TARGET b64_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

@@ -120,3 +120,26 @@ if(LNG_BUILD_TESTS)
     endif()
 endif()
 
+
+
+if(TARGET lng_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(lng_cli src/lng.c)
+    set_target_properties(lng_cli PROPERTIES
+        OUTPUT_NAME "lng"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(lng_cli PRIVATE src)
+    target_link_libraries(lng_cli PRIVATE lng_shared)
+    if(APPLE)
+        set_target_properties(lng_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(lng_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()
