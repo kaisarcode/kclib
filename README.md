@@ -130,9 +130,10 @@ project build artifacts and is intentionally excluded from source control.
 
 ## Build and tests
 
-Build every kclib sequentially:
+Build every kclib sequentially (omitting `all` is equivalent):
 
 ```sh
+./scripts/build.sh
 ./scripts/build.sh all
 ```
 
@@ -147,6 +148,7 @@ Use `-l` to display the full build log instead:
 
 ```sh
 ./scripts/build.sh -l demo
+./scripts/build.sh -l
 ./scripts/build.sh -l all
 ```
 
@@ -155,13 +157,16 @@ target and preserves the detailed log if a build fails.
 
 The build script resolves the logical library name to its project directory and runs `make all`.
 
-The test runner uses the same compact terminal display as the build script.
+The test runner also defaults to `all` when no project is specified.
+It uses the same compact terminal display as the build script.
 It updates a single line across native, Wine and WASM tests and between
 projects. Add `-l` to see every test result and the original platform
 separators:
 
 ```sh
+./scripts/test.sh
 ./scripts/test.sh all
+./scripts/test.sh -l
 ./scripts/test.sh -l all
 ./scripts/test.sh -l demo
 ```

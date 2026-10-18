@@ -10,7 +10,7 @@ set -eo pipefail
 # Prints command usage information.
 # @return 0 on success.
 usage() {
-    echo "Usage: $0 [-l] all|NAME" >&2
+    echo "Usage: $0 [-l] [all|NAME]" >&2
 }
 
 # Resolves one logical kclib name to its project directory.
@@ -213,7 +213,7 @@ main() {
         shift
     done
 
-    [ -n "$target" ] || { usage; return 1; }
+    target="${target:-all}"
 
     terminal_cols=80
     if [ "$output_mode" = "compact" ]; then
