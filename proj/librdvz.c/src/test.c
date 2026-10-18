@@ -393,7 +393,11 @@ static int case_errors_and_version(void) {
 static int case_all(void) {
     int rc = 0;
 
+#ifdef __EMSCRIPTEN__
+    test_case_total = 8;
+#else
     test_case_total = 9;
+#endif
     test_case_current = 0;
     run_case(&rc, case_seek_before_publish);
     run_case(&rc, case_unpublish_independent);
