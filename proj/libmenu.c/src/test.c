@@ -435,7 +435,11 @@ static int case_kc_menu_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 5;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 4;
+#else
+    test_case_total = 11;
+#endif
     test_case_current = 0;
 
     run_case(&rc, case_kc_menu_add);
@@ -443,7 +447,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_menu_validation);
     run_case(&rc, case_kc_menu_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_menu_cli);
+    rc += case_menu_cli();
 #endif
 
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
@@ -480,7 +484,10 @@ int main(int argc, char **argv) {
         return case_kc_menu_version();
     }
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "menu_cli") == 0) return case_menu_cli();
+    if (strcmp(argv[1], "menu_cli") == 0) {
+        test_case_total = 7;
+        return case_menu_cli();
+    }
 #endif
 
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
@@ -501,28 +508,17 @@ int main(int argc, char **argv) {
 #define KC_CLI_PATH "menu"
 #endif
 
-static int test_total;
-static int test_current;
-static int test_failures;
-
 /**
- * Print one test result.
+ * Print one CLI test result using the shared test counter.
  * @param name Test name.
  * @param detail Test detail.
  * @param ok Whether the test passed.
- * @return None.
+ * @return Zero on success, one on failure.
  */
-static void result(const char *name, const char *detail, int ok) {
-    test_current++;
-    if (!ok) test_failures++;
-    printf(
-        "[%d/%d] [%s] %s: %s\n",
-        test_current,
-        test_total,
-        ok ? "PASS" : "FAIL",
-        name,
-        detail
-    );
+static int result(const char *name, const char *detail, int ok) {
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -616,47 +612,40 @@ static int run_cli(const char *args) {
  * @return Process status.
  */
 static int case_menu_cli(void) {
-    test_total = 7;
-    test_current = 0;
-    test_failures = 0;
+    int failures = 0;
 
-    result("help", "prints command help", run_cli("--help") == 0);
-    result(
+    failures += result("help", "prints command help", run_cli("--help") == 0);
+    failures += result(
         "version",
         "reports linked libmenu build version",
         run_cli("--version") == 0
     );
-    result(
+    failures += result(
         "errors",
         "rejects an unknown option",
         run_cli("--unknown") != 0
     );
-    result(
+    failures += result(
         "command",
         "rejects a missing command",
         run_cli("only-id") != 0
     );
-    result(
+    failures += result(
         "name",
         "rejects a missing --name value",
         run_cli("test-id test-command --name") != 0
     );
-    result(
+    failures += result(
         "delete-prefix",
         "deletes a missing entry with -d <id>",
         run_cli("-d kccli-menu-contract-missing-a") == 0
     );
-    result(
+    failures += result(
         "delete-suffix",
         "deletes a missing entry with <id> -d",
         run_cli("kccli-menu-contract-missing-b -d") == 0
     );
 
-    printf(
-        "\n%d passed, %d failed\n",
-        test_total - test_failures,
-        test_failures
-    );
-    return test_failures ? 1 : 0;
+    return failures;
 }
 #endif
