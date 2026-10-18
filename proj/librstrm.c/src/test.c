@@ -1290,7 +1290,11 @@ static int case_kc_rstrm_status(void)
 static int case_all(void)
 {
     int rc = 0;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 16;
+#else
     test_case_total = 17;
+#endif
     test_case_current = 0;
     run_case(&rc, case_kc_rstrm_open);
     run_case(&rc, case_kc_rstrm_send);
