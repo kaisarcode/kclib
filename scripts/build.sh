@@ -145,18 +145,31 @@ update_target_checksum() {
     rm -f "$temporary"
 }
 
+# Returns success for supported output platform directory names.
+# @param platform First component beneath bin/.
+# @return 0 for a known platform, 1 otherwise.
+is_platform() {
+    case "$1" in
+        linux|windows|macos|ios|iossim|android|wasm) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Updates checksums for all compiled targets of one project.
 # @param project_dir Project directory.
 # @return 0 on success.
 update_project_checksums() {
     local project_dir="$1"
-    local target_dir
+    local target_dir relative platform
 
     project_dir="${project_dir%/}"
     [ -d "$project_dir/bin" ] || return 0
 
     for target_dir in "$project_dir"/bin/*/*; do
         [ -d "$target_dir" ] || continue
+        relative="${target_dir#"$project_dir/bin/"}"
+        platform="${relative%%/*}"
+        is_platform "$platform" || continue
         update_target_checksum "$project_dir" "$target_dir"
     done
 }

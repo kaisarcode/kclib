@@ -47,6 +47,16 @@ is_excluded() {
     return 1
 }
 
+# Checks whether a directory name is a supported target platform.
+# @param platform Directory name beneath bin/ or dist/libNAME.c/.
+# @return 0 when recognized, 1 otherwise.
+is_platform() {
+    case "$1" in
+        linux|windows|macos|ios|iossim|android|wasm) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Checks whether a path is a current kclib project.
 # @param project_path Project directory path.
 # @return 0 when current, 1 otherwise.
@@ -225,7 +235,7 @@ sync_target() {
 # @return 0 when unchanged, 1 when stale targets were removed.
 prune_stale_targets() {
     local project_dir="$1"
-    local project_name project_dist arch_dir platform_dir relative source_dir
+    local project_name project_dist platform_dir arch_dir relative source_dir
     local changed
 
     project_dir="${project_dir%/}"
@@ -234,15 +244,21 @@ prune_stale_targets() {
     [ -d "$project_dist" ] || return 0
 
     changed=0
-    for arch_dir in "$project_dist"/*; do
-        [ -d "$arch_dir" ] || continue
-        for platform_dir in "$arch_dir"/*; do
-            [ -d "$platform_dir" ] || continue
-            relative="${platform_dir#"$project_dist/"}"
+    for platform_dir in "$project_dist"/*; do
+        [ -d "$platform_dir" ] || continue
+        if ! is_platform "$(basename "$platform_dir")"; then
+            rm -rf "$platform_dir"
+            changed=1
+            continue
+        fi
+
+        for arch_dir in "$platform_dir"/*; do
+            [ -d "$arch_dir" ] || continue
+            relative="${arch_dir#"$project_dist/"}"
             source_dir="$project_dir/bin/$relative"
 
             if [ ! -d "$source_dir" ]; then
-                rm -rf "$platform_dir"
+                rm -rf "$arch_dir"
                 changed=1
             fi
         done
@@ -256,7 +272,7 @@ prune_stale_targets() {
 # @return 0 when changed, 1 when no work was needed.
 package_project() {
     local project_dir="$1"
-    local project_name target_dir status changed stale_changed
+    local project_name target_dir relative platform status changed stale_changed
 
     project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
@@ -271,6 +287,9 @@ package_project() {
 
     for target_dir in "$project_dir"/bin/*/*; do
         [ -d "$target_dir" ] || continue
+        relative="${target_dir#"$project_dir/bin/"}"
+        platform="${relative%%/*}"
+        is_platform "$platform" || continue
 
         status=0
         dist_target_is_current "$project_dir" "$target_dir" || status=$?
@@ -328,7 +347,7 @@ prune_stale_projects() {
 generate_manifest() {
     local manifest_file first_project first_binary updated_at
     local project_dir project_name project_dist target_dir checksum
-    local relative arch platform sha file dist_file filesize
+    local relative platform arch sha file dist_file filesize
 
     manifest_file="$DIST_DIR/manifest.json"
     first_project=true
@@ -359,14 +378,14 @@ generate_manifest() {
 
         for target_dir in "$project_dir"/bin/*/*; do
             [ -d "$target_dir" ] || continue
+            relative="${target_dir#"$project_dir/bin/"}"
+            IFS="/" read -r platform arch <<< "$relative"
+            is_platform "$platform" || continue
             checksum="$target_dir/SHA256SUMS"
             if [ ! -f "$checksum" ]; then
                 echo "error: build checksum not found: $checksum" >&2
                 return 1
             fi
-
-            relative="${target_dir#"$project_dir/bin/"}"
-            IFS="/" read -r arch platform <<< "$relative"
 
             while read -r sha file; do
                 [ -n "$sha" ] || continue
