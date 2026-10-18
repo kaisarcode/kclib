@@ -245,7 +245,11 @@ static int case_kc_min_version(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 7;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 6;
+#else
+    test_case_total = 18;
+#endif
     test_case_current = 0;
     run_case(&rc, case_kc_min_css);
     run_case(&rc, case_kc_min_js);
@@ -254,7 +258,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_min_free);
     run_case(&rc, case_kc_min_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_min_cli);
+    rc += case_min_cli();
 #endif
     printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -279,7 +283,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_min_free") == 0) return case_kc_min_free();
     if (strcmp(argv[1], "kc_min_version") == 0) return case_kc_min_version();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "min_cli") == 0) return case_min_cli();
+    if (strcmp(argv[1], "min_cli") == 0) {
+        int failures;
+
+        test_case_total = 12;
+        failures = case_min_cli();
+        printf("%d passed, %d failed\n", test_case_total - failures, failures);
+        return failures ? 1 : 0;
+    }
 #endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
@@ -292,9 +303,6 @@ int main(int argc, char **argv) {
 #ifndef KC_CLI_PATH
 #define KC_CLI_PATH "min"
 #endif
-
-static int test_total = 0;
-static int test_failed = 0;
 
 /**
  * Writes one text fixture file.
@@ -390,18 +398,17 @@ static int output_equals(
 }
 
 /**
- * Prints one contract-test result.
+ * Prints one CLI result using the shared test counter.
  * @param name Test name.
  * @param detail Behavior under test.
  * @param ok Nonzero on success.
- * @return None.
+ * @return Zero on success, one on failure.
  */
-static void result(const char *name, const char *detail, int ok)
+static int result(const char *name, const char *detail, int ok)
 {
-    test_total++;
-    if (!ok) test_failed++;
-    printf("[%d/12] [%s] %s: %s\n", test_total, ok ? "PASS" : "FAIL",
-        name, detail);
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -412,40 +419,40 @@ static int case_min_cli(void)
 {
     const char *file_path = "min-cli-file.txt";
     int fixture_ok;
+    int failures = 0;
 
-    result("help", "--help succeeds", run_cli("--help") == 0);
-    result("version", "--version succeeds", run_cli("--version") == 0);
-    result("default txt", "text argument defaults to txt",
+    failures += result("help", "--help succeeds", run_cli("--help") == 0);
+    failures += result("version", "--version succeeds", run_cli("--version") == 0);
+    failures += result("default txt", "text argument defaults to txt",
         output_equals("\"fdfsdfsd sdfsd     ff sd              fsdfd\"", NULL,
             "fdfsdfsd sdfsd ff sd fsdfd"));
-    result("stdin", "stdin defaults to txt",
+    failures += result("stdin", "stdin defaults to txt",
         output_equals(NULL, "  hello   world\n\nfoo\tbar  ",
             "hello world foo bar"));
 
     fixture_ok = write_text_file(file_path, "file      input");
-    result("input file", "-i reads file when higher-priority input is absent",
+    failures += result("input file", "-i reads file when higher-priority input is absent",
         fixture_ok && output_equals("-i min-cli-file.txt", NULL,
             "file input"));
-    result("stdin priority", "stdin takes priority over -i",
+    failures += result("stdin priority", "stdin takes priority over -i",
         fixture_ok && output_equals("-i min-cli-file.txt",
             "stdin      input", "stdin input"));
-    result("argument priority", "argument takes priority over stdin and -i",
+    failures += result("argument priority", "argument takes priority over stdin and -i",
         fixture_ok && output_equals(
             "\"argument    input\" -i min-cli-file.txt",
             "stdin input", "argument input"));
     remove(file_path);
 
-    result("css", "CSS argument minification succeeds",
+    failures += result("css", "CSS argument minification succeeds",
         output_equals("-t css \"/* hi */ body{}\"", NULL, "body{}"));
-    result("js", "JavaScript argument minification succeeds",
+    failures += result("js", "JavaScript argument minification succeeds",
         output_equals("-t js \"const x = 1; // comment\"", NULL,
             "const x = 1;"));
-    result("html", "HTML argument minification succeeds",
+    failures += result("html", "HTML argument minification succeeds",
         output_equals("-t html \"<!-- c --><p>hi</p>\"", NULL, "<p>hi</p>"));
-    result("bad type", "unknown type fails", run_cli("-t xml \"text\"") != 0);
-    result("unknown", "unknown option fails", run_cli("--unknown") != 0);
+    failures += result("bad type", "unknown type fails", run_cli("-t xml \"text\"") != 0);
+    failures += result("unknown", "unknown option fails", run_cli("--unknown") != 0);
 
-    printf("%d passed, %d failed\n", test_total - test_failed, test_failed);
-    return test_failed ? 1 : 0;
+    return failures;
 }
 #endif
