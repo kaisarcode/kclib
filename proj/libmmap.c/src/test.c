@@ -416,7 +416,11 @@ static int case_kc_mmap_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 8;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 7;
+#else
+    test_case_total = 15;
+#endif
     test_case_current = 0;
 
     run_case(&rc, case_kc_mmap_open);
@@ -427,7 +431,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_mmap_close);
     run_case(&rc, case_kc_mmap_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_mmap_cli);
+    rc += case_mmap_cli();
 #endif
     printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -453,7 +457,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_mmap_close") == 0) return case_kc_mmap_close();
     if (strcmp(argv[1], "kc_mmap_version") == 0) return case_kc_mmap_version();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "mmap_cli") == 0) return case_mmap_cli();
+    if (strcmp(argv[1], "mmap_cli") == 0) {
+        int failures;
+
+        test_case_total = 8;
+        failures = case_mmap_cli();
+        printf("%d passed, %d failed\n", test_case_total - failures, failures);
+        return failures ? 1 : 0;
+    }
 #endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
@@ -466,9 +477,6 @@ int main(int argc, char **argv) {
 #ifndef KC_CLI_PATH
 #define KC_CLI_PATH "mmap"
 #endif
-
-static int test_total = 0;
-static int test_failed = 0;
 
 /**
  * Executes the CLI with output discarded.
@@ -537,18 +545,17 @@ static int create_input(void)
 }
 
 /**
- * Prints one contract-test result.
+ * Prints one CLI result using the shared test counter.
  * @param name Test name.
  * @param detail Behavior under test.
  * @param ok Nonzero on success.
- * @return None.
+ * @return Zero on success, one on failure.
  */
-static void result(const char *name, const char *detail, int ok)
+static int result(const char *name, const char *detail, int ok)
 {
-    test_total++;
-    if (!ok) test_failed++;
-    printf("[%d/8] [%s] %s: %s\n", test_total, ok ? "PASS" : "FAIL",
-        name, detail);
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -557,22 +564,23 @@ static void result(const char *name, const char *detail, int ok)
  */
 static int case_mmap_cli(void)
 {
+    int failures = 0;
     remove("mmap-cli-value.bin");
     remove("mmap-cli-input.bin");
     remove("mmap-cli-output.bin");
 
-    result("help", "--help succeeds", run_cli("--help") == 0);
-    result("version", "--version succeeds", run_cli("--version") == 0);
-    result("unknown", "unknown command fails",
+    failures += result("help", "--help succeeds", run_cli("--help") == 0);
+    failures += result("version", "--version succeeds", run_cli("--version") == 0);
+    failures += result("unknown", "unknown command fails",
         run_cli("unknown mmap-cli-value.bin") != 0);
-    result("missing", "get on a missing value fails",
+    failures += result("missing", "get on a missing value fails",
         run_cli("get mmap-cli-value.bin") != 0);
-    result("fixture", "binary input fixture is created", create_input());
-    result("set", "set persists binary input",
+    failures += result("fixture", "binary input fixture is created", create_input());
+    failures += result("set", "set persists binary input",
         run_cli("set mmap-cli-value.bin -i mmap-cli-input.bin") == 0);
-    result("get", "get reproduces binary bytes",
+    failures += result("get", "get reproduces binary bytes",
         get_matches("mmap-cli-value.bin"));
-    result("del", "del removes the stored value",
+    failures += result("del", "del removes the stored value",
         run_cli("del mmap-cli-value.bin") == 0 &&
         run_cli("get mmap-cli-value.bin") != 0);
 
@@ -580,7 +588,6 @@ static int case_mmap_cli(void)
     remove("mmap-cli-input.bin");
     remove("mmap-cli-output.bin");
 
-    printf("%d passed, %d failed\n", test_total - test_failed, test_failed);
-    return test_failed ? 1 : 0;
+    return failures;
 }
 #endif
