@@ -103,3 +103,21 @@ if(B64_BUILD_TESTS)
         )
     endif()
 endif()
+
+# Build the command-line frontend against the shared library.
+if(TARGET b64_shared AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(b64_cli src/b64.c)
+    set_target_properties(b64_cli PROPERTIES
+        OUTPUT_NAME "b64"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(b64_cli PRIVATE src)
+    target_link_libraries(b64_cli PRIVATE b64_shared)
+    if(APPLE)
+        set_target_properties(b64_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
+    elseif(UNIX)
+        set_target_properties(b64_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN")
+    endif()
+endif()
