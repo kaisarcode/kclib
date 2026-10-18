@@ -142,6 +142,17 @@ Build one project:
 ./scripts/build.sh demo
 ```
 
+In an interactive terminal, builds show a single updating progress line.
+Use `-l` to display the full build log instead:
+
+```sh
+./scripts/build.sh -l demo
+./scripts/build.sh -l all
+```
+
+When output is redirected, the default mode prints one line per completed
+target and preserves the detailed log if a build fails.
+
 The build script resolves the logical library name to its project directory and runs `make all`.
 
 The normal project-local entry points are:

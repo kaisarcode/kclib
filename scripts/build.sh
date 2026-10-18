@@ -10,7 +10,7 @@ set -e
 # Prints command usage information.
 # @return 0 on success.
 usage() {
-    echo "Usage: $0 all|NAME" >&2
+    echo "Usage: $0 [-l] all|NAME" >&2
 }
 
 # Resolves one logical kclib name to its project directory.
@@ -203,49 +203,119 @@ count_build_steps() {
     fi
 }
 
+# Formats build output as logs, an in-place status, or CI-friendly lines.
+# @param project_name Project directory basename.
+# @param step_index First target position for the project.
+# @param step_count Total number of targets.
+# @param last_step Last target position for the project.
+# @param output_mode verbose, tty, or plain.
+# @param columns Available terminal columns.
+# @return 0 on success.
+format_build_output() {
+    awk -v project_name="$1" \
+        -v step_index="$2" \
+        -v step_count="$3" \
+        -v last_step="$4" \
+        -v output_mode="$5" \
+        -v columns="$6" '
+            function show_status(detail,    line) {
+                sub(/\/[^[:space:]]*\/bin\//, "bin/", detail)
+                gsub(/\r/, "", detail)
+                line = sprintf("[%d/%d] %s: %s", step_index,
+                    step_count, project_name, detail)
+                if (columns > 1 && length(line) >= columns) {
+                    line = substr(line, 1, columns - 1)
+                }
+                printf "\r\033[2K%s", line
+            }
+            {
+                if (output_mode == "verbose") {
+                    printf "[%d/%d] %s: %s\n", step_index,
+                        step_count, project_name, $0
+                } else if (output_mode == "tty") {
+                    show_status($0)
+                } else if ($0 ~ /^OK [^[:space:]]+\/[^[:space:]]+$/) {
+                    printf "[%d/%d] %s: %s\n", step_index,
+                        step_count, project_name, $0
+                }
+
+                if ($0 ~ /^OK [^[:space:]]+\/[^[:space:]]+$/ &&
+                    step_index < last_step) {
+                    step_index++
+                }
+                fflush()
+            }
+        '
+}
+
 # Builds one kclib project for every configured target.
 # @param project_dir Project directory.
 # @param step_index One-based index of the first target for this project.
 # @param step_count Total targets in the build run.
 # @param project_steps Number of targets for this project.
+# @param output_mode verbose, tty, or plain.
+# @param columns Available terminal columns.
 # @return 0 on success.
 build_project() {
     local project_dir="$1"
     local step_index="$2"
     local step_count="$3"
     local project_steps="$4"
-    local project_name status
+    local output_mode="$5"
+    local columns="$6"
+    local project_name status build_log
 
     project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
-    echo "[$step_index/$step_count] $project_name: building"
+
+    if [ "$output_mode" = "tty" ]; then
+        printf '\r\033[2K[%d/%d] %s: building' \
+            "$step_index" "$step_count" "$project_name"
+    else
+        echo "[$step_index/$step_count] $project_name: building"
+    fi
+
+    build_log=""
+    if [ "$output_mode" != "verbose" ]; then
+        build_log=$(mktemp)
+    fi
 
     status=0
     (
         cd "$project_dir"
         set -o pipefail
-        make all 2>&1 | awk \
-            -v project_name="$project_name" \
-            -v step_count="$step_count" \
-            -v step_index="$step_index" \
-            -v last_step="$((step_index + project_steps - 1))" '
-                {
-                    printf "[%d/%d] %s: %s\n", step_index,
-                        step_count, project_name, $0
-                    if ($0 ~ /^OK [^[:space:]]+\/[^[:space:]]+$/ &&
-                        step_index < last_step) {
-                        step_index++
-                    }
-                }
-            '
+        if [ "$output_mode" = "verbose" ]; then
+            make all 2>&1 | format_build_output \
+                "$project_name" "$step_index" "$step_count" \
+                "$((step_index + project_steps - 1))" "$output_mode" "$columns"
+        else
+            make all 2>&1 | tee "$build_log" | format_build_output \
+                "$project_name" "$step_index" "$step_count" \
+                "$((step_index + project_steps - 1))" "$output_mode" "$columns"
+        fi
     ) || status=$?
 
     if [ "$status" -ne 0 ]; then
+        if [ "$output_mode" = "tty" ]; then
+            printf '\r\033[2K'
+        fi
+        if [ -n "$build_log" ]; then
+            printf '[%d/%d] %s: build failed\n' \
+                "$step_index" "$step_count" "$project_name" >&2
+            cat "$build_log" >&2
+            rm -f "$build_log"
+        fi
         return "$status"
     fi
 
+    if [ -n "$build_log" ]; then
+        rm -f "$build_log"
+    fi
     update_project_checksums "$project_dir"
-    printf '\n'
+
+    if [ "$output_mode" = "verbose" ]; then
+        printf '\n'
+    fi
 }
 
 # Dispatches one project build or all project builds.
@@ -253,22 +323,50 @@ build_project() {
 # @return 0 on success.
 main() {
     local script_dir root_dir proj_dir target project_dir project_name
-    local failed_projects step_count step_index steps i
+    local failed_projects step_count step_index steps i output_mode terminal_cols
     local -a project_dirs project_steps
 
-    [ "$#" -eq 1 ] || {
-        usage
-        exit 1
-    }
+    target=""
+    output_mode="compact"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -l)
+                [ "$output_mode" = "compact" ] || { usage; return 1; }
+                output_mode="verbose"
+                ;;
+            *)
+                [ -z "$target" ] || { usage; return 1; }
+                target="$1"
+                ;;
+        esac
+        shift
+    done
+
+    [ -n "$target" ] || { usage; return 1; }
+
+    terminal_cols=80
+    if [ "$output_mode" = "compact" ]; then
+        if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ]; then
+            output_mode="tty"
+            terminal_cols=$(tput cols 2>/dev/null || true)
+            case "$terminal_cols" in
+                ''|*[!0-9]*) terminal_cols=80 ;;
+            esac
+            if [ "$terminal_cols" -lt 12 ]; then
+                terminal_cols=80
+            fi
+        else
+            output_mode="plain"
+        fi
+    fi
 
     script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     root_dir=$(dirname "$script_dir")
     proj_dir="$root_dir/proj"
-    target="$1"
 
     [ -d "$proj_dir" ] || {
         echo "error: projects directory not found: $proj_dir" >&2
-        exit 1
+        return 1
     }
 
     if [ "$target" = "all" ]; then
@@ -288,7 +386,8 @@ main() {
         for i in "${!project_dirs[@]}"; do
             project_dir="${project_dirs[$i]}"
             steps="${project_steps[$i]}"
-            if ! build_project "$project_dir" "$step_index" "$step_count" "$steps"; then
+            if ! build_project "$project_dir" "$step_index" "$step_count" \
+                "$steps" "$output_mode" "$terminal_cols"; then
                 project_name=$(basename "$project_dir")
                 failed_projects="$failed_projects $project_name"
             fi
@@ -296,8 +395,15 @@ main() {
         done
 
         if [ -n "$failed_projects" ]; then
+            if [ "$output_mode" = "tty" ]; then
+                printf '\r\033[2K'
+            fi
             echo "error: failed projects:$failed_projects" >&2
             return 1
+        fi
+        if [ "$output_mode" = "tty" ]; then
+            printf '\r\033[2K[%d/%d] Build complete\n' \
+                "$step_count" "$step_count"
         fi
         return 0
     fi
@@ -306,17 +412,23 @@ main() {
         *[!A-Za-z0-9_-]*|'')
             echo "error: invalid project name: $target" >&2
             usage
-            exit 1
+            return 1
             ;;
     esac
 
     project_dir=$(resolve_project "$proj_dir" "$target") || {
         echo "error: project not found: $target" >&2
-        exit 1
+        return 1
     }
 
     steps=$(count_build_steps "$project_dir")
-    build_project "$project_dir" 1 "$steps" "$steps"
+    build_project "$project_dir" 1 "$steps" "$steps" \
+        "$output_mode" "$terminal_cols" || return $?
+
+    if [ "$output_mode" = "tty" ]; then
+        printf '\r\033[2K[%d/%d] %s: build complete\n' \
+            "$steps" "$steps" "$(basename "$project_dir")"
+    fi
 }
 
 main "$@"
