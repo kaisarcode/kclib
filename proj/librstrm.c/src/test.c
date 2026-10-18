@@ -41,6 +41,8 @@ typedef pthread_mutex_t test_mutex_t;
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+static void case_result(int fail, const char *name, const char *detail);
+
 #ifndef __EMSCRIPTEN__
 static int case_rstrm_cli(void);
 #endif
