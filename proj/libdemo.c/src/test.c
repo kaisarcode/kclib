@@ -107,9 +107,6 @@ static int case_kc_demo_version(void) {
 #define KC_LINE_END "\n"
 #endif
 
-static int demo_cli_total = 0;
-static int demo_cli_failed = 0;
-
 /**
  * Executes the CLI with output discarded.
  * @param args Arguments appended after executable.
@@ -170,14 +167,13 @@ static int demo_cli_capture_output(const char *args, char *buffer, size_t buffer
  * @param name Test name.
  * @param detail Behavior under test.
  * @param ok Nonzero on success.
- * @return None.
+ * @return 0 on success, 1 on failure.
  */
-static void demo_cli_result(const char *name, const char *detail, int ok)
+static int demo_cli_result(const char *name, const char *detail, int ok)
 {
-    demo_cli_total++;
-    if (!ok) demo_cli_failed++;
-    printf("[%d/6] [%s] %s: %s\n", demo_cli_total, ok ? "PASS" : "FAIL",
-        name, detail);
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -187,20 +183,24 @@ static void demo_cli_result(const char *name, const char *detail, int ok)
 static int case_demo_cli(void)
 {
     char output[256];
+    int failures = 0;
 
-    demo_cli_result("help", "--help succeeds", demo_cli_run("--help") == 0);
-    demo_cli_result("version", "--version succeeds", demo_cli_run("--version") == 0);
-    demo_cli_result("greet", "name prints greeting",
+    failures += demo_cli_result("help", "--help succeeds",
+        demo_cli_run("--help") == 0);
+    failures += demo_cli_result("version", "--version succeeds",
+        demo_cli_run("--version") == 0);
+    failures += demo_cli_result("greet", "name prints greeting",
         demo_cli_capture_output("John", output, sizeof(output)) &&
         strcmp(output, "Hello John!" KC_LINE_END) == 0);
-    demo_cli_result("quoted", "quoted name with spaces succeeds",
+    failures += demo_cli_result("quoted", "quoted name with spaces succeeds",
         demo_cli_capture_output("\"John Doe\"", output, sizeof(output)) &&
         strcmp(output, "Hello John Doe!" KC_LINE_END) == 0);
-    demo_cli_result("missing", "missing name fails", demo_cli_run(NULL) != 0);
-    demo_cli_result("unknown", "unknown option fails", demo_cli_run("--unknown") != 0);
+    failures += demo_cli_result("missing", "missing name fails",
+        demo_cli_run(NULL) != 0);
+    failures += demo_cli_result("unknown", "unknown option fails",
+        demo_cli_run("--unknown") != 0);
 
-    printf("%d passed, %d failed\n\n", demo_cli_total - demo_cli_failed, demo_cli_failed);
-    return demo_cli_failed ? 1 : 0;
+    return failures;
 }
 
 #endif
@@ -212,18 +212,19 @@ static int case_demo_cli(void)
 static int case_all(void) {
     int rc = 0;
 
+#ifdef __EMSCRIPTEN__
     test_case_total = 2;
-#ifndef __EMSCRIPTEN__
-    test_case_total++;
+#else
+    test_case_total = 8;
 #endif
     test_case_current = 0;
     run_case(&rc, case_kc_demo_greet);
     run_case(&rc, case_kc_demo_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_demo_cli);
+    rc += case_demo_cli();
 #endif
 
-    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
@@ -242,7 +243,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_demo_greet") == 0) return case_kc_demo_greet();
     if (strcmp(argv[1], "kc_demo_version") == 0) return case_kc_demo_version();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "demo_cli") == 0) return case_demo_cli();
+    if (strcmp(argv[1], "demo_cli") == 0) {
+        int failures;
+
+        test_case_total = 6;
+        failures = case_demo_cli();
+        printf("%d passed, %d failed\n", test_case_total - failures, failures);
+        return failures ? 1 : 0;
+    }
 #endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
