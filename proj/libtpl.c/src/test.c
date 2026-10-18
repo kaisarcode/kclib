@@ -285,7 +285,11 @@ static int case_kc_tpl_version(void) {
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 7;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 6;
+#else
+    test_case_total = 17;
+#endif
     test_case_current = 0;
 
     run_case(&rc, case_kc_tpl_open);
@@ -295,7 +299,7 @@ static int case_all(void) {
     run_case(&rc, case_kc_tpl_close);
     run_case(&rc, case_kc_tpl_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_tpl_cli);
+    rc += case_tpl_cli();
 #endif
     printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -320,7 +324,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_tpl_close") == 0) return case_kc_tpl_close();
     if (strcmp(argv[1], "kc_tpl_version") == 0) return case_kc_tpl_version();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "tpl_cli") == 0) return case_tpl_cli();
+    if (strcmp(argv[1], "tpl_cli") == 0) {
+        int failures;
+
+        test_case_total = 11;
+        failures = case_tpl_cli();
+        printf("%d passed, %d failed\n", test_case_total - failures, failures);
+        return failures ? 1 : 0;
+    }
 #endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
@@ -333,9 +344,6 @@ int main(int argc, char **argv) {
 #ifndef KC_CLI_PATH
 #define KC_CLI_PATH "tpl"
 #endif
-
-static int test_total = 0;
-static int test_failed = 0;
 
 /**
  * Writes one text fixture file.
@@ -430,18 +438,17 @@ static int run_cli(const char *args)
 }
 
 /**
- * Prints one contract-test result.
+ * Prints one CLI result using the shared test counter.
  * @param name Test name.
  * @param detail Behavior under test.
  * @param ok Nonzero on success.
- * @return None.
+ * @return Zero on success, one on failure.
  */
-static void result(const char *name, const char *detail, int ok)
+static int result(const char *name, const char *detail, int ok)
 {
-    test_total++;
-    if (!ok) test_failed++;
-    printf("[%d/11] [%s] %s: %s\n", test_total, ok ? "PASS" : "FAIL",
-        name, detail);
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -452,30 +459,30 @@ static int case_tpl_cli(void)
 {
     const char *file_path = "tpl-cli-input.tpl";
     int fixture_ok;
+    int failures = 0;
 
-    result("help", "--help succeeds", run_cli("--help") == 0);
-    result("version", "--version succeeds", run_cli("--version") == 0);
-    result("missing", "missing template input fails", run_cli("") != 0);
-    result("root", "--root requires a value", run_cli("Hello --root") != 0);
-    result("var", "--var requires key and value", run_cli("Hello --var key") != 0);
-    result("unknown", "unknown option fails", run_cli("Hello --unknown") != 0);
-    result("argument", "positional argument is literal template text",
+    failures += result("help", "--help succeeds", run_cli("--help") == 0);
+    failures += result("version", "--version succeeds", run_cli("--version") == 0);
+    failures += result("missing", "missing template input fails", run_cli("") != 0);
+    failures += result("root", "--root requires a value", run_cli("Hello --root") != 0);
+    failures += result("var", "--var requires key and value", run_cli("Hello --var key") != 0);
+    failures += result("unknown", "unknown option fails", run_cli("Hello --unknown") != 0);
+    failures += result("argument", "positional argument is literal template text",
         output_equals("Hello", NULL, "Hello"));
-    result("stdin", "stdin provides template input",
+    failures += result("stdin", "stdin provides template input",
         output_equals("", "Hello", "Hello"));
 
     fixture_ok = write_text_file(file_path, "File");
-    result("input file", "-i reads template file when higher-priority input is absent",
+    failures += result("input file", "-i reads template file when higher-priority input is absent",
         fixture_ok && output_equals("-i tpl-cli-input.tpl", NULL, "File"));
-    result("stdin priority", "stdin takes priority over -i",
+    failures += result("stdin priority", "stdin takes priority over -i",
         fixture_ok && output_equals("-i tpl-cli-input.tpl", "Stdin",
             "Stdin"));
-    result("argument priority", "argument takes priority over stdin and -i",
+    failures += result("argument priority", "argument takes priority over stdin and -i",
         fixture_ok && output_equals("-i tpl-cli-input.tpl Argument", "Stdin",
             "Argument"));
     remove(file_path);
 
-    printf("%d passed, %d failed\n", test_total - test_failed, test_failed);
-    return test_failed ? 1 : 0;
+    return failures;
 }
 #endif
