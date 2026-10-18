@@ -155,6 +155,20 @@ target and preserves the detailed log if a build fails.
 
 The build script resolves the logical library name to its project directory and runs `make all`.
 
+The test runner uses the same compact terminal display as the build script.
+It updates a single line across native, Wine and WASM tests and between
+projects. Add `-l` to see every test result and the original platform
+separators:
+
+```sh
+./scripts/test.sh all
+./scripts/test.sh -l all
+./scripts/test.sh -l demo
+```
+
+With redirected output, the default prints one summary per runtime. When a
+runtime fails, its complete test log is shown.
+
 The normal project-local entry points are:
 
 ```sh
