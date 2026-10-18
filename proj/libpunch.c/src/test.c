@@ -1018,7 +1018,11 @@ static int case_punch_cli(void)
 static int case_all(void)
 {
     int rc = 0;
+#ifdef __EMSCRIPTEN__
+    test_case_total = 4;
+#else
     test_case_total = 5;
+#endif
     test_case_current = 0;
     run_case(&rc, case_kc_punch_connect);
     run_case(&rc, case_kc_punch_datagrams);
