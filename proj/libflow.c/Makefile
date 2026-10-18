@@ -165,7 +165,7 @@ all: \
 ## Linux
 define linux_target
 	@mkdir -p $(BIN_DIR)/linux/$(1)
-	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/linux/$(1)' $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Linux \

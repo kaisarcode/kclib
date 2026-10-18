@@ -214,7 +214,7 @@ define linux_target
 	if [ -f "$cache" ] && { ! grep -Fq "CMAKE_C_COMPILER:FILEPATH=$(command -v $(3) 2>/dev/null || printf '%s' $(3))" "$cache" || ! grep -Fq "CMAKE_CXX_COMPILER:FILEPATH=$(command -v $(4) 2>/dev/null || printf '%s' $(4))" "$cache"; }; then \
 		rm -f "$cache" $(BUILD_DIR)/$(subst /,-,$(1))-linux/build.ninja && rm -rf $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeFiles; \
 	fi
-	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/linux/$(1)' $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Linux \
