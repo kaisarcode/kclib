@@ -184,9 +184,12 @@ make test
 Projects normally use Make over CMake and Ninja. A local build creates artifacts
 under `bin/{platform}/{arch}/`; exact multiarch targets depend on the project.
 For example, `make linux/x86_64` builds to `proj/libdemo.c/bin/linux/x86_64/`,
-while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Published artifacts
-follow the same order in `dist/libNAME.c/{platform}/{arch}/` (for example,
-`dist/libdemo.c/linux/x86_64/`).
+while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Distribution
+publishes one ZIP per platform and architecture, for example,
+`dist/libdemo.c/libdemo-linux-x86_64.zip`. Each ZIP contains a single
+`libdemo/` directory with the compiled artifacts for that target and
+`SHA256SUMS`. The distribution manifest (`dist/manifest.json`) lists ZIP
+paths, sizes, archive SHA-256 hashes, and source build-checksum hashes.
 
 Publish every kclib (omitting `all` is equivalent) or one project:
 

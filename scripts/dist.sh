@@ -36,7 +36,7 @@ PROJ_DIR="$ROOT_DIR/proj"
 DIST_DIR="$ROOT_DIR/dist"
 readonly EXCLUDED_PROJECTS=("liblibr.c")
 declare -A MANIFEST_SHA=()
-declare -A MANIFEST_COUNT=()
+declare -A MANIFEST_BUILD_SHA=()
 
 # Prints command usage information.
 # @return 0 on success.
@@ -116,25 +116,53 @@ resolve_project() {
     return 1
 }
 
-# Loads artifact checksums from the current distribution manifest.
+# Returns the SHA-256 checksum of one file.
+# @param file File path.
+# @return Checksum on stdout.
+compute_sha256() {
+    local file="$1"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+    else
+        openssl dgst -sha256 "$file" | awk '{print $NF}'
+    fi
+}
+
+# Maps one bin/<platform>/<arch> directory to its published ZIP path.
+# @param project_dir Project directory.
+# @param target_dir Built target directory.
+# @return Archive path on stdout.
+target_archive_path() {
+    local project_dir="$1"
+    local target_dir="$2"
+    local project_name name relative platform arch
+
+    project_dir="${project_dir%/}"
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+    relative="${target_dir#"$project_dir/bin/"}"
+    IFS="/" read -r platform arch <<< "$relative"
+    printf '%s/%s/lib%s-%s-%s.zip\n' "$DIST_DIR" "$project_name" \
+        "$name" "$platform" "$arch"
+}
+
+# Loads previous archive and build checksums for incremental publication.
 # @return 0 on success.
 load_manifest_state() {
-    local manifest sha path prefix
+    local manifest sha build_sha path
 
     MANIFEST_SHA=()
-    MANIFEST_COUNT=()
+    MANIFEST_BUILD_SHA=()
     manifest="$DIST_DIR/manifest.json"
     [ -f "$manifest" ] || return 0
 
-    while IFS=$'\t' read -r sha path; do
-        [ -n "$sha" ] || continue
-        [ -n "$path" ] || continue
-
+    while IFS=$'\t' read -r sha build_sha path; do
+        [ -n "$sha" ] && [ -n "$path" ] || continue
         MANIFEST_SHA["$path"]="$sha"
-        prefix="${path%/*}"
-        MANIFEST_COUNT["$prefix"]=$((
-            ${MANIFEST_COUNT["$prefix"]:-0} + 1
-        ))
+        MANIFEST_BUILD_SHA["$path"]="$build_sha"
     done < <(
         awk '
             /"sha256":/ {
@@ -142,155 +170,165 @@ load_manifest_state() {
                 sub(/^.*"sha256": "/, "", sha)
                 sub(/".*$/, "", sha)
             }
+            /"build_sha256":/ {
+                build_sha = $0
+                sub(/^.*"build_sha256": "/, "", build_sha)
+                sub(/".*$/, "", build_sha)
+            }
             /"path":/ {
                 path = $0
                 sub(/^.*"path": "/, "", path)
                 sub(/".*$/, "", path)
                 if (sha != "" && path != "") {
-                    printf "%s\t%s\n", sha, path
+                    printf "%s\t%s\t%s\n", sha, build_sha, path
                 }
                 sha = ""
+                build_sha = ""
             }
         ' "$manifest"
     )
 }
 
-# Removes checksum files left by the superseded dist layout.
+# Removes metadata from the former, unpacked distribution layout.
 # @return 0 on success.
-remove_dist_checksum_files() {
+remove_legacy_metadata() {
     [ -d "$DIST_DIR" ] || return 0
-    find "$DIST_DIR" -type f -name SHA256SUMS -delete
     rm -f "$DIST_DIR/.build_state"
 }
 
-# Checks whether one distributed target matches the build checksum.
+# Checks whether the existing ZIP matches both its source build and manifest.
 # @param project_dir Project directory.
-# @param target_dir Compiled target directory.
+# @param target_dir Built target directory.
 # @return 0 when current, 1 when changed, 2 when checksum is missing.
 dist_target_is_current() {
     local project_dir="$1"
     local target_dir="$2"
-    local project_name name relative prefix checksum dist_target
-    local sha file path count expected_count
+    local archive key checksum build_sha archive_sha
 
     project_dir="${project_dir%/}"
-    project_name=$(basename "$project_dir")
-    name=$(capability_name "$project_name")
-    relative="${target_dir#"$project_dir/bin/"}"
-    prefix="$project_name/$relative"
     checksum="$target_dir/SHA256SUMS"
-    dist_target="$DIST_DIR/$prefix"
-
     if [ ! -f "$checksum" ]; then
         echo "error: build checksum not found: $checksum" >&2
-        echo "run ./scripts/build.sh ${project_name#lib}" >&2
+        echo "run ./scripts/build.sh $(capability_name "$(basename "$project_dir")")" >&2
         return 2
     fi
 
-    [ -d "$dist_target" ] || return 1
-    [ -f "$dist_target/lib$name.h" ] || return 1
+    archive=$(target_archive_path "$project_dir" "$target_dir")
+    key="${archive#"$DIST_DIR/"}"
+    [ -s "$archive" ] || return 1
 
-    count=0
-    while read -r sha file; do
-        [ -n "$sha" ] || continue
-        [ -n "$file" ] || continue
-        case "$file" in *.h) continue ;; esac
+    build_sha=$(compute_sha256 "$checksum") || return 2
+    [ "${MANIFEST_BUILD_SHA["$key"]:-}" = "$build_sha" ] || return 1
 
-        path="$prefix/$file"
-        [ "${MANIFEST_SHA["$path"]:-}" = "$sha" ] || return 1
-        [ -f "$DIST_DIR/$path" ] || return 1
-        count=$((count + 1))
-    done < "$checksum"
-
-    expected_count=${MANIFEST_COUNT["$prefix"]:-0}
-    [ "$count" -eq "$expected_count" ] || return 1
-    [ "$count" -gt 0 ] || return 1
-
-    return 0
+    archive_sha=$(compute_sha256 "$archive") || return 2
+    [ "${MANIFEST_SHA["$key"]:-}" = "$archive_sha" ]
 }
 
-# Copies one changed compiled target into dist.
+# Packages one target as libNAME-<platform>-<arch>.zip containing libNAME/.
 # @param project_dir Project directory.
-# @param target_dir Compiled target directory.
-# @return 0 on success.
+# @param target_dir Built target directory.
+# @return 0 on success, 1 on failure.
 sync_target() {
     local project_dir="$1"
     local target_dir="$2"
-    local project_name name header relative dist_target sha file
+    local project_name name archive staging stage_dir file sha count
 
     project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
-    header="$project_dir/src/lib$name.h"
-    relative="${target_dir#"$project_dir/bin/"}"
-    dist_target="$DIST_DIR/$project_name/$relative"
-
-    if [ ! -f "$header" ]; then
-        echo "error: public header not found: $header" >&2
+    archive=$(target_archive_path "$project_dir" "$target_dir")
+    mkdir -p "$(dirname "$archive")" || return 1
+    staging=$(mktemp -d "$(dirname "$archive")/.dist.XXXXXXXX") || return 1
+    stage_dir="$staging/lib$name"
+    if ! mkdir -p "$stage_dir"; then
+        rm -rf "$staging"
         return 1
     fi
 
-    rm -rf "$dist_target"
-    mkdir -p "$dist_target"
-
+    count=0
+    : > "$stage_dir/SHA256SUMS"
     while read -r sha file; do
-        [ -n "$sha" ] || continue
-        [ -n "$file" ] || continue
-        case "$file" in *.h) continue ;; esac
-
+        [ -n "$sha" ] && [ -n "$file" ] || continue
+        case "$file" in
+            *.h) continue ;;
+            "lib$name."*|"$name"|"$name.exe") ;;
+            *)
+                echo "error: unexpected build artifact: $file" >&2
+                rm -rf "$staging"
+                return 1
+                ;;
+        esac
         if [ ! -f "$target_dir/$file" ]; then
             echo "error: build artifact not found: $target_dir/$file" >&2
+            rm -rf "$staging"
             return 1
         fi
-        cp "$target_dir/$file" "$dist_target/$file"
+        if ! cp "$target_dir/$file" "$stage_dir/$file"; then
+            rm -rf "$staging"
+            return 1
+        fi
+        printf '%s  %s\n' "$sha" "$file" >> "$stage_dir/SHA256SUMS"
+        count=$((count + 1))
     done < "$target_dir/SHA256SUMS"
 
-    cp "$header" "$dist_target/lib$name.h"
+    if [ "$count" -eq 0 ]; then
+        echo "error: no build artifacts to package: $target_dir" >&2
+        rm -rf "$staging"
+        return 1
+    fi
 
-    [ -f "$project_dir/LICENSE" ] &&
-        cp "$project_dir/LICENSE" "$dist_target/LICENSE"
-    [ -f "$project_dir/COPYING" ] &&
-        cp "$project_dir/COPYING" "$dist_target/COPYING"
+    if ! (cd "$staging" && zip -q -X -r package.zip "lib$name"); then
+        rm -rf "$staging"
+        return 1
+    fi
+    if ! mv -f "$staging/package.zip" "$archive"; then
+        rm -rf "$staging"
+        return 1
+    fi
+    rm -rf "$staging"
+    echo "    [+] $(basename "$archive")"
 }
 
-# Removes distributed targets that no longer exist in bin.
+# Removes unpacked distribution directories and ZIPs with no source target.
 # @param project_dir Project directory.
 # @return 0 when unchanged, 1 when stale targets were removed.
 prune_stale_targets() {
     local project_dir="$1"
-    local project_name project_dist platform_dir arch_dir relative source_dir
+    local project_name name project_dist old_dir archive tail platform arch
     local changed
 
     project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
     project_dist="$DIST_DIR/$project_name"
     [ -d "$project_dist" ] || return 0
 
     changed=0
-    for platform_dir in "$project_dist"/*; do
-        [ -d "$platform_dir" ] || continue
-        if ! is_platform "$(basename "$platform_dir")"; then
-            rm -rf "$platform_dir"
+    for old_dir in "$project_dist"/*/; do
+        [ -d "$old_dir" ] || continue
+        rm -rf "$old_dir"
+        changed=1
+    done
+
+    for archive in "$project_dist"/lib"$name"-*.zip; do
+        [ -f "$archive" ] || continue
+        tail="${archive##*/}"
+        tail="${tail#lib$name-}"
+        tail="${tail%.zip}"
+        platform="${tail%%-*}"
+        arch="${tail#*-}"
+        if ! is_platform "$platform" ||
+            [ "$arch" = "$tail" ] ||
+            [ ! -d "$project_dir/bin/$platform/$arch" ]; then
+            rm -f "$archive"
             changed=1
-            continue
         fi
-
-        for arch_dir in "$platform_dir"/*; do
-            [ -d "$arch_dir" ] || continue
-            relative="${arch_dir#"$project_dist/"}"
-            source_dir="$project_dir/bin/$relative"
-
-            if [ ! -d "$source_dir" ]; then
-                rm -rf "$arch_dir"
-                changed=1
-            fi
-        done
     done
 
     return "$changed"
 }
 
-# Synchronizes one project using build-generated target checksums.
+# Synchronizes one project using build-generated artifact checksums.
 # @param project_dir Project directory.
 # @return 0 when changed, 1 when no work was needed.
 package_project() {
@@ -301,34 +339,29 @@ package_project() {
     project_name=$(basename "$project_dir")
 
     echo "Processing $project_name..."
-    if [ ! -d "$project_dir/bin" ]; then
-        echo "    [=] No build artifacts."
-        return 1
-    fi
-
     changed=0
 
-    for target_dir in "$project_dir"/bin/*/*; do
-        [ -d "$target_dir" ] || continue
-        relative="${target_dir#"$project_dir/bin/"}"
-        platform="${relative%%/*}"
-        is_platform "$platform" || continue
+    if [ -d "$project_dir/bin" ]; then
+        for target_dir in "$project_dir"/bin/*/*; do
+            [ -d "$target_dir" ] || continue
+            relative="${target_dir#"$project_dir/bin/"}"
+            platform="${relative%%/*}"
+            is_platform "$platform" || continue
 
-        status=0
-        dist_target_is_current "$project_dir" "$target_dir" || status=$?
-        case "$status" in
-            0)
-                continue
-                ;;
-            1)
-                sync_target "$project_dir" "$target_dir"
-                changed=1
-                ;;
-            *)
-                return "$status"
-                ;;
-        esac
-    done
+            status=0
+            dist_target_is_current "$project_dir" "$target_dir" || status=$?
+            case "$status" in
+                0) continue ;;
+                1)
+                    sync_target "$project_dir" "$target_dir" || return $?
+                    changed=1
+                    ;;
+                *) return "$status" ;;
+            esac
+        done
+    else
+        echo "    [=] No build artifacts."
+    fi
 
     stale_changed=0
     if ! prune_stale_targets "$project_dir"; then
@@ -365,14 +398,14 @@ prune_stale_projects() {
     return "$changed"
 }
 
-# Writes manifest.json from build-generated target checksums.
+# Builds the manifest from actual ZIP archives (one entry per platform/arch).
 # @return 0 on success.
 generate_manifest() {
-    local manifest_file first_project first_binary updated_at
-    local project_dir project_name project_dist target_dir checksum
-    local relative platform arch sha file dist_file filesize
+    local manifest_file first_project first_archive updated_at
+    local project_dir project_name project_dist name archive archive_name
+    local tail platform arch target_dir checksum build_sha zip_sha filesize
 
-    manifest_file="$DIST_DIR/manifest.json"
+    manifest_file=$(mktemp "$DIST_DIR/.manifest.XXXXXXXX") || return 1
     first_project=true
     updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 
@@ -387,6 +420,7 @@ generate_manifest() {
         is_project "$project_dir" || continue
         project_dir="${project_dir%/}"
         project_name=$(basename "$project_dir")
+        name=$(capability_name "$project_name")
         project_dist="$DIST_DIR/$project_name"
         [ -d "$project_dist" ] || continue
 
@@ -395,54 +429,63 @@ generate_manifest() {
         else
             echo "," >> "$manifest_file"
         fi
-
         echo "    \"$project_name\": [" >> "$manifest_file"
-        first_binary=true
+        first_archive=true
 
-        for target_dir in "$project_dir"/bin/*/*; do
-            [ -d "$target_dir" ] || continue
-            relative="${target_dir#"$project_dir/bin/"}"
-            IFS="/" read -r platform arch <<< "$relative"
+        for archive in "$project_dist"/lib"$name"-*.zip; do
+            [ -f "$archive" ] || continue
+            archive_name=$(basename "$archive")
+            tail="${archive_name#lib$name-}"
+            tail="${tail%.zip}"
+            platform="${tail%%-*}"
+            arch="${tail#*-}"
             is_platform "$platform" || continue
+            target_dir="$project_dir/bin/$platform/$arch"
+            [ -d "$target_dir" ] || continue
             checksum="$target_dir/SHA256SUMS"
             if [ ! -f "$checksum" ]; then
                 echo "error: build checksum not found: $checksum" >&2
+                rm -f "$manifest_file"
                 return 1
             fi
 
-            while read -r sha file; do
-                [ -n "$sha" ] || continue
-                [ -n "$file" ] || continue
-                case "$file" in *.h) continue ;; esac
+            build_sha=$(compute_sha256 "$checksum") || {
+                rm -f "$manifest_file"
+                return 1
+            }
+            zip_sha=$(compute_sha256 "$archive") || {
+                rm -f "$manifest_file"
+                return 1
+            }
+            filesize=$(stat -c%s "$archive" 2>/dev/null ||
+                stat -f%z "$archive" 2>/dev/null) || {
+                rm -f "$manifest_file"
+                return 1
+            }
 
-                dist_file="$project_dist/$relative/$file"
-                [ -f "$dist_file" ] || continue
-                filesize=$(stat -c%s "$dist_file" 2>/dev/null || \
-                    stat -f%z "$dist_file" 2>/dev/null)
-
-                if [ "$first_binary" = true ]; then
-                    first_binary=false
-                else
-                    echo "," >> "$manifest_file"
-                fi
-
-                cat <<MANIFEST_ENTRY >> "$manifest_file"
+            if [ "$first_archive" = true ]; then
+                first_archive=false
+            else
+                echo "," >> "$manifest_file"
+            fi
+            cat <<MANIFEST_ENTRY >> "$manifest_file"
       {
         "arch": "$arch",
         "platform": "$platform",
-        "binary": "$file",
+        "archive": "$archive_name",
         "size_bytes": $filesize,
-        "sha256": "$sha",
-        "path": "$project_name/$relative/$file"
+        "sha256": "$zip_sha",
+        "build_sha256": "$build_sha",
+        "path": "$project_name/$archive_name"
       }
 MANIFEST_ENTRY
-            done < "$checksum"
         done
 
         printf '\n    ]' >> "$manifest_file"
     done
 
     printf '\n  }\n}\n' >> "$manifest_file"
+    mv -f "$manifest_file" "$DIST_DIR/manifest.json"
 }
 
 # Dispatches one project distribution or all project distributions.
@@ -463,7 +506,12 @@ main() {
     }
 
     mkdir -p "$DIST_DIR"
-    remove_dist_checksum_files
+    if ! command -v zip >/dev/null 2>&1; then
+        echo "error: zip command not found (install zip)" >&2
+        return 1
+    fi
+
+    remove_legacy_metadata
     load_manifest_state
 
     stale_changed=0
