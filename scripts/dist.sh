@@ -7,7 +7,30 @@
 
 set -e
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# Resolves the real script directory, including relative and chained symlinks.
+# @return Absolute directory containing the script.
+resolve_script_dir() {
+    local source="${BASH_SOURCE[0]}"
+    local directory link hops=0
+
+    while [ -L "$source" ]; do
+        directory=$(cd -P "$(dirname "$source")" && pwd) || return 1
+        link=$(readlink "$source") || return 1
+        case "$link" in
+            /*) source="$link" ;;
+            *) source="$directory/$link" ;;
+        esac
+        hops=$((hops + 1))
+        if [ "$hops" -gt 40 ]; then
+            echo "error: too many script symlinks" >&2
+            return 1
+        fi
+    done
+
+    cd -P "$(dirname "$source")" && pwd
+}
+
+SCRIPT_DIR=$(resolve_script_dir)
 ROOT_DIR=$(dirname "$SCRIPT_DIR")
 PROJ_DIR="$ROOT_DIR/proj"
 DIST_DIR="$ROOT_DIR/dist"
