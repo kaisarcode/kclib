@@ -50,3 +50,10 @@ long-term infrastructure.
 [![LGPLv3](https://www.gnu.org/graphics/lgplv3-147x51.png)](https://www.gnu.org/licenses/lgpl-3.0.html)
 
 This project is distributed under the **GNU Lesser General Public License version 3 (LGPLv3)**.
+
+## Command-line interface
+
+The `b64` executable is built from `src/b64.c` and dynamically links to
+the shared library in the same `bin/ARCH/PLATFORM/` directory. Use `make`
+to build the library and CLI, and `make test` to test both. No separate
+`kccli` checkout or `KCLIB_DIR` variable is needed.
