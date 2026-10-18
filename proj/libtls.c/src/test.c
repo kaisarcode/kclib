@@ -608,7 +608,11 @@ int main(int argc, char **argv) {
     int failed;
 
     if (argc != 2 || strcmp(argv[1], "all") != 0) return 2;
-    case_total = 5;
+#ifdef __EMSCRIPTEN__
+    case_total = 4;
+#else
+    case_total = 18;
+#endif
     case_current = 0;
     failed = 0;
     case_current++;
@@ -620,7 +624,6 @@ int main(int argc, char **argv) {
     case_current++;
     failed += case_metadata();
 #ifndef __EMSCRIPTEN__
-    case_current++;
     failed += case_tls_cli();
 #endif
     printf("%d passed, %d failed\n", case_total - failed, failed);
@@ -638,23 +641,17 @@ int main(int argc, char **argv) {
 #define TLS_CLI_DEV_NULL "/dev/null"
 #endif
 
-#define TLS_CLI_TEST_COUNT 14
-
-static int tls_cli_test_current;
-static int tls_cli_test_failures;
-
 /**
- * Prints one tls CLI test result.
+ * Prints one TLS CLI test result with the shared counter.
  * @param name Test name.
  * @param detail Behavior verified by the test.
  * @param ok Nonzero when the test passed.
- * @return None.
+ * @return Zero on success, one on failure.
  */
-static void tls_cli_result(const char *name, const char *detail, int ok) {
-    tls_cli_test_current++;
-    if (!ok) tls_cli_test_failures++;
-    printf("[%d/%d] [%s] %s: %s\n", tls_cli_test_current,
-        TLS_CLI_TEST_COUNT, ok ? "PASS" : "FAIL", name, detail);
+static int tls_cli_result(const char *name, const char *detail, int ok) {
+    case_current++;
+    print_case(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -677,38 +674,35 @@ static int tls_cli_run(const char *args) {
  * @return Zero when every test passes.
  */
 static int case_tls_cli(void) {
-    tls_cli_test_current = 0;
-    tls_cli_test_failures = 0;
-    tls_cli_result("help", "long help succeeds", tls_cli_run("--help") == 0);
-    tls_cli_result("short help", "short help succeeds", tls_cli_run("-h") == 0);
-    tls_cli_result("version", "long version succeeds",
+    int failures = 0;
+    failures += tls_cli_result("help", "long help succeeds", tls_cli_run("--help") == 0);
+    failures += tls_cli_result("short help", "short help succeeds", tls_cli_run("-h") == 0);
+    failures += tls_cli_result("version", "long version succeeds",
         tls_cli_run("--version") == 0);
-    tls_cli_result("short version", "short version succeeds",
+    failures += tls_cli_result("short version", "short version succeeds",
         tls_cli_run("-v") == 0);
-    tls_cli_result("missing command", "empty invocation fails",
+    failures += tls_cli_result("missing command", "empty invocation fails",
         tls_cli_run("") != 0);
-    tls_cli_result("unknown command", "unknown command fails",
+    failures += tls_cli_result("unknown command", "unknown command fails",
         tls_cli_run("unknown") != 0);
-    tls_cli_result("client arguments", "client requires host and port",
+    failures += tls_cli_result("client arguments", "client requires host and port",
         tls_cli_run("client localhost") != 0);
-    tls_cli_result("client port", "client rejects invalid port",
+    failures += tls_cli_result("client port", "client rejects invalid port",
         tls_cli_run("client localhost invalid") != 0);
-    tls_cli_result("client options", "client rejects server-only options",
+    failures += tls_cli_result("client options", "client rejects server-only options",
         tls_cli_run("client localhost 443 --cert server.pem") != 0);
-    tls_cli_result("server credentials", "server requires certificate and key",
+    failures += tls_cli_result("server credentials", "server requires certificate and key",
         tls_cli_run("server 443") != 0);
-    tls_cli_result("server port", "server rejects invalid port",
+    failures += tls_cli_result("server port", "server rejects invalid port",
         tls_cli_run("server invalid --cert server.pem --key server.key") != 0);
-    tls_cli_result("server options", "server rejects client-only options",
+    failures += tls_cli_result("server options", "server rejects client-only options",
         tls_cli_run("server 443 --ca ca.pem --cert server.pem --key server.key")
         != 0);
-    tls_cli_result("missing option value",
+    failures += tls_cli_result("missing option value",
         "value options require a following argument",
         tls_cli_run("client localhost 443 --ca") != 0);
-    tls_cli_result("unknown option", "unknown options fail",
+    failures += tls_cli_result("unknown option", "unknown options fail",
         tls_cli_run("client localhost 443 --unknown") != 0);
-    printf("%d passed, %d failed\n", TLS_CLI_TEST_COUNT - tls_cli_test_failures,
-        tls_cli_test_failures);
-    return tls_cli_test_failures == 0 ? 0 : 1;
+    return failures;
 }
 #endif
