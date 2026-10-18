@@ -247,9 +247,6 @@ static int case_kc_b64_version(void) {
 
 #ifndef __EMSCRIPTEN__
 
-static int b64_cli_total = 0;
-static int b64_cli_failed = 0;
-
 /**
  * Writes one fixture file.
  * @param path Output file path.
@@ -343,18 +340,17 @@ static int b64_cli_run(const char *args)
 }
 
 /**
- * Prints one contract-test result.
+ * Prints one CLI test result using the shared test counter.
  * @param name Test name.
  * @param detail Behavior under test.
  * @param ok Nonzero on success.
- * @return None.
+ * @return 0 on success, 1 on failure.
  */
-static void b64_cli_result(const char *name, const char *detail, int ok)
+static int b64_cli_result(const char *name, const char *detail, int ok)
 {
-    b64_cli_total++;
-    if (!ok) b64_cli_failed++;
-    printf("[%d/13] [%s] %s: %s\n", b64_cli_total, ok ? "PASS" : "FAIL",
-        name, detail);
+    test_case_current++;
+    case_result(!ok, name, detail);
+    return ok ? 0 : 1;
 }
 
 /**
@@ -365,42 +361,41 @@ static int case_b64_cli(void)
 {
     const char *file_path = "b64-cli-file.txt";
     int fixture_ok;
+    int failures = 0;
 
-    b64_cli_result("help", "--help succeeds", b64_cli_run("--help") == 0);
-    b64_cli_result("version", "--version succeeds", b64_cli_run("--version") == 0);
-    b64_cli_result("encode arg", "-e encodes text argument",
+    failures += b64_cli_result("help", "--help succeeds", b64_cli_run("--help") == 0);
+    failures += b64_cli_result("version", "--version succeeds", b64_cli_run("--version") == 0);
+    failures += b64_cli_result("encode arg", "-e encodes text argument",
         b64_cli_output_equals("-e \"hello world\"", NULL, "aGVsbG8gd29ybGQ="));
-    b64_cli_result("encode stdin", "-e reads stdin when argument is absent",
+    failures += b64_cli_result("encode stdin", "-e reads stdin when argument is absent",
         b64_cli_output_equals("-e", "hello world", "aGVsbG8gd29ybGQ="));
 
     fixture_ok = b64_cli_write_text_file(file_path, "file");
-    b64_cli_result("encode file", "-e -i reads file",
+    failures += b64_cli_result("encode file", "-e -i reads file",
         fixture_ok && b64_cli_output_equals("-e -i b64-cli-file.txt", NULL,
             "ZmlsZQ=="));
-    b64_cli_result("stdin priority", "stdin takes priority over -i",
+    failures += b64_cli_result("stdin priority", "stdin takes priority over -i",
         fixture_ok && b64_cli_output_equals("-e -i b64-cli-file.txt", "stdin",
             "c3RkaW4="));
-    b64_cli_result("argument priority", "argument takes priority over stdin and -i",
+    failures += b64_cli_result("argument priority", "argument takes priority over stdin and -i",
         fixture_ok && b64_cli_output_equals(
             "-e \"argument\" -i b64-cli-file.txt", "stdin",
             "YXJndW1lbnQ="));
 
-    b64_cli_result("decode arg", "-d decodes Base64 argument",
+    failures += b64_cli_result("decode arg", "-d decodes Base64 argument",
         b64_cli_output_equals("-d aGVsbG8=", NULL, "hello"));
-    b64_cli_result("decode stdin", "-d reads Base64 from stdin",
+    failures += b64_cli_result("decode stdin", "-d reads Base64 from stdin",
         b64_cli_output_equals("-d", "aGVsbG8=", "hello"));
     fixture_ok = fixture_ok && b64_cli_write_text_file(file_path, "aGVsbG8=");
-    b64_cli_result("decode file", "-d -i reads Base64 file",
+    failures += b64_cli_result("decode file", "-d -i reads Base64 file",
         fixture_ok && b64_cli_output_equals("-d -i b64-cli-file.txt", NULL, "hello"));
     remove(file_path);
 
-    b64_cli_result("missing mode", "encode or decode mode is required", b64_cli_run("") != 0);
-    b64_cli_result("invalid", "invalid Base64 fails", b64_cli_run("-d invalid") != 0);
-    b64_cli_result("unknown", "unknown option fails", b64_cli_run("-e --unknown") != 0);
+    failures += b64_cli_result("missing mode", "encode or decode mode is required", b64_cli_run("") != 0);
+    failures += b64_cli_result("invalid", "invalid Base64 fails", b64_cli_run("-d invalid") != 0);
+    failures += b64_cli_result("unknown", "unknown option fails", b64_cli_run("-e --unknown") != 0);
 
-    printf("%d passed, %d failed\n\n", b64_cli_total - b64_cli_failed,
-        b64_cli_failed);
-    return b64_cli_failed ? 1 : 0;
+    return failures;
 }
 
 #endif
@@ -412,9 +407,10 @@ static int case_b64_cli(void)
 static int case_all(void) {
     int rc = 0;
 
+#ifdef __EMSCRIPTEN__
     test_case_total = 4;
-#ifndef __EMSCRIPTEN__
-    test_case_total++;
+#else
+    test_case_total = 17;
 #endif
     test_case_current = 0;
     run_case(&rc, case_kc_b64_encode);
@@ -422,10 +418,10 @@ static int case_all(void) {
     run_case(&rc, case_kc_b64_free);
     run_case(&rc, case_kc_b64_version);
 #ifndef __EMSCRIPTEN__
-    run_case(&rc, case_b64_cli);
+    rc += case_b64_cli();
 #endif
 
-    printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
+    printf("%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
 }
 
@@ -446,7 +442,14 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_b64_free") == 0) return case_kc_b64_free();
     if (strcmp(argv[1], "kc_b64_version") == 0) return case_kc_b64_version();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "b64_cli") == 0) return case_b64_cli();
+    if (strcmp(argv[1], "b64_cli") == 0) {
+        int failures;
+
+        test_case_total = 13;
+        failures = case_b64_cli();
+        printf("%d passed, %d failed\n", test_case_total - failures, failures);
+        return failures ? 1 : 0;
+    }
 #endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
