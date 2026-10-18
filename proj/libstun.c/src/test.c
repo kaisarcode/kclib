@@ -42,8 +42,12 @@ typedef socklen_t test_socklen_t;
 
 #define TEST_STUN_MAGIC 0x2112A442U
 
-static int test_case_total = 5;
+static int test_case_total = 6;
 static int test_case_current = 0;
+
+#ifndef __EMSCRIPTEN__
+static int case_stun_cli(void);
+#endif
 
 typedef struct {
     test_socket_t fd;
@@ -674,7 +678,48 @@ int main(int argc, char **argv)
     test_case_current++; rc += case_listen();
     test_case_current++; rc += case_errors();
     test_case_current++; rc += case_metadata();
+#ifndef __EMSCRIPTEN__
+    test_case_current++; rc += case_stun_cli();
+#endif
     socket_runtime_stop();
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc ? 1 : 0;
 }
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "stun"
+#endif
+
+/**
+ * Runs one stun CLI command.
+ * @param args Command arguments.
+ * @return Shell exit status.
+ */
+static int stun_cli_run(const char *args)
+{
+    char command[4096];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"", KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1", KC_CLI_PATH, args);
+#endif
+    return system(command);
+}
+
+/**
+ * Tests the stun command-line contract.
+ * @return 1 on failure, 0 on success.
+ */
+static int case_stun_cli(void)
+{
+    int fail = 0;
+    fail += stun_cli_run("--help") != 0;
+    fail += stun_cli_run("--version") != 0;
+    fail += stun_cli_run("client") == 0;
+    fail += stun_cli_run("client :") == 0;
+    fail += stun_cli_run("unknown") == 0;
+    case_result(fail, "stun_cli", "reports metadata and validates commands");
+    return fail ? 1 : 0;
+}
+#endif

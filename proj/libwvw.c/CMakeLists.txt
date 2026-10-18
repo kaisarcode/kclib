@@ -114,6 +114,11 @@ if(WVW_BUILD_TESTS)
     add_executable(wvw_contract_test src/test.c)
     target_include_directories(wvw_contract_test PRIVATE src lib/parson)
     target_link_libraries(wvw_contract_test PRIVATE ${WVW_TEST_SHARED_TARGET})
+    if(WVW_CLI_PATH)
+        target_compile_definitions(wvw_contract_test PRIVATE
+            KC_CLI_PATH="${WVW_CLI_PATH}"
+        )
+    endif()
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(GTK3_TEST gtk+-3.0)

@@ -86,6 +86,11 @@ if(NETL_BUILD_TESTS)
     add_executable(netl_contract_test src/test.c)
     target_include_directories(netl_contract_test PRIVATE src)
     target_link_libraries(netl_contract_test PRIVATE ${NETL_TEST_SHARED_TARGET})
+    if(DEFINED NETL_CLI_PATH)
+        target_compile_definitions(netl_contract_test PRIVATE
+            KC_CLI_PATH="${NETL_CLI_PATH}"
+        )
+    endif()
 
     if(WIN32)
         target_link_libraries(netl_contract_test PRIVATE ws2_32)

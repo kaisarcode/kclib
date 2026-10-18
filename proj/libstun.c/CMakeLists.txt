@@ -72,6 +72,11 @@ if(STUN_BUILD_TESTS)
     add_executable(stun_contract_test src/test.c)
     target_include_directories(stun_contract_test PRIVATE src)
     target_link_libraries(stun_contract_test PRIVATE ${STUN_TEST_SHARED_TARGET})
+    if(STUN_CLI_PATH)
+        target_compile_definitions(stun_contract_test PRIVATE
+            KC_CLI_PATH="${STUN_CLI_PATH}"
+        )
+    endif()
     if(WIN32)
         target_link_libraries(stun_contract_test PRIVATE ws2_32)
     else()
@@ -81,4 +86,25 @@ if(STUN_BUILD_TESTS)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:${STUN_TEST_SHARED_TARGET}>
             $<TARGET_FILE_DIR:stun_contract_test>)
+endif()
+
+if(TARGET stun_shared AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(stun_cli src/stun.c)
+    set_target_properties(stun_cli PROPERTIES
+        OUTPUT_NAME "stun"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(stun_cli PRIVATE src)
+    target_link_libraries(stun_cli PRIVATE stun_shared)
+    if(APPLE)
+        set_target_properties(stun_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(stun_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
 endif()

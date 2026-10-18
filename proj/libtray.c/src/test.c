@@ -24,6 +24,10 @@
 
 static int current, total, failures;
 
+#ifndef __EMSCRIPTEN__
+static int case_tray_cli(void);
+#endif
+
 /**
  * Print and count one contract test result.
  * @param name Case or program name.
@@ -306,9 +310,76 @@ int main(int argc, char **argv) {
         total = 1; case_callbacks(); return failures ? 1 : 0;
     }
     if (argc != 2 || strcmp(argv[1], "all") != 0) return 2;
-    total = 8;
+    total = 9;
     case_version(); case_open_close(); case_options(); case_icon();
     case_tooltip(); case_items(); case_lifecycle(); case_error();
+#ifndef __EMSCRIPTEN__
+    current++;
+    failures += case_tray_cli();
+#endif
     printf("%d passed, %d failed\n\n", total - failures, failures);
     return failures ? 1 : 0;
 }
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "tray"
+#endif
+
+static int tray_cli_current;
+static int tray_cli_failures;
+
+/**
+ * Runs tray with one argument string.
+ * @param args Command arguments.
+ * @return Shell exit status.
+ */
+static int tray_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args ? args : "");
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args ? args : "");
+#endif
+    return system(command);
+}
+
+/**
+ * Prints one tray CLI result.
+ * @param name Test name.
+ * @param detail Tested behavior.
+ * @param ok Nonzero when the test passed.
+ * @return None.
+ */
+static void tray_cli_result(const char *name, const char *detail, int ok) {
+    tray_cli_current++;
+    if (!ok) tray_cli_failures++;
+    printf("[%d/7] [%s] %s: %s\n", tray_cli_current,
+        ok ? "PASS" : "FAIL", name, detail);
+}
+
+/**
+ * Runs the tray CLI contract tests.
+ * @return Zero when every test passes.
+ */
+static int case_tray_cli(void) {
+    tray_cli_current = 0;
+    tray_cli_failures = 0;
+    tray_cli_result("help", "--help succeeds", tray_cli_run("--help") == 0);
+    tray_cli_result("version", "--version succeeds",
+        tray_cli_run("--version") == 0);
+    tray_cli_result("unknown", "unknown options fail", tray_cli_run("--bad") != 0);
+    tray_cli_result("icon", "--icon requires a value", tray_cli_run("--icon") != 0);
+    tray_cli_result("tooltip", "--tooltip requires a value",
+        tray_cli_run("--tooltip") != 0);
+    tray_cli_result("item", "--item requires text and command",
+        tray_cli_run("--item label") != 0);
+    tray_cli_result("quit", "--quit requires a label", tray_cli_run("--quit") != 0);
+    printf("%d passed, %d failed\n\n", 7 - tray_cli_failures,
+        tray_cli_failures);
+    return tray_cli_failures ? 1 : 0;
+}
+#endif

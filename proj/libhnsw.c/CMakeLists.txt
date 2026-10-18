@@ -119,6 +119,11 @@ if(HNSW_BUILD_TESTS)
         add_executable(hnsw_contract_test src/test.c)
         target_include_directories(hnsw_contract_test PRIVATE src)
         target_link_libraries(hnsw_contract_test ${HNSW_TEST_SHARED_TARGET})
+        if(DEFINED HNSW_CLI_PATH)
+            target_compile_definitions(hnsw_contract_test PRIVATE
+                KC_CLI_PATH="${HNSW_CLI_PATH}"
+            )
+        endif()
         
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(hnsw_contract_test pthread m)

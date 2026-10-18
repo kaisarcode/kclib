@@ -29,6 +29,10 @@ typedef int (*case_fn)(void);
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+#ifndef __EMSCRIPTEN__
+static int case_hnsw_cli(void);
+#endif
+
 /**
  * Print one grouped test result.
  * @param fail Non-zero when the case failed.
@@ -463,6 +467,50 @@ static int case_kc_hnsw_version(void) {
     return fail;
 }
 
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "hnsw"
+#endif
+
+/**
+ * Run the HNSW CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int hnsw_cli_run(const char *args) {
+    char command[8192];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Test the public one-shot vector-search command contract.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_hnsw_cli(void) {
+    int fail = 0;
+
+    fail += hnsw_cli_run("--help");
+    fail += hnsw_cli_run("--version");
+    fail += hnsw_cli_run("\"a\t1,0\nb\t0,1\" -q 1,0 -d 2");
+    fail += hnsw_cli_run("\"a\t0,0\nb\t2,2\" -q 0,0 -d 2 -m l2");
+    fail += hnsw_cli_run("\"a\t1,0\" -q 1,0,0 -d 2") == 0;
+    fail += hnsw_cli_run("a,1,0 -q 1,0 -d 2") == 0;
+    fail += hnsw_cli_run("\"a\t1,0\" -d 2") == 0;
+    fail += hnsw_cli_run("\"a\t1,0\" -q 1,0 -d 2 --unknown") == 0;
+    case_result(fail, "hnsw_cli",
+        "validates one-shot vector search options and errors");
+    return fail != 0;
+}
+#endif
+
 /**
  * Run all grouped HNSW contract tests.
  * @return Total failed case count.
@@ -470,7 +518,7 @@ static int case_kc_hnsw_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 6;
+    test_case_total = 7;
     test_case_current = 0;
     rc += run_case(case_kc_hnsw_open);
     rc += run_case(case_kc_hnsw_add_build);
@@ -478,6 +526,9 @@ static int case_all(void) {
     rc += run_case(case_kc_hnsw_contract);
     rc += run_case(case_kc_hnsw_concurrency);
     rc += run_case(case_kc_hnsw_version);
+#ifndef __EMSCRIPTEN__
+    rc += run_case(case_hnsw_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -524,6 +575,13 @@ int main(int argc, char **argv) {
         test_case_current = 1;
         return case_kc_hnsw_version();
     }
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "hnsw_cli") == 0) {
+        test_case_total = 1;
+        test_case_current = 1;
+        return case_hnsw_cli();
+    }
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

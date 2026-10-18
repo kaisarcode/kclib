@@ -81,6 +81,11 @@ if(FLOW_BUILD_TESTS)
     add_executable(flow_contract_test src/test.c)
     target_include_directories(flow_contract_test PRIVATE src)
     target_link_libraries(flow_contract_test PRIVATE ${FLOW_TEST_SHARED_TARGET})
+    if(FLOW_CLI_PATH)
+        target_compile_definitions(flow_contract_test PRIVATE
+            KC_CLI_PATH="${FLOW_CLI_PATH}"
+        )
+    endif()
     
 
     add_custom_command(TARGET flow_contract_test POST_BUILD

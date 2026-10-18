@@ -162,10 +162,12 @@ endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 NATIVE_SHARED_NAME := libemb.so
+NATIVE_CLI_NAME := emb
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_SHARED_NAME := libemb.dll
+NATIVE_CLI_NAME := emb.exe
 NATIVE_IMPORT_LIBRARY := -DEMB_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libemb.dll.a
 endif
 
@@ -461,7 +463,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CXX)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libemb.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libemb.dll.a ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libemb.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libemb.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/emb.exe ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -476,6 +478,7 @@ test:
 				-DEMB_BUILD_VERSION=$(BUILD_VERSION) \
 				-DEMB_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libemb.dll \
 				-DEMB_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libemb.dll.a \
+			-DEMB_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/emb.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -519,7 +522,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -530,6 +533,7 @@ test:
 				-DEMB_BUILD_TESTS=ON \
 				-DEMB_BUILD_VERSION=$(BUILD_VERSION) \
 				-DEMB_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DEMB_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \

@@ -142,10 +142,12 @@ endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 NATIVE_SHARED_NAME := libnetl.so
+NATIVE_CLI_NAME := netl
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_SHARED_NAME := libnetl.dll
+NATIVE_CLI_NAME := netl.exe
 NATIVE_IMPORT_LIBRARY := -DNETL_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libnetl.dll.a
 endif
 
@@ -411,6 +413,7 @@ test:
 				-DNETL_BUILD_VERSION=$(BUILD_VERSION) \
 				-DNETL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnetl.dll \
 				-DNETL_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnetl.dll.a \
+				-DNETL_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/netl.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -422,6 +425,7 @@ test:
 			-DNETL_BUILD_VERSION=$(BUILD_VERSION) \
 			-DNETL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnetl.dll \
 			-DNETL_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnetl.dll.a \
+			-DNETL_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/netl.exe \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target netl_contract_test || exit 1; \
@@ -441,6 +445,7 @@ test:
 				-DNETL_BUILD_TESTS=ON \
 				-DNETL_BUILD_VERSION=$(BUILD_VERSION) \
 				-DNETL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DNETL_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -449,6 +454,7 @@ test:
 			-DNETL_BUILD_TESTS=ON \
 			-DNETL_BUILD_VERSION=$(BUILD_VERSION) \
 			-DNETL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+			-DNETL_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) \
 			$(NATIVE_IMPORT_LIBRARY) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target netl_contract_test || exit 1; \

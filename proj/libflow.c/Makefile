@@ -354,6 +354,7 @@ test:
 			-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
 			-DFLOW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libflow.dll \
 			-DFLOW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libflow.dll.a \
+			-DFLOW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/flow.exe \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target flow_contract_test; \
@@ -372,6 +373,7 @@ test:
 			-DFLOW_BUILD_TESTS=ON \
 			-DFLOW_BUILD_VERSION=$(BUILD_VERSION) \
 			-DFLOW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+			-DFLOW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/flow \
 			$(NATIVE_IMPORT_LIBRARY) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target flow_contract_test; \

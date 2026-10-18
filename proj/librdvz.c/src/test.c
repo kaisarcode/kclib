@@ -25,6 +25,10 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+#ifndef __EMSCRIPTEN__
+static int case_rdvz_cli(void);
+#endif
+
 /**
  * Report a test case result.
  * @param fail Non-zero if the case failed.
@@ -389,7 +393,7 @@ static int case_errors_and_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 8;
+    test_case_total = 9;
     test_case_current = 0;
     run_case(&rc, case_seek_before_publish);
     run_case(&rc, case_unpublish_independent);
@@ -399,6 +403,9 @@ static int case_all(void) {
     run_case(&rc, case_ttl_independence);
     run_case(&rc, case_hash_index);
     run_case(&rc, case_errors_and_version);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_rdvz_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -423,6 +430,46 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "ttl_independence") == 0) return case_ttl_independence();
     if (strcmp(argv[1], "hash_index") == 0) return case_hash_index();
     if (strcmp(argv[1], "errors_and_version") == 0) return case_errors_and_version();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "rdvz_cli") == 0) return case_rdvz_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "rdvz"
+#endif
+
+/**
+ * Runs one rdvz CLI operation.
+ * @param args Command arguments.
+ * @return Shell exit status.
+ */
+static int rdvz_cli_run(const char *args) {
+    char command[4096];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"", KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1", KC_CLI_PATH, args);
+#endif
+    return system(command);
+}
+
+/**
+ * Tests the rdvz command-line operations.
+ * @return One when a check failed, otherwise zero.
+ */
+static int case_rdvz_cli(void) {
+    int fail = 0;
+    fail += rdvz_cli_run("--help") != 0;
+    fail += rdvz_cli_run("--version") != 0;
+    fail += rdvz_cli_run("publish room pub") != 0;
+    fail += rdvz_cli_run("seek room seeker") != 0;
+    fail += rdvz_cli_run("match room pub seeker") != 0;
+    fail += rdvz_cli_run("match room pub") == 0;
+    case_result(fail, "rdvz_cli", "runs publication, seeking and matching operations");
+    return fail != 0;
+}
+#endif

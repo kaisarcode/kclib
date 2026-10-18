@@ -34,6 +34,10 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+#ifndef __EMSCRIPTEN__
+static int case_flow_cli(void);
+#endif
+
 /**
  * Prints a test case result line.
  * @param fail Non-zero when the case failed.
@@ -858,7 +862,7 @@ static int case_kc_flow_version(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 10;
+    test_case_total = 11;
     test_case_current = 0;
     run_case(&rc, case_kc_flow_open);
     run_case(&rc, case_kc_flow_close);
@@ -870,6 +874,9 @@ static int case_all(void) {
     run_case(&rc, case_kc_flow_run_failure);
     run_case(&rc, case_kc_flow_free);
     run_case(&rc, case_kc_flow_version);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_flow_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -898,6 +905,48 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_flow_run_failure") == 0) return case_kc_flow_run_failure();
     if (strcmp(argv[1], "kc_flow_free") == 0) return case_kc_flow_free();
     if (strcmp(argv[1], "kc_flow_version") == 0) return case_kc_flow_version();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "flow_cli") == 0) return case_flow_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "flow"
+#endif
+
+/**
+ * Runs one flow CLI command.
+ * @param args Command arguments.
+ * @return Shell exit status.
+ */
+static int flow_cli_run(const char *args) {
+    char command[4096];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"", KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1", KC_CLI_PATH, args);
+#endif
+    return system(command);
+}
+
+/**
+ * Tests the flow command-line contract.
+ * @return One when a check failed, otherwise zero.
+ */
+static int case_flow_cli(void) {
+    int fail = 0;
+    fail += flow_cli_run("--help") != 0;
+    fail += flow_cli_run("-h") != 0;
+    fail += flow_cli_run("--version") != 0;
+    fail += flow_cli_run("-v") != 0;
+    fail += flow_cli_run("") == 0;
+    fail += flow_cli_run("--unknown") == 0;
+    fail += flow_cli_run("kccli-flow-contract-missing.flow") == 0;
+    fail += flow_cli_run("kccli-flow-contract-missing.flow --unknown") == 0;
+    case_result(fail, "flow_cli", "validates command help, version and invocation");
+    return fail != 0;
+}
+#endif

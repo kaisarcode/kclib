@@ -215,10 +215,14 @@ test:
 				-DWVW_BUILD_TESTS=ON \
 				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll \
 				-DWVW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll.a \
+			-DWVW_CLI_PATH=wvw.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target wvw_contract_test || exit 1; \
+		cp $(BIN_DIR)/x86_64/windows/wvw.exe $(BUILD_DIR)/test-wine/wvw.exe || exit 1; \
+		cp $(BIN_DIR)/x86_64/windows/libwvw.dll $(BUILD_DIR)/test-wine/libwvw.dll || exit 1; \
+		cp $(BIN_DIR)/x86_64/windows/WebView2Loader.dll $(BUILD_DIR)/test-wine/WebView2Loader.dll || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all DXVK_LOG_LEVEL=none $(WINE) $(BUILD_DIR)/test-wine/wvw_contract_test.exe all 2>/dev/null; \
 	else \
 		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
@@ -226,6 +230,7 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DWVW_BUILD_TESTS=ON \
 				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/$(NATIVE_SHARED_LIBRARY) \
+			-DWVW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/wvw \
 				$(NATIVE_IMPORT_ARGUMENT) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \

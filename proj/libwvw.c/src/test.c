@@ -17,12 +17,17 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
 static int current;
 static int total;
 static int failures;
+
+#ifndef __EMSCRIPTEN__
+static int case_wvw_cli(void);
+#endif
 
 /**
  * Print one test result line.
@@ -375,7 +380,7 @@ static void case_kc_wvw_booleans(void) {
  * @return None.
  */
 static void run_all(void) {
-    total = 10;
+    total = 11;
     case_kc_wvw_version();
     case_kc_wvw_open();
     case_kc_wvw_navigation();
@@ -386,8 +391,91 @@ static void run_all(void) {
     case_kc_wvw_size();
     case_kc_wvw_position();
     case_kc_wvw_booleans();
+#ifndef __EMSCRIPTEN__
+    failures += case_wvw_cli();
+#endif
     printf("%d passed, %d failed\n\n", total - failures, failures);
 }
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "wvw"
+#endif
+
+/**
+ * Run the CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return Child exit code, or -1 on execution failure.
+ */
+static int run_wvw_cli(const char *args) {
+#ifdef _WIN32
+    HANDLE null_handle;
+    STARTUPINFOA startup;
+    PROCESS_INFORMATION process;
+    char command_line[4096];
+    DWORD exit_code;
+
+    if ((size_t)snprintf(command_line, sizeof(command_line), "\"%s\" %s",
+        KC_CLI_PATH, args ? args : "") >= sizeof(command_line)) return -1;
+    null_handle = CreateFileA("NUL", GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, NULL);
+    if (null_handle == INVALID_HANDLE_VALUE) return -1;
+    memset(&startup, 0, sizeof(startup));
+    memset(&process, 0, sizeof(process));
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = null_handle;
+    startup.hStdError = null_handle;
+    if (!CreateProcessA(NULL, command_line, NULL, NULL, TRUE, 0, NULL, NULL,
+        &startup, &process))
+    {
+        CloseHandle(null_handle);
+        return -1;
+    }
+    WaitForSingleObject(process.hProcess, INFINITE);
+    if (!GetExitCodeProcess(process.hProcess, &exit_code)) exit_code = (DWORD)-1;
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    CloseHandle(null_handle);
+    return (int)exit_code;
+#else
+    char command[8192];
+    int rc;
+
+    if ((size_t)snprintf(command, sizeof(command),
+        "\"%s\" %s > /dev/null 2>&1", KC_CLI_PATH,
+        args ? args : "") >= sizeof(command)) return -1;
+    rc = system(command);
+    if (rc == -1 || !WIFEXITED(rc)) return -1;
+    return WEXITSTATUS(rc);
+#endif
+}
+
+/**
+ * Validate the command-line argument contract without opening a window.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_wvw_cli(void) {
+    int fail = 0;
+
+    fail += run_wvw_cli("--help") != 0;
+    fail += run_wvw_cli("--version") != 0;
+    fail += run_wvw_cli("") == 0;
+    fail += run_wvw_cli("--unknown") == 0;
+    fail += run_wvw_cli("about:blank --unknown") == 0;
+    fail += run_wvw_cli("about:blank --title") == 0;
+    fail += run_wvw_cli("about:blank --background transparent") == 0;
+    fail += run_wvw_cli("about:blank --width 0") == 0;
+    fail += run_wvw_cli("about:blank --height 16385") == 0;
+    fail += run_wvw_cli("about:blank --x bad") == 0;
+    fail += run_wvw_cli("about:blank --y bad") == 0;
+    fail += run_wvw_cli("about:blank --exec") == 0;
+    result("wvw_cli", "validates command options without opening a window", !fail);
+    return fail != 0;
+}
+#endif
 
 /**
  * Execute the selected test group.

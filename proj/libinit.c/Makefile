@@ -96,10 +96,12 @@ endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 NATIVE_SHARED_NAME := libinit.so
+NATIVE_CLI_NAME := init
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_SHARED_NAME := libinit.dll
+NATIVE_CLI_NAME := init.exe
 NATIVE_IMPORT_LIBRARY := -DINIT_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libinit.dll.a
 endif
 
@@ -252,7 +254,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libinit.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libinit.dll.a ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libinit.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libinit.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/init.exe ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -263,6 +265,7 @@ test:
 			-DINIT_BUILD_TESTS=ON \
 			-DINIT_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libinit.dll \
 			-DINIT_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libinit.dll.a \
+			-DINIT_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/init.exe \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target init_contract_test || exit 1; \
@@ -272,7 +275,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -280,6 +283,7 @@ test:
 			-DCMAKE_BUILD_TYPE=Release \
 			-DINIT_BUILD_TESTS=ON \
 			-DINIT_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+			-DINIT_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) \
 			$(NATIVE_IMPORT_LIBRARY) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target init_contract_test || exit 1; \

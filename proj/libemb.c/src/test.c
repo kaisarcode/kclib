@@ -23,6 +23,10 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+#ifndef __EMSCRIPTEN__
+static int case_emb_cli(void);
+#endif
+
 typedef int (*case_fn)(void);
 
 /**
@@ -284,6 +288,130 @@ static int case_kc_emb_determinism(void) {
     return fail == 0 ? 0 : 1;
 }
 
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "emb"
+#endif
+
+/**
+ * Write one temporary CLI input fixture.
+ * @param path Fixture path.
+ * @param text Fixture text.
+ * @return 0 on success, 1 on failure.
+ */
+static int emb_cli_write_file(const char *path, const char *text) {
+    FILE *file = fopen(path, "wb");
+    size_t size = strlen(text);
+    int ok;
+
+    if (!file) return 1;
+    ok = fwrite(text, 1, size, file) == size;
+    fclose(file);
+    return ok ? 0 : 1;
+}
+
+/**
+ * Run the CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int emb_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args ? args : "");
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args ? args : "");
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Run the CLI and capture its standard output.
+ * @param args Arguments appended after the executable.
+ * @param stdin_text Optional standard-input text.
+ * @param output Destination output buffer.
+ * @param output_size Destination buffer size.
+ * @return 0 on success, 1 on failure.
+ */
+static int emb_cli_capture(
+    const char *args,
+    const char *stdin_text,
+    char *output,
+    size_t output_size
+) {
+    const char *stdin_path = "emb-cli-stdin.txt";
+    const char *output_path = "emb-cli-output.txt";
+    char command[4096];
+    FILE *file;
+    size_t size;
+
+    if (!output || output_size == 0) return 1;
+    if (stdin_text && emb_cli_write_file(stdin_path, stdin_text)) return 1;
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s %s> %s 2>NUL\"",
+        KC_CLI_PATH, args ? args : "",
+        stdin_text ? "< emb-cli-stdin.txt " : "", output_path);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s %s> %s 2>/dev/null",
+        KC_CLI_PATH, args ? args : "",
+        stdin_text ? "< emb-cli-stdin.txt " : "", output_path);
+#endif
+    if (system(command) != 0) {
+        if (stdin_text) remove(stdin_path);
+        remove(output_path);
+        return 1;
+    }
+    if (stdin_text) remove(stdin_path);
+    file = fopen(output_path, "rb");
+    if (!file) return 1;
+    size = fread(output, 1, output_size - 1, file);
+    fclose(file);
+    remove(output_path);
+    output[size] = '\0';
+    return 0;
+}
+
+/**
+ * Test the public CLI input and output contract.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_emb_cli(void) {
+    const char *file_path = "emb-cli-file.txt";
+    char expected[8192];
+    char actual[8192];
+    int fixture_ok;
+    int fail = 0;
+
+    fail += emb_cli_run("--help");
+    fail += emb_cli_run("--version");
+    fail += emb_cli_run("--dimension");
+    fail += emb_cli_run("\"Hello world\"");
+    fail += emb_cli_capture("\"Hello world\"", NULL, actual,
+        sizeof(actual));
+    fail += actual[0] == '\0' || strchr(actual, ',') == NULL ||
+        strchr(actual, '\t') != NULL || strncmp(actual, "code,", 5) == 0 ||
+        strncmp(actual, "value,", 6) == 0;
+
+    fixture_ok = emb_cli_write_file(file_path, "File input") == 0;
+    fail += !fixture_ok || emb_cli_run("-i emb-cli-file.txt");
+    fail += !fixture_ok || emb_cli_capture(NULL, "Stdin input", expected,
+        sizeof(expected)) || emb_cli_capture("-i emb-cli-file.txt",
+        "Stdin input", actual, sizeof(actual)) || strcmp(expected, actual);
+    fail += !fixture_ok || emb_cli_capture("\"Argument input\"", NULL,
+        expected, sizeof(expected)) || emb_cli_capture(
+        "\"Argument input\" -i emb-cli-file.txt", "Stdin input", actual,
+        sizeof(actual)) || strcmp(expected, actual);
+    remove(file_path);
+    fail += emb_cli_run("\"Hello world\" --unknown") == 0;
+    case_result(fail, "emb_cli",
+        "validates embedding input precedence and CSV output");
+    return fail != 0;
+}
+#endif
+
 /**
  * Runs all reusable and platform-applicable test cases.
  * @return 0 on success, nonzero on failure.
@@ -291,13 +419,16 @@ static int case_kc_emb_determinism(void) {
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 5;
+    test_case_total = 6;
     test_case_current = 0;
     run_case(&rc, case_kc_emb_version);
     run_case(&rc, case_kc_emb_dimension);
     run_case(&rc, case_kc_emb_embed);
     run_case(&rc, case_kc_emb_contract);
     run_case(&rc, case_kc_emb_determinism);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_emb_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -339,6 +470,13 @@ int main(int argc, char **argv) {
         test_case_current = 1;
         return case_kc_emb_determinism();
     }
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "emb_cli") == 0) {
+        test_case_total = 1;
+        test_case_current = 1;
+        return case_emb_cli();
+    }
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

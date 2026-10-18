@@ -75,6 +75,11 @@ if(INIT_BUILD_TESTS)
     add_executable(init_contract_test src/test.c)
     target_include_directories(init_contract_test PRIVATE src)
     target_link_libraries(init_contract_test PRIVATE ${INIT_TEST_SHARED_TARGET})
+    if(DEFINED INIT_CLI_PATH)
+        target_compile_definitions(init_contract_test PRIVATE
+            KC_CLI_PATH="${INIT_CLI_PATH}"
+        )
+    endif()
 
     if(WIN32)
         target_link_libraries(init_contract_test PRIVATE advapi32)

@@ -121,6 +121,11 @@ if(TRAY_BUILD_TESTS)
     endif()
     target_include_directories(tray_contract_test PRIVATE src)
     target_link_libraries(tray_contract_test PRIVATE ${TRAY_TEST_SHARED_TARGET})
+    if(TRAY_CLI_PATH)
+        target_compile_definitions(tray_contract_test PRIVATE
+            KC_CLI_PATH="${TRAY_CLI_PATH}"
+        )
+    endif()
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
         find_package(PkgConfig REQUIRED)

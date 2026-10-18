@@ -71,6 +71,10 @@ typedef struct {
 static int test_case_total;
 static int test_case_current;
 
+#ifndef __EMSCRIPTEN__
+static int case_netl_cli(void);
+#endif
+
 /**
  * Verifies one condition.
  * @param label Check label.
@@ -900,6 +904,48 @@ static int case_kc_netl_status(void) {
     return fail != 0;
 }
 
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "netl"
+#endif
+
+/**
+ * Run the netl CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int netl_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Test CLI argument handling for listener administration.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_netl_cli(void) {
+    int fail = 0;
+
+    fail += netl_cli_run("--help");
+    fail += netl_cli_run("--version");
+    fail += netl_cli_run("") == 0;
+    fail += netl_cli_run("sample 8080") == 0;
+    fail += netl_cli_run("sample 8080 true --unknown") == 0;
+    fail += netl_cli_run("bad/name -d") == 0;
+    case_result(fail, "netl_cli",
+        "validates listener administration arguments and errors");
+    return fail != 0;
+}
+#endif
+
 /**
  * Runs all public contract cases.
  * @return Failure count.
@@ -908,13 +954,16 @@ static int case_all(void) {
     int result;
 
     result = 0;
-    test_case_total = 5;
+    test_case_total = 6;
     test_case_current = 0;
     run_case(&result, case_kc_netl_open);
     run_case(&result, case_kc_netl_tcp);
     run_case(&result, case_kc_netl_listener_close);
     run_case(&result, case_kc_netl_udp);
     run_case(&result, case_kc_netl_status);
+#ifndef __EMSCRIPTEN__
+    run_case(&result, case_netl_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - result, result);
     return result;
 }
@@ -940,6 +989,9 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "kc_netl_udp") == 0) return case_kc_netl_udp();
     if (strcmp(argv[1], "kc_netl_status") == 0) return case_kc_netl_status();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "netl_cli") == 0) return case_netl_cli();
+#endif
 
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;

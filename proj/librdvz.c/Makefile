@@ -307,6 +307,7 @@ test:
 			-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
 			-DRDVZ_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/librdvz.dll \
 			-DRDVZ_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/librdvz.dll.a \
+			-DRDVZ_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/rdvz.exe \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/test-wine/out \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target rdvz_contract_test; \
@@ -328,6 +329,7 @@ test:
 			-DCMAKE_BUILD_TYPE=Release \
 			-DRDVZ_BUILD_TESTS=ON \
 			-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
+			-DRDVZ_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/rdvz \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test --target rdvz_contract_test; \
 		$(BUILD_DIR)/test/rdvz_contract_test all; \

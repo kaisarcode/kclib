@@ -448,6 +448,7 @@ test:
 			-DHTTP_BUILD_TESTS=ON \
 			-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll \
 			-DHTTP_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhttp.dll.a \
+			-DHTTP_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/http.exe \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
 		cmake --build $(BUILD_DIR)/test-wine --target http_contract_test || exit 1; \
@@ -499,6 +500,7 @@ test:
 			-DHTTP_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
 			$(NATIVE_IMPORT_LIBRARY) \
 			-G Ninja -Wno-dev > /dev/null; \
+		cmake -S . -B $(BUILD_DIR)/test -DHTTP_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/http > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test --target http_contract_test || exit 1; \
 		$(BUILD_DIR)/test/http_contract_test all; \
 	fi

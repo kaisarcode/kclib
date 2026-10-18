@@ -273,6 +273,11 @@ if(EMB_BUILD_TESTS)
         add_executable(emb_contract_test src/test.c)
         target_include_directories(emb_contract_test PRIVATE src)
         target_link_libraries(emb_contract_test PRIVATE ${EMB_TEST_SHARED_TARGET})
+        if(DEFINED EMB_CLI_PATH)
+            target_compile_definitions(emb_contract_test PRIVATE
+                KC_CLI_PATH="${EMB_CLI_PATH}"
+            )
+        endif()
 
         if(UNIX AND NOT ANDROID)
             target_link_libraries(emb_contract_test PRIVATE pthread dl m)

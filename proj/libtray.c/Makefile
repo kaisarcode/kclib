@@ -80,6 +80,7 @@ endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 NATIVE_SHARED_LIBRARY := libtray.so
+NATIVE_CLI_NAME := tray
 NATIVE_IMPORT_ARGUMENT :=
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
@@ -203,6 +204,8 @@ test:
 				-DCMAKE_CROSSCOMPILING_EMULATOR=wine \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine \
+			-DTRAY_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/tray.exe > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test-wine --target tray_contract_test || exit 1; \
 		WINEDEBUG=-all wine $(BUILD_DIR)/test-wine/tray_contract_test.exe all 2>/dev/null; \
 	else \
@@ -214,6 +217,8 @@ test:
 				$(NATIVE_IMPORT_ARGUMENT) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test \
+			-DTRAY_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/$(NATIVE_CLI_NAME) > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test --target tray_contract_test || exit 1; \
 		$(BUILD_DIR)/test/tray_contract_test all 2>/dev/null; \
 	fi

@@ -30,6 +30,10 @@
 static int test_case_total;
 static int test_case_current;
 
+#ifndef __EMSCRIPTEN__
+static int case_init_cli(void);
+#endif
+
 typedef int (*case_fn)(void);
 
 /**
@@ -459,6 +463,89 @@ static int case_kc_init_version(void) {
     return fail == 0 ? 0 : 1;
 }
 
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "init"
+#endif
+
+/**
+ * Run the init CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int init_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Capture one init CLI output line.
+ * @param args Arguments appended after the executable.
+ * @param output Output buffer.
+ * @param output_size Output buffer capacity.
+ * @return 0 on success, 1 on failure.
+ */
+static int init_cli_capture(const char *args, char *output, size_t output_size) {
+    const char *path = "init-cli-output.txt";
+    char command[4096];
+    FILE *file;
+    size_t size;
+
+    if (!output || output_size == 0) return 1;
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > %s 2>NUL\"",
+        KC_CLI_PATH, args, path);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > %s 2>/dev/null",
+        KC_CLI_PATH, args, path);
+#endif
+    if (system(command) != 0) {
+        remove(path);
+        return 1;
+    }
+    file = fopen(path, "rb");
+    if (!file) return 1;
+    size = fread(output, 1, output_size - 1, file);
+    fclose(file);
+    remove(path);
+    output[size] = '\0';
+    return 0;
+}
+
+/**
+ * Test the public init command-line interface.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_init_cli(void) {
+    const char *expected = "test-entry\ttester\techo init-test";
+    char dir[1024] = {0};
+    char output[4096];
+    int fail = 0;
+
+    fail += init_cli_run("--help");
+    fail += init_cli_run("--version");
+    fail += init_cli_run("--unknown") == 0;
+    fail += fixture_create(dir, sizeof(dir));
+    if (!fail) {
+        fail += init_cli_capture("-l test-entry", output, sizeof(output));
+        output[strcspn(output, "\r\n")] = '\0';
+        fail += strcmp(output, expected) != 0;
+    }
+    fixture_remove(dir);
+    case_result(fail, "init_cli",
+        "validates help, errors, and startup-list output");
+    return fail != 0;
+}
+#endif
+
 /**
  * Run all contract cases.
  * @return Failure count.
@@ -467,7 +554,7 @@ static int case_all(void) {
     int rc;
 
     rc = 0;
-    test_case_total = 6;
+    test_case_total = 7;
     test_case_current = 0;
     run_case(&rc, case_kc_init_create);
     run_case(&rc, case_kc_init_get);
@@ -475,6 +562,9 @@ static int case_all(void) {
     run_case(&rc, case_kc_init_delete);
     run_case(&rc, case_kc_init_free);
     run_case(&rc, case_kc_init_version);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_init_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -494,5 +584,8 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_init_delete") == 0) return case_kc_init_delete();
     if (strcmp(argv[1], "kc_init_free") == 0) return case_kc_init_free();
     if (strcmp(argv[1], "kc_init_version") == 0) return case_kc_init_version();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "init_cli") == 0) return case_init_cli();
+#endif
     return 2;
 }

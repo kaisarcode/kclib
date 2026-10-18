@@ -62,6 +62,28 @@ if(NOT HTTP_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     endif()
 endif()
 
+if(TARGET http_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(http_cli src/http.c)
+    set_target_properties(http_cli PROPERTIES
+        OUTPUT_NAME "http"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(http_cli PRIVATE src)
+    target_link_libraries(http_cli PRIVATE http_shared)
+    if(APPLE)
+        set_target_properties(http_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(http_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()
+
 if(HTTP_BUILD_TESTS)
     enable_testing()
 
@@ -91,6 +113,11 @@ if(HTTP_BUILD_TESTS)
         add_executable(http_contract_test src/test.c)
         target_include_directories(http_contract_test PRIVATE src)
         target_link_libraries(http_contract_test PRIVATE ${HTTP_TEST_SHARED_TARGET})
+        if(HTTP_CLI_PATH)
+            target_compile_definitions(http_contract_test PRIVATE
+                KC_CLI_PATH="${HTTP_CLI_PATH}"
+            )
+        endif()
 
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(http_contract_test PRIVATE m)

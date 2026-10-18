@@ -321,7 +321,7 @@ test:
 			echo "x86_64-w64-mingw32-gcc is required for make test wine" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhnsw.dll" ]; then \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhnsw.dll" ] || [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/hnsw.exe" ]; then \
 			echo "missing Windows shared library: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
@@ -338,6 +338,7 @@ test:
 				-DHNSW_BUILD_TESTS=ON \
 				-DHNSW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhnsw.dll \
 				-DHNSW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libhnsw.dll.a \
+				-DHNSW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/hnsw.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target hnsw_contract_test || exit 1; \
@@ -371,7 +372,7 @@ test:
 			echo "Unsupported native target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libhnsw.so" ]; then \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libhnsw.so" ] || [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/hnsw" ]; then \
 			echo "missing native shared library: run make first" >&2; \
 			exit 1; \
 		fi; \
@@ -380,6 +381,7 @@ test:
 				-DCMAKE_BUILD_TYPE=Release \
 				-DHNSW_BUILD_TESTS=ON \
 				-DHNSW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libhnsw.so \
+				-DHNSW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/hnsw \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target hnsw_contract_test || exit 1; \

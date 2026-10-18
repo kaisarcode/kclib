@@ -15,6 +15,10 @@
 static int test_case_total;
 static int test_case_current;
 
+#ifndef __EMSCRIPTEN__
+static int case_http_cli(void);
+#endif
+
 /**
  * expect true.
  * @return Function result.
@@ -580,6 +584,9 @@ static int test_named(const char *name) {
     if (strcmp(name, "kc_http_free") == 0) return case_kc_http_free();
     if (strcmp(name, "kc_http_strerror") == 0) return case_kc_http_strerror();
     if (strcmp(name, "kc_http_version") == 0) return case_kc_http_version();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(name, "http_cli") == 0) return case_http_cli();
+#endif
     fprintf(stderr, "unknown case: %s\n", name);
     return 2;
 }
@@ -597,7 +604,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "all") != 0) return test_named(argv[1]);
 
-    test_case_total = 8;
+    test_case_total = 9;
     test_case_current = 0;
     test_run(&rc, case_kc_http_parser_open);
     test_run(&rc, case_kc_http_parser_write);
@@ -607,6 +614,50 @@ int main(int argc, char **argv) {
     test_run(&rc, case_kc_http_free);
     test_run(&rc, case_kc_http_strerror);
     test_run(&rc, case_kc_http_version);
+#ifndef __EMSCRIPTEN__
+    test_run(&rc, case_http_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "http"
+#endif
+
+/**
+ * Runs one http CLI command with output discarded.
+ * @param args Command arguments.
+ * @return Shell exit status.
+ */
+static int http_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command);
+}
+
+/**
+ * Tests the http CLI command surface.
+ * @return One when a check failed, otherwise zero.
+ */
+static int case_http_cli(void) {
+    int fail;
+
+    fail = 0;
+    fail += http_cli_run("--help") != 0;
+    fail += http_cli_run("--version") != 0;
+    fail += http_cli_run("request GET / hello") != 0;
+    fail += http_cli_run("response 201 created") != 0;
+    fail += http_cli_run("response invalid") == 0;
+    test_result(fail, "http_cli", "builds and validates command operations");
+    return fail != 0;
+}
+#endif
