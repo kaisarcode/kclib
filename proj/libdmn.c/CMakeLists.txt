@@ -75,6 +75,11 @@ if(DMN_BUILD_TESTS)
     add_executable(dmn_contract_test src/test.c)
     target_include_directories(dmn_contract_test PRIVATE src)
     target_link_libraries(dmn_contract_test PRIVATE ${DMN_TEST_SHARED_TARGET})
+    if(DMN_CLI_PATH)
+        target_compile_definitions(dmn_contract_test PRIVATE
+            KC_CLI_PATH="${DMN_CLI_PATH}"
+        )
+    endif()
 
     add_custom_command(TARGET dmn_contract_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

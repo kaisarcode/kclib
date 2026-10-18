@@ -32,6 +32,10 @@
 #define mkdir_one(path) mkdir(path, 0700)
 #endif
 
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "dmn"
+#endif
+
 static int test_case_total;
 static int test_case_current;
 
@@ -847,13 +851,147 @@ static int case_kc_dmn_version(void) {
 }
 
 /**
+ * Run the dmn CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return Child process status from system().
+ */
+static int dmn_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args ? args : "");
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args ? args : "");
+#endif
+    return system(command);
+}
+
+/**
+ * Run the dmn CLI and capture standard output.
+ * @param args Arguments appended after the executable.
+ * @param buffer Output buffer.
+ * @param capacity Output buffer capacity.
+ * @return Nonzero on success.
+ */
+static int dmn_cli_output(
+    const char *args,
+    char *buffer,
+    size_t capacity
+) {
+    const char *path = "dmn-cli-output.txt";
+    char command[4096];
+    FILE *file;
+    size_t size;
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > %s 2>NUL\"",
+        KC_CLI_PATH, args ? args : "", path);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > %s 2>/dev/null",
+        KC_CLI_PATH, args ? args : "", path);
+#endif
+    if (system(command) != 0) {
+        (void)remove(path);
+        return 0;
+    }
+    file = fopen(path, "r");
+    if (!file) return 0;
+    size = fread(buffer, 1, capacity - 1U, file);
+    fclose(file);
+    (void)remove(path);
+    buffer[size] = '\0';
+    return 1;
+}
+
+/**
+ * Remove the CLI test runtime directory.
+ * @return None.
+ */
+static void dmn_cli_clear_runtime(void) {
+#ifdef _WIN32
+    (void)system("rmdir /S /Q dmn-cli-runtime >NUL 2>&1");
+#else
+    (void)system("rm -rf dmn-cli-runtime");
+#endif
+}
+
+/**
+ * Test the dmn command-line interface.
+ * @return Zero on success, non-zero on failure.
+ */
+static int case_dmn_cli(void) {
+    char output[1024];
+    const char *command;
+    const char *expected;
+    int runtime_ok;
+    int create_ok;
+    int list_ok;
+    int update_ok;
+    int delete_ok;
+    int fail = 0;
+
+    fail += expect_true("CLI help", dmn_cli_run("--help") == 0);
+    fail += expect_true("CLI version", dmn_cli_run("--version") == 0);
+    fail += expect_true("CLI missing daemon id", dmn_cli_run("") != 0);
+    fail += expect_true("CLI unknown option",
+        dmn_cli_run("sample cat --unknown") != 0);
+    fail += expect_true("CLI invalid daemon id", dmn_cli_run("bad/name -d") != 0);
+
+    runtime_ok = use_runtime_dir("dmn-cli-runtime") == 0;
+    dmn_cli_clear_runtime();
+#ifdef _WIN32
+    command = "more";
+    expected = "sample\tmore\n";
+#else
+    command = "cat";
+    expected = "sample\tcat\n";
+#endif
+    create_ok = runtime_ok && dmn_cli_run(
+#ifdef _WIN32
+        "sample more"
+#else
+        "sample cat"
+#endif
+    ) == 0;
+    fail += expect_true("CLI creates daemon", create_ok);
+
+    output[0] = '\0';
+    list_ok = create_ok && dmn_cli_output("-l sample", output, sizeof(output)) &&
+        strcmp(output, expected) == 0;
+    fail += expect_true("CLI lists daemon", list_ok);
+
+    update_ok = create_ok && dmn_cli_run(
+#ifdef _WIN32
+        "sample more"
+#else
+        "sample cat"
+#endif
+    ) == 0;
+    fail += expect_true("CLI updates daemon", update_ok);
+
+    delete_ok = dmn_cli_run("sample -d") == 0;
+    output[0] = '\0';
+    if (delete_ok)
+        delete_ok = dmn_cli_output("-l sample", output, sizeof(output)) &&
+            output[0] == '\0';
+    fail += expect_true("CLI deletes daemon", delete_ok);
+
+    (void)command;
+    dmn_cli_clear_runtime();
+    case_result(fail, "dmn CLI", "runs the resident daemon workflow");
+    return fail != 0;
+}
+
+/**
  * Run all contract test cases.
  * @return Failure count.
  */
 static int case_all(void) {
     int rc = 0;
 
-    test_case_total = 13;
+    test_case_total = 14;
     test_case_current = 0;
     run_case(&rc, case_kc_dmn_create);
     run_case(&rc, case_kc_dmn_open);
@@ -868,6 +1006,9 @@ static int case_all(void) {
     run_case(&rc, case_kc_dmn_free);
     run_case(&rc, case_kc_dmn_close);
     run_case(&rc, case_kc_dmn_version);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_dmn_cli);
+#endif
 
     printf("\n%d passed, %d failed\n", test_case_total - rc, rc);
     return rc;
@@ -908,6 +1049,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_dmn_free") == 0) return case_kc_dmn_free();
     if (strcmp(argv[1], "kc_dmn_close") == 0) return case_kc_dmn_close();
     if (strcmp(argv[1], "kc_dmn_version") == 0) return case_kc_dmn_version();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "dmn_cli") == 0) return case_dmn_cli();
+#endif
 
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;

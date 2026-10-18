@@ -397,7 +397,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libdmn.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libdmn.dll.a ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libdmn.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libdmn.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/dmn.exe ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -411,6 +411,7 @@ test:
 			-DDMN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libdmn.dll.a \
 			-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 			-G Ninja -Wno-dev > /dev/null; \
+		cmake -S . -B $(BUILD_DIR)/test-wine -DDMN_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/dmn.exe > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test-wine --target dmn_contract_test || exit 1; \
 		cd $(BUILD_DIR)/test-wine && EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) dmn_contract_test.exe all; \
 	else \
@@ -418,7 +419,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/dmn$(NATIVE_EXE_EXT) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -429,6 +430,7 @@ test:
 			-DDMN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
 			$(NATIVE_IMPORT_LIBRARY) \
 			-G Ninja -Wno-dev > /dev/null; \
+		cmake -S . -B $(BUILD_DIR)/test -DDMN_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/dmn$(NATIVE_EXE_EXT) > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test --target dmn_contract_test || exit 1; \
 		$(BUILD_DIR)/test/dmn_contract_test all; \
 	fi
