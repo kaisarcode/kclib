@@ -158,6 +158,8 @@ if(TARGET tray_shared AND NOT EMSCRIPTEN AND
     target_include_directories(tray_cli PRIVATE src)
     target_link_libraries(tray_cli PRIVATE tray_shared)
     if(APPLE)
+        set_source_files_properties(src/tray.c PROPERTIES LANGUAGE OBJC)
+        target_link_libraries(tray_cli PRIVATE "-framework Cocoa")
         set_target_properties(tray_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
             INSTALL_RPATH "@loader_path"
