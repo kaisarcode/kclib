@@ -85,13 +85,13 @@ ifneq ($(filter MINGW% MSYS% CYGWIN%,$(HOST_SYSTEM)),)
 NATIVE_PLATFORM := windows
 endif
 
-NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
+NATIVE_TARGET := $(NATIVE_PLATFORM)/$(NATIVE_ARCH)
 NATIVE_SHARED_LIBRARY := libwvw.so
 NATIVE_IMPORT_ARGUMENT :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_SHARED_LIBRARY := libwvw.dll
-NATIVE_IMPORT_ARGUMENT := -DWVW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/libwvw.dll.a
+NATIVE_IMPORT_ARGUMENT := -DWVW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_PLATFORM)/$(NATIVE_ARCH)/libwvw.dll.a
 endif
 
 ifeq ($(NATIVE_PLATFORM),macos)
@@ -101,61 +101,61 @@ endif
 .DEFAULT_GOAL := $(NATIVE_TARGET)
 
 .PHONY: all test clean \
-	x86_64/linux x86_64/windows x86_64/macos \
-	aarch64/macos
+	linux/x86_64 windows/x86_64 macos/x86_64 \
+	macos/aarch64
 
-all: x86_64/linux x86_64/windows x86_64/macos aarch64/macos
+all: linux/x86_64 windows/x86_64 macos/x86_64 macos/aarch64
 
 ## Linux
 
 define linux_target
-	@mkdir -p $(BIN_DIR)/$(1)/linux
-	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
+	@mkdir -p $(BIN_DIR)/linux/$(1)
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/linux/$(1)' $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Linux \
 			-DWVW_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DWVW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
-	@echo "OK $(1)/linux"
+	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DWVW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/linux/$(1) -G Ninja -Wno-dev > /dev/null)
+	@echo "OK linux/$(1)"
 endef
 
-x86_64/linux:
+linux/x86_64:
 	$(call linux_target,x86_64,gcc)
 
 ## Windows
 
 define windows_target
-	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ]; then \
+	@mkdir -p $(BIN_DIR)/windows/$(1)
+	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/windows/$(1)' $(BUILD_DIR)/$(1)-windows/CMakeCache.txt; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DCMAKE_SYSTEM_NAME=Windows \
 			-DWVW_BUILD_VERSION=$(BUILD_VERSION) \
 			-DCMAKE_C_COMPILER=$(2) \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DWVW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
-	@cp $(BUILD_DIR)/$(1)-windows/out/libwvw.dll $(BIN_DIR)/$(1)/windows/libwvw.dll
-	@cp lib/webview2/WebView2Loader.dll $(BIN_DIR)/$(1)/windows/WebView2Loader.dll
-	@echo "OK $(1)/windows"
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DWVW_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/windows/$(1) -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/$(1)-windows/out/libwvw.dll $(BIN_DIR)/windows/$(1)/libwvw.dll
+	@cp lib/webview2/WebView2Loader.dll $(BIN_DIR)/windows/$(1)/WebView2Loader.dll
+	@echo "OK windows/$(1)"
 endef
 
-x86_64/windows:
+windows/x86_64:
 	$(call windows_target,x86_64,x86_64-w64-mingw32-gcc)
 
 ## macOS
 
 define macos_target
-	@mkdir -p $(BIN_DIR)/$(1)/macos
+	@mkdir -p $(BIN_DIR)/macos/$(1)
 	@if ! $(2) --version > /dev/null 2>&1; then \
 		echo "Missing macOS cross-compiler wrapper: $(2)" >&2; \
 		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
@@ -181,18 +181,18 @@ define macos_target
 			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
 			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
 			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
-			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
-			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/macos \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
 			-G Ninja -Wno-dev > /dev/null; \
 	fi && \
 	cmake --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
-	echo "OK $(1)/macos"
+	echo "OK macos/$(1)"
 endef
 
-x86_64/macos:
+macos/x86_64:
 	$(call macos_target,x86_64,$(OSXCROSS_X86_64_CC))
 
-aarch64/macos:
+macos/aarch64:
 	$(call macos_target,aarch64,$(OSXCROSS_AARCH64_CC))
 
 ## Utility
@@ -207,30 +207,30 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/windows/x86_64' $(BUILD_DIR)/test-wine/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DCMAKE_SYSTEM_NAME=Windows \
 				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
 				-DWVW_BUILD_TESTS=ON \
-				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll \
-				-DWVW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll.a \
+				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/windows/x86_64/libwvw.dll \
+				-DWVW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/windows/x86_64/libwvw.dll.a \
 			-DWVW_CLI_PATH=wvw.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target wvw_contract_test || exit 1; \
-		cp $(BIN_DIR)/x86_64/windows/wvw.exe $(BUILD_DIR)/test-wine/wvw.exe || exit 1; \
-		cp $(BIN_DIR)/x86_64/windows/libwvw.dll $(BUILD_DIR)/test-wine/libwvw.dll || exit 1; \
-		cp $(BIN_DIR)/x86_64/windows/WebView2Loader.dll $(BUILD_DIR)/test-wine/WebView2Loader.dll || exit 1; \
+		cp $(BIN_DIR)/windows/x86_64/wvw.exe $(BUILD_DIR)/test-wine/wvw.exe || exit 1; \
+		cp $(BIN_DIR)/windows/x86_64/libwvw.dll $(BUILD_DIR)/test-wine/libwvw.dll || exit 1; \
+		cp $(BIN_DIR)/windows/x86_64/WebView2Loader.dll $(BUILD_DIR)/test-wine/WebView2Loader.dll || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all DXVK_LOG_LEVEL=none $(WINE) $(BUILD_DIR)/test-wine/wvw_contract_test.exe all 2>/dev/null; \
 	else \
-		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)' $(BUILD_DIR)/test/CMakeCache.txt; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
 				-DWVW_BUILD_TESTS=ON \
-				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/$(NATIVE_SHARED_LIBRARY) \
-			-DWVW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/wvw \
+				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_PLATFORM)/$(NATIVE_ARCH)/$(NATIVE_SHARED_LIBRARY) \
+			-DWVW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_PLATFORM)/$(NATIVE_ARCH)/wvw \
 				$(NATIVE_IMPORT_ARGUMENT) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
