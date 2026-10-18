@@ -231,7 +231,7 @@ dist_target_is_current() {
 sync_target() {
     local project_dir="$1"
     local target_dir="$2"
-    local project_name name archive staging stage_dir file sha count
+    local project_name name archive staging stage_dir file sha actual_sha count
 
     project_dir="${project_dir%/}"
     project_name=$(basename "$project_dir")
@@ -264,6 +264,16 @@ sync_target() {
             return 1
         fi
         if ! cp "$target_dir/$file" "$stage_dir/$file"; then
+            rm -rf "$staging"
+            return 1
+        fi
+        actual_sha=$(compute_sha256 "$stage_dir/$file") || {
+            rm -rf "$staging"
+            return 1
+        }
+        if [ "$actual_sha" != "$sha" ]; then
+            echo "error: build checksum mismatch: $target_dir/$file" >&2
+            echo "run ./scripts/build.sh $name to refresh SHA256SUMS" >&2
             rm -rf "$staging"
             return 1
         fi
