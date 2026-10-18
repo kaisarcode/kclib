@@ -107,6 +107,11 @@ if(PACT_BUILD_TESTS)
         add_executable(pact_contract_test src/test.c)
         target_include_directories(pact_contract_test PRIVATE src lib/monocypher)
         target_link_libraries(pact_contract_test PRIVATE ${PACT_TEST_SHARED_TARGET})
+        if(DEFINED PACT_CLI_PATH)
+            target_compile_definitions(pact_contract_test PRIVATE
+                KC_CLI_PATH="${PACT_CLI_PATH}"
+            )
+        endif()
         add_custom_command(TARGET pact_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:${PACT_TEST_SHARED_TARGET}>

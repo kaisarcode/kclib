@@ -71,6 +71,11 @@ if(PUNCH_BUILD_TESTS)
     add_executable(punch_contract_test src/test.c)
     target_include_directories(punch_contract_test PRIVATE src)
     target_link_libraries(punch_contract_test PRIVATE ${PUNCH_TEST_SHARED_TARGET})
+    if(DEFINED PUNCH_CLI_PATH)
+        target_compile_definitions(punch_contract_test PRIVATE
+            KC_CLI_PATH="${PUNCH_CLI_PATH}"
+        )
+    endif()
     if(WIN32)
         target_link_libraries(punch_contract_test PRIVATE ws2_32)
     else()

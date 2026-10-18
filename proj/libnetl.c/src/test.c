@@ -149,7 +149,7 @@ static void case_result(
 ) {
     test_case_current++;
     printf(
-        "[%d/%d] %s: %s - %s\n",
+        "[%d/%d] [%s] %s: %s\n",
         test_case_current,
         test_case_total,
         fail == 0 ? "PASS" : "FAIL",

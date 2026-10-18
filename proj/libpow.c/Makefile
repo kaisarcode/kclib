@@ -145,10 +145,12 @@ endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 NATIVE_SHARED_NAME := libpow.so
+NATIVE_CLI_NAME := pow
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_SHARED_NAME := libpow.dll
+NATIVE_CLI_NAME := pow.exe
 NATIVE_IMPORT_LIBRARY := -DPOW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libpow.dll.a
 endif
 
@@ -436,6 +438,7 @@ test:
 				-DPOW_BUILD_VERSION=$(BUILD_VERSION) \
 				-DPOW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libpow.dll \
 				-DPOW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libpow.dll.a \
+				-DPOW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/pow.exe \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wine --target pow_contract_test || exit 1; \
@@ -475,6 +478,7 @@ test:
 				-DPOW_BUILD_TESTS=ON \
 				-DPOW_BUILD_VERSION=$(BUILD_VERSION) \
 				-DPOW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DPOW_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target pow_contract_test || exit 1; \

@@ -57,6 +57,11 @@ if(RSTRM_BUILD_TESTS)
     add_executable(rstrm_contract_test src/test.c)
     target_include_directories(rstrm_contract_test PRIVATE src)
     target_link_libraries(rstrm_contract_test PRIVATE ${RSTRM_TEST_SHARED_TARGET})
+    if(DEFINED RSTRM_CLI_PATH)
+        target_compile_definitions(rstrm_contract_test PRIVATE
+            KC_CLI_PATH="${RSTRM_CLI_PATH}"
+        )
+    endif()
     if(NOT WIN32)
         target_link_libraries(rstrm_contract_test PRIVATE Threads::Threads)
     endif()

@@ -159,6 +159,11 @@ if(POW_BUILD_TESTS)
         add_executable(pow_contract_test src/test.c)
         target_include_directories(pow_contract_test PRIVATE src)
         target_link_libraries(pow_contract_test PRIVATE ${POW_TEST_SHARED_TARGET})
+        if(DEFINED POW_CLI_PATH)
+            target_compile_definitions(pow_contract_test PRIVATE
+                KC_CLI_PATH="${POW_CLI_PATH}"
+            )
+        endif()
 
         add_custom_command(TARGET pow_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

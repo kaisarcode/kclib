@@ -42,6 +42,10 @@ typedef socklen_t test_socklen_t;
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+#ifndef __EMSCRIPTEN__
+static int case_punch_cli(void);
+#endif
+
 typedef struct {
     kc_punch_endpoint_t peer;
     kc_punch_options_t options;
@@ -964,6 +968,49 @@ done:
     return fail ? 1 : 0;
 }
 
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "punch"
+#endif
+
+/**
+ * Run the punch CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int punch_cli_run(const char *args)
+{
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Test punch CLI help and argument validation.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_punch_cli(void)
+{
+    int fail = 0;
+
+    fail += punch_cli_run("--help");
+    fail += punch_cli_run("--version");
+    fail += punch_cli_run("") == 0;
+    fail += punch_cli_run("127.0.0.1") == 0;
+    fail += punch_cli_run("127.0.0.1 1 --unknown") == 0;
+    case_result(fail, "punch_cli",
+        "validates peer connection command arguments");
+    return fail != 0;
+}
+#endif
+
 /**
  * Runs all test cases.
  * @return Number of failures.
@@ -971,12 +1018,15 @@ done:
 static int case_all(void)
 {
     int rc = 0;
-    test_case_total = 4;
+    test_case_total = 5;
     test_case_current = 0;
     run_case(&rc, case_kc_punch_connect);
     run_case(&rc, case_kc_punch_datagrams);
     run_case(&rc, case_kc_punch_lifecycle);
     run_case(&rc, case_kc_punch_connect_over);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_punch_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -999,6 +1049,9 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "kc_punch_lifecycle") == 0) return case_kc_punch_lifecycle();
     if (strcmp(argv[1], "kc_punch_connect_over") == 0)
         return case_kc_punch_connect_over();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "punch_cli") == 0) return case_punch_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

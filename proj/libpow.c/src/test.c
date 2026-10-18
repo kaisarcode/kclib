@@ -10,10 +10,15 @@
 #include "libpow.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int test_case_total = 0;
 static int test_case_current = 0;
+
+#ifndef __EMSCRIPTEN__
+static int case_pow_cli(void);
+#endif
 
 static int expect_true(const char *name, int condition);
 
@@ -412,13 +417,57 @@ static int case_kc_pow_lifecycle(void) {
     return fail == 0 ? 0 : 1;
 }
 
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "pow"
+#endif
+
+/**
+ * Run the pow CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int pow_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Test the proof-of-work command dispatch contract.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_pow_cli(void) {
+    int fail = 0;
+
+    fail += pow_cli_run("--help");
+    fail += pow_cli_run("--version");
+    fail += pow_cli_run("challenge 1 --backend sha256");
+    fail += pow_cli_run("challenge 0") == 0;
+    fail += pow_cli_run("challenge nope") == 0;
+    fail += pow_cli_run("challenge 1 --backend unknown") == 0;
+    fail += pow_cli_run("solve --backend sha256") == 0;
+    fail += pow_cli_run("verify --backend sha256 -c missing") == 0;
+    case_result(fail, "pow_cli",
+        "validates challenge backend selection and command errors");
+    return fail != 0;
+}
+#endif
+
 /**
  * Runs all public contract tests.
  * @return 0 on success, 1 on failure.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 7;
+    test_case_total = 8;
     test_case_current = 0;
     run_case(&rc, case_kc_pow_backend);
     run_case(&rc, case_kc_pow_sha256_vectors);
@@ -427,6 +476,9 @@ static int case_all(void) {
     run_case(&rc, case_kc_pow_solve);
     run_case(&rc, case_kc_pow_verify);
     run_case(&rc, case_kc_pow_lifecycle);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_pow_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -452,6 +504,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_pow_solve") == 0) return case_kc_pow_solve();
     if (strcmp(argv[1], "kc_pow_verify") == 0) return case_kc_pow_verify();
     if (strcmp(argv[1], "kc_pow_lifecycle") == 0) return case_kc_pow_lifecycle();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "pow_cli") == 0) return case_pow_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

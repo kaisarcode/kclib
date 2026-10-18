@@ -41,6 +41,10 @@ typedef pthread_mutex_t test_mutex_t;
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+#ifndef __EMSCRIPTEN__
+static int case_rstrm_cli(void);
+#endif
+
 typedef struct endpoint endpoint_t;
 
 struct endpoint {
@@ -79,6 +83,48 @@ typedef struct {
     unsigned count;
     int status;
 } writer_arg_t;
+
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "rstrm"
+#endif
+
+/**
+ * Run the rstrm CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int rstrm_cli_run(const char *args)
+{
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Test stream CLI help and argument validation.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_rstrm_cli(void)
+{
+    int fail = 0;
+
+    fail += rstrm_cli_run("--help");
+    fail += rstrm_cli_run("--version");
+    fail += rstrm_cli_run("") == 0;
+    fail += rstrm_cli_run("--unknown") == 0;
+    case_result(fail, "rstrm_cli",
+        "validates reliable-stream command arguments");
+    return fail != 0;
+}
+#endif
 
 /**
  * Runs a reliable-stream contract operation.
@@ -1242,7 +1288,7 @@ static int case_kc_rstrm_status(void)
 static int case_all(void)
 {
     int rc = 0;
-    test_case_total = 16;
+    test_case_total = 17;
     test_case_current = 0;
     run_case(&rc, case_kc_rstrm_open);
     run_case(&rc, case_kc_rstrm_send);
@@ -1260,6 +1306,9 @@ static int case_all(void)
     run_case(&rc, case_kc_rstrm_error_callback);
     run_case(&rc, case_kc_rstrm_input);
     run_case(&rc, case_kc_rstrm_status);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_rstrm_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -1301,6 +1350,9 @@ int main(int argc, char **argv)
         return case_kc_rstrm_error_callback();
     if (strcmp(argv[1], "kc_rstrm_input") == 0) return case_kc_rstrm_input();
     if (strcmp(argv[1], "kc_rstrm_status") == 0) return case_kc_rstrm_status();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "rstrm_cli") == 0) return case_rstrm_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

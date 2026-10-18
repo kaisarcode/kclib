@@ -145,10 +145,12 @@ endif
 
 NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 NATIVE_SHARED_NAME := libpact.so
+NATIVE_CLI_NAME := pact
 NATIVE_IMPORT_LIBRARY :=
 
 ifeq ($(NATIVE_PLATFORM),windows)
 NATIVE_SHARED_NAME := libpact.dll
+NATIVE_CLI_NAME := pact.exe
 NATIVE_IMPORT_LIBRARY := -DPACT_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libpact.dll.a
 endif
 
@@ -417,7 +419,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libpact.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libpact.dll.a ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libpact.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libpact.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/pact.exe ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -430,6 +432,7 @@ test:
 				-DPACT_BUILD_VERSION=$(BUILD_VERSION) \
 				-DPACT_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libpact.dll \
 				-DPACT_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libpact.dll.a \
+				-DPACT_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/pact.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -464,7 +467,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -474,6 +477,7 @@ test:
 				-DPACT_BUILD_TESTS=ON \
 				-DPACT_BUILD_VERSION=$(BUILD_VERSION) \
 				-DPACT_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) \
+				-DPACT_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_CLI_NAME) \
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \

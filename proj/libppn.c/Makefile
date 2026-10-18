@@ -128,6 +128,7 @@ test:
 				-DPPN_BUILD_VERSION=$(BUILD_VERSION) \
 				-DPPN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libppn.dll \
 				-DPPN_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libppn.dll.a \
+				-DPPN_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/ppn.exe \
 				-DCMAKE_CROSSCOMPILING_EMULATOR=wine \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
@@ -140,6 +141,7 @@ test:
 				-DPPN_BUILD_TESTS=ON \
 				-DPPN_BUILD_VERSION=$(BUILD_VERSION) \
 				-DPPN_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/$(NATIVE_SHARED_LIBRARY) \
+				-DPPN_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_ARCH)/$(NATIVE_PLATFORM)/ppn \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
 		cmake --build $(BUILD_DIR)/test --target ppn_contract_test || exit 1; \

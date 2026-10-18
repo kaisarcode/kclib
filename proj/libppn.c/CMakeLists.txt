@@ -95,6 +95,11 @@ if(PPN_BUILD_TESTS)
     add_executable(ppn_contract_test src/test.c)
     target_include_directories(ppn_contract_test PRIVATE src)
     target_link_libraries(ppn_contract_test PRIVATE ${PPN_TEST_SHARED_TARGET})
+    if(DEFINED PPN_CLI_PATH)
+        target_compile_definitions(ppn_contract_test PRIVATE
+            KC_CLI_PATH="${PPN_CLI_PATH}"
+        )
+    endif()
 
     if(WIN32)
         target_link_libraries(ppn_contract_test PRIVATE user32 shell32)

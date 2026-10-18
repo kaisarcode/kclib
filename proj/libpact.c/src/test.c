@@ -29,6 +29,10 @@
 static int test_case_total = 0;
 static int test_case_current = 0;
 
+#ifndef __EMSCRIPTEN__
+static int case_pact_cli(void);
+#endif
+
 typedef int (*case_fn)(void);
 
 /**
@@ -565,13 +569,56 @@ static int case_kc_pact_protocol(void) {
     return fail ? 1 : 0;
 }
 
+#ifndef __EMSCRIPTEN__
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "pact"
+#endif
+
+/**
+ * Run the pact CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int pact_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Test command-line help, version, and invalid invocations.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_pact_cli(void) {
+    int fail = 0;
+
+    fail += pact_cli_run("--help");
+    fail += pact_cli_run("--version");
+    fail += pact_cli_run("") == 0;
+    fail += pact_cli_run("join") == 0;
+    fail += pact_cli_run("confirm") == 0;
+    fail += pact_cli_run("seal") == 0;
+    fail += pact_cli_run("--unknown") == 0;
+    case_result(fail, "pact_cli",
+        "validates command dispatch and incomplete invocations");
+    return fail != 0;
+}
+#endif
+
 /**
  * Runs all trust contract test cases.
  * @return 0 when all cases pass, or a failure count.
  */
 static int case_all(void) {
     int rc = 0;
-    test_case_total = 11;
+    test_case_total = 12;
     test_case_current = 0;
     run_case(&rc, case_kc_pact_version);
     run_case(&rc, case_kc_pact_init);
@@ -584,6 +631,9 @@ static int case_all(void) {
     run_case(&rc, case_kc_pact_revoke);
     run_case(&rc, case_kc_pact_free);
     run_case(&rc, case_kc_pact_protocol);
+#ifndef __EMSCRIPTEN__
+    run_case(&rc, case_pact_cli);
+#endif
     printf("%d passed, %d failed\n\n", test_case_total - rc, rc);
     return rc;
 }
@@ -611,6 +661,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "kc_pact_revoke") == 0) return case_kc_pact_revoke();
     if (strcmp(argv[1], "kc_pact_free") == 0) return case_kc_pact_free();
     if (strcmp(argv[1], "kc_pact_protocol") == 0) return case_kc_pact_protocol();
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "pact_cli") == 0) return case_pact_cli();
+#endif
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }
