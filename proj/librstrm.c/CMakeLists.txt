@@ -65,3 +65,25 @@ if(RSTRM_BUILD_TESTS)
             $<TARGET_FILE:${RSTRM_TEST_SHARED_TARGET}>
             $<TARGET_FILE_DIR:rstrm_contract_test>)
 endif()
+# Build the command-line frontend against the shared library.
+if(TARGET rstrm_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(rstrm_cli src/rstrm.c)
+    set_target_properties(rstrm_cli PROPERTIES
+        OUTPUT_NAME "rstrm"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(rstrm_cli PRIVATE src)
+    target_link_libraries(rstrm_cli PRIVATE rstrm_shared)
+    if(APPLE)
+        set_target_properties(rstrm_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(rstrm_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()

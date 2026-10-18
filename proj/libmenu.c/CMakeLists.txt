@@ -75,6 +75,11 @@ if(MENU_BUILD_TESTS)
     add_executable(menu_contract_test src/test.c)
     target_include_directories(menu_contract_test PRIVATE src)
     target_link_libraries(menu_contract_test PRIVATE ${MENU_TEST_SHARED_TARGET})
+    if(MENU_CLI_PATH)
+        target_compile_definitions(menu_contract_test PRIVATE
+            KC_CLI_PATH="${MENU_CLI_PATH}"
+        )
+    endif()
 
     if(WIN32)
         target_link_libraries(menu_contract_test PRIVATE ole32 shell32 uuid)
@@ -85,4 +90,26 @@ if(MENU_BUILD_TESTS)
             $<TARGET_FILE:${MENU_TEST_SHARED_TARGET}>
             $<TARGET_FILE_DIR:menu_contract_test>
     )
+endif()
+# Build the command-line frontend against the shared library.
+if(TARGET menu_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(menu_cli src/menu.c)
+    set_target_properties(menu_cli PROPERTIES
+        OUTPUT_NAME "menu"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(menu_cli PRIVATE src)
+    target_link_libraries(menu_cli PRIVATE menu_shared)
+    if(APPLE)
+        set_target_properties(menu_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(menu_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
 endif()

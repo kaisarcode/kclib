@@ -145,3 +145,25 @@ if(WVW_BUILD_TESTS)
             $<TARGET_FILE_DIR:wvw_contract_test>
     )
 endif()
+# Build the command-line frontend against the shared library.
+if(TARGET wvw_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(wvw_cli src/wvw.c)
+    set_target_properties(wvw_cli PROPERTIES
+        OUTPUT_NAME "wvw"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(wvw_cli PRIVATE src)
+    target_link_libraries(wvw_cli PRIVATE wvw_shared)
+    if(APPLE)
+        set_target_properties(wvw_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(wvw_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()

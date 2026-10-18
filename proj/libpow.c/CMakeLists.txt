@@ -167,3 +167,25 @@ if(POW_BUILD_TESTS)
         )
     endif()
 endif()
+# Build the command-line frontend against the shared library.
+if(TARGET pow_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(pow_cli src/pow.c)
+    set_target_properties(pow_cli PROPERTIES
+        OUTPUT_NAME "pow"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(pow_cli PRIVATE src)
+    target_link_libraries(pow_cli PRIVATE pow_shared)
+    if(APPLE)
+        set_target_properties(pow_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(pow_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()

@@ -86,6 +86,11 @@ if(NGRAM_BUILD_TESTS)
         add_executable(ngram_contract_test src/test.c)
         target_include_directories(ngram_contract_test PRIVATE src)
         target_link_libraries(ngram_contract_test PRIVATE ${NGRAM_TEST_SHARED_TARGET})
+    if(NGRAM_CLI_PATH)
+        target_compile_definitions(ngram_contract_test PRIVATE
+            KC_CLI_PATH="${NGRAM_CLI_PATH}"
+        )
+    endif()
 
         add_custom_command(TARGET ngram_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -94,4 +99,26 @@ if(NGRAM_BUILD_TESTS)
         )
     endif()
 
+endif()
+# Build the command-line frontend against the shared library.
+if(TARGET ngram_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(ngram_cli src/ngram.c)
+    set_target_properties(ngram_cli PROPERTIES
+        OUTPUT_NAME "ngram"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(ngram_cli PRIVATE src)
+    target_link_libraries(ngram_cli PRIVATE ngram_shared)
+    if(APPLE)
+        set_target_properties(ngram_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(ngram_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
 endif()

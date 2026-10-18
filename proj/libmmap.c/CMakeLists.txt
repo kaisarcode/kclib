@@ -93,11 +93,38 @@ if(MMAP_BUILD_TESTS)
         add_executable(mmap_contract_test src/test.c)
         target_include_directories(mmap_contract_test PRIVATE src)
         target_link_libraries(mmap_contract_test PRIVATE ${MMAP_TEST_SHARED_TARGET})
+        if(MMAP_CLI_PATH)
+            target_compile_definitions(mmap_contract_test PRIVATE
+                KC_CLI_PATH="${MMAP_CLI_PATH}"
+            )
+        endif()
 
         add_custom_command(TARGET mmap_contract_test POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:${MMAP_TEST_SHARED_TARGET}>
                 $<TARGET_FILE_DIR:mmap_contract_test>
+        )
+    endif()
+endif()
+# Build the command-line frontend against the shared library.
+if(TARGET mmap_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(mmap_cli src/mmap.c)
+    set_target_properties(mmap_cli PROPERTIES
+        OUTPUT_NAME "mmap"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(mmap_cli PRIVATE src)
+    target_link_libraries(mmap_cli PRIVATE mmap_shared)
+    if(APPLE)
+        set_target_properties(mmap_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(mmap_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
         )
     endif()
 endif()

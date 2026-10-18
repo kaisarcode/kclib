@@ -91,6 +91,11 @@ if(MIN_BUILD_TESTS)
         add_executable(min_contract_test src/test.c)
         target_include_directories(min_contract_test PRIVATE src)
         target_link_libraries(min_contract_test PRIVATE ${MIN_TEST_SHARED_TARGET})
+        if(MIN_CLI_PATH)
+            target_compile_definitions(min_contract_test PRIVATE
+                KC_CLI_PATH="${MIN_CLI_PATH}"
+            )
+        endif()
 
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(min_contract_test PRIVATE m)
@@ -104,3 +109,25 @@ if(MIN_BUILD_TESTS)
     endif()
 endif()
 
+# Build the command-line frontend against the shared library.
+if(TARGET min_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(min_cli src/min.c)
+    set_target_properties(min_cli PROPERTIES
+        OUTPUT_NAME "min"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(min_cli PRIVATE src)
+    target_link_libraries(min_cli PRIVATE min_shared)
+    if(APPLE)
+        set_target_properties(min_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(min_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()

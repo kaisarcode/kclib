@@ -116,3 +116,25 @@ if(TPM_BUILD_TESTS)
     endif()
 
 endif()
+# Build the command-line frontend against the shared library.
+if(TARGET tpm_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(tpm_cli src/tpm.c)
+    set_target_properties(tpm_cli PROPERTIES
+        OUTPUT_NAME "tpm"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(tpm_cli PRIVATE src)
+    target_link_libraries(tpm_cli PRIVATE tpm_shared)
+    if(APPLE)
+        set_target_properties(tpm_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(tpm_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()

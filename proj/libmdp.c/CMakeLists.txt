@@ -92,6 +92,11 @@ if(MDP_BUILD_TESTS)
         add_executable(mdp_contract_test src/test.c)
         target_include_directories(mdp_contract_test PRIVATE src)
         target_link_libraries(mdp_contract_test PRIVATE ${MDP_TEST_SHARED_TARGET})
+        if(MDP_CLI_PATH)
+            target_compile_definitions(mdp_contract_test PRIVATE
+                KC_CLI_PATH="${MDP_CLI_PATH}"
+            )
+        endif()
 
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(mdp_contract_test PRIVATE m)
@@ -101,6 +106,29 @@ if(MDP_BUILD_TESTS)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:${MDP_TEST_SHARED_TARGET}>
                 $<TARGET_FILE_DIR:mdp_contract_test>
+        )
+    endif()
+endif()
+
+# Build the command-line frontend against the shared library.
+if(TARGET mdp_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(mdp_cli src/mdp.c)
+    set_target_properties(mdp_cli PROPERTIES
+        OUTPUT_NAME "mdp"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(mdp_cli PRIVATE src)
+    target_link_libraries(mdp_cli PRIVATE mdp_shared)
+    if(APPLE)
+        set_target_properties(mdp_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(mdp_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
         )
     endif()
 endif()

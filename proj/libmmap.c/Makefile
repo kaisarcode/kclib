@@ -447,7 +447,7 @@ test:
 			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/x86_64/windows/libmmap.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmmap.dll.a ]; then \
+		if [ ! -f $(BIN_DIR)/x86_64/windows/libmmap.dll ] || [ ! -f $(BIN_DIR)/x86_64/windows/libmmap.dll.a ] || [ ! -f $(BIN_DIR)/x86_64/windows/mmap.exe ]; then \
 			echo "Missing Windows artifacts. Run 'make x86_64/windows' or 'make all' first." >&2; \
 			exit 1; \
 		fi; \
@@ -463,6 +463,7 @@ test:
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine -DMMAP_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/mmap.exe > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test-wine --target mmap_contract_test || exit 1; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/mmap_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
@@ -494,7 +495,7 @@ test:
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 			exit 1; \
 		fi; \
-		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ]; then \
+		if [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/$(NATIVE_SHARED_NAME) ] || [ ! -f $(BIN_DIR)/$(NATIVE_TARGET)/mmap$(NATIVE_EXE_EXT) ]; then \
 			echo "Missing native artifacts. Run 'make' first." >&2; \
 			exit 1; \
 		fi; \
@@ -507,6 +508,7 @@ test:
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test -DMMAP_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/mmap$(NATIVE_EXE_EXT) > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test --target mmap_contract_test || exit 1; \
 		$(BUILD_DIR)/test/mmap_contract_test all; \
 	fi

@@ -81,3 +81,25 @@ if(PUNCH_BUILD_TESTS)
             $<TARGET_FILE:${PUNCH_TEST_SHARED_TARGET}>
             $<TARGET_FILE_DIR:punch_contract_test>)
 endif()
+# Build the command-line frontend against the shared library.
+if(TARGET punch_shared AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_executable(punch_cli src/punch.c)
+    set_target_properties(punch_cli PROPERTIES
+        OUTPUT_NAME "punch"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+    )
+    target_include_directories(punch_cli PRIVATE src)
+    target_link_libraries(punch_cli PRIVATE punch_shared)
+    if(APPLE)
+        set_target_properties(punch_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "@loader_path"
+        )
+    elseif(UNIX)
+        set_target_properties(punch_cli PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()
