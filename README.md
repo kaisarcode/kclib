@@ -187,6 +187,15 @@ For example, `make linux/x86_64` builds to `proj/libdemo.c/bin/linux/x86_64/`,
 while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Published artifacts
 follow the same order in `dist/libNAME.c/{platform}/{arch}/` (for example,
 `dist/libdemo.c/linux/x86_64/`).
+
+Publish every kclib (omitting `all` is equivalent) or one project:
+
+```sh
+./scripts/dist.sh
+./scripts/dist.sh all
+./scripts/dist.sh demo
+```
+
 The code is primarily C11.
 
 Each project declares its requirements and supported targets in its own README

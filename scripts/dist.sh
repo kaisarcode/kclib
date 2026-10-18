@@ -41,7 +41,7 @@ declare -A MANIFEST_COUNT=()
 # Prints command usage information.
 # @return 0 on success.
 usage() {
-    echo "Usage: $0 all|NAME" >&2
+    echo "Usage: $0 [all|NAME]" >&2
 }
 
 # Returns the logical capability name for a libNAME.c project.
@@ -451,12 +451,12 @@ MANIFEST_ENTRY
 main() {
     local target project_dir status changed stale_changed
 
-    [ "$#" -eq 1 ] || {
+    [ "$#" -le 1 ] || {
         usage
         exit 1
     }
 
-    target="$1"
+    target="${1:-all}"
     [ -d "$PROJ_DIR" ] || {
         echo "error: projects directory not found: $PROJ_DIR" >&2
         exit 1
