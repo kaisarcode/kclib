@@ -428,6 +428,10 @@ test:
 			echo "missing Windows import library: run make x86_64/windows first" >&2; \
 			exit 1; \
 		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/tpl.exe" ]; then \
+			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
+			exit 1; \
+		fi; \
 		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test-wine \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -438,6 +442,7 @@ test:
 				-DTPL_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libtpl.dll.a \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test-wine -DTPL_CLI_PATH=$(CURDIR)/$(BIN_DIR)/x86_64/windows/tpl.exe > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test-wine --target tpl_contract_test; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/tpl_contract_test.exe all; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
@@ -473,6 +478,10 @@ test:
 			echo "missing native shared library: run make first" >&2; \
 			exit 1; \
 		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/tpl$(NATIVE_EXE_EXT)" ]; then \
+			echo "missing native CLI: run make first" >&2; \
+			exit 1; \
+		fi; \
 		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
 			cmake -S . -B $(BUILD_DIR)/test \
 				-DCMAKE_BUILD_TYPE=Release \
@@ -480,6 +489,7 @@ test:
 				-DTPL_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libtpl.so \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
+		cmake -S . -B $(BUILD_DIR)/test -DTPL_CLI_PATH=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/tpl$(NATIVE_EXE_EXT) > /dev/null || exit 1; \
 		cmake --build $(BUILD_DIR)/test --target tpl_contract_test; \
 		$(BUILD_DIR)/test/tpl_contract_test all; \
 	fi

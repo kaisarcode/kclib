@@ -87,6 +87,11 @@ if(TPL_BUILD_TESTS)
         add_executable(tpl_contract_test src/test.c)
         target_include_directories(tpl_contract_test PRIVATE src)
         target_link_libraries(tpl_contract_test ${TPL_TEST_SHARED_TARGET})
+    if(TPL_CLI_PATH)
+        target_compile_definitions(tpl_contract_test PRIVATE
+            KC_CLI_PATH="${TPL_CLI_PATH}"
+        )
+    endif()
         if(UNIX AND NOT ANDROID AND NOT APPLE)
             target_link_libraries(tpl_contract_test pthread m)
         endif()
