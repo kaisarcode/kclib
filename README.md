@@ -185,14 +185,15 @@ Projects normally use Make over CMake and Ninja. A local build creates artifacts
 under `bin/{platform}/{arch}/`; exact multiarch targets depend on the project.
 For example, `make linux/x86_64` builds to `proj/libdemo.c/bin/linux/x86_64/`,
 while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Distribution
-publishes one ZIP per platform and architecture, for example,
-`dist/libdemo.c/libdemo-linux-x86_64.zip`. Each ZIP contains a single
-`libdemo/` directory with the compiled artifacts, `LICENSE`, `COPYING`,
-a generated minimal `README.md` (project name, author and website), and
-`SHA256SUMS` covering every included file. The distribution manifest
-(`dist/manifest.json`) records ZIP paths, sizes, archive SHA-256 hashes,
-build checksums, license checksums, and README checksums. ZIPs are
-regenerated when binaries, licensing files, or README content change.
+publishes individual files under `dist/libNAME.c/{platform}/{arch}/`,
+for example `dist/libdemo.c/linux/x86_64/libdemo.so`. Each target
+directory contains its compiled artifacts, public header, `LICENSE` or
+`COPYING` when provided, a generated minimal `README.md` (project name,
+author and website), and `SHA256SUMS` covering the published files.
+The distribution manifest (`dist/manifest.json`) records each file's
+download path, size, SHA-256 hash, build checksum, license checksum,
+and README checksum. Changes to binaries, headers, licensing files,
+or README content republish only affected targets, without ZIP archives.
 
 Publish every kclib (omitting `all` is equivalent) or one project:
 
