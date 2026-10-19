@@ -1,5 +1,5 @@
 .build/
 bin/
-PLAN.md
-PLAN-CHAT.md
 dist/
+PLAN.md
+HANDOVER.md
