@@ -287,10 +287,10 @@ another scripting-language binding:
 * read the matching `docs/api/NAME.md`;
 * preserve the capability semantics of the public C header;
 * keep ABI-only mechanics such as output pointers, buffer/count pairs,
-  allocation cleanup, and opaque pointer representation out of the scripting
-  surface when they can be translated mechanically;
+    allocation cleanup, and opaque pointer representation out of the scripting
+    surface when they can be translated mechanically;
 * do not make these references depend on a particular application framework,
-  host runtime, bridge implementation, or packaging system.
+    host runtime, bridge implementation, or packaging system.
 
 The public C header remains the native compatibility contract. The scripting
 documents define the canonical language-facing projection of that contract and
