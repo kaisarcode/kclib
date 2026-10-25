@@ -1,6 +1,6 @@
 /**
  * rdvz.c - Rendezvous peer relationship CLI.
- * Summary: Demonstrates a registry and direct links within one process.
+ * Summary: Creates one in-memory peer per invocation.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -19,7 +19,6 @@
  */
 static void rdvz_help(const char *name) {
     printf("Usage: %s connect\n", name);
-    printf("       %s match\n", name);
     printf("       %s --help|--version\n", name);
     printf("\nEach command operates on a private in-memory registry.\n");
 }
@@ -32,8 +31,7 @@ static void rdvz_help(const char *name) {
  */
 int main(int argc, char **argv) {
     kc_rdvz_t *rdvz = NULL;
-    kc_rdvz_peer_t *first = NULL;
-    kc_rdvz_peer_t *second = NULL;
+    kc_rdvz_peer_t *peer = NULL;
     int status;
 
     if (argc != 2) {
@@ -48,21 +46,17 @@ int main(int argc, char **argv) {
         printf("%llu\n", (unsigned long long)kc_rdvz_version());
         return 0;
     }
-    if (strcmp(argv[1], "connect") && strcmp(argv[1], "match")) {
+    if (strcmp(argv[1], "connect") != 0) {
         rdvz_help(argv[0]);
         return 2;
     }
 
     status = kc_rdvz_open(&rdvz, NULL);
     if (status == KC_RDVZ_OK)
-        status = kc_rdvz_connect(rdvz, NULL, &first);
-    if (status == KC_RDVZ_OK && !strcmp(argv[1], "match"))
-        status = kc_rdvz_connect(rdvz, kc_rdvz_peer_id(first), &second);
+        status = kc_rdvz_connect(rdvz, NULL, &peer);
 
     if (status == KC_RDVZ_OK) {
-        printf("%s", kc_rdvz_peer_id(first));
-        if (second) printf("\t%s", kc_rdvz_peer_id(second));
-        printf("\n");
+        printf("%s\n", kc_rdvz_peer_id(peer));
     } else {
         fprintf(stderr, "rdvz: %s\n", kc_rdvz_strerror(status));
     }
