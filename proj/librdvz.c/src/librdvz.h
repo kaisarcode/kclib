@@ -1,6 +1,6 @@
 /**
- * librdvz.h - Generic rendezvous registry.
- * Summary: Public API for named publications and independent seekers.
+ * librdvz.h - Generic peer rendezvous relationships.
+ * Summary: Public API for independent peers and their direct links.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -10,7 +10,6 @@
 #ifndef KC_RDVZ_H
 #define KC_RDVZ_H
 
-#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -18,158 +17,117 @@ extern "C" {
 #endif
 
 typedef struct kc_rdvz kc_rdvz_t;
-typedef struct kc_rdvz_point kc_rdvz_point_t;
-typedef struct kc_rdvz_seeker kc_rdvz_seeker_t;
+typedef struct kc_rdvz_peer kc_rdvz_peer_t;
 
 #define KC_RDVZ_OK 0
 #define KC_RDVZ_ENOENT -1
-#define KC_RDVZ_EEXIST -2
-#define KC_RDVZ_EINVAL -3
-#define KC_RDVZ_ENOMEM -4
+#define KC_RDVZ_EINVAL -2
+#define KC_RDVZ_ENOMEM -3
+#define KC_RDVZ_EBUSY -4
 #define KC_RDVZ_ELIMIT -5
 
 /**
- * Configures storage limits and expiry policy.
- *
- * A zero count limit means unlimited. A zero TTL disables expiry for that
- * object type. Expiry is applied only when kc_rdvz_prune() is called.
+ * Observes one created or removed direct link.
+ * Both peers are valid during the notification. Callbacks may inspect the
+ * registry but must not mutate or close it; mutations return KC_RDVZ_EBUSY.
+ * @param peer Peer initiating connection or disconnection.
+ * @param other Peer at the opposite end of the link.
+ * @param userdata Application context supplied to open.
+ * @return None.
+ */
+typedef void (*kc_rdvz_link_fn)(const kc_rdvz_peer_t *peer,
+    const kc_rdvz_peer_t *other, void *userdata);
+
+/**
+ * Visits one peer during a list operation.
+ * The registry cannot be mutated or closed during iteration.
+ * @param peer Borrowed peer reference, valid until disconnection or close.
+ * @param userdata Context supplied to the list operation.
+ * @return None.
+ */
+typedef void (*kc_rdvz_visit_fn)(const kc_rdvz_peer_t *peer, void *userdata);
+
+/**
+ * Optional rendezvous notifications.
+ * Notifications are synchronous, occur once per created or removed direct
+ * link, and do not imply transport, message delivery or peer authentication.
  */
 typedef struct {
-    size_t max_publications;
-    size_t max_seekers;
-    size_t max_seekers_per_point;
-    uint64_t publication_ttl_ms;
-    uint64_t seeker_ttl_ms;
+    kc_rdvz_link_fn on_connect;
+    kc_rdvz_link_fn on_disconnect;
+    void *userdata;
 } kc_rdvz_options_t;
 
 /**
- * Read-only view of one published value.
- */
-typedef struct {
-    const void *data;
-    size_t data_size;
-} kc_rdvz_publication_t;
-
-/**
- * Read-only view of one seeker in a rendezvous point.
- *
- * Seekers remain in insertion order until removed or pruned. previous and next
- * are traversal links only; the library owns the list structure.
- */
-struct kc_rdvz_seeker {
-    const kc_rdvz_point_t *point;
-    const void *data;
-    size_t data_size;
-    const kc_rdvz_seeker_t *previous;
-    const kc_rdvz_seeker_t *next;
-};
-
-/**
- * Read-only view of one named rendezvous point.
- *
- * A point may contain seekers with no publication, a publication with no
- * seekers, or both.
- */
-struct kc_rdvz_point {
-    const char *id;
-    const kc_rdvz_publication_t *publication;
-    const kc_rdvz_seeker_t *head;
-    const kc_rdvz_seeker_t *tail;
-    size_t seeker_count;
-};
-
-/**
- * Creates an independent rendezvous registry.
- * @param out Destination registry pointer.
- * @param options Optional storage policy. NULL selects unlimited storage and no
- *                expiry.
- * @return KC_RDVZ_OK or a negative status code.
+ * Opens an independent in-memory registry.
+ * @param out Destination for the owned registry.
+ * @param options Optional notification callbacks and application context.
+ * @return KC_RDVZ_OK, KC_RDVZ_EINVAL, or KC_RDVZ_ENOMEM.
  */
 int kc_rdvz_open(kc_rdvz_t **out, const kc_rdvz_options_t *options);
 
 /**
- * Returns the current point for one identifier.
+ * Creates a new peer and optionally links it to an existing peer.
+ * Passing NULL as target_id creates an independent peer. Every successful
+ * call creates a fresh, registry-unique ID; the supplied ID identifies the
+ * target, not the new peer. A link is symmetric and never creates transitive
+ * links. On success, on_connect runs once if a link was created.
  * @param rdvz Open registry.
- * @param id Arbitrary NUL-terminated identifier.
- * @return Borrowed point view, or NULL when no publication or seeker exists.
+ * @param target_id Existing peer ID, or NULL for an independent peer.
+ * @param out Destination for the owned peer handle.
+ * @return KC_RDVZ_OK, KC_RDVZ_ENOENT, KC_RDVZ_EINVAL,
+ *         KC_RDVZ_ENOMEM, KC_RDVZ_EBUSY, or KC_RDVZ_ELIMIT.
  */
-const kc_rdvz_point_t *kc_rdvz_get(kc_rdvz_t *rdvz, const char *id);
+int kc_rdvz_connect(kc_rdvz_t *rdvz, const char *target_id,
+    kc_rdvz_peer_t **out);
 
 /**
- * Publishes one value at an identifier.
- *
- * Publishing does not modify existing seekers. Only one publication may exist
- * at a point; publishing an already-published identifier returns
- * KC_RDVZ_EEXIST.
- * The data bytes are copied by the library.
- *
- * @param rdvz Open registry.
- * @param id Arbitrary NUL-terminated identifier.
- * @param data Publication bytes, or NULL when data_size is zero.
- * @param data_size Publication byte count.
- * @param out Optional destination for the resulting borrowed point view.
- * @return KC_RDVZ_OK or a negative status code.
+ * Returns the stable ID of a connected peer.
+ * The string remains valid until the peer disconnects or the registry closes.
+ * @param peer Live peer.
+ * @return Borrowed ID or NULL for an invalid handle.
  */
-int kc_rdvz_publish(kc_rdvz_t *rdvz, const char *id,
-    const void *data, size_t data_size, const kc_rdvz_point_t **out);
+const char *kc_rdvz_peer_id(const kc_rdvz_peer_t *peer);
 
 /**
- * Removes only the publication at an identifier.
- *
- * Existing seekers remain attached to the rendezvous point and may later meet
- * a new publication of the same identifier.
- *
+ * Visits every live peer in registry insertion order.
  * @param rdvz Open registry.
- * @param id Published identifier.
- * @return KC_RDVZ_OK, KC_RDVZ_ENOENT, or KC_RDVZ_EINVAL.
- */
-int kc_rdvz_unpublish(kc_rdvz_t *rdvz, const char *id);
-
-/**
- * Adds one seeker to an identifier.
- *
- * Seeking succeeds even when no publication currently exists. The data bytes
- * are copied by the library. The returned seeker exposes its point, so a caller
- * can inspect the point publication immediately when present.
- *
- * @param rdvz Open registry.
- * @param id Arbitrary NUL-terminated identifier.
- * @param data Seeker bytes, or NULL when data_size is zero.
- * @param data_size Seeker byte count.
- * @param out Destination for the borrowed seeker view.
- * @return KC_RDVZ_OK or a negative status code.
- */
-int kc_rdvz_seek(kc_rdvz_t *rdvz, const char *id,
-    const void *data, size_t data_size, const kc_rdvz_seeker_t **out);
-
-/**
- * Removes one seeker without affecting the publication or other seekers.
- * @param rdvz Open registry that owns seeker.
- * @param seeker Borrowed seeker returned by kc_rdvz_seek() or point traversal.
+ * @param visit Required visitor invoked once for each peer.
+ * @param userdata Caller context.
  * @return KC_RDVZ_OK or KC_RDVZ_EINVAL.
  */
-int kc_rdvz_remove(kc_rdvz_t *rdvz, const kc_rdvz_seeker_t *seeker);
+int kc_rdvz_list(kc_rdvz_t *rdvz, kc_rdvz_visit_fn visit, void *userdata);
 
 /**
- * Applies configured TTLs and removes objects whose expiry time has elapsed.
- *
- * Publication expiry does not remove seekers. Seeker expiry does not remove a
- * publication or other seekers. Empty points are reclaimed automatically.
- *
- * @param rdvz Open registry.
- * @return Number of publications plus seekers removed, or zero for NULL.
+ * Visits the direct neighbors of one peer in connection order.
+ * Does not traverse indirect links.
+ * @param peer Live peer.
+ * @param visit Required visitor invoked for each directly linked peer.
+ * @param userdata Caller context.
+ * @return KC_RDVZ_OK or KC_RDVZ_EINVAL.
  */
-size_t kc_rdvz_prune(kc_rdvz_t *rdvz);
+int kc_rdvz_peer_list(const kc_rdvz_peer_t *peer, kc_rdvz_visit_fn visit,
+    void *userdata);
 
 /**
- * Releases a rendezvous registry and all stored publications and seekers.
- * @param rdvz Registry pointer. NULL is a safe no-op.
- * @return None.
+ * Removes a peer and all its direct links, retaining every other peer.
+ * on_disconnect runs once per removed link after that link is detached.
+ * The peer handle and its ID become invalid when this function returns.
+ * @param peer Live peer to disconnect.
+ * @return KC_RDVZ_OK, KC_RDVZ_EINVAL, or KC_RDVZ_EBUSY.
  */
-void kc_rdvz_close(kc_rdvz_t *rdvz);
+int kc_rdvz_disconnect(kc_rdvz_peer_t *peer);
 
 /**
- * Returns a stable textual description for one public status code.
+ * Closes the registry and discards all peers and links.
+ * Closing does not emit disconnect notifications.
+ * @param rdvz Open registry; NULL is a successful no-op.
+ * @return KC_RDVZ_OK or KC_RDVZ_EBUSY when invoked from a callback.
+ */
+int kc_rdvz_close(kc_rdvz_t *rdvz);
+
+/**
+ * Returns a stable textual description for one status code.
  * @param status Public status code.
  * @return Static NUL-terminated description.
  */
@@ -177,7 +135,7 @@ const char *kc_rdvz_strerror(int status);
 
 /**
  * Returns the build version generated at compile time.
- * @return Unix timestamp for the current build.
+ * @return Build version.
  */
 uint64_t kc_rdvz_version(void);
 
