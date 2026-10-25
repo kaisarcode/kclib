@@ -585,11 +585,21 @@ static int rdvz_cli_result(const char *name, const char *detail, int ok) {
  * @return Number of failed CLI cases.
  */
 static int case_rdvz_cli(void) {
+    char help[512];
     int failures = 0;
 
-    failures += rdvz_cli_result("help", "--help succeeds",
-        rdvz_cli_run("--help") == 0);
-    failures += rdvz_cli_result("version", "--version succeeds",
+    snprintf(help, sizeof(help),
+        "Usage: %s connect" KC_LINE_END
+        KC_LINE_END
+        "Options:" KC_LINE_END
+        "  -h, --help     Show this help" KC_LINE_END
+        "  -v, --version  Show version" KC_LINE_END,
+        KC_CLI_PATH);
+    failures += rdvz_cli_result("help", "-h and --help show usage and options",
+        rdvz_cli_output_equals("-h", help) &&
+        rdvz_cli_output_equals("--help", help));
+    failures += rdvz_cli_result("version", "-v and --version succeed",
+        rdvz_cli_run("-v") == 0 &&
         rdvz_cli_run("--version") == 0);
     failures += rdvz_cli_result("connect", "connect prints a fresh peer ID",
         rdvz_cli_output_equals("connect", "1" KC_LINE_END));
