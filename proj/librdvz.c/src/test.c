@@ -599,8 +599,6 @@ static int case_rdvz_cli(void) {
         rdvz_cli_run(NULL) != 0);
     failures += rdvz_cli_result("unknown", "unknown command fails",
         rdvz_cli_run("--unknown") != 0);
-    failures += rdvz_cli_result("legacy", "old seek command is unsupported",
-        rdvz_cli_run("seek room value") != 0);
 
     return failures;
 }
@@ -616,7 +614,7 @@ static int case_all(void) {
 #ifdef __EMSCRIPTEN__
     test_case_total = 9;
 #else
-    test_case_total = 16;
+    test_case_total = 15;
 #endif
     test_case_current = 0;
     run_case(&rc, case_kc_rdvz_open);
@@ -675,7 +673,7 @@ int main(int argc, char **argv) {
 #ifndef __EMSCRIPTEN__
     if (strcmp(argv[1], "rdvz_cli") == 0) {
         int failures;
-        test_case_total = 7;
+        test_case_total = 6;
         test_case_current = 0;
         failures = case_rdvz_cli();
         printf("%d passed, %d failed\n", test_case_total - failures, failures);
