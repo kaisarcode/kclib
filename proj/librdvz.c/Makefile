@@ -218,31 +218,38 @@ android/armv7: ; $(call android_target,armv7,armeabi-v7a)
 ## macOS
 
 define macos_target
-	@if [ ! -x "$(2)" ]; then echo "Missing macOS compiler: $(2)" >&2; exit 1; fi
-	@if [ -z "$(MACOSX_SDK)" ] || [ ! -d "$(MACOSX_SDK)" ]; then \
-		echo "Missing macOS SDK under $(OSXCROSS_ROOT)" >&2; exit 1; \
-	fi
 	@mkdir -p $(BIN_DIR)/macos/$(1)
-	@cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
-	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache"; then \
+	@if ! $(2) --version > /dev/null 2>&1; then \
+		echo "Missing macOS cross-compiler wrapper: $(2)" >&2; \
+		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
+		exit 1; \
+	fi
+	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
+	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
+	export OSXCROSS_TARGET=darwin25.1 && \
+	export OSXCROSS_SDK=$(MACOSX_SDK) && \
+	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
+	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
+	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache" || ! grep -q '^CMAKE_AR:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar$$' "$$cache" || ! grep -q '^CMAKE_RANLIB:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib$$' "$$cache"; }; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
-	fi
-	@if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/macos/$(1)' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
+	fi && \
+	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/macos/$(1)' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
 		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Darwin \
-		-DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) \
-		-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
-		-DCMAKE_C_COMPILER=$(2) \
-		-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
-		-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
-		-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
-		-G Ninja -Wno-dev > /dev/null; \
-	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-macos,$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-macos -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_SYSROOT=$(MACOSX_SDK) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(2) -DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar -DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib -DRDVZ_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) -G Ninja -Wno-dev > /dev/null)
-	@echo "OK macos/$(1)"
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Darwin \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) \
+			-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
+			-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-macos/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/macos/$(1) \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi && \
+	$(CMAKE) --build $(BUILD_DIR)/$(1)-macos 2>&1 && \
+	echo "OK macos/$(1)"
 endef
 
 macos/x86_64: ; $(call macos_target,x86_64,$(OSXCROSS_X86_64_CC))
