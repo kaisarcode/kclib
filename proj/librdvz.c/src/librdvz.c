@@ -1,6 +1,6 @@
 /**
- * librdvz.c - Generic rendezvous registry.
- * Summary: Named publications with independent ordered seekers.
+ * librdvz.c - Generic peer rendezvous relationships.
+ * Summary: Registry-local peer identities and symmetric direct links.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -9,19 +9,11 @@
 
 #include "librdvz.h"
 
+#include <inttypes.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#elif defined(__EMSCRIPTEN__)
-#include <emscripten/emscripten.h>
-#endif
 
 #ifndef KC_RDVZ_BUILD_VERSION
 #define KC_RDVZ_BUILD_VERSION 0
@@ -30,196 +22,123 @@
 #define KC_RDVZ_INITIAL_BUCKETS 16U
 #define KC_RDVZ_LOAD_DEN 4U
 
-typedef struct kc_rdvz_point_node kc_rdvz_point_node_t;
-typedef struct kc_rdvz_seeker_node kc_rdvz_seeker_node_t;
+typedef struct kc_rdvz_edge kc_rdvz_edge_t;
 
-struct kc_rdvz_seeker_node {
-    kc_rdvz_seeker_t view;
+/**
+ * One end of a bidirectional peer relationship.
+ */
+struct kc_rdvz_edge {
+    kc_rdvz_peer_t *other;
+    kc_rdvz_edge_t *reverse;
+    kc_rdvz_edge_t *previous;
+    kc_rdvz_edge_t *next;
+};
+
+/**
+ * One independently owned peer within a registry.
+ */
+struct kc_rdvz_peer {
     kc_rdvz_t *owner;
-    kc_rdvz_point_node_t *point;
-    kc_rdvz_seeker_node_t *list_previous;
-    kc_rdvz_seeker_node_t *list_next;
-    kc_rdvz_seeker_node_t *expiry_previous;
-    kc_rdvz_seeker_node_t *expiry_next;
-    uint64_t expires_at_ms;
-    void *owned_data;
+    uint64_t serial;
+    char id[32];
+    kc_rdvz_peer_t *previous;
+    kc_rdvz_peer_t *next;
+    kc_rdvz_peer_t *hash_next;
+    kc_rdvz_edge_t *edge_head;
+    kc_rdvz_edge_t *edge_tail;
 };
 
-struct kc_rdvz_point_node {
-    kc_rdvz_point_t view;
-    kc_rdvz_publication_t publication;
-    uint64_t hash;
-    kc_rdvz_point_node_t *hash_previous;
-    kc_rdvz_point_node_t *hash_next;
-    kc_rdvz_point_node_t *expiry_previous;
-    kc_rdvz_point_node_t *expiry_next;
-    uint64_t publication_expires_at_ms;
-    kc_rdvz_seeker_node_t *seeker_head;
-    kc_rdvz_seeker_node_t *seeker_tail;
-    char *owned_id;
-    void *publication_data;
-};
-
+/**
+ * A registry with one peer namespace and independent direct links.
+ */
 struct kc_rdvz {
     kc_rdvz_options_t options;
-    kc_rdvz_point_node_t **buckets;
+    kc_rdvz_peer_t **buckets;
     size_t bucket_count;
-    size_t point_count;
-    size_t publication_count;
-    size_t seeker_count;
-    kc_rdvz_point_node_t *publication_expiry_head;
-    kc_rdvz_point_node_t *publication_expiry_tail;
-    kc_rdvz_seeker_node_t *seeker_expiry_head;
-    kc_rdvz_seeker_node_t *seeker_expiry_tail;
+    size_t peer_count;
+    uint64_t next_id;
+    kc_rdvz_peer_t *head;
+    kc_rdvz_peer_t *tail;
+    unsigned busy;
 };
 
 /**
- * Get current time in milliseconds.
- * @return Current time in milliseconds.
+ * Maps one peer identifier to a hash table bucket.
+ * @param id Numeric peer ID.
+ * @param capacity Power-of-two table capacity.
+ * @return Bucket index.
  */
-static uint64_t rdvz_now_ms(void) {
-#ifdef _WIN32
-    return (uint64_t)GetTickCount64();
-#elif defined(__EMSCRIPTEN__)
-    return (uint64_t)emscripten_get_now();
-#else
-    struct timespec ts;
-#ifdef CLOCK_MONOTONIC
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        return (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U;
+static size_t rdvz_bucket(uint64_t id, size_t capacity) {
+    uint64_t hash = id;
+    hash ^= hash >> 33;
+    hash *= UINT64_C(0xff51afd7ed558ccd);
+    hash ^= hash >> 33;
+    hash *= UINT64_C(0xc4ceb9fe1a85ec53);
+    hash ^= hash >> 33;
+    return (size_t)(hash & (uint64_t)(capacity - 1U));
+}
+
+/**
+ * Parses a canonical decimal peer identifier.
+ * @param text Text from a caller.
+ * @param out Parsed positive ID.
+ * @return 1 for a valid ID, otherwise 0.
+ */
+static int rdvz_parse_id(const char *text, uint64_t *out) {
+    uint64_t value = 0U;
+    size_t i;
+
+    if (!text || !text[0] || text[0] == '0' || !out) return 0;
+    for (i = 0U; text[i]; ++i) {
+        unsigned digit;
+        if (text[i] < '0' || text[i] > '9') return 0;
+        digit = (unsigned)(text[i] - '0');
+        if (value > (UINT64_MAX - digit) / 10U) return 0;
+        value = value * 10U + digit;
     }
-#endif
-#if !defined(__ANDROID__)
-    if (timespec_get(&ts, TIME_UTC) == TIME_UTC) {
-        return (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U;
-    }
-#endif
-    return (uint64_t)time(NULL) * 1000U;
-#endif
+    *out = value;
+    return 1;
 }
 
 /**
- * Compute expiry timestamp with saturation arithmetic.
- * @param now Current time in milliseconds.
- * @param ttl Time-to-live in milliseconds, or 0 for no expiry.
- * @return Expiry timestamp, 0 if no expiry, UINT64_MAX on overflow.
+ * Finds an existing peer by its numeric identifier.
+ * @param rdvz Registry to search.
+ * @param id Numeric peer ID.
+ * @return Live peer or NULL.
  */
-static uint64_t rdvz_expiry(uint64_t now, uint64_t ttl) {
-    if (ttl == 0U) return 0U;
-    if (UINT64_MAX - now < ttl) return UINT64_MAX;
-    return now + ttl;
-}
+static kc_rdvz_peer_t *rdvz_find(kc_rdvz_t *rdvz, uint64_t id) {
+    kc_rdvz_peer_t *peer;
+    size_t index = rdvz_bucket(id, rdvz->bucket_count);
 
-/**
- * Compute FNV-1a hash of a string identifier.
- * @param id NUL-terminated identifier string.
- * @return 64-bit hash value.
- */
-static uint64_t rdvz_hash_id(const char *id) {
-    const unsigned char *p;
-    uint64_t hash;
-
-    hash = UINT64_C(1469598103934665603);
-    for (p = (const unsigned char *)id; *p != 0U; p++) {
-        hash ^= (uint64_t)*p;
-        hash *= UINT64_C(1099511628211);
-    }
-    return hash;
-}
-
-/**
- * Copy data bytes with malloc.
- * @param data Source data pointer, or NULL when size is zero.
- * @param size Number of bytes to copy.
- * @return Newly allocated copy, or NULL on allocation failure or zero size.
- */
-static void *rdvz_copy_data(const void *data, size_t size) {
-    void *copy;
-
-    if (size == 0U) return NULL;
-    copy = malloc(size);
-    if (!copy) return NULL;
-    memcpy(copy, data, size);
-    return copy;
-}
-
-/**
- * Copy a NUL-terminated identifier string with malloc.
- * @param id Source identifier string.
- * @return Newly allocated copy, or NULL on allocation failure.
- */
-static char *rdvz_copy_id(const char *id) {
-    size_t len;
-    char *copy;
-
-    len = strlen(id);
-    if (len == SIZE_MAX) return NULL;
-    copy = (char *)malloc(len + 1U);
-    if (!copy) return NULL;
-    memcpy(copy, id, len + 1U);
-    return copy;
-}
-
-/**
- * Convert seeker view to internal node pointer.
- * @param seeker Borrowed seeker view.
- * @return Internal seeker node pointer.
- */
-static kc_rdvz_seeker_node_t *rdvz_seeker_node(const kc_rdvz_seeker_t *seeker) {
-    return (kc_rdvz_seeker_node_t *)(uintptr_t)seeker;
-}
-
-/**
- * Find a point node by identifier and hash.
- * @param rdvz Registry.
- * @param id Identifier string.
- * @param hash Precomputed hash of id.
- * @return Matching point node, or NULL if not found.
- */
-static kc_rdvz_point_node_t *rdvz_find(kc_rdvz_t *rdvz, const char *id,
-    uint64_t hash)
-{
-    kc_rdvz_point_node_t *point;
-    size_t bucket;
-
-    bucket = (size_t)(hash & (uint64_t)(rdvz->bucket_count - 1U));
-    for (point = rdvz->buckets[bucket]; point; point = point->hash_next) {
-        if (point->hash == hash && strcmp(point->owned_id, id) == 0)
-            return point;
+    for (peer = rdvz->buckets[index]; peer; peer = peer->hash_next) {
+        if (peer->serial == id) return peer;
     }
     return NULL;
 }
 
 /**
- * Rehash the registry's bucket array to a new capacity.
- * @param rdvz Registry.
- * @param capacity New bucket capacity (must be power of two).
- * @return 1 on success, 0 on allocation failure.
+ * Rebuilds the peer lookup table at a larger capacity.
+ * @param rdvz Registry to grow.
+ * @param capacity New power-of-two table capacity.
+ * @return Nonzero on success.
  */
 static int rdvz_rehash(kc_rdvz_t *rdvz, size_t capacity) {
-    kc_rdvz_point_node_t **buckets;
-    kc_rdvz_point_node_t *point;
-    kc_rdvz_point_node_t *next;
+    kc_rdvz_peer_t **buckets;
+    kc_rdvz_peer_t *peer;
+    kc_rdvz_peer_t *next;
     size_t i;
-    size_t bucket;
 
     if (capacity > SIZE_MAX / sizeof(*buckets)) return 0;
-    buckets = (kc_rdvz_point_node_t **)calloc(capacity, sizeof(*buckets));
+    buckets = (kc_rdvz_peer_t **)calloc(capacity, sizeof(*buckets));
     if (!buckets) return 0;
-
-    for (i = 0U; i < rdvz->bucket_count; i++) {
-        point = rdvz->buckets[i];
-        while (point) {
-            next = point->hash_next;
-            point->hash_previous = NULL;
-            bucket = (size_t)(point->hash & (uint64_t)(capacity - 1U));
-            point->hash_next = buckets[bucket];
-            if (point->hash_next) point->hash_next->hash_previous = point;
-            buckets[bucket] = point;
-            point = next;
+    for (i = 0U; i < rdvz->bucket_count; ++i) {
+        for (peer = rdvz->buckets[i]; peer; peer = next) {
+            size_t index = rdvz_bucket(peer->serial, capacity);
+            next = peer->hash_next;
+            peer->hash_next = buckets[index];
+            buckets[index] = peer;
         }
     }
-
     free(rdvz->buckets);
     rdvz->buckets = buckets;
     rdvz->bucket_count = capacity;
@@ -227,271 +146,114 @@ static int rdvz_rehash(kc_rdvz_t *rdvz, size_t capacity) {
 }
 
 /**
- * Reserve space for a new point, rehashing if needed.
- * @param rdvz Registry.
- * @return 1 on success, 0 on rehash failure.
+ * Ensures the lookup table can accept one additional peer.
+ * @param rdvz Registry to extend.
+ * @return Nonzero on success.
  */
-static int rdvz_reserve_point(kc_rdvz_t *rdvz) {
-    size_t capacity;
-    size_t threshold;
+static int rdvz_reserve(kc_rdvz_t *rdvz) {
+    size_t threshold = rdvz->bucket_count -
+        rdvz->bucket_count / KC_RDVZ_LOAD_DEN;
 
-    threshold = rdvz->bucket_count - rdvz->bucket_count / KC_RDVZ_LOAD_DEN;
-    if (rdvz->point_count < threshold) return 1;
+    if (rdvz->peer_count < threshold) return 1;
     if (rdvz->bucket_count > SIZE_MAX / 2U) return 0;
-    capacity = rdvz->bucket_count * 2U;
-    return rdvz_rehash(rdvz, capacity);
+    return rdvz_rehash(rdvz, rdvz->bucket_count * 2U);
 }
 
 /**
- * Insert a point into the hash table.
- * @param rdvz Registry.
- * @param point Point node to insert.
- * @return void
+ * Inserts a constructed peer into the global list and lookup table.
+ * @param rdvz Destination registry.
+ * @param peer Newly allocated peer.
+ * @return None.
  */
-static void rdvz_hash_insert(kc_rdvz_t *rdvz, kc_rdvz_point_node_t *point) {
-    size_t bucket;
+static void rdvz_insert(kc_rdvz_t *rdvz, kc_rdvz_peer_t *peer) {
+    size_t index = rdvz_bucket(peer->serial, rdvz->bucket_count);
 
-    bucket = (size_t)(point->hash & (uint64_t)(rdvz->bucket_count - 1U));
-    point->hash_previous = NULL;
-    point->hash_next = rdvz->buckets[bucket];
-    if (point->hash_next) point->hash_next->hash_previous = point;
-    rdvz->buckets[bucket] = point;
-    rdvz->point_count++;
+    peer->hash_next = rdvz->buckets[index];
+    rdvz->buckets[index] = peer;
+    peer->previous = rdvz->tail;
+    if (rdvz->tail) rdvz->tail->next = peer;
+    else rdvz->head = peer;
+    rdvz->tail = peer;
+    rdvz->peer_count++;
 }
 
 /**
- * Remove a point from the hash table.
- * @param rdvz Registry.
- * @param point Point node to remove.
- * @return void
+ * Removes a peer from the registry's global list and lookup table.
+ * @param rdvz Owner registry.
+ * @param peer Live peer without direct links.
+ * @return None.
  */
-static void rdvz_hash_remove(kc_rdvz_t *rdvz, kc_rdvz_point_node_t *point) {
-    size_t bucket;
+static void rdvz_erase(kc_rdvz_t *rdvz, kc_rdvz_peer_t *peer) {
+    kc_rdvz_peer_t **slot;
+    size_t index = rdvz_bucket(peer->serial, rdvz->bucket_count);
 
-    bucket = (size_t)(point->hash & (uint64_t)(rdvz->bucket_count - 1U));
-    if (point->hash_previous)
-        point->hash_previous->hash_next = point->hash_next;
-    else
-        rdvz->buckets[bucket] = point->hash_next;
-    if (point->hash_next)
-        point->hash_next->hash_previous = point->hash_previous;
-    point->hash_previous = NULL;
-    point->hash_next = NULL;
-    rdvz->point_count--;
+    slot = &rdvz->buckets[index];
+    while (*slot && *slot != peer) slot = &(*slot)->hash_next;
+    if (*slot) *slot = peer->hash_next;
+
+    if (peer->previous) peer->previous->next = peer->next;
+    else rdvz->head = peer->next;
+    if (peer->next) peer->next->previous = peer->previous;
+    else rdvz->tail = peer->previous;
+    rdvz->peer_count--;
 }
 
 /**
- * Create a new point node and insert into hash table.
- * @param rdvz Registry.
- * @param id Identifier string.
- * @param hash Precomputed hash of id.
- * @return New point node, or NULL on allocation failure.
+ * Attaches one side of a direct link to a peer.
+ * @param peer Receiving peer.
+ * @param edge Link endpoint.
+ * @return None.
  */
-static kc_rdvz_point_node_t *rdvz_point_create(kc_rdvz_t *rdvz, const char *id,
-    uint64_t hash)
-{
-    kc_rdvz_point_node_t *point;
+static void rdvz_edge_append(kc_rdvz_peer_t *peer, kc_rdvz_edge_t *edge) {
+    edge->previous = peer->edge_tail;
+    if (peer->edge_tail) peer->edge_tail->next = edge;
+    else peer->edge_head = edge;
+    peer->edge_tail = edge;
+}
 
-    if (!rdvz_reserve_point(rdvz)) return NULL;
-    point = (kc_rdvz_point_node_t *)calloc(1U, sizeof(*point));
-    if (!point) return NULL;
-    point->owned_id = rdvz_copy_id(id);
-    if (!point->owned_id) {
-        free(point);
-        return NULL;
+/**
+ * Detaches one side of a direct link from a peer.
+ * @param peer Owner of that link endpoint.
+ * @param edge Endpoint to detach.
+ * @return None.
+ */
+static void rdvz_edge_remove(kc_rdvz_peer_t *peer, kc_rdvz_edge_t *edge) {
+    if (edge->previous) edge->previous->next = edge->next;
+    else peer->edge_head = edge->next;
+    if (edge->next) edge->next->previous = edge->previous;
+    else peer->edge_tail = edge->previous;
+}
+
+/**
+ * Releases a peer and its direct links, optionally emitting notifications.
+ * @param rdvz Owner registry, already protected from callback mutations.
+ * @param peer Peer being disconnected.
+ * @param notify Nonzero to emit one event per removed link.
+ * @return None.
+ */
+static void rdvz_drop_peer(kc_rdvz_t *rdvz, kc_rdvz_peer_t *peer, int notify) {
+    while (peer->edge_head) {
+        kc_rdvz_edge_t *edge = peer->edge_head;
+        kc_rdvz_peer_t *other = edge->other;
+
+        rdvz_edge_remove(peer, edge);
+        rdvz_edge_remove(other, edge->reverse);
+        free(edge->reverse);
+        free(edge);
+        if (notify && rdvz->options.on_disconnect) {
+            rdvz->options.on_disconnect(peer, other, rdvz->options.userdata);
+        }
     }
-    point->hash = hash;
-    point->view.id = point->owned_id;
-    rdvz_hash_insert(rdvz, point);
-    return point;
+    rdvz_erase(rdvz, peer);
+    peer->owner = NULL;
+    free(peer);
 }
 
 /**
- * Destroy an empty point node (no publication, no seekers).
- * @param rdvz Registry.
- * @param point Point node to destroy.
- * @return void
- */
-static void rdvz_point_destroy_empty(kc_rdvz_t *rdvz,
-    kc_rdvz_point_node_t *point)
-{
-    rdvz_hash_remove(rdvz, point);
-    free(point->owned_id);
-    free(point);
-}
-
-/**
- * Append a point to the publication expiry queue.
- * @param rdvz Registry.
- * @param point Point with publication to add to expiry queue.
- * @return void
- */
-static void rdvz_publication_expiry_append(kc_rdvz_t *rdvz,
-    kc_rdvz_point_node_t *point)
-{
-    point->expiry_previous = rdvz->publication_expiry_tail;
-    point->expiry_next = NULL;
-    if (rdvz->publication_expiry_tail)
-        rdvz->publication_expiry_tail->expiry_next = point;
-    else
-        rdvz->publication_expiry_head = point;
-    rdvz->publication_expiry_tail = point;
-}
-
-/**
- * Remove a point from the publication expiry queue.
- * @param rdvz Registry.
- * @param point Point to remove from expiry queue.
- * @return void
- */
-static void rdvz_publication_expiry_remove(kc_rdvz_t *rdvz,
-    kc_rdvz_point_node_t *point)
-{
-    if (point->expiry_previous)
-        point->expiry_previous->expiry_next = point->expiry_next;
-    else if (rdvz->publication_expiry_head == point)
-        rdvz->publication_expiry_head = point->expiry_next;
-    if (point->expiry_next)
-        point->expiry_next->expiry_previous = point->expiry_previous;
-    else if (rdvz->publication_expiry_tail == point)
-        rdvz->publication_expiry_tail = point->expiry_previous;
-    point->expiry_previous = NULL;
-    point->expiry_next = NULL;
-}
-
-/**
- * Append a seeker to the seeker expiry queue.
- * @param rdvz Registry.
- * @param seeker Seeker node to add to expiry queue.
- * @return void
- */
-static void rdvz_seeker_expiry_append(kc_rdvz_t *rdvz,
-    kc_rdvz_seeker_node_t *seeker)
-{
-    seeker->expiry_previous = rdvz->seeker_expiry_tail;
-    seeker->expiry_next = NULL;
-    if (rdvz->seeker_expiry_tail)
-        rdvz->seeker_expiry_tail->expiry_next = seeker;
-    else
-        rdvz->seeker_expiry_head = seeker;
-    rdvz->seeker_expiry_tail = seeker;
-}
-
-/**
- * Remove a seeker from the seeker expiry queue.
- * @param rdvz Registry.
- * @param seeker Seeker node to remove from expiry queue.
- * @return void
- */
-static void rdvz_seeker_expiry_remove(kc_rdvz_t *rdvz,
-    kc_rdvz_seeker_node_t *seeker)
-{
-    if (seeker->expiry_previous)
-        seeker->expiry_previous->expiry_next = seeker->expiry_next;
-    else if (rdvz->seeker_expiry_head == seeker)
-        rdvz->seeker_expiry_head = seeker->expiry_next;
-    if (seeker->expiry_next)
-        seeker->expiry_next->expiry_previous = seeker->expiry_previous;
-    else if (rdvz->seeker_expiry_tail == seeker)
-        rdvz->seeker_expiry_tail = seeker->expiry_previous;
-    seeker->expiry_previous = NULL;
-    seeker->expiry_next = NULL;
-}
-
-/**
- * Append a seeker to a point's seeker list.
- * @param point Point node.
- * @param seeker Seeker node to append.
- * @return void
- */
-static void rdvz_seeker_list_append(kc_rdvz_point_node_t *point,
-    kc_rdvz_seeker_node_t *seeker)
-{
-    seeker->list_previous = point->seeker_tail;
-    seeker->list_next = NULL;
-    seeker->view.previous = point->seeker_tail ? &point->seeker_tail->view : NULL;
-    seeker->view.next = NULL;
-    if (point->seeker_tail) {
-        point->seeker_tail->list_next = seeker;
-        point->seeker_tail->view.next = &seeker->view;
-    } else {
-        point->seeker_head = seeker;
-        point->view.head = &seeker->view;
-    }
-    point->seeker_tail = seeker;
-    point->view.tail = &seeker->view;
-    point->view.seeker_count++;
-}
-
-/**
- * Remove a seeker node from its point and expiry queue, and free its data.
- * @param rdvz Registry.
- * @param seeker Seeker node to remove and free.
- * @return void
- */
-static void rdvz_seeker_remove_node(kc_rdvz_t *rdvz,
-    kc_rdvz_seeker_node_t *seeker)
-{
-    kc_rdvz_point_node_t *point;
-
-    point = seeker->point;
-    if (rdvz->options.seeker_ttl_ms != 0U)
-        rdvz_seeker_expiry_remove(rdvz, seeker);
-
-    if (seeker->list_previous) {
-        seeker->list_previous->list_next = seeker->list_next;
-        seeker->list_previous->view.next = seeker->list_next
-            ? &seeker->list_next->view : NULL;
-    } else {
-        point->seeker_head = seeker->list_next;
-        point->view.head = seeker->list_next ? &seeker->list_next->view : NULL;
-    }
-    if (seeker->list_next) {
-        seeker->list_next->list_previous = seeker->list_previous;
-        seeker->list_next->view.previous = seeker->list_previous
-            ? &seeker->list_previous->view : NULL;
-    } else {
-        point->seeker_tail = seeker->list_previous;
-        point->view.tail = seeker->list_previous
-            ? &seeker->list_previous->view : NULL;
-    }
-    point->view.seeker_count--;
-    rdvz->seeker_count--;
-    seeker->owner = NULL;
-    seeker->point = NULL;
-    free(seeker->owned_data);
-    free(seeker);
-
-    if (!point->view.publication && point->view.seeker_count == 0U)
-        rdvz_point_destroy_empty(rdvz, point);
-}
-
-/**
- * Remove publication from a point, freeing its data.
- * @param rdvz Registry.
- * @param point Point node with publication to remove.
- * @return void
- */
-static void rdvz_unpublish_node(kc_rdvz_t *rdvz, kc_rdvz_point_node_t *point) {
-    if (!point->view.publication) return;
-    if (rdvz->options.publication_ttl_ms != 0U)
-        rdvz_publication_expiry_remove(rdvz, point);
-    free(point->publication_data);
-    point->publication_data = NULL;
-    point->publication.data = NULL;
-    point->publication.data_size = 0U;
-    point->publication_expires_at_ms = 0U;
-    point->view.publication = NULL;
-    rdvz->publication_count--;
-    if (point->view.seeker_count == 0U)
-        rdvz_point_destroy_empty(rdvz, point);
-}
-
-/**
- * Open a new rendezvous registry.
- * @param out Output pointer for the new registry.
- * @param options Configuration options, or NULL for defaults.
- * @return KC_RDVZ_OK on success, negative status code on failure.
+ * Opens an independent peer rendezvous registry.
+ * @param out Destination for the registry.
+ * @param options Optional link notifications.
+ * @return Public status code.
  */
 int kc_rdvz_open(kc_rdvz_t **out, const kc_rdvz_options_t *options) {
     kc_rdvz_t *rdvz;
@@ -501,7 +263,7 @@ int kc_rdvz_open(kc_rdvz_t **out, const kc_rdvz_options_t *options) {
     rdvz = (kc_rdvz_t *)calloc(1U, sizeof(*rdvz));
     if (!rdvz) return KC_RDVZ_ENOMEM;
     rdvz->bucket_count = KC_RDVZ_INITIAL_BUCKETS;
-    rdvz->buckets = (kc_rdvz_point_node_t **)calloc(rdvz->bucket_count,
+    rdvz->buckets = (kc_rdvz_peer_t **)calloc(rdvz->bucket_count,
         sizeof(*rdvz->buckets));
     if (!rdvz->buckets) {
         free(rdvz);
@@ -513,251 +275,173 @@ int kc_rdvz_open(kc_rdvz_t **out, const kc_rdvz_options_t *options) {
 }
 
 /**
- * Get a rendezvous point by identifier.
+ * Creates a peer, optionally linking it directly to an existing peer.
  * @param rdvz Registry.
- * @param id Identifier string.
- * @return Point view, or NULL if not found.
+ * @param target_id Optional existing peer ID.
+ * @param out Destination for new peer.
+ * @return Public status code.
  */
-const kc_rdvz_point_t *kc_rdvz_get(kc_rdvz_t *rdvz, const char *id) {
-    kc_rdvz_point_node_t *point;
-    uint64_t hash;
-
-    if (!rdvz || !id) return NULL;
-    hash = rdvz_hash_id(id);
-    point = rdvz_find(rdvz, id, hash);
-    return point ? &point->view : NULL;
-}
-
-/**
- * Publish data at an identifier.
- * @param rdvz Registry.
- * @param id Identifier string.
- * @param data Data to publish, or NULL when data_size is zero.
- * @param data_size Data byte count.
- * @param out Optional output for the point view.
- * @return KC_RDVZ_OK on success, negative status code on failure.
- */
-int kc_rdvz_publish(kc_rdvz_t *rdvz, const char *id,
-    const void *data, size_t data_size, const kc_rdvz_point_t **out)
+int kc_rdvz_connect(kc_rdvz_t *rdvz, const char *target_id,
+    kc_rdvz_peer_t **out)
 {
-    kc_rdvz_point_node_t *point;
-    void *copy;
-    uint64_t hash;
-
-    if (out) *out = NULL;
-    if (!rdvz || !id || (data_size != 0U && !data)) return KC_RDVZ_EINVAL;
-    hash = rdvz_hash_id(id);
-    point = rdvz_find(rdvz, id, hash);
-    if (point && point->view.publication) return KC_RDVZ_EEXIST;
-    if (rdvz->options.max_publications != 0U &&
-        rdvz->publication_count >= rdvz->options.max_publications)
-        return KC_RDVZ_ELIMIT;
-
-    copy = rdvz_copy_data(data, data_size);
-    if (data_size != 0U && !copy) return KC_RDVZ_ENOMEM;
-    if (!point) {
-        point = rdvz_point_create(rdvz, id, hash);
-        if (!point) {
-            free(copy);
-            return KC_RDVZ_ENOMEM;
-        }
-    }
-
-    point->publication_data = copy;
-    point->publication.data = copy;
-    point->publication.data_size = data_size;
-    point->view.publication = &point->publication;
-    rdvz->publication_count++;
-    if (rdvz->options.publication_ttl_ms != 0U) {
-        point->publication_expires_at_ms = rdvz_expiry(rdvz_now_ms(),
-            rdvz->options.publication_ttl_ms);
-        rdvz_publication_expiry_append(rdvz, point);
-    }
-    if (out) *out = &point->view;
-    return KC_RDVZ_OK;
-}
-
-/**
- * Remove publication at an identifier.
- * @param rdvz Registry.
- * @param id Identifier string.
- * @return KC_RDVZ_OK on success, negative status code on failure.
- */
-int kc_rdvz_unpublish(kc_rdvz_t *rdvz, const char *id) {
-    kc_rdvz_point_node_t *point;
-    uint64_t hash;
-
-    if (!rdvz || !id) return KC_RDVZ_EINVAL;
-    hash = rdvz_hash_id(id);
-    point = rdvz_find(rdvz, id, hash);
-    if (!point || !point->view.publication) return KC_RDVZ_ENOENT;
-    rdvz_unpublish_node(rdvz, point);
-    return KC_RDVZ_OK;
-}
-
-/**
- * Add a seeker at an identifier.
- * @param rdvz Registry.
- * @param id Identifier string.
- * @param data Seeker data, or NULL when data_size is zero.
- * @param data_size Seeker data byte count.
- * @param out Output for the seeker view.
- * @return KC_RDVZ_OK on success, negative status code on failure.
- */
-int kc_rdvz_seek(kc_rdvz_t *rdvz, const char *id,
-    const void *data, size_t data_size, const kc_rdvz_seeker_t **out)
-{
-    kc_rdvz_point_node_t *point;
-    kc_rdvz_seeker_node_t *seeker;
-    void *copy;
-    uint64_t hash;
+    kc_rdvz_peer_t *target = NULL;
+    kc_rdvz_peer_t *peer;
+    kc_rdvz_edge_t *edge = NULL;
+    kc_rdvz_edge_t *reverse = NULL;
+    uint64_t target_serial;
 
     if (!out) return KC_RDVZ_EINVAL;
     *out = NULL;
-    if (!rdvz || !id || (data_size != 0U && !data)) return KC_RDVZ_EINVAL;
-    if (rdvz->options.max_seekers != 0U &&
-        rdvz->seeker_count >= rdvz->options.max_seekers)
-        return KC_RDVZ_ELIMIT;
-
-    hash = rdvz_hash_id(id);
-    point = rdvz_find(rdvz, id, hash);
-    if (point && rdvz->options.max_seekers_per_point != 0U &&
-        point->view.seeker_count >= rdvz->options.max_seekers_per_point)
-        return KC_RDVZ_ELIMIT;
-
-    copy = rdvz_copy_data(data, data_size);
-    if (data_size != 0U && !copy) return KC_RDVZ_ENOMEM;
-    seeker = (kc_rdvz_seeker_node_t *)calloc(1U, sizeof(*seeker));
-    if (!seeker) {
-        free(copy);
-        return KC_RDVZ_ENOMEM;
+    if (!rdvz) return KC_RDVZ_EINVAL;
+    if (rdvz->busy) return KC_RDVZ_EBUSY;
+    if (target_id) {
+        if (!rdvz_parse_id(target_id, &target_serial))
+            return KC_RDVZ_EINVAL;
+        target = rdvz_find(rdvz, target_serial);
+        if (!target) return KC_RDVZ_ENOENT;
     }
-    if (!point) {
-        point = rdvz_point_create(rdvz, id, hash);
-        if (!point) {
-            free(copy);
-            free(seeker);
+    if (rdvz->next_id == UINT64_MAX) return KC_RDVZ_ELIMIT;
+    peer = (kc_rdvz_peer_t *)calloc(1U, sizeof(*peer));
+    if (!peer) return KC_RDVZ_ENOMEM;
+    if (target) {
+        edge = (kc_rdvz_edge_t *)calloc(1U, sizeof(*edge));
+        reverse = (kc_rdvz_edge_t *)calloc(1U, sizeof(*reverse));
+        if (!edge || !reverse) {
+            free(edge);
+            free(reverse);
+            free(peer);
             return KC_RDVZ_ENOMEM;
         }
     }
-
-    seeker->owner = rdvz;
-    seeker->point = point;
-    seeker->owned_data = copy;
-    seeker->view.point = &point->view;
-    seeker->view.data = copy;
-    seeker->view.data_size = data_size;
-    rdvz_seeker_list_append(point, seeker);
-    rdvz->seeker_count++;
-    if (rdvz->options.seeker_ttl_ms != 0U) {
-        seeker->expires_at_ms = rdvz_expiry(rdvz_now_ms(),
-            rdvz->options.seeker_ttl_ms);
-        rdvz_seeker_expiry_append(rdvz, seeker);
+    if (!rdvz_reserve(rdvz)) {
+        free(edge);
+        free(reverse);
+        free(peer);
+        return KC_RDVZ_ENOMEM;
     }
-    *out = &seeker->view;
+
+    peer->owner = rdvz;
+    peer->serial = ++rdvz->next_id;
+    (void)snprintf(peer->id, sizeof(peer->id), "%" PRIu64, peer->serial);
+    rdvz_insert(rdvz, peer);
+    if (target) {
+        edge->other = target;
+        reverse->other = peer;
+        edge->reverse = reverse;
+        reverse->reverse = edge;
+        rdvz_edge_append(peer, edge);
+        rdvz_edge_append(target, reverse);
+    }
+    *out = peer;
+    if (target && rdvz->options.on_connect) {
+        rdvz->busy++;
+        rdvz->options.on_connect(peer, target, rdvz->options.userdata);
+        rdvz->busy--;
+    }
     return KC_RDVZ_OK;
 }
 
 /**
- * Remove a seeker by its view pointer.
- * @param rdvz Registry that owns the seeker.
- * @param seeker Borrowed seeker view from kc_rdvz_seek() or point traversal.
- * @return KC_RDVZ_OK on success, KC_RDVZ_EINVAL on invalid seeker.
+ * Exposes a peer's registry-unique identifier.
+ * @param peer Live peer.
+ * @return Borrowed canonical decimal identifier.
  */
-int kc_rdvz_remove(kc_rdvz_t *rdvz, const kc_rdvz_seeker_t *seeker) {
-    kc_rdvz_seeker_node_t *node;
-
-    if (!rdvz || !seeker) return KC_RDVZ_EINVAL;
-    node = rdvz_seeker_node(seeker);
-    if (node->owner != rdvz || !node->point) return KC_RDVZ_EINVAL;
-    rdvz_seeker_remove_node(rdvz, node);
-    return KC_RDVZ_OK;
+const char *kc_rdvz_peer_id(const kc_rdvz_peer_t *peer) {
+    return peer ? peer->id : NULL;
 }
 
 /**
- * Apply configured TTLs and remove expired publications and seekers.
+ * Lists all live peers in connection order.
  * @param rdvz Registry.
- * @return Number of publications plus seekers removed.
+ * @param visit Required callback for each peer.
+ * @param userdata Visitor context.
+ * @return Public status code.
  */
-size_t kc_rdvz_prune(kc_rdvz_t *rdvz) {
-    kc_rdvz_point_node_t *point;
-    kc_rdvz_seeker_node_t *seeker;
-    uint64_t now;
-    size_t removed;
+int kc_rdvz_list(kc_rdvz_t *rdvz, kc_rdvz_visit_fn visit, void *userdata) {
+    kc_rdvz_peer_t *peer;
 
-    if (!rdvz) return 0U;
-    now = rdvz_now_ms();
-    removed = 0U;
-
-    while ((point = rdvz->publication_expiry_head) != NULL &&
-        point->publication_expires_at_ms <= now)
-    {
-        rdvz_unpublish_node(rdvz, point);
-        removed++;
-    }
-    while ((seeker = rdvz->seeker_expiry_head) != NULL &&
-        seeker->expires_at_ms <= now)
-    {
-        rdvz_seeker_remove_node(rdvz, seeker);
-        removed++;
-    }
-    return removed;
+    if (!rdvz || !visit) return KC_RDVZ_EINVAL;
+    rdvz->busy++;
+    for (peer = rdvz->head; peer; peer = peer->next)
+        visit(peer, userdata);
+    rdvz->busy--;
+    return KC_RDVZ_OK;
 }
 
 /**
- * Close a rendezvous registry and free all resources.
- * @param rdvz Registry to close. NULL is a safe no-op.
- * @return void
+ * Lists the direct neighbors of a live peer.
+ * @param peer Source peer.
+ * @param visit Required callback.
+ * @param userdata Visitor context.
+ * @return Public status code.
  */
-void kc_rdvz_close(kc_rdvz_t *rdvz) {
-    kc_rdvz_point_node_t *point;
-    kc_rdvz_point_node_t *next_point;
-    kc_rdvz_seeker_node_t *seeker;
-    kc_rdvz_seeker_node_t *next_seeker;
-    size_t i;
+int kc_rdvz_peer_list(const kc_rdvz_peer_t *peer,
+    kc_rdvz_visit_fn visit, void *userdata)
+{
+    kc_rdvz_edge_t *edge;
+    kc_rdvz_t *rdvz;
 
-    if (!rdvz) return;
-    for (i = 0U; i < rdvz->bucket_count; i++) {
-        point = rdvz->buckets[i];
-        while (point) {
-            next_point = point->hash_next;
-            seeker = point->seeker_head;
-            while (seeker) {
-                next_seeker = seeker->list_next;
-                free(seeker->owned_data);
-                free(seeker);
-                seeker = next_seeker;
-            }
-            free(point->publication_data);
-            free(point->owned_id);
-            free(point);
-            point = next_point;
-        }
-    }
+    if (!peer || !visit || !peer->owner) return KC_RDVZ_EINVAL;
+    rdvz = peer->owner;
+    rdvz->busy++;
+    for (edge = peer->edge_head; edge; edge = edge->next)
+        visit(edge->other, userdata);
+    rdvz->busy--;
+    return KC_RDVZ_OK;
+}
+
+/**
+ * Removes one peer and all its direct links.
+ * @param peer Live peer.
+ * @return Public status code.
+ */
+int kc_rdvz_disconnect(kc_rdvz_peer_t *peer) {
+    kc_rdvz_t *rdvz;
+
+    if (!peer || !peer->owner) return KC_RDVZ_EINVAL;
+    rdvz = peer->owner;
+    if (rdvz->busy) return KC_RDVZ_EBUSY;
+    rdvz->busy++;
+    rdvz_drop_peer(rdvz, peer, 1);
+    rdvz->busy--;
+    return KC_RDVZ_OK;
+}
+
+/**
+ * Releases a registry and its remaining peer relationships.
+ * @param rdvz Registry, or NULL.
+ * @return Public status code.
+ */
+int kc_rdvz_close(kc_rdvz_t *rdvz) {
+    if (!rdvz) return KC_RDVZ_OK;
+    if (rdvz->busy) return KC_RDVZ_EBUSY;
+    rdvz->busy++;
+    while (rdvz->head) rdvz_drop_peer(rdvz, rdvz->head, 0);
     free(rdvz->buckets);
     free(rdvz);
+    return KC_RDVZ_OK;
 }
 
 /**
- * Get a textual description for a status code.
+ * Explains a public status code.
  * @param status Status code.
- * @return Static NUL-terminated description string.
+ * @return Stable static description.
  */
 const char *kc_rdvz_strerror(int status) {
     switch (status) {
-        case KC_RDVZ_OK: return "ok";
-        case KC_RDVZ_ENOENT: return "not found";
-        case KC_RDVZ_EEXIST: return "already published";
+        case KC_RDVZ_OK: return "success";
+        case KC_RDVZ_ENOENT: return "peer not found";
         case KC_RDVZ_EINVAL: return "invalid argument";
         case KC_RDVZ_ENOMEM: return "out of memory";
-        case KC_RDVZ_ELIMIT: return "storage limit reached";
-        default: return "unknown rendezvous error";
+        case KC_RDVZ_EBUSY: return "registry busy";
+        case KC_RDVZ_ELIMIT: return "peer ID limit reached";
+        default: return "unknown error";
     }
 }
 
 /**
- * Get the build version.
- * @return Unix timestamp of the build.
+ * Reports the build version.
+ * @return Build version.
  */
 uint64_t kc_rdvz_version(void) {
     return (uint64_t)KC_RDVZ_BUILD_VERSION;
