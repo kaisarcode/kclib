@@ -1,8 +1,13 @@
-# librdvz.c - Rendezvous registry
+# librdvz.c - Peer rendezvous
 
-`librdvz.c` maintains named rendezvous points with one optional publication and
-an ordered collection of seekers. It stores opaque bytes only and does not
-impose networking, authentication, command, or process semantics.
+`librdvz.c` creates independent peers and maintains direct, bidirectional
+relationships between them. It provides local rendezvous without imposing
+networking, processes, messaging, roles, rooms or application policy.
+
+Each peer receives a unique ID within its registry. Connecting with another
+peer's ID creates a new peer and links the two. Disconnecting a peer removes
+its links without disconnecting other peers. Applications may observe every
+new or removed link and act on the encounter themselves.
 
 ## Quick start
 
@@ -10,27 +15,52 @@ impose networking, authentication, command, or process semantics.
 #include "librdvz.h"
 
 kc_rdvz_t *rdvz = NULL;
-const kc_rdvz_seeker_t *seeker = NULL;
-const kc_rdvz_point_t *point = NULL;
+kc_rdvz_peer_t *first = NULL;
+kc_rdvz_peer_t *second = NULL;
 
 if (kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK) {
-    kc_rdvz_seek(rdvz, "room", "consumer", 8, &seeker);
-    kc_rdvz_publish(rdvz, "room", "publisher", 9, &point);
+    kc_rdvz_connect(rdvz, NULL, &first);
+    kc_rdvz_connect(rdvz, kc_rdvz_peer_id(first), &second);
 
-    kc_rdvz_remove(rdvz, seeker);
-    kc_rdvz_unpublish(rdvz, "room");
+    kc_rdvz_disconnect(first);
+
+    /* The second peer still belongs to the registry. */
+    kc_rdvz_connect(rdvz, kc_rdvz_peer_id(second), &first);
+
+    kc_rdvz_disconnect(first);
+    kc_rdvz_disconnect(second);
     kc_rdvz_close(rdvz);
 }
 ```
 
-Seekers may exist before a publication. Unpublishing a point does not remove its
-seekers, and removing a seeker does not remove the publication.
+`kc_rdvz_list()` visits all peers in a registry.
+`kc_rdvz_peer_list()` visits only directly linked peers. Connections are
+symmetric, but not transitive.
 
-## Limits and expiry
+## Encounter notifications
 
-Limits for publications and seekers are optional; zero means unlimited.
-Publication and seeker TTLs are independent. Expiry occurs when
-`kc_rdvz_prune()` is called.
+Pass `on_connect` and `on_disconnect` callbacks to `kc_rdvz_open()` to
+observe when a pair of peers becomes linked or is unlinked. Notifications
+are synchronous and occur once per direct link. The application decides what
+to do after an encounter. It may inspect the registry during a callback;
+mutations and registry closure are not permitted until the callback returns.
+
+Disconnecting and reconnecting creates a new peer identity. Applications
+that recognize returning participants manage that identity separately.
+The registry does not transport data or retain peers after disconnect.
+
+## CLI
+
+The `rdvz` executable demonstrates the in-process primitive:
+
+```sh
+rdvz connect
+rdvz match
+```
+
+`connect` creates one peer and prints its ID. `match` links two peers and
+prints both IDs. Every invocation uses its own temporary registry; the CLI
+does not provide a cross-process service.
 
 ## Build
 
@@ -41,8 +71,8 @@ make
 make test
 ```
 
-Use `make all` for the configured cross-platform targets when their required
-toolchains are installed.
+Use `make all` for configured cross-platform targets when their toolchains
+are installed.
 
 ## Status
 
@@ -55,6 +85,6 @@ long-term infrastructure.
 
 ## License
 
-[![LGPLv3](https://www.gnu.org/graphics/lgplv3-147x51.png)](https://www.gnu.org/licenses/lgpl-3.0.html)
+[![LGPLv3](https://www.gnu.org/graphics/lgplv3-147x51.png)](https://www.gnu.org/graphics/lgplv3-147x51.png)
 
 This project is distributed under the **GNU Lesser General Public License version 3 (LGPLv3)**.
