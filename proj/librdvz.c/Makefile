@@ -231,7 +231,7 @@ define macos_target
 	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
 	cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
-	if [ -f "$cache" ] && { [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$' "$cache" || ! grep -q '^CMAKE_AR:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar$' "$cache" || ! grep -q '^CMAKE_RANLIB:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib$' "$cache"; }; then \
+	if [ -f "$$cache" ] && { [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache" || ! grep -q '^CMAKE_AR:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar$$' "$$cache" || ! grep -q '^CMAKE_RANLIB:FILEPATH=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib$$' "$$cache"; }; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
 	fi && \
 	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/macos/$(1)' $(BUILD_DIR)/$(1)-macos/CMakeCache.txt; then \
@@ -272,7 +272,7 @@ define ios_target
 	@export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
 	cache=$(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt && \
-	if [ -f "$cache" ] && { [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ] || ! grep -q '^CMAKE_C_COMPILER:.*=$(3)$' "$cache" || ! grep -q '^CMAKE_OSX_SYSROOT:.*=$(5)$' "$cache"; }; then \
+	if [ -f "$$cache" ] && { [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ] || ! grep -q '^CMAKE_C_COMPILER:.*=$(3)$$' "$$cache" || ! grep -q '^CMAKE_OSX_SYSROOT:.*=$(5)$$' "$$cache"; }; then \
 		rm -f "$$cache" $(BUILD_DIR)/$(1)-$(2)/build.ninja && rm -rf $(BUILD_DIR)/$(1)-$(2)/CMakeFiles; \
 	fi && \
 	if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(2)/$(1)' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
