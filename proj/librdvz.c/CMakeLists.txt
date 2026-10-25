@@ -3,22 +3,6 @@ project(rdvz C)
 
 set(CMAKE_C_STANDARD 11)
 
-# Apple linkers require Darwin archives; host-default GNU archives are not
-# accepted even when their members are valid Mach-O objects.
-if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
-    find_program(RDVZ_DARWIN_AR NAMES llvm-ar)
-    if(NOT RDVZ_DARWIN_AR)
-        message(FATAL_ERROR "llvm-ar is required for Darwin static archives")
-    endif()
-    set(CMAKE_AR "${RDVZ_DARWIN_AR}")
-    set(CMAKE_C_ARCHIVE_CREATE
-        "<CMAKE_AR> --format=darwin qc <TARGET> <LINK_FLAGS> <OBJECTS>"
-    )
-    set(CMAKE_C_ARCHIVE_FINISH
-        "<CMAKE_AR> --format=darwin s <TARGET>"
-    )
-endif()
-
 if(NOT DEFINED RDVZ_BUILD_VERSION)
     set(RDVZ_BUILD_VERSION 0)
 endif()
@@ -35,9 +19,6 @@ if(NOT MSVC)
     add_compile_options(-O3 -Wall -Wextra -Werror)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_compile_options(-Wno-unused-command-line-argument)
-    endif()
-    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-        add_link_options(-fuse-ld=lld)
     endif()
     if(RDVZ_NATIVE)
         add_compile_options(-march=native)
