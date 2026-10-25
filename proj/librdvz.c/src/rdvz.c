@@ -13,14 +13,17 @@
 #include <string.h>
 
 /**
- * Prints available CLI commands.
- * @param name Executable name.
+ * Prints public CLI usage.
+ * @param name Program executable name.
  * @return None.
  */
-static void rdvz_help(const char *name) {
+static void rdvz_cli_usage(const char *name)
+{
     printf("Usage: %s connect\n", name);
-    printf("       %s --help|--version\n", name);
-    printf("\nEach command operates on a private in-memory registry.\n");
+    printf("\n");
+    printf("Options:\n");
+    printf("  -h, --help     Show this help\n");
+    printf("  -v, --version  Show version\n");
 }
 
 /**
@@ -34,21 +37,29 @@ int main(int argc, char **argv) {
     kc_rdvz_peer_t *peer = NULL;
     int status;
 
-    if (argc != 2) {
-        rdvz_help(argv[0]);
-        return 2;
-    }
-    if (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")) {
-        rdvz_help(argv[0]);
+    if (argc == 2 && (!strcmp(argv[1], "-h") ||
+        !strcmp(argv[1], "--help")))
+    {
+        rdvz_cli_usage(argv[0]);
         return 0;
     }
-    if (!strcmp(argv[1], "--version") || !strcmp(argv[1], "-v")) {
+    if (argc == 2 && (!strcmp(argv[1], "-v") ||
+        !strcmp(argv[1], "--version")))
+    {
         printf("%llu\n", (unsigned long long)kc_rdvz_version());
         return 0;
     }
+    if (argc == 1) {
+        fprintf(stderr, "rdvz: missing command\n");
+        return 1;
+    }
+    if (argc != 2) {
+        fprintf(stderr, "rdvz: expected one command\n");
+        return 1;
+    }
     if (strcmp(argv[1], "connect") != 0) {
-        rdvz_help(argv[0]);
-        return 2;
+        fprintf(stderr, "rdvz: unknown command: %s\n", argv[1]);
+        return 1;
     }
 
     status = kc_rdvz_open(&rdvz, NULL);
