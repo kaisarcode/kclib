@@ -55,12 +55,10 @@ The `rdvz` executable demonstrates the in-process primitive:
 
 ```sh
 rdvz connect
-rdvz match
 ```
 
-`connect` creates one peer and prints its ID. `match` links two peers and
-prints both IDs. Every invocation uses its own temporary registry; the CLI
-does not provide a cross-process service.
+`connect` creates one peer and prints its ID. Every invocation uses its
+own temporary registry; the CLI does not provide a cross-process service.
 
 ## Build
 
