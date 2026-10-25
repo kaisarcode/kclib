@@ -1,6 +1,6 @@
 /**
- * test.c - librdvz public API contract tests.
- * Summary: Validates rendezvous publication and seeker lifecycle.
+ * test.c - Rendezvous peer relationship contract tests.
+ * Summary: Verifies independent peers, direct links and delegated events.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -9,471 +9,354 @@
 
 #include "librdvz.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#else
-#include <time.h>
-#endif
-
-static int test_case_total = 0;
-static int test_case_current = 0;
-
-#ifndef __EMSCRIPTEN__
-static int case_rdvz_cli(void);
-#endif
-
-/**
- * Report a test case result.
- * @param fail Non-zero if the case failed.
- * @param name Test case name.
- * @param detail Additional detail string.
- * @return void
- */
-static void case_result(int fail, const char *name, const char *detail) {
-    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        fail ? "FAIL" : "PASS", name, detail);
-}
-
-static void run_case(int *rc, int (*fn)(void)) {
-    test_case_current++;
-    *rc += fn();
-}
-
-/**
- * Assert a condition is true, reporting failure if not.
- * @param name Test case name.
- * @param condition Condition to evaluate.
- * @return 0 on success, 1 on failure.
- */
-static int expect_true(const char *name, int condition) {
-    if (!condition) {
-        printf("[FAIL] %s\n", name);
-        return 1;
-    }
-    return 0;
-}
-
-/**
- * Sleep for the specified number of milliseconds.
- * @param ms Milliseconds to sleep.
- * @return void
- */
-static void sleep_ms(unsigned int ms) {
-#ifdef _WIN32
-    Sleep(ms);
-#else
-    struct timespec req;
-    req.tv_sec = (time_t)(ms / 1000U);
-    req.tv_nsec = (long)(ms % 1000U) * 1000000L;
-    nanosleep(&req, NULL);
-#endif
-}
-
-/**
- * Compare binary data to a text string.
- * @param data Binary data pointer.
- * @param size Binary data size.
- * @param text Text string to compare.
- * @return 1 if equal, 0 otherwise.
- */
-static int bytes_equal(const void *data, size_t size, const char *text) {
-    size_t text_size = strlen(text);
-    return size == text_size && (size == 0U || memcmp(data, text, size) == 0);
-}
-
-/**
- * Test case: seek before publish.
- * Seekers exist independently and survive later publication.
- * @return Number of failed assertions.
- */
-static int case_seek_before_publish(void) {
-    const char *name = "seek_before_publish";
-    const char *detail = "seekers exist independently and survive later publication";
-    kc_rdvz_t *rdvz = NULL;
-    const kc_rdvz_seeker_t *s1 = NULL;
-    const kc_rdvz_seeker_t *s2 = NULL;
-    const kc_rdvz_point_t *point = NULL;
-    int fail = 0;
-
-    fail += expect_true("open succeeds", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    fail += expect_true("first seek succeeds",
-        kc_rdvz_seek(rdvz, "room", "one", 3U, &s1) == KC_RDVZ_OK);
-    fail += expect_true("second seek succeeds",
-        kc_rdvz_seek(rdvz, "room", "two", 3U, &s2) == KC_RDVZ_OK);
-    point = kc_rdvz_get(rdvz, "room");
-    fail += expect_true("point exists", point != NULL);
-    if (point) {
-        fail += expect_true("publication is absent", point->publication == NULL);
-        fail += expect_true("two seekers are retained", point->seeker_count == 2U);
-        fail += expect_true("head is first seeker", point->head == s1);
-        fail += expect_true("tail is second seeker", point->tail == s2);
-    }
-    fail += expect_true("publish succeeds",
-        kc_rdvz_publish(rdvz, "room", "pub", 3U, &point) == KC_RDVZ_OK);
-    if (point) {
-        fail += expect_true("publication appears", point->publication != NULL);
-        fail += expect_true("seekers survive publish", point->seeker_count == 2U);
-        fail += expect_true("published bytes are retained",
-            point->publication && bytes_equal(point->publication->data,
-                point->publication->data_size, "pub"));
-    }
-    kc_rdvz_close(rdvz);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test case: unpublish independent.
- * Unpublish removes only publication and republish reuses waiting seekers.
- * @return Number of failed assertions.
- */
-static int case_unpublish_independent(void) {
-    const char *name = "unpublish_independent";
-    const char *detail = "unpublish removes only publication and republish reuses waiting seekers";
-    kc_rdvz_t *rdvz = NULL;
-    const kc_rdvz_seeker_t *s1 = NULL;
-    const kc_rdvz_seeker_t *s2 = NULL;
-    const kc_rdvz_point_t *point = NULL;
-    int fail = 0;
-
-    fail += expect_true("open succeeds", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    fail += expect_true("publish succeeds",
-        kc_rdvz_publish(rdvz, "room", "first", 5U, NULL) == KC_RDVZ_OK);
-    fail += expect_true("seek succeeds",
-        kc_rdvz_seek(rdvz, "room", "a", 1U, &s1) == KC_RDVZ_OK);
-    fail += expect_true("unpublish succeeds",
-        kc_rdvz_unpublish(rdvz, "room") == KC_RDVZ_OK);
-    point = kc_rdvz_get(rdvz, "room");
-    fail += expect_true("point survives unpublish", point != NULL);
-    if (point) {
-        fail += expect_true("publication removed", point->publication == NULL);
-        fail += expect_true("first seeker survives", point->head == s1);
-    }
-    fail += expect_true("new seeker can wait while unpublished",
-        kc_rdvz_seek(rdvz, "room", "b", 1U, &s2) == KC_RDVZ_OK);
-    fail += expect_true("republish succeeds",
-        kc_rdvz_publish(rdvz, "room", "second", 6U, &point) == KC_RDVZ_OK);
-    if (point) {
-        fail += expect_true("both seekers survive republish",
-            point->seeker_count == 2U && point->head == s1 && point->tail == s2);
-        fail += expect_true("new publication data is visible",
-            point->publication && bytes_equal(point->publication->data,
-                point->publication->data_size, "second"));
-    }
-    kc_rdvz_close(rdvz);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test case: remove and order.
- * Middle removal is isolated and insertion order remains linked.
- * @return Number of failed assertions.
- */
-static int case_remove_and_order(void) {
-    const char *name = "remove_and_order";
-    const char *detail = "middle removal is isolated and insertion order remains linked";
-    kc_rdvz_t *rdvz = NULL;
-    const kc_rdvz_seeker_t *a = NULL;
-    const kc_rdvz_seeker_t *b = NULL;
-    const kc_rdvz_seeker_t *c = NULL;
-    const kc_rdvz_point_t *point;
-    int fail = 0;
-
-    fail += expect_true("open succeeds", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    fail += expect_true("seek a", kc_rdvz_seek(rdvz, "x", "a", 1U, &a) == KC_RDVZ_OK);
-    fail += expect_true("seek b", kc_rdvz_seek(rdvz, "x", "b", 1U, &b) == KC_RDVZ_OK);
-    fail += expect_true("seek c", kc_rdvz_seek(rdvz, "x", "c", 1U, &c) == KC_RDVZ_OK);
-    fail += expect_true("remove middle", kc_rdvz_remove(rdvz, b) == KC_RDVZ_OK);
-    point = kc_rdvz_get(rdvz, "x");
-    fail += expect_true("point remains", point != NULL);
-    if (point) {
-        fail += expect_true("count is two", point->seeker_count == 2U);
-        fail += expect_true("a links to c", a->next == c);
-        fail += expect_true("c links to a", c->previous == a);
-        fail += expect_true("head/tail updated", point->head == a && point->tail == c);
-    }
-    fail += expect_true("remove a", kc_rdvz_remove(rdvz, a) == KC_RDVZ_OK);
-    fail += expect_true("remove c", kc_rdvz_remove(rdvz, c) == KC_RDVZ_OK);
-    fail += expect_true("empty seeker-only point is reclaimed",
-        kc_rdvz_get(rdvz, "x") == NULL);
-    kc_rdvz_close(rdvz);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test case: data is copied.
- * Publication and seeker values are owned copies.
- * @return Number of failed assertions.
- */
-static int case_data_is_copied(void) {
-    const char *name = "data_is_copied";
-    const char *detail = "publication and seeker values are owned copies";
-    kc_rdvz_t *rdvz = NULL;
-    const kc_rdvz_seeker_t *seeker = NULL;
-    const kc_rdvz_point_t *point = NULL;
-    char publication[] = "pub";
-    char request[] = "req";
-    int fail = 0;
-
-    fail += expect_true("open succeeds", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    fail += expect_true("publish succeeds",
-        kc_rdvz_publish(rdvz, "copy", publication, 3U, &point) == KC_RDVZ_OK);
-    fail += expect_true("seek succeeds",
-        kc_rdvz_seek(rdvz, "copy", request, 3U, &seeker) == KC_RDVZ_OK);
-    publication[0] = 'X';
-    request[0] = 'Y';
-    fail += expect_true("publication copy is independent",
-        point && point->publication && bytes_equal(point->publication->data,
-            point->publication->data_size, "pub"));
-    fail += expect_true("seeker copy is independent",
-        seeker && bytes_equal(seeker->data, seeker->data_size, "req"));
-    kc_rdvz_close(rdvz);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test case: limits.
- * Publication, global seeker and per-point seeker limits are independent.
- * @return Number of failed assertions.
- */
-static int case_limits(void) {
-    const char *name = "limits";
-    const char *detail = "publication, global seeker and per-point seeker limits are independent";
-    kc_rdvz_options_t options;
-    kc_rdvz_t *rdvz = NULL;
-    const kc_rdvz_seeker_t *seeker = NULL;
-    int fail = 0;
-
-    memset(&options, 0, sizeof(options));
-    options.max_publications = 1U;
-    options.max_seekers = 2U;
-    options.max_seekers_per_point = 1U;
-    fail += expect_true("open succeeds", kc_rdvz_open(&rdvz, &options) == KC_RDVZ_OK);
-    fail += expect_true("first publication fits",
-        kc_rdvz_publish(rdvz, "a", NULL, 0U, NULL) == KC_RDVZ_OK);
-    fail += expect_true("second publication hits limit",
-        kc_rdvz_publish(rdvz, "b", NULL, 0U, NULL) == KC_RDVZ_ELIMIT);
-    fail += expect_true("first seeker fits",
-        kc_rdvz_seek(rdvz, "a", NULL, 0U, &seeker) == KC_RDVZ_OK);
-    fail += expect_true("per-point seeker limit applies",
-        kc_rdvz_seek(rdvz, "a", NULL, 0U, &seeker) == KC_RDVZ_ELIMIT);
-    fail += expect_true("second point seeker fits global limit",
-        kc_rdvz_seek(rdvz, "b", NULL, 0U, &seeker) == KC_RDVZ_OK);
-    fail += expect_true("global seeker limit applies",
-        kc_rdvz_seek(rdvz, "c", NULL, 0U, &seeker) == KC_RDVZ_ELIMIT);
-    kc_rdvz_close(rdvz);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test case: ttl independence.
- * Pruning publication expiry preserves seekers with independent TTL.
- * @return Number of failed assertions.
- */
-static int case_ttl_independence(void) {
-    const char *name = "ttl_independence";
-    const char *detail = "pruning publication expiry preserves seekers with independent TTL";
-    kc_rdvz_options_t options;
-    kc_rdvz_t *rdvz = NULL;
-    const kc_rdvz_seeker_t *seeker = NULL;
-    const kc_rdvz_point_t *point;
-    size_t pruned;
-    int fail = 0;
-
-    memset(&options, 0, sizeof(options));
-    options.publication_ttl_ms = 5U;
-    options.seeker_ttl_ms = 0U;
-    fail += expect_true("open succeeds", kc_rdvz_open(&rdvz, &options) == KC_RDVZ_OK);
-    fail += expect_true("publish succeeds",
-        kc_rdvz_publish(rdvz, "ttl", "p", 1U, NULL) == KC_RDVZ_OK);
-    fail += expect_true("seek succeeds",
-        kc_rdvz_seek(rdvz, "ttl", "s", 1U, &seeker) == KC_RDVZ_OK);
-    sleep_ms(20U);
-    pruned = kc_rdvz_prune(rdvz);
-    fail += expect_true("one publication pruned", pruned == 1U);
-    point = kc_rdvz_get(rdvz, "ttl");
-    fail += expect_true("point remains for seeker", point != NULL);
-    if (point) {
-        fail += expect_true("publication expired", point->publication == NULL);
-        fail += expect_true("seeker survives", point->head == seeker && point->seeker_count == 1U);
-    }
-    kc_rdvz_close(rdvz);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test case: hash index.
- * Many identifiers survive hash growth and direct lookup.
- * @return Number of failed assertions.
- */
-static int case_hash_index(void) {
-    const char *name = "hash_index";
-    const char *detail = "many identifiers survive hash growth and direct lookup";
-    kc_rdvz_t *rdvz = NULL;
-    const kc_rdvz_point_t *point;
-    char id[32];
-    int fail = 0;
-    int i;
-
-    fail += expect_true("open succeeds", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    for (i = 0; i < 2048; i++) {
-        snprintf(id, sizeof(id), "id-%d", i);
-        if (kc_rdvz_publish(rdvz, id, &i, sizeof(i), NULL) != KC_RDVZ_OK) {
-            fail += expect_true("bulk publish succeeds", 0);
-            break;
-        }
-    }
-    for (i = 0; i < 2048 && fail == 0; i++) {
-        int value;
-        snprintf(id, sizeof(id), "id-%d", i);
-        point = kc_rdvz_get(rdvz, id);
-        if (!point || !point->publication ||
-            point->publication->data_size != sizeof(value)) {
-            fail += expect_true("bulk lookup returns publication", 0);
-            break;
-        }
-        memcpy(&value, point->publication->data, sizeof(value));
-        if (value != i) {
-            fail += expect_true("bulk lookup preserves value", 0);
-            break;
-        }
-    }
-    kc_rdvz_close(rdvz);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Test case: errors and version.
- * Invalid, duplicate and not-found states remain explicit.
- * @return Number of failed assertions.
- */
-static int case_errors_and_version(void) {
-    const char *name = "errors_and_version";
-    const char *detail = "invalid, duplicate and not-found states remain explicit";
-    kc_rdvz_t *rdvz = NULL;
-    int fail = 0;
-
-    fail += expect_true("open rejects missing out", kc_rdvz_open(NULL, NULL) == KC_RDVZ_EINVAL);
-    fail += expect_true("open succeeds", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    fail += expect_true("publish validates data",
-        kc_rdvz_publish(rdvz, "x", NULL, 1U, NULL) == KC_RDVZ_EINVAL);
-    fail += expect_true("publish succeeds",
-        kc_rdvz_publish(rdvz, "x", NULL, 0U, NULL) == KC_RDVZ_OK);
-    fail += expect_true("duplicate publication rejected",
-        kc_rdvz_publish(rdvz, "x", NULL, 0U, NULL) == KC_RDVZ_EEXIST);
-    fail += expect_true("first unpublish succeeds",
-        kc_rdvz_unpublish(rdvz, "x") == KC_RDVZ_OK);
-    fail += expect_true("second unpublish is not found",
-        kc_rdvz_unpublish(rdvz, "x") == KC_RDVZ_ENOENT);
-    fail += expect_true("status text is stable",
-        strcmp(kc_rdvz_strerror(KC_RDVZ_EEXIST), "already published") == 0);
-    fail += expect_true("version is nonzero", kc_rdvz_version() != 0U);
-    kc_rdvz_close(rdvz);
-    case_result(fail, name, detail);
-    return fail == 0 ? 0 : 1;
-}
-
-/**
- * Run all test cases.
- * @return Total number of failed assertions across all cases.
- */
-static int case_all(void) {
-    int rc = 0;
-
-#ifdef __EMSCRIPTEN__
-    test_case_total = 8;
-#else
-    test_case_total = 9;
-#endif
-    test_case_current = 0;
-    run_case(&rc, case_seek_before_publish);
-    run_case(&rc, case_unpublish_independent);
-    run_case(&rc, case_remove_and_order);
-    run_case(&rc, case_data_is_copied);
-    run_case(&rc, case_limits);
-    run_case(&rc, case_ttl_independence);
-    run_case(&rc, case_hash_index);
-    run_case(&rc, case_errors_and_version);
-#ifndef __EMSCRIPTEN__
-    run_case(&rc, case_rdvz_cli);
-#endif
-    printf("%d passed, %d failed\n", test_case_total - rc, rc);
-    return rc;
-}
-
-/**
- * Test program entry point.
- * @param argc Argument count.
- * @param argv Argument vector: test case name or "all".
- * @return Exit code.
- */
-int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
-        return 2;
-    }
-    if (strcmp(argv[1], "all") == 0) return case_all();
-    if (strcmp(argv[1], "seek_before_publish") == 0) return case_seek_before_publish();
-    if (strcmp(argv[1], "unpublish_independent") == 0) return case_unpublish_independent();
-    if (strcmp(argv[1], "remove_and_order") == 0) return case_remove_and_order();
-    if (strcmp(argv[1], "data_is_copied") == 0) return case_data_is_copied();
-    if (strcmp(argv[1], "limits") == 0) return case_limits();
-    if (strcmp(argv[1], "ttl_independence") == 0) return case_ttl_independence();
-    if (strcmp(argv[1], "hash_index") == 0) return case_hash_index();
-    if (strcmp(argv[1], "errors_and_version") == 0) return case_errors_and_version();
-#ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "rdvz_cli") == 0) return case_rdvz_cli();
-#endif
-    fprintf(stderr, "unknown test case: %s\n", argv[1]);
-    return 2;
-}
 
 #ifndef __EMSCRIPTEN__
 #ifndef KC_CLI_PATH
 #define KC_CLI_PATH "rdvz"
 #endif
+#endif
+
+typedef struct {
+    kc_rdvz_t *rdvz;
+    unsigned connected;
+    unsigned disconnected;
+    unsigned seen_connected;
+    unsigned seen_disconnected;
+    int unexpected;
+} rdvz_events_t;
+
+typedef struct {
+    size_t count;
+    const kc_rdvz_peer_t *last;
+} rdvz_list_t;
 
 /**
- * Runs one rdvz CLI operation.
- * @param args Command arguments.
- * @return Shell exit status.
+ * Adds one received peer to an inspection summary.
+ * @param peer Listed peer.
+ * @param userdata Summary to update.
+ * @return None.
+ */
+static void rdvz_collect(const kc_rdvz_peer_t *peer, void *userdata) {
+    rdvz_list_t *list = (rdvz_list_t *)userdata;
+    list->count++;
+    list->last = peer;
+}
+
+/**
+ * Checks if a peer has the expected number of direct neighbors.
+ * @param peer Peer being inspected.
+ * @param expected Expected direct neighbor count.
+ * @return Nonzero on success.
+ */
+static int rdvz_expect_links(const kc_rdvz_peer_t *peer, size_t expected) {
+    rdvz_list_t list = {0};
+    return kc_rdvz_peer_list(peer, rdvz_collect, &list) == KC_RDVZ_OK &&
+        list.count == expected;
+}
+
+/**
+ * Observes a new link and verifies notification-time lookup and mutation rules.
+ * @param peer Newly created peer.
+ * @param other Existing peer.
+ * @param userdata Test event state.
+ * @return None.
+ */
+static void rdvz_on_connect(const kc_rdvz_peer_t *peer,
+    const kc_rdvz_peer_t *other, void *userdata)
+{
+    rdvz_events_t *events = (rdvz_events_t *)userdata;
+    kc_rdvz_peer_t *reentrant = NULL;
+    rdvz_list_t list = {0};
+
+    events->connected++;
+    if (!peer || !other || !kc_rdvz_peer_id(peer) ||
+        !kc_rdvz_peer_id(other)) events->unexpected++;
+    if (kc_rdvz_list(events->rdvz, rdvz_collect, &list) != KC_RDVZ_OK ||
+        list.count != events->seen_connected + 2U)
+        events->unexpected++;
+    if (kc_rdvz_connect(events->rdvz, NULL, &reentrant) != KC_RDVZ_EBUSY ||
+        reentrant != NULL) events->unexpected++;
+    if (kc_rdvz_close(events->rdvz) != KC_RDVZ_EBUSY)
+        events->unexpected++;
+    events->seen_connected++;
+}
+
+/**
+ * Observes removal of one direct link after the link was detached.
+ * @param peer Disconnecting peer.
+ * @param other Remaining peer.
+ * @param userdata Test event state.
+ * @return None.
+ */
+static void rdvz_on_disconnect(const kc_rdvz_peer_t *peer,
+    const kc_rdvz_peer_t *other, void *userdata)
+{
+    rdvz_events_t *events = (rdvz_events_t *)userdata;
+    if (!peer || !other || !kc_rdvz_peer_id(peer) ||
+        !kc_rdvz_peer_id(other)) events->unexpected++;
+    if (kc_rdvz_disconnect((kc_rdvz_peer_t *)other) != KC_RDVZ_EBUSY)
+        events->unexpected++;
+    events->disconnected++;
+    events->seen_disconnected++;
+}
+
+/**
+ * Tests independent peers and symmetric direct links.
+ * @return Number of failed contract checks.
+ */
+static int case_connect_and_list(void) {
+    kc_rdvz_t *rdvz = NULL;
+    kc_rdvz_peer_t *a = NULL, *b = NULL, *c = NULL;
+    rdvz_list_t list = {0};
+    int fail = 0;
+
+    fail += kc_rdvz_open(&rdvz, NULL) != KC_RDVZ_OK;
+    if (!rdvz) return 1;
+    fail += kc_rdvz_connect(rdvz, NULL, &a) != KC_RDVZ_OK;
+    fail += !a || strcmp(kc_rdvz_peer_id(a), "1") != 0;
+    fail += kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &b) != KC_RDVZ_OK;
+    fail += !b || strcmp(kc_rdvz_peer_id(b), "2") != 0;
+    fail += kc_rdvz_connect(rdvz, kc_rdvz_peer_id(b), &c) != KC_RDVZ_OK;
+    fail += !c || strcmp(kc_rdvz_peer_id(c), "3") != 0;
+    if (a && b && c) {
+        fail += !rdvz_expect_links(a, 1U);
+        fail += !rdvz_expect_links(b, 2U);
+        fail += !rdvz_expect_links(c, 1U);
+        fail += kc_rdvz_list(rdvz, rdvz_collect, &list) != KC_RDVZ_OK;
+        fail += list.count != 3U || list.last != c;
+        fail += kc_rdvz_disconnect(a) != KC_RDVZ_OK;
+        fail += !rdvz_expect_links(b, 1U);
+        fail += !rdvz_expect_links(c, 1U);
+        fail += kc_rdvz_disconnect(c) != KC_RDVZ_OK;
+        fail += !rdvz_expect_links(b, 0U);
+        fail += kc_rdvz_disconnect(b) != KC_RDVZ_OK;
+    }
+    fail += kc_rdvz_close(rdvz) != KC_RDVZ_OK;
+    return fail;
+}
+
+/**
+ * Tests departure, continued membership and a later new encounter.
+ * @return Number of failed contract checks.
+ */
+static int case_reconnect(void) {
+    kc_rdvz_t *rdvz = NULL;
+    kc_rdvz_peer_t *a = NULL, *b = NULL;
+    char previous[32];
+    int fail = 0;
+
+    fail += kc_rdvz_open(&rdvz, NULL) != KC_RDVZ_OK;
+    if (!rdvz) return 1;
+    fail += kc_rdvz_connect(rdvz, NULL, &a) != KC_RDVZ_OK;
+    fail += kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &b) != KC_RDVZ_OK;
+    if (a && b) {
+        snprintf(previous, sizeof(previous), "%s", kc_rdvz_peer_id(a));
+        fail += kc_rdvz_disconnect(a) != KC_RDVZ_OK;
+        fail += !rdvz_expect_links(b, 0U);
+        fail += kc_rdvz_connect(rdvz, previous, &a) != KC_RDVZ_ENOENT;
+        fail += a != NULL;
+        fail += kc_rdvz_connect(rdvz, kc_rdvz_peer_id(b), &a) != KC_RDVZ_OK;
+        if (a) {
+            fail += strcmp(kc_rdvz_peer_id(a), previous) == 0;
+            fail += !rdvz_expect_links(b, 1U);
+            fail += kc_rdvz_disconnect(a) != KC_RDVZ_OK;
+            fail += !rdvz_expect_links(b, 0U);
+        }
+        fail += kc_rdvz_disconnect(b) != KC_RDVZ_OK;
+    }
+    fail += kc_rdvz_close(rdvz) != KC_RDVZ_OK;
+    return fail;
+}
+
+/**
+ * Tests one notification per actual edge and close without disconnect events.
+ * @return Number of failed contract checks.
+ */
+static int case_notifications(void) {
+    kc_rdvz_t *rdvz = NULL;
+    kc_rdvz_peer_t *a = NULL, *b = NULL, *c = NULL;
+    rdvz_events_t events = {0};
+    kc_rdvz_options_t options = {0};
+    int fail = 0;
+
+    options.on_connect = rdvz_on_connect;
+    options.on_disconnect = rdvz_on_disconnect;
+    options.userdata = &events;
+    fail += kc_rdvz_open(&rdvz, &options) != KC_RDVZ_OK;
+    if (!rdvz) return 1;
+    events.rdvz = rdvz;
+    fail += kc_rdvz_connect(rdvz, NULL, &a) != KC_RDVZ_OK;
+    fail += kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &b) != KC_RDVZ_OK;
+    fail += kc_rdvz_connect(rdvz, kc_rdvz_peer_id(b), &c) != KC_RDVZ_OK;
+    fail += events.connected != 2U;
+    fail += events.unexpected != 0;
+    if (b) fail += kc_rdvz_disconnect(b) != KC_RDVZ_OK;
+    fail += events.disconnected != 2U;
+    fail += events.unexpected != 0;
+    if (a) fail += !rdvz_expect_links(a, 0U);
+    if (c) fail += !rdvz_expect_links(c, 0U);
+    fail += kc_rdvz_close(rdvz) != KC_RDVZ_OK;
+    fail += events.disconnected != 2U;
+    return fail;
+}
+
+/**
+ * Tests malformed IDs, missing peers and invalid arguments.
+ * @return Number of failed contract checks.
+ */
+static int case_errors(void) {
+    kc_rdvz_t *rdvz = NULL;
+    kc_rdvz_peer_t *a = NULL, *invalid = NULL;
+    int fail = 0;
+
+    fail += kc_rdvz_open(NULL, NULL) != KC_RDVZ_EINVAL;
+    fail += kc_rdvz_open(&rdvz, NULL) != KC_RDVZ_OK;
+    if (!rdvz) return 1;
+    fail += kc_rdvz_connect(rdvz, NULL, NULL) != KC_RDVZ_EINVAL;
+    fail += kc_rdvz_connect(rdvz, "0", &invalid) != KC_RDVZ_EINVAL;
+    fail += kc_rdvz_connect(rdvz, "01", &invalid) != KC_RDVZ_EINVAL;
+    fail += kc_rdvz_connect(rdvz, "abc", &invalid) != KC_RDVZ_EINVAL;
+    fail += kc_rdvz_connect(rdvz, "18446744073709551616", &invalid) !=
+        KC_RDVZ_EINVAL;
+    fail += kc_rdvz_connect(rdvz, "10", &invalid) != KC_RDVZ_ENOENT;
+    fail += invalid != NULL;
+    fail += kc_rdvz_list(rdvz, NULL, NULL) != KC_RDVZ_EINVAL;
+    fail += kc_rdvz_peer_list(NULL, rdvz_collect, NULL) != KC_RDVZ_EINVAL;
+    fail += kc_rdvz_connect(rdvz, NULL, &a) != KC_RDVZ_OK;
+    if (a) fail += kc_rdvz_disconnect(a) != KC_RDVZ_OK;
+    fail += strcmp(kc_rdvz_strerror(KC_RDVZ_ENOENT), "peer not found") != 0;
+    fail += kc_rdvz_close(rdvz) != KC_RDVZ_OK;
+    fail += kc_rdvz_close(NULL) != KC_RDVZ_OK;
+    return fail;
+}
+
+/**
+ * Tests hash growth, neighbor cleanup and independent retained peers.
+ * @return Number of failed contract checks.
+ */
+static int case_many_peers(void) {
+    kc_rdvz_t *rdvz = NULL;
+    kc_rdvz_peer_t *anchor = NULL, *peer = NULL;
+    rdvz_list_t list = {0};
+    int fail = 0;
+    unsigned i;
+
+    fail += kc_rdvz_open(&rdvz, NULL) != KC_RDVZ_OK;
+    if (!rdvz) return 1;
+    fail += kc_rdvz_connect(rdvz, NULL, &anchor) != KC_RDVZ_OK;
+    if (!anchor) {
+        (void)kc_rdvz_close(rdvz);
+        return 1;
+    }
+    for (i = 0U; i < 2048U; ++i) {
+        if (kc_rdvz_connect(rdvz, kc_rdvz_peer_id(anchor), &peer) !=
+            KC_RDVZ_OK) {
+            fail++;
+            break;
+        }
+    }
+    fail += kc_rdvz_list(rdvz, rdvz_collect, &list) != KC_RDVZ_OK;
+    fail += list.count != (size_t)i + 1U;
+    fail += !rdvz_expect_links(anchor, (size_t)i);
+    fail += kc_rdvz_disconnect(anchor) != KC_RDVZ_OK;
+    fail += !rdvz_expect_links(peer, 0U);
+    fail += kc_rdvz_close(rdvz) != KC_RDVZ_OK;
+    return fail;
+}
+
+#ifndef __EMSCRIPTEN__
+/**
+ * Runs one native rdvz CLI command.
+ * @param args CLI arguments.
+ * @return Command exit status.
  */
 static int rdvz_cli_run(const char *args) {
     char command[4096];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"", KC_CLI_PATH, args);
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
 #else
-    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1", KC_CLI_PATH, args);
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
 #endif
     return system(command);
 }
 
 /**
- * Tests the rdvz command-line operations.
- * @return One when a check failed, otherwise zero.
+ * Tests the native CLI demonstration commands.
+ * @return Number of failed checks.
  */
-static int case_rdvz_cli(void) {
+static int case_cli(void) {
     int fail = 0;
     fail += rdvz_cli_run("--help") != 0;
     fail += rdvz_cli_run("--version") != 0;
-    fail += rdvz_cli_run("publish room pub") != 0;
-    fail += rdvz_cli_run("seek room seeker") != 0;
-    fail += rdvz_cli_run("match room pub seeker") != 0;
-    fail += rdvz_cli_run("match room pub") == 0;
-    case_result(fail, "rdvz_cli", "runs publication, seeking and matching operations");
-    return fail != 0;
+    fail += rdvz_cli_run("connect") != 0;
+    fail += rdvz_cli_run("match") != 0;
+    fail += rdvz_cli_run("seek") == 0;
+    return fail;
 }
 #endif
+
+/**
+ * Runs one named test case and reports the result.
+ * @param name Test case name.
+ * @param fn Test implementation.
+ * @return Number of failures.
+ */
+static int rdvz_run(const char *name, int (*fn)(void)) {
+    int fail = fn();
+    printf("%s: %s\n", name, fail ? "FAIL" : "PASS");
+    return fail;
+}
+
+/**
+ * Runs every portable contract case and optional native CLI case.
+ * @return Nonzero if any case fails.
+ */
+static int case_all(void) {
+    int fail = 0;
+    fail += rdvz_run("connect_and_list", case_connect_and_list);
+    fail += rdvz_run("reconnect", case_reconnect);
+    fail += rdvz_run("notifications", case_notifications);
+    fail += rdvz_run("errors", case_errors);
+    fail += rdvz_run("many_peers", case_many_peers);
+#ifndef __EMSCRIPTEN__
+    fail += rdvz_run("cli", case_cli);
+#endif
+    return fail != 0;
+}
+
+/**
+ * Dispatches a named contract test case.
+ * @param argc Argument count.
+ * @param argv Command arguments.
+ * @return Zero on success and nonzero on failure.
+ */
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s all|connect_and_list|reconnect|notifications|errors|many_peers|cli\n",
+            argv[0]);
+        return 2;
+    }
+    if (strcmp(argv[1], "all") == 0) return case_all();
+    if (strcmp(argv[1], "connect_and_list") == 0)
+        return rdvz_run(argv[1], case_connect_and_list) != 0;
+    if (strcmp(argv[1], "reconnect") == 0)
+        return rdvz_run(argv[1], case_reconnect) != 0;
+    if (strcmp(argv[1], "notifications") == 0)
+        return rdvz_run(argv[1], case_notifications) != 0;
+    if (strcmp(argv[1], "errors") == 0)
+        return rdvz_run(argv[1], case_errors) != 0;
+    if (strcmp(argv[1], "many_peers") == 0)
+        return rdvz_run(argv[1], case_many_peers) != 0;
+#ifndef __EMSCRIPTEN__
+    if (strcmp(argv[1], "cli") == 0)
+        return rdvz_run(argv[1], case_cli) != 0;
+#endif
+    fprintf(stderr, "unknown test case: %s\n", argv[1]);
+    return 2;
+}
