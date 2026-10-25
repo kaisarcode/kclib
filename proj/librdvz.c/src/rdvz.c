@@ -1,10 +1,10 @@
 /**
- * rdvz.c - Rendezvous registry command-line interface.
- * Summary: Runs one in-memory rendezvous operation per process.
+ * rdvz.c - Rendezvous peer relationship CLI.
+ * Summary: Demonstrates a registry and direct links within one process.
  *
- * Author: KaisarCode
+ * Author:  KaisarCode
  * Website: https://kaisarcode.com
- * License: GNU Lesser General Public License v3.0
+ * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
 #include "librdvz.h"
@@ -13,65 +13,59 @@
 #include <string.h>
 
 /**
- * Prints public command usage.
- * @param name Program name.
+ * Prints available CLI commands.
+ * @param name Executable name.
  * @return None.
  */
 static void rdvz_help(const char *name) {
-    printf("Usage: %s match <id> <publication> <seeker>\n", name);
-    printf("       %s publish <id> <value>\n", name);
-    printf("       %s seek <id> <value>\n", name);
-    printf("\nOperations use one in-memory registry for this process.\n");
+    printf("Usage: %s connect\n", name);
+    printf("       %s match\n", name);
+    printf("       %s --help|--version\n", name);
+    printf("\nEach command operates on a private in-memory registry.\n");
 }
 
 /**
- * Runs one rendezvous command.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return Process status.
+ * Runs one demonstration of the rendezvous relationship contract.
+ * @param argc Command argument count.
+ * @param argv Command argument vector.
+ * @return Zero on success, nonzero on failure.
  */
 int main(int argc, char **argv) {
     kc_rdvz_t *rdvz = NULL;
-    const kc_rdvz_point_t *point = NULL;
-    const kc_rdvz_seeker_t *seeker = NULL;
+    kc_rdvz_peer_t *first = NULL;
+    kc_rdvz_peer_t *second = NULL;
     int status;
 
-    if (argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
+    if (argc != 2) {
+        rdvz_help(argv[0]);
+        return 2;
+    }
+    if (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")) {
         rdvz_help(argv[0]);
         return 0;
     }
-    if (argc == 2 && (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version"))) {
+    if (!strcmp(argv[1], "--version") || !strcmp(argv[1], "-v")) {
         printf("%llu\n", (unsigned long long)kc_rdvz_version());
         return 0;
     }
-    if (argc < 4 || (strcmp(argv[1], "publish") && strcmp(argv[1], "seek") &&
-            strcmp(argv[1], "match"))) {
+    if (strcmp(argv[1], "connect") && strcmp(argv[1], "match")) {
         rdvz_help(argv[0]);
-        return 1;
+        return 2;
     }
+
     status = kc_rdvz_open(&rdvz, NULL);
-    if (status != KC_RDVZ_OK) return 1;
-    if (!strcmp(argv[1], "publish")) {
-        status = kc_rdvz_publish(rdvz, argv[2], argv[3], strlen(argv[3]), &point);
-    } else if (!strcmp(argv[1], "seek")) {
-        status = kc_rdvz_seek(rdvz, argv[2], argv[3], strlen(argv[3]), &seeker);
-        point = seeker ? seeker->point : NULL;
-    } else if (argc == 5) {
-        status = kc_rdvz_publish(rdvz, argv[2], argv[3], strlen(argv[3]), &point);
-        if (status == KC_RDVZ_OK) {
-            status = kc_rdvz_seek(rdvz, argv[2], argv[4], strlen(argv[4]), &seeker);
-            point = seeker ? seeker->point : NULL;
-        }
-    } else {
-        status = KC_RDVZ_EINVAL;
-    }
-    if (status == KC_RDVZ_OK && point) {
-        printf("%s\t%zu\t%zu\n", point->id,
-            point->publication ? point->publication->data_size : 0U,
-            point->seeker_count);
+    if (status == KC_RDVZ_OK)
+        status = kc_rdvz_connect(rdvz, NULL, &first);
+    if (status == KC_RDVZ_OK && !strcmp(argv[1], "match"))
+        status = kc_rdvz_connect(rdvz, kc_rdvz_peer_id(first), &second);
+
+    if (status == KC_RDVZ_OK) {
+        printf("%s", kc_rdvz_peer_id(first));
+        if (second) printf("\t%s", kc_rdvz_peer_id(second));
+        printf("\n");
     } else {
         fprintf(stderr, "rdvz: %s\n", kc_rdvz_strerror(status));
     }
-    kc_rdvz_close(rdvz);
-    return status != KC_RDVZ_OK;
+    (void)kc_rdvz_close(rdvz);
+    return status == KC_RDVZ_OK ? 0 : 1;
 }
