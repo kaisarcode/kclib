@@ -258,30 +258,45 @@ macos/aarch64: ; $(call macos_target,aarch64,$(OSXCROSS_AARCH64_CC))
 ## iOS
 
 define ios_target
-	@if [ ! -x "$(3)" ]; then echo "Missing iOS compiler: $(3)" >&2; exit 1; fi
-	@if [ -z "$(4)" ] || [ ! -d "$(4)" ]; then echo "Missing iOS SDK" >&2; exit 1; fi
 	@mkdir -p $(BIN_DIR)/$(2)/$(1)
-	@if [ ! -f $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt ] || grep -q '^RDVZ_BUILD_VERSION:.*=0$$' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
-		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=iOS \
-		-DCMAKE_OSX_SYSROOT=$(4) \
-		-DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) \
-		-DCMAKE_C_COMPILER=$(3) \
-		-DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar \
-		-DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib \
-		-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) \
-		-G Ninja -Wno-dev > /dev/null; \
+	@if ! $(3) --version > /dev/null 2>&1; then \
+		echo "Missing iOS cross-compiler wrapper: $(3)" >&2; \
+		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
+		exit 1; \
 	fi
-	$(call cmake_build,$(BUILD_DIR)/$(1)-$(2),$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=$(4) -DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(3) -DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar -DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib -DRDVZ_BUILD_VERSION=$$ver -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) -G Ninja -Wno-dev > /dev/null)
-	@echo "OK $(2)/$(1)"
+	@if [ -z "$(5)" ] || [ ! -d "$(5)" ]; then \
+		echo "Missing iOS SDK sysroot: $(5)" >&2; \
+		echo "Set $(4) to an installed Apple SDK directory." >&2; \
+		exit 1; \
+	fi
+	@export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
+	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	cache=$(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt && \
+	if [ -f "$$cache" ] && { ! grep -q '^CMAKE_C_COMPILER:.*=$(3)$$' "$$cache" || ! grep -q '^CMAKE_OSX_SYSROOT:.*=$(5)$$' "$$cache"; }; then \
+		rm -f "$$cache" $(BUILD_DIR)/$(1)-$(2)/build.ninja && rm -rf $(BUILD_DIR)/$(1)-$(2)/CMakeFiles; \
+	fi && \
+	if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ] || ! grep -q 'CMAKE_LIBRARY_OUTPUT_DIRECTORY:.*=$(CURDIR)/$(BIN_DIR)/$(2)/$(1)' $(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt; then \
+		$(CMAKE) -S . -B $(BUILD_DIR)/$(1)-$(2) \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=iOS \
+			-DCMAKE_SYSTEM_VERSION=$(IOS_DEPLOYMENT_TARGET) \
+			-DCMAKE_OSX_DEPLOYMENT_TARGET=$(IOS_DEPLOYMENT_TARGET) \
+			-DCMAKE_OSX_SYSROOT=$(5) \
+			-DCMAKE_OSX_ARCHITECTURES=$(6) \
+			-DRDVZ_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(3) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-$(2)/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(2)/$(1) \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi && \
+	$(CMAKE) --build $(BUILD_DIR)/$(1)-$(2) 2>&1 && \
+	echo "OK $(2)/$(1)"
 endef
 
-ios/aarch64: ; $(call ios_target,aarch64,ios,$(OSXCROSS_IOS_AARCH64_CC),$(IPHONEOS_SDK))
-iossim/aarch64: ; $(call ios_target,aarch64,iossim,$(OSXCROSS_IOSSIM_AARCH64_CC),$(IPHONESIMULATOR_SDK))
-iossim/x86_64: ; $(call ios_target,x86_64,iossim,$(OSXCROSS_IOSSIM_X86_64_CC),$(IPHONESIMULATOR_SDK))
+ios/aarch64: ; $(call ios_target,aarch64,ios,$(OSXCROSS_IOS_AARCH64_CC),IPHONEOS_SDK,$(IPHONEOS_SDK),arm64)
+iossim/aarch64: ; $(call ios_target,aarch64,iossim,$(OSXCROSS_IOSSIM_AARCH64_CC),IPHONESIMULATOR_SDK,$(IPHONESIMULATOR_SDK),arm64)
+iossim/x86_64: ; $(call ios_target,x86_64,iossim,$(OSXCROSS_IOSSIM_X86_64_CC),IPHONESIMULATOR_SDK,$(IPHONESIMULATOR_SDK),x86_64)
 
 ## WebAssembly
 
