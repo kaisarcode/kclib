@@ -65,7 +65,7 @@ if(EMSCRIPTEN)
     target_link_options(librdvz_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_rdvz_open,_kc_rdvz_get,_kc_rdvz_publish,_kc_rdvz_unpublish,_kc_rdvz_seek,_kc_rdvz_remove,_kc_rdvz_prune,_kc_rdvz_close,_kc_rdvz_strerror,_kc_rdvz_version
+        -sEXPORTED_FUNCTIONS=_kc_rdvz_open,_kc_rdvz_connect,_kc_rdvz_peer_id,_kc_rdvz_list,_kc_rdvz_peer_list,_kc_rdvz_disconnect,_kc_rdvz_close,_kc_rdvz_strerror,_kc_rdvz_version
     )
 elseif(NOT RDVZ_TEST_EXTERNAL_ARTIFACTS)
     add_library(rdvz_static STATIC ${RDVZ_CORE_SOURCES})
