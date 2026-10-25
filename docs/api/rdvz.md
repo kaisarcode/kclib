@@ -1,61 +1,71 @@
 # rdvz scripting API
 
-Named rendezvous points with one optional publication and independent ordered
-seekers. Values are arbitrary bytes.
+An in-memory registry of independent peers and their direct, bidirectional
+links. IDs are unique within an open registry and are not persistent. The
+registry does not know what a peer represents or how it communicates.
 
 ## Lua
 
 ```lua
 local rendezvous = rdvz.open({
-    max_publications = 1000,
-    max_seekers = 10000,
-    max_seekers_per_point = 100,
-    publication_ttl_ms = 60000,
-    seeker_ttl_ms = 30000
+    onConnect = function(peer, other)
+        -- The application handles the encounter.
+    end,
+    onDisconnect = function(peer, other)
+        -- The application handles the departure.
+    end
 })
 
-local seeker = rendezvous:seek("room", "consumer")
-local point = rendezvous:publish("room", "publisher")
+local peer1 = rendezvous:connect()
+local peer2 = rendezvous:connect(peer1.id)
 
-for _, waiting in ipairs(point.seekers) do
-    -- application-defined processing
-end
+local all = rendezvous:list()
+local linked = peer1:list()
 
-rendezvous:remove(seeker)
-rendezvous:unpublish("room")
-rendezvous:prune()
+peer1:disconnect()
+peer1 = rendezvous:connect(peer2.id)
+
+peer1:disconnect()
+peer2:disconnect()
 rendezvous:close()
 ```
 
 ## JavaScript
 
 ```js
-const rendezvous = await rdvz.open({
-  maxPublications: 1000,
-  maxSeekers: 10000,
-  maxSeekersPerPoint: 100,
-  publicationTtlMs: 60000,
-  seekerTtlMs: 30000
+const rendezvous = rdvz.open({
+    onConnect(peer, other) {
+        // The application handles the encounter.
+    },
+    onDisconnect(peer, other) {
+        // The application handles the departure.
+    }
 });
 
-const seeker = await rendezvous.seek("room", bytes("consumer"));
-const point = await rendezvous.publish("room", bytes("publisher"));
+let peer1 = rendezvous.connect();
+const peer2 = rendezvous.connect(peer1.id);
 
-for (const waiting of point.seekers) {
-  // application-defined processing
-}
+const all = rendezvous.list();
+const linked = peer1.list();
 
-await rendezvous.remove(seeker);
-await rendezvous.unpublish("room");
-await rendezvous.prune();
-await rendezvous.close();
+peer1.disconnect();
+peer1 = rendezvous.connect(peer2.id);
+
+peer1.disconnect();
+peer2.disconnect();
+rendezvous.close();
 ```
 
-`seek(id, data)` creates a seeker even when `id` is not currently published.
-`publish(id, data)` does not change existing seekers. `unpublish(id)` removes
-only the publication. `remove(seeker)` removes only that seeker.
+`connect()` creates an independent peer. `connect(id)` creates a new peer
+with one direct link to the specified existing peer. Unknown IDs fail rather
+than creating a pending room or a deferred encounter. A peer's `id` remains
+stable during its lifetime, and its `list()` returns direct neighbors only.
 
-`get(id)` returns the current point or `null`/`nil`. A point exposes `id`, an
-optional `publication`, and its ordered `seekers` collection.
+The callbacks run synchronously when a direct link is created or removed;
+there is one notification per link, not one per endpoint. A callback can
+inspect peers and links but cannot mutate or close its registry. Closing the
+registry drops all remaining peers without emitting notifications.
 
-TTL cleanup is explicit through `prune()`; there is no background maintenance.
+The Lua and JavaScript arrays are mechanical projections of the native C
+visitor operations. Neither projection imposes asynchronous execution,
+network transport, roles, rooms, timers, or application metadata.
