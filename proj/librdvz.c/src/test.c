@@ -749,6 +749,7 @@ static int case_rdvz_cli_disconnect(void)
         "deleting a peer removes only that named identity");
     return fail != 0;
 }
+#endif
 
 /**
  * Run one contract case and advance the shared progress counter.
