@@ -1,73 +1,53 @@
-# STUN mapping lifecycle
+# STUN Binding lifecycle
 
-`libstun.c` exposes both a discoverable live UDP mapping and an autonomous STUN
-Binding endpoint. This page describes the lifetime and datagram behavior shared
-by those roles.
+`libstun.c` has two operations: `client` and `server`. Both work over owned UDP
+or a caller-provided transport. No other kclib is required.
 
-## Discover a mapping
+## Client
 
-`kc_stun_discover()` creates a UDP mapping, sends an RFC 5389 Binding Request,
-and returns only after the STUN server reports the externally observed
-endpoint.
+`kc_stun_client()` starts an RFC 8489 Binding transaction and returns a client
+handle. Use `kc_stun_client_poll()` to send the request, pace retransmissions,
+receive on an owned socket and report completion. `KC_STUN_PENDING` means the
+transaction is running. A successful transaction yields `client_mapped()`.
+The client retains its UDP mapping until `client_close()`.
 
-The same local UDP socket remains open until `kc_stun_close()`. Application
-traffic therefore uses the same mapping that STUN observed.
+`client_refresh()` starts another transaction on the same mapping, with a new
+transaction identifier and integrity values. `client_send()` sends application
+UDP datagrams; `client_read()` receives them on owned transports after the
+transaction completes.
 
-The server value can use `host:port`, `[IPv6]:port`, or a host without a port.
-A host without a port uses STUN port 3478. An optional `stun:` prefix is
-accepted.
+The client validates the response transaction ID, source endpoint, message
+integrity and fingerprint. Authentication and `487` error responses are returned
+to the caller. Unknown extension attributes in responses remain available via
+`client_attributes()`.
 
-The local port can be zero to request an operating-system-selected port.
+## Server
 
-## Local and mapped endpoints
+`kc_stun_server()` listens for Binding requests. For owned UDP the library
+accepts requests in its own worker, responds with `XOR-MAPPED-ADDRESS` and closes
+its sockets after `server_close()`. For borrowed UDP the caller delivers each
+incoming request to `server_receive()` and owns all socket lifetime and I/O.
 
-The local endpoint accessors describe the socket bound by the application
-host.
+The optional credentials callback provides the key matching a request's
+`USERNAME`. The binding callback sees parsed STUN attributes and can accept or
+reject the Binding request with an error code. Authenticated success and
+application-rejected error responses carry verified message integrity.
 
-The mapped endpoint accessors describe the address observed by the STUN server.
+## Borrowed UDP and concurrent ICE compositions
 
-IPv4 and IPv6 mappings are supported. An explicit local host must be compatible
-with the address family selected for the STUN server.
+The application or composition owns **exactly one UDP receive loop**. Its
+STUN-response datagrams are delivered to the matching active client transaction,
+and incoming Binding requests are delivered to the server. The transport send
+callback is borrowed; neither role reads it or closes it.
 
-## Refresh
+Client objects can be driven independently by a higher-level checklist
+scheduler. STUN provides its own per-transaction retry timing; ICE supplies
+candidates, credential values, policy and extension attribute values.
 
-`kc_stun_refresh()` sends another Binding Request over the same mapping without
-blocking for the response.
+## Protocol
 
-STUN responses from the configured server are consumed internally by
-`kc_stun_receive()` and are not exposed as application datagrams.
-
-## Application datagrams
-
-`kc_stun_send()` and `kc_stun_receive()` preserve UDP datagram boundaries on
-the discovered mapping.
-
-A receive timeout of zero waits indefinitely.
-
-Release received datagram storage with `kc_stun_datagram_free()`.
-
-## Run a Binding endpoint
-
-`kc_stun_listen()` starts an autonomous UDP Binding endpoint.
-
-A null or empty host listens on available IPv4 and IPv6 wildcard addresses
-using the same UDP port. An explicit host restricts the listener to compatible
-resolved address families.
-
-Port zero requests an operating-system-selected port. Read the resulting port
-with `kc_stun_server_port()`.
-
-The listener answers Binding Requests with the source address and port it
-actually received, encoded as `XOR-MAPPED-ADDRESS`.
-
-The endpoint runs until `kc_stun_server_close()`.
-
-## Transport scope
-
-The current public transport is UDP. TCP, TLS, and DTLS STUN transports are not
-part of this API.
-
-## Related documentation
-
-See the [project README](../README.md) for first use and the
-[public header](../src/libstun.h) for the complete C interface.
+STUN Binding uses the RFC 8489 message envelope, `XOR-MAPPED-ADDRESS`, short-term
+`USERNAME`, SHA-1 `MESSAGE-INTEGRITY` and SHA-256 `MESSAGE-INTEGRITY-SHA256`,
+`FINGERPRINT`, `ERROR-CODE` and opaque extensions. Both IPv4 and IPv6 are
+supported. The implementation does not perform ICE scheduling, nomination,
+role determination or candidate selection.
