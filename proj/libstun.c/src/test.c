@@ -474,15 +474,39 @@ static void stun_test_mapped_codec(void)
 }
 
 /**
+ * Verifies public STUN error attribute encoding and decoding.
+ * @return void.
+ */
+static void stun_test_error_codec(void)
+{
+    unsigned char data[128];
+    kc_stun_attribute_t attribute;
+    unsigned short code=0;
+    char reason[128];
+    size_t size=sizeof(data);
+    int rc=kc_stun_encode_error(487,"Role Conflict",data,&size);
+    stun_test_check(rc==KC_STUN_OK&&size==17,
+        "error_encode","encodes an RFC STUN error code and reason");
+    attribute.type=KC_STUN_ERROR_CODE;
+    attribute.data=data;attribute.size=size;
+    rc=kc_stun_decode_error(&attribute,&code,reason,sizeof(reason));
+    stun_test_check(rc==KC_STUN_OK&&code==487&&
+        strcmp(reason,"Role Conflict")==0,
+        "error_decode","decodes STUN error code and reason");
+    stun_test_group("kc_stun_error_codec",
+        "serializes and parses STUN protocol error attributes");
+}
+
+/**
  * Runs the full numbered STUN contract suite.
  * @return Zero when all assertions pass.
  */
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 16;
+    test_case_total = 17;
 #else
-    test_case_total = 15;
+    test_case_total = 16;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
@@ -490,6 +514,7 @@ static int stun_test_all(void)
     stun_group_checks = 0;
     stun_test_codec();
     stun_test_mapped_codec();
+    stun_test_error_codec();
     stun_test_messages();
     stun_test_owned();
     stun_test_ipv6();
