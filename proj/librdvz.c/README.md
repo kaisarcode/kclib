@@ -66,18 +66,36 @@ establishes a new link.
 ## CLI
 
 ```sh
-rdvz peer1 'handler connected'
-rdvz peer2 'handler connected'
+rdvz peer1 'echo peer1-connected-to'
+rdvz peer2 'echo peer2-connected-to'
 
 rdvz -l
-rdvz peer1 -l
+# peer1
+# peer2
 
-rdvz peer2 -c peer1 'handler linked'
-rdvz peer1 -d peer2 'handler unlinked'
+rdvz peer2 -c peer1 'echo linked-to'
+
+rdvz peer1 -l
+# peer2
+rdvz peer2 -l
+# peer1
+
+rdvz peer1 -d peer2 'echo unlinked-from'
+
+rdvz peer1 -l
+rdvz peer2 -l
+# Both peers still exist, but have no direct links.
 
 rdvz peer1 -d
 rdvz peer2 -d
 ```
+
+The example uses the shell's built-in `echo`, so no separate handler
+executable is required. Connecting runs the two peers' registered commands
+with the other peer's ID, and runs `echo linked-to peer1` for the
+initiating operation. Disconnecting runs `echo unlinked-from peer2`.
+Command output may appear after subsequent CLI operations or in a different
+order because the commands run asynchronously.
 
 `rdvz <id> <cmd>` creates or updates a named peer and
 configures the command executed for incoming connections from any peer.
