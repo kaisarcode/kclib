@@ -54,6 +54,13 @@ This includes other STUN traffic, which the consuming application must
 identify and dispatch rather than treating it automatically as application data.
 The pending datagram queue is bounded to 64 entries.
 
+A composition that owns UDP reception can use `kc_stun_is_message(bytes, size)`
+to identify STUN message envelopes before routing packets. This operation works
+on caller-owned buffers without opening sockets. It checks the STUN header,
+cookie, and datagram length; it does not perform authentication or inspect ICE
+semantics. The composition still dispatches messages to the appropriate
+client or server instance.
+
 A client can borrow an existing UDP sender. The composition delivers inbound
 STUN responses using `kc_stun_client_receive()` and drives retransmissions using
 `kc_stun_client_poll()`. `kc_stun_client_keepalive()` emits an unauthenticated
