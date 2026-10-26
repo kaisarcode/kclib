@@ -201,6 +201,8 @@ static void rdvz_test_cleanup(void)
         if (!rdvz_test_path(path, sizeof(path), names[i]))
             (void)remove(path);
     }
+    (void)remove("rdvz-cli-event.txt");
+    (void)remove("rdvz-cli-action.txt");
 #ifdef _WIN32
     (void)RemoveDirectoryA(rdvz_test_dir);
     (void)_putenv_s("KC_RDVZ_DIR", "");
@@ -467,7 +469,10 @@ static int rdvz_test_file_contains(const char *filename,
     char path[RDVZ_TEST_PATH_MAX], buffer[256];
     FILE *file;
 
-    if (rdvz_test_path(path, sizeof(path), filename)) return 0;
+    if (strncmp(filename, "rdvz-cli-", 9U) == 0) {
+        if ((size_t)snprintf(path, sizeof(path), "%s", filename) >=
+                sizeof(path)) return 0;
+    } else if (rdvz_test_path(path, sizeof(path), filename)) return 0;
     file = fopen(path, "rb");
     if (!file) return 0;
     if (!fgets(buffer, sizeof(buffer), file)) {
@@ -662,18 +667,12 @@ static int case_rdvz_cli_help(void)
  */
 static int case_rdvz_cli_create(void)
 {
-    char command[RDVZ_TEST_PATH_MAX * 2];
-    char path[RDVZ_TEST_PATH_MAX];
     int fail = 0;
 
     fail += rdvz_test_expect("list starts empty",
         rdvz_cli_equals("-l", ""));
-    fail += rdvz_test_expect("create cli-a",
-        rdvz_test_path(path, sizeof(path), "rdvz-cli-event.txt") == 0);
-    (void)snprintf(command, sizeof(command),
-        "cli-a \"echo > '%s'\"", path);
     fail += rdvz_test_expect("create command is persisted",
-        rdvz_cli_run(command) == 0);
+        rdvz_cli_run("cli-a \"echo > rdvz-cli-event.txt\"") == 0);
     fail += rdvz_test_expect("create cli-b",
         rdvz_cli_run("cli-b \"echo\"") == 0);
     fail += rdvz_test_expect("list sees both CLI peers",
@@ -687,31 +686,20 @@ static int case_rdvz_cli_create(void)
         "CLI-created peers survive separate invocations");
     return fail != 0;
 }
-
 /**
  * Verify the CLI link and unlink operations are symmetric.
  * @return Zero on success.
  */
 static int case_rdvz_cli_links(void)
 {
-    char command[RDVZ_TEST_PATH_MAX * 2];
-    char path[RDVZ_TEST_PATH_MAX], action[RDVZ_TEST_PATH_MAX];
     int fail = 0;
 
-    fail += rdvz_test_expect("resident event output path",
-        rdvz_test_path(path, sizeof(path), "rdvz-cli-event.txt") == 0);
-    fail += rdvz_test_expect("operation output path",
-        rdvz_test_path(action, sizeof(action), "rdvz-cli-action.txt") == 0);
-    (void)snprintf(command, sizeof(command),
-        "cli-a \"echo > '%s'\"", path);
     fail += rdvz_test_expect("create cli-a with resident command",
-        rdvz_cli_run(command) == 0);
+        rdvz_cli_run("cli-a \"echo > rdvz-cli-event.txt\"") == 0);
     fail += rdvz_test_expect("create cli-b",
         rdvz_cli_run("cli-b \"echo\"") == 0);
-    (void)snprintf(command, sizeof(command),
-        "cli-b -c cli-a \"echo > '%s'\"", action);
     fail += rdvz_test_expect("connect cli-b to cli-a",
-        rdvz_cli_run(command) == 0);
+        rdvz_cli_run("cli-b -c cli-a \"echo > rdvz-cli-action.txt\"") == 0);
     fail += rdvz_test_expect("cli-a sees cli-b",
         rdvz_cli_equals("cli-a -l", "cli-b" KC_LINE_END));
     fail += rdvz_test_expect("cli-b sees cli-a",
@@ -720,11 +708,9 @@ static int case_rdvz_cli_links(void)
         rdvz_test_wait_file("rdvz-cli-event.txt", "cli-b"));
     fail += rdvz_test_expect("connect operation command receives cli-a",
         rdvz_test_wait_file("rdvz-cli-action.txt", "cli-a"));
-    (void)remove(action);
-    (void)snprintf(command, sizeof(command),
-        "cli-a -d cli-b \"echo > '%s'\"", action);
+    (void)remove("rdvz-cli-action.txt");
     fail += rdvz_test_expect("remove from reverse endpoint",
-        rdvz_cli_run(command) == 0);
+        rdvz_cli_run("cli-a -d cli-b \"echo > rdvz-cli-action.txt\"") == 0);
     fail += rdvz_test_expect("disconnect command receives cli-b",
         rdvz_test_wait_file("rdvz-cli-action.txt", "cli-b"));
     fail += rdvz_test_expect("both peers remain without links",
