@@ -50,7 +50,9 @@ typedef struct {
     const char *username;
     const void *key;
     size_t key_size;
-    unsigned int integrity; /* 0 auto-selects BOTH with key; otherwise SHA1/SHA256/BOTH */
+
+    /** Integrity mode; zero auto-selects both algorithms. */
+    unsigned int integrity;
 } kc_stun_credentials_t;
 
 typedef struct {
@@ -58,62 +60,181 @@ typedef struct {
     const char *host;
     unsigned short port;
     uint64_t timeout_ms;
-    const kc_stun_transport_t *transport; /* Borrowed: send only, never closed. */
+
+    /** Borrowed transport; send only, never closed. */
+    const kc_stun_transport_t *transport;
     kc_stun_credentials_t credentials;
     const kc_stun_attribute_t *attributes;
     size_t attribute_count;
 } kc_stun_client_options_t;
 
 typedef int (*kc_stun_credentials_fn)(void *context, const char *username, kc_stun_credentials_t *credentials);
-/* Return 0 to accept; otherwise a STUN error code (e.g. 487). */
+
+/**
+ * Selects the response code for a binding request.
+ * @return 0 to accept; otherwise a STUN error code.
+ */
 typedef unsigned short (*kc_stun_binding_fn)(void *context, const kc_stun_endpoint_t *peer, const kc_stun_attribute_t *attributes, size_t count);
 
 typedef struct {
     const char *host;
     unsigned short port;
-    const kc_stun_transport_t *transport; /* Borrowed; caller dispatches datagrams. */
+
+    /** Borrowed transport; the caller dispatches datagrams. */
+    const kc_stun_transport_t *transport;
     kc_stun_credentials_fn credentials;
     kc_stun_binding_fn binding;
     void *context;
 } kc_stun_server_options_t;
 
-/** Begins one authenticated or anonymous Binding transaction. Client is pending until poll/receive completes. */
+/**
+ * Begins one authenticated or anonymous Binding transaction.
+ * @param out Destination client pointer.
+ * @param options Client options.
+ * @return KC_STUN_OK, or a negative status.
+ */
 int kc_stun_client(kc_stun_client_t **out, const kc_stun_client_options_t *options);
-/** Drives retransmissions and, for owned UDP, receives responses; returns OK, PENDING or an error. */
+
+/**
+ * Drives retransmissions and owned-socket reception.
+ * @param client Client to drive.
+ * @param wait_ms Maximum wait in milliseconds.
+ * @return OK, PENDING, or a negative status.
+ */
 int kc_stun_client_poll(kc_stun_client_t *client, uint64_t wait_ms);
-/** Delivers an inbound UDP datagram to a client on borrowed transport; ignores unrelated packets. */
+
+/**
+ * Delivers one datagram to a client on borrowed transport.
+ * @param client Client receiving the datagram.
+ * @param peer Source endpoint.
+ * @param bytes Datagram bytes.
+ * @param size Byte count.
+ * @return The current client status.
+ */
 int kc_stun_client_receive(kc_stun_client_t *client, const kc_stun_endpoint_t *peer, const void *bytes, size_t size);
-/** Local endpoint, or NULL when transport is borrowed and its local address is not specified. */
+
+/**
+ * Returns the local endpoint of a client.
+ * @param client Client to inspect.
+ * @return Local endpoint, or NULL when unspecified.
+ */
 const kc_stun_endpoint_t *kc_stun_client_local(const kc_stun_client_t *client);
-/** Endpoint observed by peer after a successful Binding transaction. */
+
+/**
+ * Returns the endpoint observed by the peer.
+ * @param client Client to inspect.
+ * @return Mapped endpoint after success, or NULL.
+ */
 const kc_stun_endpoint_t *kc_stun_client_mapped(const kc_stun_client_t *client);
-/** Parsed response attributes, valid until client_refresh() or client_close(). */
+
+/**
+ * Returns the parsed attributes of the last response.
+ * Returned attributes remain valid until refresh or close.
+ * @param client Client to inspect.
+ * @param count Destination attribute count.
+ * @return Attribute array, or NULL when absent.
+ */
 const kc_stun_attribute_t *kc_stun_client_attributes(const kc_stun_client_t *client, size_t *count);
-/** Sends an application UDP datagram through the same mapping (owned or borrowed). */
+
+/**
+ * Sends an application datagram through the same mapping.
+ * @param client Client owning the mapping.
+ * @param peer Destination endpoint.
+ * @param bytes Datagram bytes.
+ * @param size Byte count.
+ * @return A STUN status code.
+ */
 int kc_stun_client_send(kc_stun_client_t *client, const kc_stun_endpoint_t *peer, const void *bytes, size_t size);
-/** Reads an application datagram on an owned socket after the STUN transaction completes. */
+
+/**
+ * Reads an application datagram on an owned socket.
+ * @param client Client owning the socket.
+ * @param out Destination datagram.
+ * @param timeout_ms Maximum wait in milliseconds.
+ * @return A STUN status code.
+ */
 int kc_stun_client_read(kc_stun_client_t *client, kc_stun_datagram_t *out, uint64_t timeout_ms);
-/** Releases one datagram and resets its fields. */
+
+/**
+ * Releases one datagram and resets its fields.
+ * @param datagram Datagram to release.
+ * @return void.
+ */
 void kc_stun_datagram_free(kc_stun_datagram_t *datagram);
-/** Sends an unauthenticated STUN Binding Indication to keep the peer UDP path alive. */
+
+/**
+ * Sends a Binding Indication to keep the UDP path alive.
+ * @param client Client owning the mapping.
+ * @return A STUN status code.
+ */
 int kc_stun_client_keepalive(kc_stun_client_t *client);
-/** Performs a new Binding transaction on the same UDP mapping. */
+
+/**
+ * Performs a new Binding transaction on the same mapping.
+ * @param client Client to refresh.
+ * @param timeout_ms Transaction timeout in milliseconds.
+ * @return A STUN status code.
+ */
 int kc_stun_client_refresh(kc_stun_client_t *client, uint64_t timeout_ms);
-/** Returns STUN error code from a rejected Binding transaction, or zero. */
+
+/**
+ * Returns the error code of a rejected transaction.
+ * @param client Client to inspect.
+ * @return Error code, or zero when not rejected.
+ */
 unsigned short kc_stun_client_error(const kc_stun_client_t *client);
-/** Releases the client and its owned socket, never a borrowed transport. */
+
+/**
+ * Releases a client and its owned resources.
+ * @param client Client to release, or NULL.
+ * @return void.
+ */
 void kc_stun_client_close(kc_stun_client_t *client);
-/** Starts a STUN Binding responder; owned UDP receives on an internal thread. */
+
+/**
+ * Starts a STUN Binding responder.
+ * Owned UDP receives on an internal thread.
+ * @param out Destination server pointer.
+ * @param options Server options.
+ * @return KC_STUN_OK, or a negative status.
+ */
 int kc_stun_server(kc_stun_server_t **out, const kc_stun_server_options_t *options);
-/** Processes one borrowed-transport datagram; responses use the provided send callback. */
+
+/**
+ * Processes one borrowed-transport datagram.
+ * @param server Server handling the datagram.
+ * @param peer Source endpoint.
+ * @param bytes Datagram bytes.
+ * @param size Byte count.
+ * @return A STUN status code.
+ */
 int kc_stun_server_receive(kc_stun_server_t *server, const kc_stun_endpoint_t *peer, const void *bytes, size_t size);
-/** Returns the bound server UDP port (or configured borrowed port). */
+
+/**
+ * Returns the bound or configured server UDP port.
+ * @param server Server to inspect.
+ * @return Server port.
+ */
 unsigned short kc_stun_server_port(const kc_stun_server_t *server);
-/** Stops server, releases owned sockets, and joins its worker. */
+
+/**
+ * Stops a server and releases owned resources.
+ * @param server Server to close.
+ * @return void.
+ */
 void kc_stun_server_close(kc_stun_server_t *server);
-/** Human-readable error code. */
+
+/**
+ * Returns a human-readable status description.
+ * @param status STUN status code.
+ * @return Static description text.
+ */
 const char *kc_stun_strerror(int status);
-/** Build version. */
+
+/**
+ * Returns the library build version.
+ * @return Build version number.
+ */
 uint64_t kc_stun_version(void);
 #ifdef __cplusplus
 }

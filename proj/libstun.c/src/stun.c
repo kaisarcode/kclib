@@ -24,7 +24,10 @@
 
 static volatile sig_atomic_t stun_cli_stop;
 
-/** Prints all public CLI operations and options. */
+/**
+ * Prints all public CLI operations and options.
+ * @return void.
+ */
 static void stun_cli_help(void)
 {
     printf("Usage: stun <client|server> [arguments] [options]\n");
@@ -38,7 +41,13 @@ static void stun_cli_help(void)
     printf("  -h, --help              Show this help\n");
     printf("  -v, --version           Show version\n");
 }
-/** Parses nonnegative decimal input without truncation. */
+
+/**
+ * Parses nonnegative decimal input without truncation.
+ * @param text Decimal text to parse.
+ * @param out Destination value.
+ * @return 1 when the text is valid.
+ */
 static int stun_cli_u64(const char *text,uint64_t *out)
 {
     unsigned long long n;char *end=NULL;
@@ -47,17 +56,38 @@ static int stun_cli_u64(const char *text,uint64_t *out)
     if(errno||!end||*end)return 0;
     *out=(uint64_t)n;return 1;
 }
-/** Parses a UDP port. */
+
+/**
+ * Parses a UDP port.
+ * @param text Decimal text to parse.
+ * @param out Destination port.
+ * @return 1 when the port is valid.
+ */
 static int stun_cli_port(const char *text,unsigned short *out)
 {
     uint64_t n;if(!stun_cli_u64(text,&n)||n>65535U)return 0;
     *out=(unsigned short)n;return 1;
 }
-/** Emits an error to stderr. */
+
+/**
+ * Emits an error to stderr.
+ * @param message Message text.
+ * @return 1 as a process failure status.
+ */
 static int stun_cli_error(const char *message){fprintf(stderr,"stun: %s\n",message);return 1;}
-/** Requests graceful server shutdown. */
+
+/**
+ * Requests graceful server shutdown.
+ * @param signum Received signal number.
+ * @return void.
+ */
 static void stun_cli_signal(int signum){(void)signum;stun_cli_stop=1;}
-/** Runs one STUN Binding transaction. */
+
+/**
+ * Runs one STUN Binding transaction.
+ * @param options Client options.
+ * @return Process exit status.
+ */
 static int stun_cli_client(const kc_stun_client_options_t *options)
 {
     kc_stun_client_t *client=NULL;const kc_stun_endpoint_t *mapped;
@@ -74,7 +104,12 @@ static int stun_cli_client(const kc_stun_client_options_t *options)
     kc_stun_client_close(client);
     return status==KC_STUN_OK?0:1;
 }
-/** Runs a Binding server until signaled. */
+
+/**
+ * Runs a Binding server until signaled.
+ * @param options Server options.
+ * @return Process exit status.
+ */
 static int stun_cli_server(const kc_stun_server_options_t *options)
 {
     kc_stun_server_t *server=NULL;int status=kc_stun_server(&server,options);
@@ -90,7 +125,13 @@ static int stun_cli_server(const kc_stun_server_options_t *options)
     }
     kc_stun_server_close(server);return 0;
 }
-/** Dispatches the STUN CLI. */
+
+/**
+ * Dispatches the STUN CLI.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return Process exit status.
+ */
 int main(int argc,char **argv)
 {
     kc_stun_client_options_t client;kc_stun_server_options_t server;

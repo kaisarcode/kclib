@@ -10,7 +10,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "libstun.h"
-#include "stun_crypto.h"
+#include "stun-crypto.h"
 #include <limits.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -130,6 +130,10 @@ static uint32_t stun_rd32(const uint8_t *p) { return ((uint32_t)p[0]<<24)|((uint
 static void stun_wr16(uint8_t *p,uint16_t v) { p[0]=(uint8_t)(v>>8);p[1]=(uint8_t)v; }
 static void stun_wr32(uint8_t *p,uint32_t v) { p[0]=(uint8_t)(v>>24);p[1]=(uint8_t)(v>>16);p[2]=(uint8_t)(v>>8);p[3]=(uint8_t)v; }
 
+/**
+ * Returns a monotonic millisecond timestamp.
+ * @return Milliseconds from a monotonic clock.
+ */
 static uint64_t stun_now(void)
 {
 #ifdef _WIN32
@@ -139,14 +143,33 @@ static uint64_t stun_now(void)
     return clock_gettime(CLOCK_MONOTONIC,&t)==0 ? (uint64_t)t.tv_sec*1000U+(uint64_t)t.tv_nsec/1000000U : 0U;
 #endif
 }
+
+/**
+ * Adds a duration to the current monotonic time.
+ * @param duration Milliseconds to add.
+ * @return Saturated absolute deadline.
+ */
 static uint64_t stun_deadline(uint64_t duration)
 {
     uint64_t n=stun_now();return duration>UINT64_MAX-n?UINT64_MAX:n+duration;
 }
+
+/**
+ * Computes the time remaining until an absolute deadline.
+ * @param end Absolute deadline in milliseconds.
+ * @return Remaining milliseconds, or zero when elapsed.
+ */
 static uint64_t stun_remaining(uint64_t end)
 {
     uint64_t n=stun_now();return n>=end?0:end-n;
 }
+
+/**
+ * Fills a buffer with cryptographically random bytes.
+ * @param out Destination buffer.
+ * @param size Number of bytes to generate.
+ * @return 1 on success, 0 when entropy is unavailable.
+ */
 static int stun_random(uint8_t *out,size_t size)
 {
 #ifdef _WIN32
@@ -159,6 +182,11 @@ static int stun_random(uint8_t *out,size_t size)
     close(fd);return 1;
 #endif
 }
+
+/**
+ * Initializes the platform socket runtime.
+ * @return 1 on success, 0 on failure.
+ */
 static int stun_runtime_start(void)
 {
 #ifdef _WIN32
@@ -167,12 +195,25 @@ static int stun_runtime_start(void)
     return 1;
 #endif
 }
+
+/**
+ * Releases the platform socket runtime.
+ * @return void.
+ */
 static void stun_runtime_stop(void)
 {
 #ifdef _WIN32
     WSACleanup();
 #endif
 }
+
+/**
+ * Parses a host and optional port from a STUN peer string.
+ * @param text Peer text such as "host:port".
+ * @param host Destination host buffer.
+ * @param port Destination port.
+ * @return 1 when the peer text is valid.
+ */
 static int stun_parse_host(const char *text,char host[NI_MAXHOST],unsigned short *port)
 {
     const char *begin,*end,*last=NULL,*p;
@@ -205,6 +246,15 @@ static int stun_parse_host(const char *text,char host[NI_MAXHOST],unsigned short
     *port=(unsigned short)value;
     return 1;
 }
+
+/**
+ * Formats a socket address as numeric host and port text.
+ * @param a Socket address to format.
+ * @param len Socket address length.
+ * @param host Destination host buffer.
+ * @param port Destination port.
+ * @return 1 on success.
+ */
 static int stun_endpoint_text(const struct sockaddr_storage *a,stun_socklen_t len,char host[NI_MAXHOST],unsigned short *port)
 {
     char service[16],*tail;unsigned long v;
@@ -212,6 +262,13 @@ static int stun_endpoint_text(const struct sockaddr_storage *a,stun_socklen_t le
     v=strtoul(service,&tail,10);if(*tail||v>65535U)return 0;
     *port=(unsigned short)v;return 1;
 }
+
+/**
+ * Compares two socket addresses for equality.
+ * @param a First socket address.
+ * @param b Second socket address.
+ * @return 1 when both addresses match.
+ */
 static int stun_endpoint_equal(const struct sockaddr_storage *a,const struct sockaddr_storage *b)
 {
     if(a->ss_family!=b->ss_family)return 0;
@@ -219,6 +276,16 @@ static int stun_endpoint_equal(const struct sockaddr_storage *a,const struct soc
     if(a->ss_family==AF_INET6){const struct sockaddr_in6 *x=(const struct sockaddr_in6 *)a,*y=(const struct sockaddr_in6 *)b;return x->sin6_port==y->sin6_port&&x->sin6_scope_id==y->sin6_scope_id&&memcmp(&x->sin6_addr,&y->sin6_addr,sizeof(x->sin6_addr))==0;}
     return 0;
 }
+
+/**
+ * Resolves a host and port into one socket address.
+ * @param host Host name or address.
+ * @param port UDP port.
+ * @param family Preferred address family.
+ * @param addr Destination socket address.
+ * @param len Destination address length.
+ * @return 1 when an address was resolved.
+ */
 static int stun_resolve(const char *host,unsigned short port,int family,struct sockaddr_storage *addr,stun_socklen_t *len)
 {
     struct addrinfo hints,*head=NULL,*it;char service[16];int found=0;
@@ -228,6 +295,14 @@ static int stun_resolve(const char *host,unsigned short port,int family,struct s
     for(it=head;it;it=it->ai_next){if(it->ai_addrlen&&it->ai_addrlen<=sizeof(*addr)){memset(addr,0,sizeof(*addr));memcpy(addr,it->ai_addr,it->ai_addrlen);*len=(stun_socklen_t)it->ai_addrlen;found=1;break;}}
     freeaddrinfo(head);return found;
 }
+
+/**
+ * Creates and binds a UDP socket.
+ * @param host Local bind host, or NULL for any.
+ * @param port Local UDP port.
+ * @param family Address family to bind.
+ * @return Bound socket, or STUN_BAD_SOCKET on failure.
+ */
 static stun_socket_t stun_bind(const char *host,unsigned short port,int family)
 {
     struct addrinfo hints,*head=NULL,*it;char service[16];stun_socket_t socket_fd=STUN_BAD_SOCKET;
@@ -243,6 +318,16 @@ static stun_socket_t stun_bind(const char *host,unsigned short port,int family)
     }
     freeaddrinfo(head);return socket_fd;
 }
+
+/**
+ * Sends one datagram to a socket address.
+ * @param fd Socket to send through.
+ * @param addr Destination socket address.
+ * @param length Destination address length.
+ * @param data Datagram bytes.
+ * @param size Byte count.
+ * @return A STUN status code.
+ */
 static int stun_socket_send(stun_socket_t fd,const struct sockaddr_storage *addr,stun_socklen_t length,const uint8_t *data,size_t size)
 {
     int n;
@@ -254,6 +339,13 @@ static int stun_socket_send(stun_socket_t fd,const struct sockaddr_storage *addr
 #endif
     return n==(int)size?KC_STUN_OK:KC_STUN_ENET;
 }
+
+/**
+ * Waits for a socket to become readable.
+ * @param fd Socket to wait on.
+ * @param ms Maximum wait in milliseconds.
+ * @return 1 when ready, 0 on timeout, -1 on failure.
+ */
 static int stun_wait(stun_socket_t fd,uint64_t ms)
 {
     fd_set fds;struct timeval tv;int rc;
@@ -269,7 +361,10 @@ static int stun_wait(stun_socket_t fd,uint64_t ms)
     return rc>0?1:rc==0?0:-1;
 }
 
-/* Strictly parses the STUN wire envelope and every padded attribute. */
+/**
+ * Parses the STUN wire envelope and each padded attribute.
+ * @return 1 when the packet is valid.
+ */
 static int stun_unpack(const uint8_t *data,size_t size,stun_packet_view_t *out)
 {
     size_t offset,n=0,capacity;
@@ -296,10 +391,25 @@ invalid:
     free(out->attrs);memset(out,0,sizeof(*out));return 0;
 }
 static void stun_unpack_free(stun_packet_view_t *p){free(p->attrs);memset(p,0,sizeof(*p));}
+
+/**
+ * Finds the first attribute of a given type.
+ * @param p Parsed packet view.
+ * @param type Attribute type to locate.
+ * @return Attribute view, or NULL when absent.
+ */
 static const stun_attribute_view_t *stun_find(const stun_packet_view_t *p,uint16_t type)
 {
     size_t i;for(i=0;i<p->count;i++)if(p->attrs[i].type==type)return &p->attrs[i];return NULL;
 }
+
+/**
+ * Verifies the packet fingerprint when present.
+ * @param data Raw packet bytes.
+ * @param size Raw packet length.
+ * @param p Parsed packet view.
+ * @return 1 when the fingerprint is valid or absent.
+ */
 static int stun_fingerprint_valid(const uint8_t *data,size_t size,const stun_packet_view_t *p)
 {
     const stun_attribute_view_t *fp=stun_find(p,KC_STUN_FINGERPRINT);
@@ -307,6 +417,16 @@ static int stun_fingerprint_valid(const uint8_t *data,size_t size,const stun_pac
     if(fp->size!=4||fp->offset+8U!=size)return 0;
     return stun_rd32(fp->data)==(stun_crc32(data,fp->offset)^0x5354554eU);
 }
+
+/**
+ * Verifies packet message integrity with a shared key.
+ * @param data Raw packet bytes.
+ * @param size Raw packet length.
+ * @param p Parsed packet view.
+ * @param key Shared HMAC key.
+ * @param key_size Key length.
+ * @return 1 when the integrity value matches.
+ */
 static int stun_integrity_valid(const uint8_t *data,size_t size,const stun_packet_view_t *p,const void *key,size_t key_size)
 {
     const stun_attribute_view_t *mi=stun_find(p,KC_STUN_MESSAGE_INTEGRITY_SHA256);
@@ -322,10 +442,28 @@ static int stun_integrity_valid(const uint8_t *data,size_t size,const stun_packe
     free(copy);
     return stun_equal(mac,mi->data,mi->size);
 }
+
+/**
+ * Writes a STUN message header.
+ * @param out Destination packet buffer.
+ * @param type Message type.
+ * @param id Transaction identifier.
+ * @return void.
+ */
 static void stun_begin(uint8_t *out,uint16_t type,const uint8_t id[12])
 {
     memset(out,0,20);stun_wr16(out,type);stun_wr32(out+4,STUN_MAGIC);memcpy(out+8,id,12);
 }
+
+/**
+ * Appends one padded STUN attribute.
+ * @param out Destination packet buffer.
+ * @param size Current packet length in and out.
+ * @param type Attribute type.
+ * @param value Attribute value.
+ * @param n Value length.
+ * @return 1 on success.
+ */
 static int stun_append(uint8_t *out,size_t *size,uint16_t type,const void *value,size_t n)
 {
     size_t padded;
@@ -337,6 +475,16 @@ static int stun_append(uint8_t *out,size_t *size,uint16_t type,const void *value
     if(n)memcpy(out+*size+4,value,n);
     *size+=4U+padded;stun_wr16(out+2,(uint16_t)(*size-20U));return 1;
 }
+
+/**
+ * Appends a message integrity attribute and signature.
+ * @param out Destination packet buffer.
+ * @param size Current packet length in and out.
+ * @param key Shared HMAC key.
+ * @param key_size Key length.
+ * @param algorithm HMAC algorithm selector.
+ * @return 1 on success.
+ */
 static int stun_sign(uint8_t *out,size_t *size,const void *key,size_t key_size,unsigned algorithm)
 {
     uint8_t zero[32]={0},mac[32];size_t at=*size,n=algorithm==1?20U:32U;
@@ -344,12 +492,28 @@ static int stun_sign(uint8_t *out,size_t *size,const void *key,size_t key_size,u
     stun_hmac(algorithm,key,key_size,out,at,mac);
     memcpy(out+at+4,mac,n);return 1;
 }
+
+/**
+ * Appends the final fingerprint attribute.
+ * @param out Destination packet buffer.
+ * @param size Current packet length in and out.
+ * @return 1 on success.
+ */
 static int stun_finish(uint8_t *out,size_t *size)
 {
     uint8_t zero[4]={0};size_t at=*size;
     if(!stun_append(out,size,KC_STUN_FINGERPRINT,zero,4))return 0;
     stun_wr32(out+at+4,stun_crc32(out,at)^0x5354554eU);return 1;
 }
+
+/**
+ * Builds one Binding request packet.
+ * @param data Destination packet buffer.
+ * @param size Destination packet length.
+ * @param id Transaction identifier.
+ * @param o Client options supplying attributes.
+ * @return 1 on success.
+ */
 static int stun_build_request(uint8_t *data,size_t *size,const uint8_t id[12],const kc_stun_client_options_t *o)
 {
     size_t n=20U,i;
@@ -371,6 +535,15 @@ static int stun_build_request(uint8_t *data,size_t *size,const uint8_t id[12],co
     if(!stun_finish(data,&n))return 0;
     *size=n;return 1;
 }
+
+/**
+ * Decodes an XOR-MAPPED-ADDRESS attribute.
+ * @param attr Attribute view to decode.
+ * @param id Transaction identifier.
+ * @param host Destination host buffer.
+ * @param port Destination port.
+ * @return 1 when the attribute is valid.
+ */
 static int stun_mapped(const stun_attribute_view_t *attr,const uint8_t id[12],char host[NI_MAXHOST],unsigned short *port)
 {
     uint8_t mask[16]={0x21,0x12,0xa4,0x42},ip[16];int family;size_t length,i;
@@ -384,6 +557,15 @@ static int stun_mapped(const stun_attribute_view_t *attr,const uint8_t id[12],ch
     for(i=0;i<length;i++)ip[i]=(uint8_t)(attr->data[i+4]^mask[i]);
     return inet_ntop(family,ip,host,NI_MAXHOST)!=NULL;
 }
+
+/**
+ * Appends an XOR-MAPPED-ADDRESS for a source address.
+ * @param out Destination packet buffer.
+ * @param size Current packet length in and out.
+ * @param from Source socket address.
+ * @param id Transaction identifier.
+ * @return 1 on success.
+ */
 static int stun_append_mapped(uint8_t *out,size_t *size,const struct sockaddr_storage *from,const uint8_t id[12])
 {
     uint8_t data[20]={0},mask[16]={0x21,0x12,0xa4,0x42},ip[16];size_t n,i;unsigned short port;
@@ -394,6 +576,14 @@ static int stun_append_mapped(uint8_t *out,size_t *size,const struct sockaddr_st
     for(i=0;i<n;i++)data[4+i]=(uint8_t)(ip[i]^mask[i]);
     return stun_append(out,size,KC_STUN_XOR_MAPPED_ADDRESS,data,4U+n);
 }
+
+/**
+ * Appends an ERROR-CODE attribute.
+ * @param out Destination packet buffer.
+ * @param size Current packet length in and out.
+ * @param code STUN error code.
+ * @return 1 on success.
+ */
 static int stun_append_error(uint8_t *out,size_t *size,unsigned short code)
 {
     uint8_t data[4];const char *phrase="Error";uint8_t value[64];size_t len;
@@ -405,12 +595,24 @@ static int stun_append_error(uint8_t *out,size_t *size,unsigned short code)
     len=strlen(phrase);memcpy(value,data,4);memcpy(value+4,phrase,len);
     return stun_append(out,size,KC_STUN_ERROR_CODE,value,len+4U);
 }
+
+/**
+ * Extracts the error code from a parsed packet.
+ * @param p Parsed packet view.
+ * @return STUN error code, or zero when absent.
+ */
 static unsigned short stun_error_code(const stun_packet_view_t *p)
 {
     const stun_attribute_view_t *a=stun_find(p,KC_STUN_ERROR_CODE);
     if(!a||a->size<4||a->data[2]>6||a->data[3]>99)return 0;
     return (unsigned short)(100U*a->data[2]+a->data[3]);
 }
+
+/**
+ * Checks that a credentials value is internally consistent.
+ * @param a Credentials to validate.
+ * @return 1 when the credentials are valid.
+ */
 static int stun_credentials_valid(const kc_stun_credentials_t *a)
 {
     if(!a->username&&!a->key&&!a->key_size&&!a->integrity)return 1;
@@ -446,9 +648,9 @@ int kc_stun_client(kc_stun_client_t **out,const kc_stun_client_options_t *o)
         c->socket=stun_bind(o->host,o->port,addr.ss_family);
         if(c->socket==STUN_BAD_SOCKET){kc_stun_client_close(c);return KC_STUN_ENET;}
         {struct sockaddr_storage local;stun_socklen_t len=(stun_socklen_t)sizeof(local);
-         if(getsockname(c->socket,(struct sockaddr *)&local,&len)!=0||
+            if(getsockname(c->socket,(struct sockaddr *)&local,&len)!=0||
             !stun_endpoint_text(&local,len,c->local_host,&c->local.port)){kc_stun_client_close(c);return KC_STUN_ENET;}
-         c->local.host=c->local_host;}
+            c->local.host=c->local_host;}
     }
     if(o->credentials.key){
         c->key=(uint8_t *)malloc(o->credentials.key_size);
@@ -468,13 +670,22 @@ int kc_stun_client(kc_stun_client_t **out,const kc_stun_client_options_t *o)
     *out=c;
     return KC_STUN_OK;
 }
+
+/**
+ * Sends the prepared request through the client transport.
+ * @param c Client with a prepared request.
+ * @return A STUN status code.
+ */
 static int stun_client_send(kc_stun_client_t *c)
 {
     if(c->borrowed){int rc=c->transport.send(c->transport.context,&c->peer,c->message,c->message_size);return rc==0?KC_STUN_OK:KC_STUN_ENET;}
     return stun_socket_send(c->socket,&c->remote,c->remote_len,c->message,c->message_size);
 }
 
-/** Consumes one correlated Binding response without owning UDP receive. */
+/**
+ * Consumes one correlated Binding response without owning UDP receive.
+ * @return The current client status.
+ */
 int kc_stun_client_receive(kc_stun_client_t *c,const kc_stun_endpoint_t *peer,const void *bytes,size_t size)
 {
     stun_packet_view_t parsed;const uint8_t *raw=(const uint8_t *)bytes;const stun_attribute_view_t *mapped;
@@ -484,9 +695,9 @@ int kc_stun_client_receive(kc_stun_client_t *c,const kc_stun_endpoint_t *peer,co
     if(peer->port!=c->peer.port||strcmp(peer->host,c->peer.host)!=0)return KC_STUN_PENDING;
     if(!stun_unpack(raw,size,&parsed))return KC_STUN_PENDING;
     if(memcmp(parsed.id,c->id,12)||
-       (parsed.type!=STUN_SUCCESS&&parsed.type!=STUN_ERROR)||
-       !stun_fingerprint_valid(raw,size,&parsed)||
-       (c->integrity&&!stun_integrity_valid(raw,size,&parsed,c->key,c->key_size))){
+        (parsed.type!=STUN_SUCCESS&&parsed.type!=STUN_ERROR)||
+        !stun_fingerprint_valid(raw,size,&parsed)||
+        (c->integrity&&!stun_integrity_valid(raw,size,&parsed,c->key,c->key_size))){
         stun_unpack_free(&parsed);return KC_STUN_PENDING;
     }
     if(parsed.type==STUN_ERROR){
@@ -515,7 +726,10 @@ int kc_stun_client_receive(kc_stun_client_t *c,const kc_stun_endpoint_t *peer,co
     stun_unpack_free(&parsed);return c->status;
 }
 
-/** Drives client retransmission deadlines and owned UDP reception. */
+/**
+ * Drives client retransmission deadlines and owned UDP reception.
+ * @return The current client status.
+ */
 int kc_stun_client_poll(kc_stun_client_t *c,uint64_t wait_ms)
 {
     uint64_t now,next,remaining;
@@ -554,7 +768,10 @@ int kc_stun_client_poll(kc_stun_client_t *c,uint64_t wait_ms)
     return KC_STUN_PENDING;
 }
 
-/** Sends arbitrary UDP data through a preserved STUN client mapping. */
+/**
+ * Sends UDP data through a preserved STUN client mapping.
+ * @return A STUN status code.
+ */
 int kc_stun_client_send(kc_stun_client_t *c,const kc_stun_endpoint_t *peer,const void *bytes,size_t size)
 {
     struct sockaddr_storage dest;stun_socklen_t len;
@@ -564,7 +781,11 @@ int kc_stun_client_send(kc_stun_client_t *c,const kc_stun_endpoint_t *peer,const
     if(!stun_resolve(peer->host,peer->port,c->remote.ss_family,&dest,&len))return KC_STUN_ENET;
     return stun_socket_send(c->socket,&dest,len,(const uint8_t *)bytes,size);
 }
-/** Sends an unauthenticated STUN Binding Indication with a fingerprint. */
+
+/**
+ * Sends an unauthenticated STUN Binding Indication with a fingerprint.
+ * @return A STUN status code.
+ */
 int kc_stun_client_keepalive(kc_stun_client_t *c)
 {
     uint8_t packet[32],id[12];size_t size=20U;
@@ -575,7 +796,11 @@ int kc_stun_client_keepalive(kc_stun_client_t *c)
     if(c->borrowed)return c->transport.send(c->transport.context,&c->peer,packet,size)==0?KC_STUN_OK:KC_STUN_ENET;
     return stun_socket_send(c->socket,&c->remote,c->remote_len,packet,size);
 }
-/** Reads one non-STUN datagram from an owned client mapping. */
+
+/**
+ * Reads one non-STUN datagram from an owned client mapping.
+ * @return A STUN status code.
+ */
 int kc_stun_client_read(kc_stun_client_t *c,kc_stun_datagram_t *out,uint64_t timeout_ms)
 {
     uint64_t end=timeout_ms?stun_deadline(timeout_ms):UINT64_MAX;
@@ -601,7 +826,7 @@ int kc_stun_client_read(kc_stun_client_t *c,kc_stun_datagram_t *out,uint64_t tim
             stun_packet_view_t parsed;
             if(stun_unpack(packet,(size_t)got,&parsed)){
                 int correlated=memcmp(parsed.id,c->id,12)==0&&
-                   (parsed.type==STUN_SUCCESS||parsed.type==STUN_ERROR);
+                    (parsed.type==STUN_SUCCESS||parsed.type==STUN_ERROR);
                 stun_unpack_free(&parsed);
                 if(correlated)continue;
             }
@@ -615,12 +840,22 @@ int kc_stun_client_read(kc_stun_client_t *c,kc_stun_datagram_t *out,uint64_t tim
         return KC_STUN_OK;
     }
 }
+
+/**
+ * Releases one received application datagram.
+ * @param d Datagram to release.
+ * @return void.
+ */
 void kc_stun_datagram_free(kc_stun_datagram_t *d)
 {
     if(!d)return;
     free(d->host);free(d->data);memset(d,0,sizeof(*d));
 }
-/** Starts a fresh transaction through the existing mapping and credentials. */
+
+/**
+ * Starts a transaction through the existing mapping and credentials.
+ * @return A STUN status code.
+ */
 int kc_stun_client_refresh(kc_stun_client_t *c,uint64_t timeout_ms)
 {
     stun_packet_view_t p;size_t i;uint8_t mac[32];
@@ -656,6 +891,11 @@ const kc_stun_endpoint_t *kc_stun_client_mapped(const kc_stun_client_t *c){retur
 unsigned short kc_stun_client_error(const kc_stun_client_t *c){return c?c->error:0;}
 const kc_stun_attribute_t *kc_stun_client_attributes(const kc_stun_client_t *c,size_t *count){if(count)*count=c?c->response_count:0;return c?c->response:NULL;}
 
+/**
+ * Releases a client and its owned resources.
+ * @param c Client to release, or NULL.
+ * @return void.
+ */
 void kc_stun_client_close(kc_stun_client_t *c)
 {
     if(!c)return;
@@ -670,11 +910,34 @@ void kc_stun_client_close(kc_stun_client_t *c)
     free(c);
 }
 
+/**
+ * Sends a server response through owned or borrowed UDP.
+ * @param s Server owning the transport.
+ * @param fd Owned socket, or STUN_BAD_SOCKET.
+ * @param addr Destination socket address.
+ * @param len Destination address length.
+ * @param peer Destination endpoint.
+ * @param data Response bytes.
+ * @param size Byte count.
+ * @return A STUN status code.
+ */
 static int stun_server_send(kc_stun_server_t *s,stun_socket_t fd,const struct sockaddr_storage *addr,stun_socklen_t len,const kc_stun_endpoint_t *peer,const uint8_t *data,size_t size)
 {
     if(s->borrowed)return s->transport.send(s->transport.context,peer,data,size)==0?KC_STUN_OK:KC_STUN_ENET;
     return stun_socket_send(fd,addr,len,data,size);
 }
+
+/**
+ * Processes one inbound Binding request.
+ * @param s Server handling the request.
+ * @param fd Owned socket, or STUN_BAD_SOCKET.
+ * @param addr Source socket address.
+ * @param len Source address length.
+ * @param peer Source endpoint.
+ * @param data Request bytes.
+ * @param size Byte count.
+ * @return A STUN status code.
+ */
 static int stun_server_process(kc_stun_server_t *s,stun_socket_t fd,const struct sockaddr_storage *addr,stun_socklen_t len,const kc_stun_endpoint_t *peer,const uint8_t *data,size_t size)
 {
     stun_packet_view_t p;uint8_t out[STUN_MAX_PACKET];size_t used=20,i;
@@ -694,7 +957,7 @@ static int stun_server_process(kc_stun_server_t *s,stun_socket_t fd,const struct
         if(!name){stun_unpack_free(&p);return KC_STUN_ENOMEM;}
         memcpy(name,user->data,user->size);name[user->size]=0;
         if(memchr(name,0,user->size)||s->credentials(s->context,name,&auth)!=0||
-           !auth.key||!auth.key_size||!stun_integrity_valid(data,size,&p,auth.key,auth.key_size))error=401;
+            !auth.key||!auth.key_size||!stun_integrity_valid(data,size,&p,auth.key,auth.key_size))error=401;
         else authenticated=1;
         free(name);
         if(error)goto response;
@@ -703,11 +966,11 @@ static int stun_server_process(kc_stun_server_t *s,stun_socket_t fd,const struct
         for(i=0;i<p.count;i++){
             unsigned short type=p.attrs[i].type;
             if(type<0x8000U&&type!=KC_STUN_USERNAME&&
-               type!=KC_STUN_MESSAGE_INTEGRITY&&
-               type!=KC_STUN_MESSAGE_INTEGRITY_SHA256&&
-               type!=KC_STUN_REALM&&type!=KC_STUN_NONCE&&
-               type!=KC_STUN_ERROR_CODE&&type!=KC_STUN_UNKNOWN_ATTRIBUTES&&
-               type!=KC_STUN_XOR_MAPPED_ADDRESS){
+                type!=KC_STUN_MESSAGE_INTEGRITY&&
+                type!=KC_STUN_MESSAGE_INTEGRITY_SHA256&&
+                type!=KC_STUN_REALM&&type!=KC_STUN_NONCE&&
+                type!=KC_STUN_ERROR_CODE&&type!=KC_STUN_UNKNOWN_ATTRIBUTES&&
+                type!=KC_STUN_XOR_MAPPED_ADDRESS){
                 error=420;break;
             }
         }
@@ -730,11 +993,11 @@ response:
             for(i=0;i<p.count&&count+2U<=sizeof(unknown);i++){
                 unsigned short type=p.attrs[i].type;
                 if(type<0x8000U&&type!=KC_STUN_USERNAME&&
-                   type!=KC_STUN_MESSAGE_INTEGRITY&&
-                   type!=KC_STUN_MESSAGE_INTEGRITY_SHA256&&
-                   type!=KC_STUN_REALM&&type!=KC_STUN_NONCE&&
-                   type!=KC_STUN_ERROR_CODE&&type!=KC_STUN_UNKNOWN_ATTRIBUTES&&
-                   type!=KC_STUN_XOR_MAPPED_ADDRESS){
+                    type!=KC_STUN_MESSAGE_INTEGRITY&&
+                    type!=KC_STUN_MESSAGE_INTEGRITY_SHA256&&
+                    type!=KC_STUN_REALM&&type!=KC_STUN_NONCE&&
+                    type!=KC_STUN_ERROR_CODE&&type!=KC_STUN_UNKNOWN_ATTRIBUTES&&
+                    type!=KC_STUN_XOR_MAPPED_ADDRESS){
                     stun_wr16(unknown+count,type);count+=2U;
                 }
             }
@@ -742,11 +1005,9 @@ response:
         }
     }
     else if(!addr||!stun_append_mapped(out,&used,addr,p.id)){
-        /* Borrowed transports do not expose sockaddr structures; resolve the
-           peer's numeric endpoint for XOR-MAPPED-ADDRESS. */
         struct sockaddr_storage endpoint;stun_socklen_t elen;
         if(!stun_resolve(peer->host,peer->port,AF_UNSPEC,&endpoint,&elen)||
-           !stun_append_mapped(out,&used,&endpoint,p.id))goto invalid;
+            !stun_append_mapped(out,&used,&endpoint,p.id))goto invalid;
     }
     if(authenticated){
         unsigned alg=stun_find(&p,KC_STUN_MESSAGE_INTEGRITY_SHA256)?2U:1U;
@@ -759,12 +1020,26 @@ invalid:
     stun_unpack_free(&p);return KC_STUN_EPROTO;
 }
 
+/**
+ * Processes one borrowed-transport datagram.
+ * @param s Server handling the datagram.
+ * @param peer Source endpoint.
+ * @param bytes Datagram bytes.
+ * @param size Byte count.
+ * @return A STUN status code.
+ */
 int kc_stun_server_receive(kc_stun_server_t *s,const kc_stun_endpoint_t *peer,const void *bytes,size_t size)
 {
     if(!s||!s->borrowed||!peer||!peer->host||!peer->port||!bytes)return KC_STUN_EINVAL;
     return stun_server_process(s,STUN_BAD_SOCKET,NULL,0,peer,(const uint8_t *)bytes,size);
 }
 
+/**
+ * Receives and processes one owned-socket datagram.
+ * @param s Server owning the socket.
+ * @param fd Ready socket.
+ * @return void.
+ */
 static void stun_server_read(kc_stun_server_t *s,stun_socket_t fd)
 {
     uint8_t packet[STUN_MAX_PACKET];struct sockaddr_storage addr;stun_socklen_t len=(stun_socklen_t)sizeof(addr);
@@ -777,6 +1052,12 @@ static void stun_server_read(kc_stun_server_t *s,stun_socket_t fd)
     if(got<20||!stun_endpoint_text(&addr,len,host,&port))return;
     {kc_stun_endpoint_t peer={host,port};(void)stun_server_process(s,fd,&addr,len,&peer,packet,(size_t)got);}
 }
+
+/**
+ * Runs the owned-socket server receive loop.
+ * @param arg Server instance.
+ * @return Platform thread exit value.
+ */
 #ifdef _WIN32
 static DWORD WINAPI stun_server_thread(LPVOID arg)
 #else
@@ -817,6 +1098,12 @@ static void *stun_server_thread(void *arg)
 #endif
 }
 
+/**
+ * Starts a STUN Binding server.
+ * @param out Destination server pointer.
+ * @param options Server options.
+ * @return KC_STUN_OK or a negative error.
+ */
 int kc_stun_server(kc_stun_server_t **out,const kc_stun_server_options_t *options)
 {
     kc_stun_server_t *s;unsigned short port;struct sockaddr_storage addr;stun_socklen_t len;
@@ -856,6 +1143,12 @@ int kc_stun_server(kc_stun_server_t **out,const kc_stun_server_options_t *option
     *out=s;return KC_STUN_OK;
 }
 unsigned short kc_stun_server_port(const kc_stun_server_t *s){return s?s->port:0;}
+
+/**
+ * Stops a server and releases its owned resources.
+ * @param s Server to close, or NULL.
+ * @return void.
+ */
 void kc_stun_server_close(kc_stun_server_t *s)
 {
     if(!s)return;
@@ -876,6 +1169,12 @@ void kc_stun_server_close(kc_stun_server_t *s)
 #endif
     free(s);
 }
+
+/**
+ * Returns a human-readable status description.
+ * @param status STUN status code.
+ * @return Static description text.
+ */
 const char *kc_stun_strerror(int status)
 {
     switch(status){

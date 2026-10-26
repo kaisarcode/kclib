@@ -23,13 +23,20 @@ static unsigned int stun_test_sent;
 static unsigned int stun_test_replies;
 static unsigned int stun_test_failures;
 
-/** Reports a contract assertion. */
+/**
+ * Reports a contract assertion.
+ * @return void
+ */
 static void stun_test_check(int pass,const char *name)
 {
     printf("%s: %s\n",pass?"OK":"FAIL",name);
     if(!pass)stun_test_failures++;
 }
-/** Delivers one server reply to a borrowed client. */
+
+/**
+ * Delivers one server reply to a borrowed client.
+ * @return 0 after delivering the reply.
+ */
 static int stun_test_server_send(void *context,const kc_stun_endpoint_t *peer,const void *bytes,size_t size)
 {
     const kc_stun_endpoint_t from={"127.0.0.1",42424};
@@ -44,7 +51,11 @@ static int stun_test_server_send(void *context,const kc_stun_endpoint_t *peer,co
     }else (void)kc_stun_client_receive(stun_test_client,&from,bytes,size);
     return 0;
 }
-/** Delivers a borrowed client's datagram to the server. */
+
+/**
+ * Delivers a borrowed client's datagram to the server.
+ * @return Server receive status.
+ */
 static int stun_test_client_send(void *context,const kc_stun_endpoint_t *peer,const void *bytes,size_t size)
 {
     const kc_stun_endpoint_t from={"127.0.0.1",51000};
@@ -53,7 +64,11 @@ static int stun_test_client_send(void *context,const kc_stun_endpoint_t *peer,co
     if(stun_test_bad_key)return 0;
     return kc_stun_server_receive(stun_test_server,&from,bytes,size);
 }
-/** Looks up a short-term STUN credential by username. */
+
+/**
+ * Looks up a short-term STUN credential by username.
+ * @return 0 when the credential is available.
+ */
 static int stun_test_credentials(void *context,const char *username,kc_stun_credentials_t *out)
 {
     (void)context;
@@ -61,7 +76,11 @@ static int stun_test_credentials(void *context,const char *username,kc_stun_cred
     out->username=username;out->key=stun_test_key;out->key_size=strlen(stun_test_key);
     out->integrity=KC_STUN_HMAC_BOTH;return 0;
 }
-/** Handles an ICE extension without interpreting it in STUN. */
+
+/**
+ * Handles an ICE extension without interpreting it in STUN.
+ * @return An optional STUN error code.
+ */
 static unsigned short stun_test_binding(void *context,const kc_stun_endpoint_t *peer,const kc_stun_attribute_t *attributes,size_t count)
 {
     size_t i;(void)context;(void)peer;
@@ -69,7 +88,11 @@ static unsigned short stun_test_binding(void *context,const kc_stun_endpoint_t *
         stun_test_seen_priority=1;
     return stun_test_role_conflict?487U:0U;
 }
-/** Executes a loopback Binding and reuses the mapping for application data. */
+
+/**
+ * Executes a loopback Binding and reuses the mapping for application data.
+ * @return void
+ */
 static void stun_test_owned(void)
 {
     kc_stun_client_options_t options={0};kc_stun_server_options_t server_options={0};
@@ -79,7 +102,7 @@ static void stun_test_owned(void)
     rc=kc_stun_server(&server,&server_options);
     stun_test_check(rc==KC_STUN_OK&&server!=NULL,"owned server starts");
     if(rc!=KC_STUN_OK)return;
-    snprintf(peer,sizeof(peer),"127.0.0.1:%u",kc_stun_server_port(server));
+    snprintf(peer,sizeof(peer),"%s:%u","127.0.0.1",kc_stun_server_port(server));
     options.peer.host=peer;options.timeout_ms=2000;
     rc=kc_stun_client(&client,&options);
     stun_test_check(rc==KC_STUN_OK&&client!=NULL,"owned client starts");
@@ -105,7 +128,11 @@ static void stun_test_owned(void)
     }
     kc_stun_server_close(server);
 }
-/** Checks the Binding address family and XOR decoding over IPv6 when available. */
+
+/**
+ * Checks the Binding address family and XOR decoding over IPv6 when available.
+ * @return void
+ */
 static void stun_test_ipv6(void)
 {
     kc_stun_server_options_t so={0};kc_stun_client_options_t co={0};
@@ -130,7 +157,10 @@ static void stun_test_ipv6(void)
     kc_stun_server_close(server);
 }
 
-/** Runs authenticated transactions through an externally owned UDP path. */
+/**
+ * Runs authenticated transactions through an externally owned UDP path.
+ * @return void
+ */
 static void stun_test_borrowed(void)
 {
     kc_stun_transport_t client_udp={NULL,stun_test_client_send};
@@ -224,7 +254,10 @@ static void stun_test_borrowed(void)
     }
 }
 #ifdef KC_CLI_PATH
-/** Executes one CLI invocation and returns its status. */
+/**
+ * Executes one CLI invocation and returns its status.
+ * @return Command exit status.
+ */
 static int stun_test_cli(const char *args)
 {
     char command[4096];
@@ -235,6 +268,11 @@ static int stun_test_cli(const char *args)
 #endif
     return system(command);
 }
+
+/**
+ * Exercises the public command-line interface.
+ * @return void
+ */
 static void stun_test_command_line(void)
 {
     stun_test_check(stun_test_cli("--help")==0,"CLI help");
@@ -245,6 +283,11 @@ static void stun_test_command_line(void)
     stun_test_check(stun_test_cli("server unexpected")==0?0:1,"CLI rejects extra arguments");
 }
 #endif
+
+/**
+ * Runs the libstun public contract tests.
+ * @return 0 when every test passes.
+ */
 int main(void)
 {
     stun_test_owned();stun_test_ipv6();stun_test_borrowed();

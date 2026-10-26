@@ -1,12 +1,12 @@
 /**
- * stun_crypto.c - Private STUN authentication and fingerprint primitives.
+ * stun-crypto.c - Private STUN authentication and fingerprint primitives.
  * Summary: Portable SHA-1, SHA-256, HMAC and CRC-32 without runtime dependencies.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
-#include "stun_crypto.h"
+#include "stun-crypto.h"
 #include <string.h>
 
 typedef struct {
@@ -32,6 +32,12 @@ static const uint32_t sha256_k[64] = {
     0x748f82eeU,0x78a5636fU,0x84c87814U,0x8cc70208U,0x90befffaU,0xa4506cebU,0xbef9a3f7U,0xc67178f2U
 };
 
+/**
+ * Mixes one 64-byte block into a SHA-1 or SHA-256 state.
+ * @param d Digest state to update.
+ * @param bytes Sixty-four input bytes.
+ * @return void.
+ */
 static void digest_block(stun_digest_t *d, const uint8_t bytes[64])
 {
     uint32_t w[80];
@@ -70,6 +76,12 @@ static void digest_block(stun_digest_t *d, const uint8_t bytes[64])
     }
 }
 
+/**
+ * Initializes a digest state for SHA-1 or SHA-256.
+ * @param d Digest state to initialize.
+ * @param algorithm Algorithm selector: 1 for SHA-1.
+ * @return void.
+ */
 static void digest_init(stun_digest_t *d, unsigned algorithm)
 {
     static const uint32_t sha1[5] = {0x67452301U,0xefcdab89U,0x98badcfeU,0x10325476U,0xc3d2e1f0U};
@@ -78,6 +90,13 @@ static void digest_init(stun_digest_t *d, unsigned algorithm)
     memcpy(d->state,algorithm==1?sha1:sha256,algorithm==1?sizeof(sha1):sizeof(sha256));
 }
 
+/**
+ * Feeds input bytes into a digest state.
+ * @param d Digest state to update.
+ * @param data Input bytes.
+ * @param size Input byte count.
+ * @return void.
+ */
 static void digest_update(stun_digest_t *d, const void *data, size_t size)
 {
     const uint8_t *p=(const uint8_t *)data;
@@ -91,6 +110,12 @@ static void digest_update(stun_digest_t *d, const void *data, size_t size)
     }
 }
 
+/**
+ * Finishes a digest and writes its raw output.
+ * @param d Digest state to finish.
+ * @param out Destination for the digest bytes.
+ * @return void.
+ */
 static void digest_final(stun_digest_t *d, uint8_t out[32])
 {
     uint64_t bits=d->count*8U;
@@ -104,6 +129,16 @@ static void digest_final(stun_digest_t *d, uint8_t out[32])
     for(i=0;i<(d->algorithm==1?5U:8U);i++)store32(out+i*4,d->state[i]);
 }
 
+/**
+ * Computes an HMAC with SHA-1 or SHA-256.
+ * @param algorithm HMAC algorithm selector.
+ * @param key HMAC key.
+ * @param key_size Key length.
+ * @param data Input bytes.
+ * @param size Input byte count.
+ * @param out Destination for the MAC bytes.
+ * @return void.
+ */
 void stun_hmac(unsigned algorithm,const void *key,size_t key_size,const void *data,size_t size,uint8_t out[32])
 {
     uint8_t k[64]={0},inner[32],ipad[64],opad[64];
@@ -117,6 +152,12 @@ void stun_hmac(unsigned algorithm,const void *key,size_t key_size,const void *da
     memset(&d,0,sizeof(d));memset(k,0,sizeof(k));memset(inner,0,sizeof(inner));
 }
 
+/**
+ * Computes the CRC-32 value of a byte range.
+ * @param data Input bytes.
+ * @param size Input byte count.
+ * @return CRC-32 value.
+ */
 uint32_t stun_crc32(const void *data,size_t size)
 {
     const uint8_t *p=(const uint8_t *)data;
@@ -129,6 +170,13 @@ uint32_t stun_crc32(const void *data,size_t size)
     return ~crc;
 }
 
+/**
+ * Compares two byte ranges in constant time.
+ * @param a First byte range.
+ * @param b Second byte range.
+ * @param n Byte count to compare.
+ * @return 1 when both ranges are equal.
+ */
 int stun_equal(const void *a,const void *b,size_t n)
 {
     const uint8_t *x=(const uint8_t *)a,*y=(const uint8_t *)b;

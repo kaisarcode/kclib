@@ -1,3 +1,11 @@
+/**
+ * stun-crypto.h - Private STUN authentication primitives.
+ * Summary: Declares HMAC, CRC-32 and constant-time comparison helpers.
+ *
+ * Author:  KaisarCode
+ * Website: https://kaisarcode.com
+ * License: https://www.gnu.org/licenses/lgpl-3.0.html
+ */
 #ifndef STUN_CRYPTO_H
 #define STUN_CRYPTO_H
 #include <stddef.h>
