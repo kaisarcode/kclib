@@ -320,7 +320,20 @@ static void stun_test_borrowed(void)
         kc_stun_client_close(stun_test_client);
     }else stun_test_check(0,"role_conflict", "starts the role conflict check");
     stun_test_role_conflict=0;
-    stun_test_group("kc_stun_errors", "returns authenticated STUN protocol errors");
+    {
+        kc_stun_client_options_t anonymous={0};
+        anonymous.peer.host="127.0.0.1:42424";
+        anonymous.transport=&client_udp;
+        rc=kc_stun_client(&stun_test_client,&anonymous);
+        if(rc==KC_STUN_OK){
+            rc=kc_stun_client_poll(stun_test_client,0);
+            stun_test_check(rc==KC_STUN_EREJECTED&&
+                kc_stun_client_error(stun_test_client)==400,
+                "missing_credentials","returns 400 for missing required STUN credentials");
+            kc_stun_client_close(stun_test_client);
+        }else stun_test_check(0,"missing_credentials","starts an anonymous Binding request");
+    }
+    stun_test_group("kc_stun_errors", "reports STUN protocol errors and authentication requirements");
     stun_test_tamper=1;
     rc=kc_stun_client(&stun_test_client,&co);
     if(rc==KC_STUN_OK){
