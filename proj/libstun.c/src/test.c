@@ -1,738 +1,198 @@
 /**
- * test.c - libstun public API contract tests.
- * Summary: Validates STUN discovery, preserved mappings, datagrams, and lifecycle.
+ * test.c - libstun public contract tests.
+ * Summary: Validates owned and borrowed UDP, authenticated ICE-style bindings, and CLI.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
-
 #include "libstun.h"
-
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
-typedef HANDLE test_thread_t;
-typedef SOCKET test_socket_t;
-typedef int test_socklen_t;
-#define TEST_INVALID_SOCKET INVALID_SOCKET
-#define test_socket_close closesocket
-#else
-#include <arpa/inet.h>
-#include <errno.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <unistd.h>
-typedef pthread_t test_thread_t;
-typedef int test_socket_t;
-typedef socklen_t test_socklen_t;
-#define TEST_INVALID_SOCKET (-1)
-#define test_socket_close close
-#endif
+static const char stun_test_key[]="example-password";
+static kc_stun_client_t *stun_test_client;
+static kc_stun_server_t *stun_test_server;
+static int stun_test_seen_priority;
+static int stun_test_role_conflict;
+static int stun_test_tamper;
+static int stun_test_bad_key;
+static unsigned int stun_test_sent;
+static unsigned int stun_test_failures;
 
-#define TEST_STUN_MAGIC 0x2112A442U
-
-#ifdef __EMSCRIPTEN__
-static int test_case_total = 5;
-#else
-static int test_case_total = 6;
-#endif
-static int test_case_current = 0;
-
-#ifndef __EMSCRIPTEN__
-static int case_stun_cli(void);
-#endif
-
-typedef struct {
-    test_socket_t fd;
-    int family;
-    int responses;
-} test_server_t;
-
-/**
- * Stores one network-order u16 in a test packet.
- * @return void
- */
-static void put16(unsigned char *out, size_t off, unsigned short v)
+/** Reports a contract assertion. */
+static void stun_test_check(int pass,const char *name)
 {
-    out[off] = (unsigned char)(v >> 8);
-    out[off + 1U] = (unsigned char)v;
+    printf("%s: %s\n",pass?"OK":"FAIL",name);
+    if(!pass)stun_test_failures++;
 }
-
-/**
- * Loads one network-order u16 from a test packet.
- * @return The loaded unsigned short value.
- */
-static unsigned short get16(const unsigned char *in, size_t off)
+/** Delivers one server reply to a borrowed client. */
+static int stun_test_server_send(void *context,const kc_stun_endpoint_t *peer,const void *bytes,size_t size)
 {
-    return (unsigned short)(((unsigned short)in[off] << 8) | in[off + 1U]);
-}
-
-/**
- * Starts the test socket runtime.
- * @return 1 on success, 0 on failure.
- */
-static int socket_runtime_start(void)
-{
-#ifdef _WIN32
-    WSADATA wsa;
-    return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
-#else
-    return 1;
-#endif
-}
-
-/**
- * Stops the test socket runtime.
- * @return void
- */
-static void socket_runtime_stop(void)
-{
-#ifdef _WIN32
-    WSACleanup();
-#endif
-}
-
-/**
- * Waits for a test socket to become readable.
- * @return 1 if readable, 0 otherwise.
- */
-static int wait_readable(test_socket_t fd, unsigned timeout_ms)
-{
-    fd_set readfds;
-    struct timeval tv;
-    int rc;
-    FD_ZERO(&readfds);
-    FD_SET(fd, &readfds);
-    tv.tv_sec = (long)(timeout_ms / 1000U);
-    tv.tv_usec = (long)((timeout_ms % 1000U) * 1000U);
-#ifdef _WIN32
-    rc = select(0, &readfds, NULL, NULL, &tv);
-#else
-    rc = select(fd + 1, &readfds, NULL, NULL, &tv);
-#endif
-    return rc > 0;
-}
-
-/**
- * Binds one IPv4 or IPv6 loopback UDP socket.
- * @return The bound socket or TEST_INVALID_SOCKET on failure.
- */
-static test_socket_t bind_loopback(int family, unsigned short *out_port)
-{
-    test_socket_t fd;
-    if (!out_port) return TEST_INVALID_SOCKET;
-    *out_port = 0;
-    fd = socket(family, SOCK_DGRAM, IPPROTO_UDP);
-    if (fd == TEST_INVALID_SOCKET) return TEST_INVALID_SOCKET;
-    if (family == AF_INET) {
-        struct sockaddr_in addr;
-        test_socklen_t len = (test_socklen_t)sizeof(addr);
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        if (bind(fd, (const struct sockaddr *)&addr, len) != 0 ||
-            getsockname(fd, (struct sockaddr *)&addr, &len) != 0) {
-            test_socket_close(fd);
-            return TEST_INVALID_SOCKET;
-        }
-        *out_port = ntohs(addr.sin_port);
-    } else {
-        struct sockaddr_in6 addr;
-        test_socklen_t len = (test_socklen_t)sizeof(addr);
-        int v6only = 1;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin6_family = AF_INET6;
-        addr.sin6_addr = in6addr_loopback;
-        if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY,
-            (const char *)&v6only, (test_socklen_t)sizeof(v6only)) != 0 ||
-            bind(fd, (const struct sockaddr *)&addr, len) != 0 ||
-            getsockname(fd, (struct sockaddr *)&addr, &len) != 0) {
-            test_socket_close(fd);
-            return TEST_INVALID_SOCKET;
-        }
-        *out_port = ntohs(addr.sin6_port);
-    }
-    return fd;
-}
-
-/**
- * Builds a Binding Success response that reflects the request source.
- * @return Number of bytes written, or 0 on failure.
- */
-static size_t build_response(const unsigned char *request, size_t request_size,
-    const struct sockaddr_storage *peer, unsigned char *out, size_t cap)
-{
-    unsigned char address[16];
-    unsigned char mask[16];
-    unsigned short port;
-    size_t n;
-    size_t attr_len;
-    size_t total;
-    size_t i;
-
-    if (!request || request_size < 20U || !peer || !out) return 0;
-    if (peer->ss_family == AF_INET) {
-        const struct sockaddr_in *v4 = (const struct sockaddr_in *)peer;
-        memcpy(address, &v4->sin_addr, 4);
-        port = ntohs(v4->sin_port);
-        n = 4;
-    } else if (peer->ss_family == AF_INET6) {
-        const struct sockaddr_in6 *v6 = (const struct sockaddr_in6 *)peer;
-        memcpy(address, &v6->sin6_addr, 16);
-        port = ntohs(v6->sin6_port);
-        n = 16;
-    } else {
-        return 0;
-    }
-    attr_len = 4U + n;
-    total = 24U + attr_len;
-    if (cap < total) return 0;
-    memset(out, 0, total);
-    put16(out, 0, 0x0101);
-    put16(out, 2, (unsigned short)(4U + attr_len));
-    out[4] = 0x21; out[5] = 0x12; out[6] = 0xa4; out[7] = 0x42;
-    memcpy(out + 8, request + 8, 12);
-    put16(out, 20, 0x0020);
-    put16(out, 22, (unsigned short)attr_len);
-    out[24] = 0;
-    out[25] = peer->ss_family == AF_INET ? 0x01 : 0x02;
-    port ^= (unsigned short)(TEST_STUN_MAGIC >> 16);
-    put16(out, 26, port);
-    mask[0] = 0x21; mask[1] = 0x12; mask[2] = 0xa4; mask[3] = 0x42;
-    memcpy(mask + 4, request + 8, 12);
-    for (i = 0; i < n; ++i) out[28 + i] = address[i] ^ mask[i];
-    return total;
-}
-
-/**
- * Runs the local STUN responder.
- * @return Thread exit code (Windows: DWORD, POSIX: void*).
- */
-#ifdef _WIN32
-static DWORD WINAPI server_thread(LPVOID arg)
-#else
-static void *server_thread(void *arg)
-#endif
-{
-    test_server_t *server = (test_server_t *)arg;
-    int i;
-    for (i = 0; i < server->responses; ++i) {
-        unsigned char request[512];
-        unsigned char response[512];
-        struct sockaddr_storage peer;
-        test_socklen_t peer_len = (test_socklen_t)sizeof(peer);
-        int received;
-        size_t response_size;
-#ifdef _WIN32
-        received = recvfrom(server->fd, (char *)request, (int)sizeof(request), 0,
-            (struct sockaddr *)&peer, &peer_len);
-#else
-        received = (int)recvfrom(server->fd, request, sizeof(request), 0,
-            (struct sockaddr *)&peer, &peer_len);
-#endif
-        if (received < 20) break;
-        response_size = build_response(request, (size_t)received, &peer,
-            response, sizeof(response));
-        if (!response_size) break;
-#ifdef _WIN32
-        (void)sendto(server->fd, (const char *)response, (int)response_size, 0,
-            (const struct sockaddr *)&peer, peer_len);
-#else
-        (void)sendto(server->fd, response, response_size, 0,
-            (const struct sockaddr *)&peer, peer_len);
-#endif
-    }
-#ifdef _WIN32
-    return 0;
-#else
-    return NULL;
-#endif
-}
-
-/**
- * Starts one local STUN responder thread.
- * @return 1 on success, 0 on failure.
- */
-static int thread_start(test_thread_t *thread, test_server_t *server)
-{
-#ifdef _WIN32
-    *thread = CreateThread(NULL, 0, server_thread, server, 0, NULL);
-    return *thread != NULL;
-#else
-    return pthread_create(thread, NULL, server_thread, server) == 0;
-#endif
-}
-
-/**
- * Waits for one local STUN responder thread.
- * @return void
- */
-static void thread_join(test_thread_t thread)
-{
-#ifdef _WIN32
-    WaitForSingleObject(thread, INFINITE);
-    CloseHandle(thread);
-#else
-    pthread_join(thread, NULL);
-#endif
-}
-
-/**
- * Reports one failed test assertion.
- * @return 1 on failure, 0 on success.
- */
-static int expect_true(const char *name, int condition)
-{
-    if (!condition) {
-        printf("[FAIL] %s\n", name);
-        return 1;
-    }
+    const kc_stun_endpoint_t from={"127.0.0.1",42424};
+    (void)context;(void)peer;
+    if(stun_test_tamper&&size){
+        unsigned char *copy=(unsigned char *)malloc(size);
+        if(!copy)return 1;
+        memcpy(copy,bytes,size);copy[size-1]^=0x10U;
+        (void)kc_stun_client_receive(stun_test_client,&from,copy,size);
+        free(copy);
+    }else (void)kc_stun_client_receive(stun_test_client,&from,bytes,size);
     return 0;
 }
-
-/**
- * Prints one contract-test case result.
- * @return void
- */
-static void case_result(int fail, const char *name, const char *detail)
+/** Delivers a borrowed client's datagram to the server. */
+static int stun_test_client_send(void *context,const kc_stun_endpoint_t *peer,const void *bytes,size_t size)
 {
-    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        fail ? "FAIL" : "PASS", name, detail);
+    const kc_stun_endpoint_t from={"127.0.0.1",51000};
+    (void)context;(void)peer;
+    stun_test_sent++;
+    if(stun_test_bad_key)return 0;
+    return kc_stun_server_receive(stun_test_server,&from,bytes,size);
 }
-
-/**
- * Validates live IPv4 discovery, refresh, send, and receive behavior.
- * @return 1 on failure, 0 on success.
- */
-static int case_discover_ipv4(void)
+/** Looks up a short-term STUN credential by username. */
+static int stun_test_credentials(void *context,const char *username,kc_stun_credentials_t *out)
 {
-    const char *name = "kc_stun_discover";
-    const char *detail = "discovers and preserves an IPv4 UDP mapping";
-    test_server_t server;
-    test_thread_t thread;
-    unsigned short server_port = 0;
-    unsigned short peer_port = 0;
-    char server_text[64];
-    kc_stun_options_t options;
-    kc_stun_mapping_t *mapping = NULL;
-    kc_stun_endpoint_t peer_endpoint;
-    kc_stun_datagram_t datagram;
-    test_socket_t peer = TEST_INVALID_SOCKET;
-    struct sockaddr_in mapping_addr;
-    const char outbound[] = "out";
-    const char inbound[] = "in";
-    char peer_buffer[16];
-    int received;
-    int fail = 0;
-
-    memset(&server, 0, sizeof(server));
-    server.fd = bind_loopback(AF_INET, &server_port);
-    server.family = AF_INET;
-    server.responses = 2;
-    if (server.fd == TEST_INVALID_SOCKET || !thread_start(&thread, &server)) {
-        if (server.fd != TEST_INVALID_SOCKET) test_socket_close(server.fd);
-        case_result(1, name, "could not start local STUN server");
-        return 1;
-    }
-
-    snprintf(server_text, sizeof(server_text), "%s:%u", "127.0.0.1", server_port);
-    memset(&options, 0, sizeof(options));
-    options.server = server_text;
-    options.host = "127.0.0.1";
-    options.timeout_ms = 1000;
-    fail += expect_true("IPv4 discovery succeeds",
-        kc_stun_discover(&mapping, &options) == KC_STUN_OK && mapping != NULL);
-    if (mapping) {
-        fail += expect_true("local host is loopback",
-            kc_stun_local_host(mapping) &&
-            strcmp(kc_stun_local_host(mapping), "127.0.0.1") == 0);
-        fail += expect_true("mapped host is loopback",
-            kc_stun_mapped_host(mapping) &&
-            strcmp(kc_stun_mapped_host(mapping), "127.0.0.1") == 0);
-        fail += expect_true("mapped port matches preserved local mapping",
-            kc_stun_mapped_port(mapping) == kc_stun_local_port(mapping));
-
-        peer = bind_loopback(AF_INET, &peer_port);
-        fail += expect_true("peer socket created", peer != TEST_INVALID_SOCKET);
-        if (peer != TEST_INVALID_SOCKET) {
-            peer_endpoint.host = "127.0.0.1";
-            peer_endpoint.port = peer_port;
-            fail += expect_true("send uses preserved mapping",
-                kc_stun_send(mapping, &peer_endpoint, outbound,
-                    sizeof(outbound) - 1U) == KC_STUN_OK);
-            if (wait_readable(peer, 1000)) {
-                received = (int)recvfrom(peer, peer_buffer, sizeof(peer_buffer), 0,
-                    NULL, NULL);
-            } else {
-                received = -1;
-            }
-            fail += expect_true("peer receives mapping datagram",
-                received == (int)(sizeof(outbound) - 1U) &&
-                memcmp(peer_buffer, outbound, sizeof(outbound) - 1U) == 0);
-
-            fail += expect_true("refresh request sent",
-                kc_stun_refresh(mapping) == KC_STUN_OK);
-            memset(&mapping_addr, 0, sizeof(mapping_addr));
-            mapping_addr.sin_family = AF_INET;
-            mapping_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            mapping_addr.sin_port = htons(kc_stun_local_port(mapping));
-#ifdef _WIN32
-            (void)sendto(peer, inbound, (int)(sizeof(inbound) - 1U), 0,
-                (const struct sockaddr *)&mapping_addr,
-                (int)sizeof(mapping_addr));
-#else
-            (void)sendto(peer, inbound, sizeof(inbound) - 1U, 0,
-                (const struct sockaddr *)&mapping_addr,
-                (socklen_t)sizeof(mapping_addr));
-#endif
-            memset(&datagram, 0, sizeof(datagram));
-            fail += expect_true("receive filters STUN and returns peer datagram",
-                kc_stun_receive(mapping, &datagram, 1000) == KC_STUN_OK &&
-                datagram.host && strcmp(datagram.host, "127.0.0.1") == 0 &&
-                datagram.port == peer_port &&
-                datagram.data_size == sizeof(inbound) - 1U &&
-                memcmp(datagram.data, inbound, sizeof(inbound) - 1U) == 0);
-            kc_stun_datagram_free(&datagram);
-        }
-    }
-
-    if (peer != TEST_INVALID_SOCKET) test_socket_close(peer);
-    kc_stun_close(mapping);
-    thread_join(thread);
-    test_socket_close(server.fd);
-    case_result(fail, name, detail);
-    return fail ? 1 : 0;
+    (void)context;
+    if(strcmp(username,"remote:local"))return 1;
+    out->username=username;out->key=stun_test_key;out->key_size=strlen(stun_test_key);
+    out->integrity=KC_STUN_HMAC_BOTH;return 0;
 }
-
-/**
- * Validates IPv6 mapping discovery when IPv6 loopback is available.
- * @return 1 on failure, 0 on success.
- */
-static int case_discover_ipv6(void)
+/** Handles an ICE extension without interpreting it in STUN. */
+static unsigned short stun_test_binding(void *context,const kc_stun_endpoint_t *peer,const kc_stun_attribute_t *attributes,size_t count)
 {
-    const char *name = "IPv6 discovery";
-    const char *detail = "discovers an IPv6 loopback mapping when available";
-    test_server_t server;
-    test_thread_t thread;
-    unsigned short server_port = 0;
-    char server_text[80];
-    kc_stun_options_t options;
-    kc_stun_mapping_t *mapping = NULL;
-    int fail = 0;
-
-    memset(&server, 0, sizeof(server));
-    server.fd = bind_loopback(AF_INET6, &server_port);
-    if (server.fd == TEST_INVALID_SOCKET) {
-        printf("[SKIP] %s\n", name);
-        case_result(0, name, detail);
-        return 0;
-    }
-    server.family = AF_INET6;
-    server.responses = 1;
-    if (!thread_start(&thread, &server)) {
-        test_socket_close(server.fd);
-        case_result(1, name, "could not start local IPv6 STUN server");
-        return 1;
-    }
-    snprintf(server_text, sizeof(server_text), "[::1]:%u", server_port);
-    memset(&options, 0, sizeof(options));
-    options.server = server_text;
-    options.host = "::1";
-    options.timeout_ms = 1000;
-    fail += expect_true("IPv6 discovery succeeds",
-        kc_stun_discover(&mapping, &options) == KC_STUN_OK && mapping != NULL);
-    if (mapping) {
-        fail += expect_true("mapped IPv6 host is loopback",
-            kc_stun_mapped_host(mapping) &&
-            strcmp(kc_stun_mapped_host(mapping), "::1") == 0);
-        fail += expect_true("IPv6 mapped port matches local port",
-            kc_stun_mapped_port(mapping) == kc_stun_local_port(mapping));
-    }
-    kc_stun_close(mapping);
-    thread_join(thread);
-    test_socket_close(server.fd);
-    case_result(fail, name, detail);
-    return fail ? 1 : 0;
+    size_t i;(void)context;(void)peer;
+    for(i=0;i<count;i++)if(attributes[i].type==0x0024&&attributes[i].size==4)
+        stun_test_seen_priority=1;
+    return stun_test_role_conflict?487U:0U;
 }
-
-/**
- * Validates the autonomous STUN Binding listener and its wire response.
- * @return 1 on failure, 0 on success.
- */
-static int case_listen(void)
+/** Executes a loopback Binding and reuses the mapping for application data. */
+static void stun_test_owned(void)
 {
-    const char *name = "kc_stun_listen";
-    const char *detail = "serves UDP Binding requests on a live endpoint";
-    kc_stun_server_options_t server_options;
-    kc_stun_server_t *server = NULL;
-    kc_stun_mapping_t *mapping = NULL;
-    kc_stun_options_t options;
-    test_socket_t client = TEST_INVALID_SOCKET;
-    unsigned short client_port = 0;
-    unsigned short server_port = 0;
-    unsigned char request[20];
-    unsigned char response[64];
-    struct sockaddr_in destination;
-    char server_text[64];
-    int received = -1;
-    int fail = 0;
-    size_t i;
-
-    memset(&server_options, 0, sizeof(server_options));
-    fail += expect_true("NULL listener output rejected",
-        kc_stun_listen(NULL, &server_options) == KC_STUN_EINVAL);
-    fail += expect_true("NULL listener options rejected",
-        kc_stun_listen(&server, NULL) == KC_STUN_EINVAL);
-    fail += expect_true("NULL listener reports no port",
-        kc_stun_server_port(NULL) == 0);
-
-    server_options.host = NULL;
-    server_options.port = 0;
-    fail += expect_true("listener starts",
-        kc_stun_listen(&server, &server_options) == KC_STUN_OK && server != NULL);
-    if (!server) {
-        case_result(1, name, detail);
-        return 1;
-    }
-    server_port = kc_stun_server_port(server);
-    fail += expect_true("listener reports assigned port", server_port != 0);
-
-    client = bind_loopback(AF_INET, &client_port);
-    fail += expect_true("raw client created", client != TEST_INVALID_SOCKET);
-    if (client != TEST_INVALID_SOCKET) {
-        memset(request, 0, sizeof(request));
-        put16(request, 0, 0x0001);
-        request[4] = 0x21; request[5] = 0x12; request[6] = 0xa4; request[7] = 0x42;
-        for (i = 0; i < 12U; ++i) request[8U + i] = (unsigned char)(i + 1U);
-        memset(&destination, 0, sizeof(destination));
-        destination.sin_family = AF_INET;
-        destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        destination.sin_port = htons(server_port);
-#ifdef _WIN32
-        (void)sendto(client, (const char *)request, (int)sizeof(request), 0,
-            (const struct sockaddr *)&destination, (int)sizeof(destination));
-#else
-        (void)sendto(client, request, sizeof(request), 0,
-            (const struct sockaddr *)&destination, (socklen_t)sizeof(destination));
-#endif
-        if (wait_readable(client, 1000)) {
-#ifdef _WIN32
-            received = recvfrom(client, (char *)response, (int)sizeof(response), 0,
-                NULL, NULL);
-#else
-            received = (int)recvfrom(client, response, sizeof(response), 0,
-                NULL, NULL);
-#endif
+    kc_stun_client_options_t options={0};kc_stun_server_options_t server_options={0};
+    kc_stun_server_t *server=NULL;kc_stun_client_t *client=NULL;
+    char peer[128];int rc;kc_stun_datagram_t data;const kc_stun_endpoint_t *mapped;
+    server_options.host="127.0.0.1";server_options.port=0;
+    rc=kc_stun_server(&server,&server_options);
+    stun_test_check(rc==KC_STUN_OK&&server!=NULL,"owned server starts");
+    if(rc!=KC_STUN_OK)return;
+    snprintf(peer,sizeof(peer),"127.0.0.1:%u",kc_stun_server_port(server));
+    options.peer.host=peer;options.timeout_ms=2000;
+    rc=kc_stun_client(&client,&options);
+    stun_test_check(rc==KC_STUN_OK&&client!=NULL,"owned client starts");
+    if(rc==KC_STUN_OK){
+        do{rc=kc_stun_client_poll(client,50);}while(rc==KC_STUN_PENDING);
+        mapped=kc_stun_client_mapped(client);
+        stun_test_check(rc==KC_STUN_OK&&mapped&&mapped->port&&strcmp(mapped->host,"127.0.0.1")==0,"owned Mapping address");
+        if(mapped){
+            const char payload[]="application datagram";
+            rc=kc_stun_client_send(client,mapped,payload,sizeof(payload));
+            stun_test_check(rc==KC_STUN_OK,"send through preserved mapping");
+            rc=kc_stun_client_read(client,&data,200);
+            stun_test_check(rc==KC_STUN_OK&&data.data_size==sizeof(payload)&&memcmp(data.data,payload,sizeof(payload))==0,"receive through preserved mapping");
+            kc_stun_datagram_free(&data);
         }
-        fail += expect_true("raw Binding response received", received == 32);
-        if (received == 32) {
-            unsigned short mapped_port = (unsigned short)(get16(response, 26) ^
-                (TEST_STUN_MAGIC >> 16));
-            unsigned char mapped[4];
-            mapped[0] = response[28] ^ 0x21;
-            mapped[1] = response[29] ^ 0x12;
-            mapped[2] = response[30] ^ 0xa4;
-            mapped[3] = response[31] ^ 0x42;
-            fail += expect_true("Binding response type is success",
-                get16(response, 0) == 0x0101 && get16(response, 2) == 12);
-            fail += expect_true("Binding response preserves transaction id",
-                memcmp(response + 8, request + 8, 12) == 0);
-            fail += expect_true("Binding response contains XOR-MAPPED-ADDRESS",
-                get16(response, 20) == 0x0020 && get16(response, 22) == 8 &&
-                response[24] == 0 && response[25] == 1);
-            fail += expect_true("Binding response reflects source endpoint",
-                mapped_port == client_port && mapped[0] == 127 && mapped[1] == 0 &&
-                mapped[2] == 0 && mapped[3] == 1);
+        rc=kc_stun_client_refresh(client,2000);
+        stun_test_check(rc==KC_STUN_OK,"refresh on same socket");
+        if(rc==KC_STUN_OK){
+            do{rc=kc_stun_client_poll(client,50);}while(rc==KC_STUN_PENDING);
+            stun_test_check(rc==KC_STUN_OK,"refreshed Mapping response");
         }
+        kc_stun_client_close(client);
     }
-
-    snprintf(server_text, sizeof(server_text), "%s:%u", "127.0.0.1", server_port);
-    memset(&options, 0, sizeof(options));
-    options.server = server_text;
-    options.host = "127.0.0.1";
-    options.timeout_ms = 1000;
-    fail += expect_true("library discovery works against library listener",
-        kc_stun_discover(&mapping, &options) == KC_STUN_OK && mapping != NULL);
-    if (mapping) {
-        fail += expect_true("listener reports discovery source mapping",
-            kc_stun_mapped_host(mapping) &&
-            strcmp(kc_stun_mapped_host(mapping), "127.0.0.1") == 0 &&
-            kc_stun_mapped_port(mapping) == kc_stun_local_port(mapping));
-    }
-    kc_stun_close(mapping);
-    mapping = NULL;
-
-    {
-        unsigned short probe_port = 0;
-        test_socket_t probe = bind_loopback(AF_INET6, &probe_port);
-        if (probe != TEST_INVALID_SOCKET) {
-            test_socket_close(probe);
-            snprintf(server_text, sizeof(server_text), "[::1]:%u", server_port);
-            memset(&options, 0, sizeof(options));
-            options.server = server_text;
-            options.host = "::1";
-            options.timeout_ms = 1000;
-            fail += expect_true("wildcard listener accepts IPv6 Binding",
-                kc_stun_discover(&mapping, &options) == KC_STUN_OK && mapping != NULL);
-            kc_stun_close(mapping);
-            mapping = NULL;
-        }
-    }
-
-    if (client != TEST_INVALID_SOCKET) test_socket_close(client);
     kc_stun_server_close(server);
-    kc_stun_server_close(NULL);
-    case_result(fail, name, detail);
-    return fail ? 1 : 0;
 }
-
-/**
- * Validates invalid arguments and bounded discovery timeout behavior.
- * @return 1 on failure, 0 on success.
- */
-static int case_errors(void)
+/** Runs authenticated transactions through an externally owned UDP path. */
+static void stun_test_borrowed(void)
 {
-    const char *name = "errors and timeout";
-    const char *detail = "rejects invalid input and bounds discovery";
-    kc_stun_mapping_t *mapping = NULL;
-    kc_stun_options_t options;
-    unsigned short port = 0;
-    test_socket_t silent = TEST_INVALID_SOCKET;
-    char server_text[64];
-    int fail = 0;
-
-    memset(&options, 0, sizeof(options));
-    fail += expect_true("NULL output rejected",
-        kc_stun_discover(NULL, &options) == KC_STUN_EINVAL);
-    fail += expect_true("NULL options rejected",
-        kc_stun_discover(&mapping, NULL) == KC_STUN_EINVAL);
-    options.server = ":";
-    fail += expect_true("malformed server rejected",
-        kc_stun_discover(&mapping, &options) == KC_STUN_EINVAL);
-
-    silent = bind_loopback(AF_INET, &port);
-    if (silent != TEST_INVALID_SOCKET) {
-        snprintf(server_text, sizeof(server_text), "%s:%u", "127.0.0.1", port);
-        memset(&options, 0, sizeof(options));
-        options.server = server_text;
-        options.host = "127.0.0.1";
-        options.timeout_ms = 50;
-        fail += expect_true("silent STUN server times out",
-            kc_stun_discover(&mapping, &options) == KC_STUN_ETIMEOUT &&
-            mapping == NULL);
-        test_socket_close(silent);
+    kc_stun_transport_t client_udp={NULL,stun_test_client_send};
+    kc_stun_transport_t server_udp={NULL,stun_test_server_send};
+    kc_stun_server_options_t so={0};kc_stun_client_options_t co={0};
+    const unsigned char priority[]={0x7e,0,0,1};
+    kc_stun_attribute_t attributes[]={{0x0024,priority,4}};
+    unsigned int modes[]={KC_STUN_HMAC_SHA1,KC_STUN_HMAC_SHA256,KC_STUN_HMAC_BOTH};
+    size_t i;int rc;
+    so.transport=&server_udp;so.credentials=stun_test_credentials;so.binding=stun_test_binding;
+    rc=kc_stun_server(&stun_test_server,&so);
+    stun_test_check(rc==KC_STUN_OK,"borrowed server starts");
+    if(rc!=KC_STUN_OK)return;
+    co.peer.host="127.0.0.1:42424";co.transport=&client_udp;
+    co.credentials.username="remote:local";co.credentials.key=stun_test_key;
+    co.credentials.key_size=strlen(stun_test_key);co.attributes=attributes;co.attribute_count=1;
+    for(i=0;i<sizeof(modes)/sizeof(modes[0]);i++){
+        co.credentials.integrity=modes[i];
+        rc=kc_stun_client(&stun_test_client,&co);
+        stun_test_check(rc==KC_STUN_OK,"borrowed client starts");
+        if(rc!=KC_STUN_OK)continue;
+        rc=kc_stun_client_poll(stun_test_client,0);
+        stun_test_check(rc==KC_STUN_OK&&kc_stun_client_mapped(stun_test_client)!=NULL,"authenticated Binding response");
+        stun_test_check(stun_test_seen_priority,"opaque ICE attribute supplied to policy");
+        if(i==2){
+            rc=kc_stun_client_refresh(stun_test_client,500);
+            stun_test_check(rc==KC_STUN_OK,"authenticated refresh starts");
+            rc=kc_stun_client_poll(stun_test_client,0);
+            stun_test_check(rc==KC_STUN_OK,"authenticated refresh verifies");
+        }
+        kc_stun_client_close(stun_test_client);
     }
-    fail += expect_true("NULL refresh rejected",
-        kc_stun_refresh(NULL) == KC_STUN_EINVAL);
-    fail += expect_true("NULL send rejected",
-        kc_stun_send(NULL, NULL, NULL, 0) == KC_STUN_EINVAL);
-    fail += expect_true("NULL receive rejected",
-        kc_stun_receive(NULL, NULL, 0) == KC_STUN_EINVAL);
-    kc_stun_close(NULL);
-    case_result(fail, name, detail);
-    return fail ? 1 : 0;
+    co.credentials.integrity=KC_STUN_HMAC_BOTH;
+    stun_test_role_conflict=1;
+    rc=kc_stun_client(&stun_test_client,&co);
+    if(rc==KC_STUN_OK){
+        rc=kc_stun_client_poll(stun_test_client,0);
+        stun_test_check(rc==KC_STUN_EREJECTED&&kc_stun_client_error(stun_test_client)==487,"authenticated 487 role conflict");
+        kc_stun_client_close(stun_test_client);
+    }else stun_test_check(0,"role conflict starts");
+    stun_test_role_conflict=0;
+    stun_test_tamper=1;
+    rc=kc_stun_client(&stun_test_client,&co);
+    if(rc==KC_STUN_OK){
+        rc=kc_stun_client_poll(stun_test_client,0);
+        stun_test_check(rc==KC_STUN_PENDING&&kc_stun_client_mapped(stun_test_client)==NULL,"fingerprint rejects changed packet");
+        kc_stun_client_close(stun_test_client);
+    }else stun_test_check(0,"tamper case starts");
+    stun_test_tamper=0;
+    stun_test_bad_key=1;stun_test_sent=0;
+    co.timeout_ms=10;
+    rc=kc_stun_client(&stun_test_client,&co);
+    if(rc==KC_STUN_OK){
+        (void)kc_stun_client_poll(stun_test_client,0);
+        do{rc=kc_stun_client_poll(stun_test_client,20);}while(rc==KC_STUN_PENDING);
+        stun_test_check(rc==KC_STUN_ETIMEOUT&&stun_test_sent>0,"borrowed timeout");
+        kc_stun_client_close(stun_test_client);
+    }else stun_test_check(0,"timeout case starts");
+    stun_test_bad_key=0;
+    kc_stun_server_close(stun_test_server);stun_test_server=NULL;
 }
-
-/**
- * Validates public status strings and the generated build version.
- * @return 1 on failure, 0 on success.
- */
-static int case_metadata(void)
-{
-    const char *name = "metadata";
-    const char *detail = "exposes stable status text and build version";
-    int fail = 0;
-    fail += expect_true("success status text",
-        strcmp(kc_stun_strerror(KC_STUN_OK), "ok") == 0);
-    fail += expect_true("protocol status text",
-        strcmp(kc_stun_strerror(KC_STUN_EPROTO), "invalid STUN response") == 0);
-    fail += expect_true("unknown status text",
-        strcmp(kc_stun_strerror(999), "unknown status") == 0);
-    fail += expect_true("version available", kc_stun_version() != 0);
-    case_result(fail, name, detail);
-    return fail ? 1 : 0;
-}
-
-/**
- * Runs the portable public API contract test suite.
- * @return 0 on success, 1 on failure.
- */
-int main(int argc, char **argv)
-{
-    int rc = 0;
-    (void)argc;
-    (void)argv;
-    if (!socket_runtime_start()) {
-        fprintf(stderr, "socket runtime unavailable\n");
-        return 1;
-    }
-    test_case_current++; rc += case_discover_ipv4();
-    test_case_current++; rc += case_discover_ipv6();
-    test_case_current++; rc += case_listen();
-    test_case_current++; rc += case_errors();
-    test_case_current++; rc += case_metadata();
-#ifndef __EMSCRIPTEN__
-    test_case_current++; rc += case_stun_cli();
-#endif
-    socket_runtime_stop();
-    printf("%d passed, %d failed\n", test_case_total - rc, rc);
-    return rc ? 1 : 0;
-}
-
-#ifndef __EMSCRIPTEN__
-#ifndef KC_CLI_PATH
-#define KC_CLI_PATH "stun"
-#endif
-
-/**
- * Runs one stun CLI command.
- * @param args Command arguments.
- * @return Shell exit status.
- */
-static int stun_cli_run(const char *args)
+#ifdef KC_CLI_PATH
+/** Executes one CLI invocation and returns its status. */
+static int stun_test_cli(const char *args)
 {
     char command[4096];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"", KC_CLI_PATH, args);
+    snprintf(command,sizeof(command),"\"\"%s\" %s > NUL 2>&1\"",KC_CLI_PATH,args);
 #else
-    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1", KC_CLI_PATH, args);
+    snprintf(command,sizeof(command),"\"%s\" %s >/dev/null 2>&1",KC_CLI_PATH,args);
 #endif
     return system(command);
 }
-
-/**
- * Tests the stun command-line contract.
- * @return 1 on failure, 0 on success.
- */
-static int case_stun_cli(void)
+static void stun_test_command_line(void)
 {
-    int fail = 0;
-    fail += stun_cli_run("--help") != 0;
-    fail += stun_cli_run("-h") != 0;
-    fail += stun_cli_run("--version") != 0;
-    fail += stun_cli_run("-v") != 0;
-    fail += stun_cli_run("client") == 0;
-    fail += stun_cli_run("client :") == 0;
-    fail += stun_cli_run("client example.com --port 65536") == 0;
-    fail += stun_cli_run("client example.com --port abc") == 0;
-    fail += stun_cli_run("client example.com --timeout -1") == 0;
-    fail += stun_cli_run("client example.com --host") == 0;
-    fail += stun_cli_run("server --timeout 1000") == 0;
-    fail += stun_cli_run("server --port abc") == 0;
-    fail += stun_cli_run("server unexpected") == 0;
-    fail += stun_cli_run("unknown") == 0;
-    case_result(fail, "stun_cli", "reports metadata and validates commands");
-    return fail ? 1 : 0;
+    stun_test_check(stun_test_cli("--help")==0,"CLI help");
+    stun_test_check(stun_test_cli("-v")==0,"CLI version");
+    stun_test_check(stun_test_cli("client")==0?0:1,"CLI missing peer");
+    stun_test_check(stun_test_cli("server --timeout 100")==0?0:1,"CLI client-only timeout");
+    stun_test_check(stun_test_cli("client localhost --port 65536")==0?0:1,"CLI rejects invalid port");
+    stun_test_check(stun_test_cli("server unexpected")==0?0:1,"CLI rejects extra arguments");
 }
 #endif
+int main(void)
+{
+    stun_test_owned();stun_test_borrowed();
+#ifdef KC_CLI_PATH
+    stun_test_command_line();
+#endif
+    printf("STUN: %u failure(s)\n",stun_test_failures);
+    return stun_test_failures?1:0;
+}
