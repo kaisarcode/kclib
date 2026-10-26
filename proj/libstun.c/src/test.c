@@ -230,10 +230,11 @@ static void stun_test_borrowed(void)
     kc_stun_attribute_t attributes[]={{0x0024,priority,4}};
     unsigned int modes[]={KC_STUN_HMAC_SHA1,KC_STUN_HMAC_SHA256,KC_STUN_HMAC_BOTH};
     size_t i;int rc;
+    int attributes_ok=1, refresh_ok=1, keepalive_ok=1;
     so.transport=&server_udp;so.credentials=stun_test_credentials;so.binding=stun_test_binding;
     rc=kc_stun_server(&stun_test_server,&so);
     stun_test_check(rc==KC_STUN_OK,"borrowed_server", "starts with external UDP transport");
-    if(rc!=KC_STUN_OK){stun_test_group("kc_stun_borrowed", "uses externally owned UDP for Binding");test_case_total -= 4;return;}
+    if(rc!=KC_STUN_OK){stun_test_group("kc_stun_borrowed", "uses externally owned UDP for Binding");test_case_total -= 7;return;}
     stun_test_group("kc_stun_borrowed", "uses externally owned UDP for Binding");
     co.peer.host="127.0.0.1:42424";co.transport=&client_udp;
     co.credentials.username="remote:local";co.credentials.key=stun_test_key;
@@ -251,24 +252,26 @@ static void stun_test_borrowed(void)
             i == 0 ? "hmac_sha1_binding" :
             i == 1 ? "hmac_sha256_binding" : "hmac_both_binding",
             "verifies the authenticated Binding response");
-        stun_test_check(stun_test_seen_priority,
-            i == 0 ? "ice_sha1" : i == 1 ? "ice_sha256" : "ice_both",
-            "passes the ICE attribute to policy");
+        if(!stun_test_seen_priority)attributes_ok=0;
         if(i==2){
             rc=kc_stun_client_refresh(stun_test_client,500);
-            stun_test_check(rc==KC_STUN_OK,"authenticated_refresh", "starts an authenticated refresh");
+            if(rc!=KC_STUN_OK)refresh_ok=0;
             rc=kc_stun_client_poll(stun_test_client,0);
-            stun_test_check(rc==KC_STUN_OK,"authenticated_refresh_response", "verifies an authenticated refresh response");
+            if(rc!=KC_STUN_OK)refresh_ok=0;
             {
                 unsigned int before=stun_test_replies;
                 rc=kc_stun_client_keepalive(stun_test_client);
-                stun_test_check(rc==KC_STUN_OK&&stun_test_replies==before,
-                    "keepalive", "sends a Binding Indication without a response");
+                if(rc!=KC_STUN_OK||stun_test_replies!=before)keepalive_ok=0;
             }
         }
         kc_stun_client_close(stun_test_client);
     }
     stun_test_group("kc_stun_authenticated", "verifies authenticated Binding with SHA-1 and SHA-256");
+    stun_test_check(attributes_ok,"extension_attributes","forwards extension attributes without ICE policy");
+    stun_test_group("kc_stun_attributes", "makes STUN extension attributes available to consumers");
+    stun_test_check(refresh_ok&&keepalive_ok,"borrowed_refresh_keepalive",
+        "refreshes authenticated Binding and sends a Binding Indication");
+    stun_test_group("kc_stun_maintenance", "refreshes transactions and sends Binding Indications");
     co.credentials.integrity=KC_STUN_HMAC_BOTH;
     stun_test_role_conflict=1;
     rc=kc_stun_client(&stun_test_client,&co);
@@ -287,6 +290,7 @@ static void stun_test_borrowed(void)
         kc_stun_client_close(stun_test_client);
     }else stun_test_check(0,"fingerprint", "starts the fingerprint rejection check");
     stun_test_tamper=0;
+    stun_test_group("kc_stun_integrity", "rejects responses with an invalid fingerprint");
     stun_test_bad_key=1;stun_test_sent=0;
     co.timeout_ms=10;
     rc=kc_stun_client(&stun_test_client,&co);
@@ -297,7 +301,7 @@ static void stun_test_borrowed(void)
         kc_stun_client_close(stun_test_client);
     }else stun_test_check(0,"timeout", "starts a borrowed transport timeout check");
     stun_test_bad_key=0;
-    stun_test_group("kc_stun_integrity_timeout", "rejects tampered responses and expires unanswered transactions");
+    stun_test_group("kc_stun_timeout", "expires an unanswered Binding transaction");
     kc_stun_server_close(stun_test_server);stun_test_server=NULL;
     {
         kc_stun_server_options_t anonymous={0};kc_stun_client_options_t request={0};
@@ -361,9 +365,9 @@ static void stun_test_command_line(void)
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 10;
+    test_case_total = 13;
 #else
-    test_case_total = 9;
+    test_case_total = 12;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
