@@ -36,6 +36,10 @@ set(RDVZ_CORE_SOURCES
     src/librdvz.c
 )
 
+if(UNIX AND NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
+endif()
+
 if(EMSCRIPTEN)
     add_executable(librdvz_wasm ${RDVZ_CORE_SOURCES})
     target_include_directories(librdvz_wasm PRIVATE src)
@@ -46,12 +50,15 @@ if(EMSCRIPTEN)
     target_link_options(librdvz_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_rdvz_open,_kc_rdvz_connect,_kc_rdvz_peer_id,_kc_rdvz_list,_kc_rdvz_peer_list,_kc_rdvz_disconnect,_kc_rdvz_close,_kc_rdvz_strerror,_kc_rdvz_version
+        -sEXPORTED_FUNCTIONS=_kc_rdvz_create,_kc_rdvz_open,_kc_rdvz_connect,_kc_rdvz_peer_id,_kc_rdvz_list,_kc_rdvz_peer_list,_kc_rdvz_peer_disconnect,_kc_rdvz_disconnect,_kc_rdvz_close,_kc_rdvz_strerror,_kc_rdvz_version
     )
 elseif(NOT RDVZ_TEST_EXTERNAL_ARTIFACTS)
     add_library(rdvz_static STATIC ${RDVZ_CORE_SOURCES})
     set_target_properties(rdvz_static PROPERTIES OUTPUT_NAME "rdvz")
     target_include_directories(rdvz_static PRIVATE src)
+    if(UNIX)
+        target_link_libraries(rdvz_static PUBLIC Threads::Threads)
+    endif()
 
     add_library(rdvz_shared SHARED ${RDVZ_CORE_SOURCES})
     set_target_properties(rdvz_shared PROPERTIES
@@ -59,6 +66,9 @@ elseif(NOT RDVZ_TEST_EXTERNAL_ARTIFACTS)
         WINDOWS_EXPORT_ALL_SYMBOLS ON
     )
     target_include_directories(rdvz_shared PRIVATE src)
+    if(UNIX)
+        target_link_libraries(rdvz_shared PRIVATE Threads::Threads)
+    endif()
 endif()
 
 if(RDVZ_BUILD_TESTS)
