@@ -107,8 +107,9 @@ int kc_stun_is_message(const void *bytes, size_t size);
 #define KC_STUN_ICE_CONTROLLING 0x802au
 
 /**
- * A decoded STUN message backed by the caller's immutable byte buffer.
- * Attributes are returned as views: do not free their data pointers.
+ * Describes a STUN envelope in caller-owned buffers.
+ * Decoded attribute values refer to the original immutable input datagram;
+ * the attribute descriptor array itself belongs to the decoded message.
  */
 typedef struct {
     unsigned short type;
@@ -118,50 +119,107 @@ typedef struct {
 } kc_stun_message_t;
 
 /**
- * Parses a complete STUN datagram into attribute views.
- * Call kc_stun_message_free to release only the attribute array.
+ * Parses a complete STUN envelope and its attributes.
+ * The returned attribute values borrow the input bytes until the message is
+ * freed. Verification of HMAC and FINGERPRINT is a separate public operation.
+ * @param bytes Caller-owned STUN datagram buffer.
+ * @param size Exact datagram size.
+ * @param out Destination decoded message.
  * @return KC_STUN_OK or a negative status.
  */
 int kc_stun_decode(const void *bytes,size_t size,kc_stun_message_t *out);
 
-/** Frees decoded attribute views without freeing caller-owned bytes. */
+/**
+ * Releases only the decoded attribute descriptor array.
+ * @param message Decoded message or NULL.
+ * @return void.
+ */
 void kc_stun_message_free(kc_stun_message_t *message);
 
 /**
- * Encodes a STUN message in an externally supplied buffer.
- * If credentials has a key, appends requested SHA-1/SHA-256 integrity.
- * Always appends FINGERPRINT. The caller supplies transaction_id.
- * Raw attributes must not include integrity or fingerprint attributes.
- * @param size In: buffer capacity; out: encoded length.
+ * Encodes STUN type, transaction ID, and generic attributes in a caller buffer.
+ * Optional short-term credentials generate integrity attributes, and a final
+ * FINGERPRINT is appended. Input attributes exclude HMAC and FINGERPRINT.
+ * @param message Message description and caller-owned attribute values.
+ * @param credentials Optional credentials, or NULL for an unsigned message.
+ * @param out Caller-owned output byte buffer.
+ * @param size Input buffer capacity and output encoded byte count.
+ * @return KC_STUN_OK or a negative status.
  */
 int kc_stun_encode(const kc_stun_message_t *message,
     const kc_stun_credentials_t *credentials,void *out,size_t *size);
 
-/** Verifies a message's FINGERPRINT; absence is an error. */
+/**
+ * Verifies a present FINGERPRINT attribute in a complete STUN datagram.
+ * @param bytes STUN datagram bytes.
+ * @param size Datagram byte count.
+ * @return KC_STUN_OK when valid, otherwise a negative status.
+ */
 int kc_stun_verify_fingerprint(const void *bytes,size_t size);
 
-/** Verifies a message's HMAC with caller-supplied credentials. */
+/**
+ * Verifies short-term message integrity using the provided key.
+ * @param bytes STUN datagram bytes.
+ * @param size Datagram byte count.
+ * @param key Shared secret bytes.
+ * @param key_size Shared secret byte count.
+ * @return KC_STUN_OK when valid, otherwise a negative status.
+ */
 int kc_stun_verify_integrity(const void *bytes,size_t size,
     const void *key,size_t key_size);
 
-/** Encodes the ERROR-CODE attribute value for a STUN error response. */
+/**
+ * Encodes the value of an ERROR-CODE attribute.
+ * @param code STUN error code between 300 and 699.
+ * @param reason Optional reason phrase.
+ * @param out Destination bytes.
+ * @param size Input capacity and output attribute value length.
+ * @return KC_STUN_OK or a negative status.
+ */
 int kc_stun_encode_error(unsigned short code,const char *reason,
     void *out,size_t *size);
 
-/** Decodes an ERROR-CODE attribute and optionally copies the reason. */
+/**
+ * Decodes the value of an ERROR-CODE attribute.
+ * @param attribute ERROR-CODE attribute descriptor.
+ * @param code Destination protocol error code.
+ * @param reason Optional destination for the NUL-terminated reason.
+ * @param reason_size Capacity of reason, or zero when not used.
+ * @return KC_STUN_OK or a negative status.
+ */
 int kc_stun_decode_error(const kc_stun_attribute_t *attribute,
     unsigned short *code,char *reason,size_t reason_size);
 
-/** Compares two STUN transaction identifiers. */
+/**
+ * Correlates a decoded message with a transaction identifier.
+ * @param message Decoded message.
+ * @param id Twelve-byte transaction identifier.
+ * @return 1 on a match, otherwise 0.
+ */
 int kc_stun_transaction_matches(const kc_stun_message_t *message,
     const unsigned char id[12]);
 
-/** Decodes XOR-MAPPED-ADDRESS to caller-owned numeric host storage. */
+/**
+ * Decodes an XOR-MAPPED-ADDRESS attribute into a numeric endpoint.
+ * @param attribute Encoded XOR-MAPPED-ADDRESS descriptor.
+ * @param id STUN transaction identifier used to calculate the XOR mask.
+ * @param host Caller-owned destination for the numeric host.
+ * @param host_size Host buffer capacity.
+ * @param port Destination UDP port.
+ * @return KC_STUN_OK or a negative status.
+ */
 int kc_stun_decode_mapped(const kc_stun_attribute_t *attribute,
     const unsigned char id[12],char *host,size_t host_size,
     unsigned short *port);
 
-/** Encodes an XOR-MAPPED-ADDRESS value into caller-owned storage. */
+/**
+ * Encodes the value of an IPv4 or IPv6 XOR-MAPPED-ADDRESS attribute.
+ * @param endpoint Numeric source endpoint.
+ * @param id STUN transaction identifier.
+ * @param out Caller-owned encoded attribute value buffer.
+ * @param size Input capacity and output attribute value length.
+ * @return KC_STUN_OK or a negative status.
+ */
 int kc_stun_encode_mapped(const kc_stun_endpoint_t *endpoint,
     const unsigned char id[12],void *out,size_t *size);
 
