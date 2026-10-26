@@ -361,9 +361,9 @@ static void stun_test_command_line(void)
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 10;
+    test_case_total = 11;
 #else
-    test_case_total = 9;
+    test_case_total = 10;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
