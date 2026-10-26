@@ -14,6 +14,7 @@
 
 static const char stun_test_key[]="example-password";
 static kc_stun_client_t *stun_test_client;
+static kc_stun_client_t *stun_test_second_client;
 static kc_stun_server_t *stun_test_server;
 static int stun_test_seen_priority;
 static int stun_test_role_conflict;
@@ -86,8 +87,12 @@ static int stun_test_server_send(void *context, const kc_stun_endpoint_t *peer,
         if(!copy)return 1;
         memcpy(copy,bytes,size);copy[size-1]^=0x10U;
         (void)kc_stun_client_receive(stun_test_client,&from,copy,size);
+        if(stun_test_second_client)(void)kc_stun_client_receive(stun_test_second_client,&from,copy,size);
         free(copy);
-    }else (void)kc_stun_client_receive(stun_test_client,&from,bytes,size);
+    }else{
+        (void)kc_stun_client_receive(stun_test_client,&from,bytes,size);
+        if(stun_test_second_client)(void)kc_stun_client_receive(stun_test_second_client,&from,bytes,size);
+    }
     return 0;
 }
 
@@ -474,6 +479,50 @@ static void stun_test_mapped_codec(void)
 }
 
 /**
+ * Exercises concurrent independent STUN transactions over the same borrowed UDP.
+ * @return void.
+ */
+static void stun_test_shared_udp(void)
+{
+    kc_stun_transport_t client_udp={NULL,stun_test_client_send};
+    kc_stun_transport_t server_udp={NULL,stun_test_server_send};
+    kc_stun_server_options_t server_options={0};
+    kc_stun_client_options_t options={0};
+    kc_stun_client_t *first=NULL,*second=NULL;
+    kc_stun_server_t *server=NULL;
+    int first_rc,second_rc;
+    server_options.transport=&server_udp;
+    first_rc=kc_stun_server(&server,&server_options);
+    stun_test_check(first_rc==KC_STUN_OK,"shared_server","creates a borrowed UDP Binding responder");
+    if(first_rc==KC_STUN_OK){
+        stun_test_server=server;
+        options.transport=&client_udp;
+        options.peer.host="127.0.0.1:42424";
+        first_rc=kc_stun_client(&first,&options);
+        second_rc=kc_stun_client(&second,&options);
+        stun_test_check(first_rc==KC_STUN_OK&&second_rc==KC_STUN_OK,
+            "shared_transactions","creates independent transactions on one transport");
+        if(first&&second){
+            stun_test_client=first;
+            stun_test_second_client=second;
+            first_rc=kc_stun_client_poll(first,0);
+            second_rc=kc_stun_client_poll(second,0);
+            stun_test_check(first_rc==KC_STUN_OK&&second_rc==KC_STUN_OK&&
+                kc_stun_client_mapped(first)&&kc_stun_client_mapped(second),
+                "shared_binding","correlates each Binding reply independently");
+        }
+        stun_test_second_client=NULL;
+        stun_test_client=NULL;
+        kc_stun_client_close(first);
+        kc_stun_client_close(second);
+        kc_stun_server_close(server);
+        stun_test_server=NULL;
+    }
+    stun_test_group("kc_stun_shared_udp",
+        "correlates concurrent Binding transactions on caller-owned UDP");
+}
+
+/**
  * Verifies public STUN error attribute encoding and decoding.
  * @return void.
  */
@@ -504,9 +553,9 @@ static void stun_test_error_codec(void)
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 17;
+    test_case_total = 18;
 #else
-    test_case_total = 16;
+    test_case_total = 17;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
@@ -515,6 +564,7 @@ static int stun_test_all(void)
     stun_test_codec();
     stun_test_mapped_codec();
     stun_test_error_codec();
+    stun_test_shared_udp();
     stun_test_messages();
     stun_test_owned();
     stun_test_ipv6();
