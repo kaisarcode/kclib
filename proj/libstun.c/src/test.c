@@ -388,20 +388,108 @@ static void stun_test_messages(void)
 }
 
 /**
+ * Verifies the standalone STUN buffer codec and short-term authentication.
+ * @return void.
+ */
+static void stun_test_codec(void)
+{
+    unsigned char encoded[1024],id[12]={1,2,3,4,5,6,7,8,9,10,11,12};
+    unsigned char priority[4]={0,0,0,42};
+    kc_stun_attribute_t attributes[]={
+        {KC_STUN_USERNAME,"local:remote",12},
+        {KC_STUN_PRIORITY,priority,4},
+        {KC_STUN_USE_CANDIDATE,NULL,0}
+    };
+    kc_stun_message_t message={0},decoded={0};
+    kc_stun_credentials_t credentials={0};
+    size_t size=sizeof(encoded),i;
+    int rc,found=0;
+    message.type=KC_STUN_REQUEST;
+    memcpy(message.transaction_id,id,12);
+    message.attributes=attributes;
+    message.attribute_count=3;
+    credentials.key=stun_test_key;
+    credentials.key_size=strlen(stun_test_key);
+    credentials.integrity=KC_STUN_HMAC_BOTH;
+    rc=kc_stun_encode(&message,&credentials,encoded,&size);
+    stun_test_check(rc==KC_STUN_OK,"encode","encodes an authenticated STUN request");
+    if(rc==KC_STUN_OK){
+        stun_test_check(kc_stun_is_message(encoded,size),
+            "classification","recognizes an encoded STUN packet");
+        stun_test_check(kc_stun_verify_fingerprint(encoded,size)==KC_STUN_OK,
+            "codec_fingerprint","verifies the generated fingerprint");
+        stun_test_check(kc_stun_verify_integrity(encoded,size,
+            stun_test_key,strlen(stun_test_key))==KC_STUN_OK,
+            "codec_hmac","verifies generated HMAC");
+        rc=kc_stun_decode(encoded,size,&decoded);
+        stun_test_check(rc==KC_STUN_OK&&decoded.type==KC_STUN_REQUEST&&
+            kc_stun_transaction_matches(&decoded,id),
+            "codec_decode","decodes a request with its transaction identifier");
+        for(i=0;i<decoded.attribute_count;i++)
+            if(decoded.attributes[i].type==KC_STUN_PRIORITY&&
+                decoded.attributes[i].size==4&&
+                memcmp(decoded.attributes[i].data,priority,4)==0)found=1;
+        stun_test_check(found,"codec_attributes","preserves opaque extension attributes");
+        kc_stun_message_free(&decoded);
+        encoded[size-1]^=1U;
+        stun_test_check(kc_stun_verify_fingerprint(encoded,size)!=KC_STUN_OK,
+            "codec_tamper","detects a modified fingerprint");
+    }
+    stun_test_group("kc_stun_codec",
+        "encodes and decodes caller-owned STUN buffers with integrity and attributes");
+}
+
+/**
+ * Verifies the reusable XOR-MAPPED-ADDRESS codec.
+ * @return void.
+ */
+static void stun_test_mapped_codec(void)
+{
+    kc_stun_endpoint_t endpoint={"127.0.0.1",48912};
+    unsigned char id[12]={1,2,3,4,5,6,7,8,9,10,11,12};
+    unsigned char data[32];
+    kc_stun_attribute_t attribute;
+    char host[64];
+    unsigned short port=0;
+    size_t size=sizeof(data);
+    int rc=kc_stun_encode_mapped(&endpoint,id,data,&size);
+    stun_test_check(rc==KC_STUN_OK&&size==8,
+        "mapped_ipv4_encode","encodes IPv4 XOR-MAPPED-ADDRESS");
+    attribute.type=KC_STUN_XOR_MAPPED_ADDRESS;
+    attribute.data=data;attribute.size=size;
+    rc=kc_stun_decode_mapped(&attribute,id,host,sizeof(host),&port);
+    stun_test_check(rc==KC_STUN_OK&&strcmp(host,endpoint.host)==0&&port==endpoint.port,
+        "mapped_ipv4_decode","decodes IPv4 XOR-MAPPED-ADDRESS");
+    endpoint.host="::1";
+    size=sizeof(data);
+    rc=kc_stun_encode_mapped(&endpoint,id,data,&size);
+    stun_test_check(rc==KC_STUN_OK&&size==20,
+        "mapped_ipv6_encode","encodes IPv6 XOR-MAPPED-ADDRESS");
+    attribute.size=size;
+    rc=kc_stun_decode_mapped(&attribute,id,host,sizeof(host),&port);
+    stun_test_check(rc==KC_STUN_OK&&strcmp(host,endpoint.host)==0&&port==endpoint.port,
+        "mapped_ipv6_decode","decodes IPv6 XOR-MAPPED-ADDRESS");
+    stun_test_group("kc_stun_mapped_codec",
+        "encodes and decodes IPv4 and IPv6 mapped endpoint attributes");
+}
+
+/**
  * Runs the full numbered STUN contract suite.
  * @return Zero when all assertions pass.
  */
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 14;
+    test_case_total = 16;
 #else
-    test_case_total = 13;
+    test_case_total = 15;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
     stun_group_failures = 0;
     stun_group_checks = 0;
+    stun_test_codec();
+    stun_test_mapped_codec();
     stun_test_messages();
     stun_test_owned();
     stun_test_ipv6();
