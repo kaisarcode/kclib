@@ -360,20 +360,49 @@ static void stun_test_command_line(void)
 #endif
 
 /**
+ * Exercises STUN message identification independently of UDP transport.
+ * @return void.
+ */
+static void stun_test_messages(void)
+{
+    unsigned char valid[20]={0x00,0x01,0x00,0x00,0x21,0x12,0xa4,0x42};
+    unsigned char invalid[20];
+    stun_test_check(kc_stun_is_message(valid,sizeof(valid)),
+        "stun_message","recognizes a complete STUN message envelope");
+    stun_test_check(!kc_stun_is_message(valid,19),
+        "short_message","does not classify incomplete datagrams as STUN");
+    memcpy(invalid,valid,sizeof(invalid));
+    invalid[0]=0x80;
+    stun_test_check(!kc_stun_is_message(invalid,sizeof(invalid)),
+        "message_bits","requires the STUN header's leading bits");
+    memcpy(invalid,valid,sizeof(invalid));
+    invalid[4]=0;
+    stun_test_check(!kc_stun_is_message(invalid,sizeof(invalid)),
+        "message_cookie","requires the STUN magic cookie");
+    memcpy(invalid,valid,sizeof(invalid));
+    invalid[3]=4;
+    stun_test_check(!kc_stun_is_message(invalid,sizeof(invalid)),
+        "message_length","requires the complete declared length");
+    stun_test_group("kc_stun_messages",
+        "identifies STUN messages in caller-owned datagram buffers");
+}
+
+/**
  * Runs the full numbered STUN contract suite.
  * @return Zero when all assertions pass.
  */
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 13;
+    test_case_total = 14;
 #else
-    test_case_total = 12;
+    test_case_total = 13;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
     stun_group_failures = 0;
     stun_group_checks = 0;
+    stun_test_messages();
     stun_test_owned();
     stun_test_ipv6();
     stun_test_borrowed();
