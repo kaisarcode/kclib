@@ -120,6 +120,8 @@ struct kc_stun_client {
     uint8_t *key;
     size_t key_size;
     unsigned integrity;
+    unsigned negotiated_integrity;
+    int integrity_violation;
     int status;
     unsigned short error;
     uint64_t deadline;
@@ -1020,9 +1022,21 @@ int kc_stun_client_receive(kc_stun_client_t *c,const kc_stun_endpoint_t *peer,co
     if(!stun_unpack(raw,size,&parsed))return KC_STUN_PENDING;
     if(memcmp(parsed.id,c->id,12)||
         (parsed.type!=STUN_SUCCESS&&parsed.type!=STUN_ERROR)||
-        !stun_fingerprint_valid(raw,size,&parsed)||
-        (c->integrity&&!stun_integrity_valid(raw,size,&parsed,c->key,c->key_size))){
+        !stun_fingerprint_valid(raw,size,&parsed)){
         stun_unpack_free(&parsed);return KC_STUN_PENDING;
+    }
+    if(c->integrity){
+        unsigned actual=stun_find(&parsed,KC_STUN_MESSAGE_INTEGRITY_SHA256)?
+            KC_STUN_HMAC_SHA256:
+            stun_find(&parsed,KC_STUN_MESSAGE_INTEGRITY)?KC_STUN_HMAC_SHA1:0U;
+        unsigned expected=c->negotiated_integrity?
+            c->negotiated_integrity:c->integrity;
+        if(!actual||(expected!=KC_STUN_HMAC_BOTH&&actual!=expected)||
+            !stun_integrity_valid(raw,size,&parsed,c->key,c->key_size)){
+            c->integrity_violation=1;
+            stun_unpack_free(&parsed);return KC_STUN_PENDING;
+        }
+        c->negotiated_integrity=actual;
     }
     if(parsed.type==STUN_ERROR){
         c->error=stun_error_code(&parsed);
@@ -1061,7 +1075,7 @@ int kc_stun_client_poll(kc_stun_client_t *c,uint64_t wait_ms)
     if(!c)return KC_STUN_EINVAL;
     if(c->status!=KC_STUN_PENDING)return c->status;
     now=stun_now();
-    if(now>=c->deadline){c->status=KC_STUN_ETIMEOUT;return c->status;}
+    if(now>=c->deadline){c->status=c->integrity_violation?KC_STUN_EAUTH:KC_STUN_ETIMEOUT;return c->status;}
     if(now>=c->next_retry){
         int rc=stun_client_send(c);
         if(rc!=KC_STUN_OK){c->status=rc;return rc;}
@@ -1199,32 +1213,43 @@ void kc_stun_datagram_free(kc_stun_datagram_t *d)
  */
 int kc_stun_client_refresh(kc_stun_client_t *c,uint64_t timeout_ms)
 {
-    stun_packet_view_t p;size_t i;uint8_t mac[32];
+    stun_packet_view_t original;
+    uint8_t new_id[12],*next;
+    size_t i,n=20U;
+    unsigned mode;
     if(!c||c->status==KC_STUN_PENDING)return KC_STUN_EINVAL;
-    if(!stun_random(c->id,12))return KC_STUN_ENET;
-    memcpy(c->message+8,c->id,12);
-    if(!stun_unpack(c->message,c->message_size,&p))return KC_STUN_EPROTO;
-    for(i=0;i<p.count;i++){
-        stun_attribute_view_t *a=&p.attrs[i];unsigned algorithm=0;
-        if(a->type==KC_STUN_MESSAGE_INTEGRITY)algorithm=1;
-        else if(a->type==KC_STUN_MESSAGE_INTEGRITY_SHA256)algorithm=2;
-        if(algorithm){
-            size_t header_length=a->offset+4U+a->size-20U;
-            stun_wr16(c->message+2,(uint16_t)header_length);
-            stun_hmac(algorithm,c->key,c->key_size,c->message,a->offset,mac);
-            memcpy(c->message+a->offset+4,mac,a->size);
-        }
+    if(!stun_random(new_id,12))return KC_STUN_ENET;
+    if(!stun_unpack(c->message,c->message_size,&original))return KC_STUN_EPROTO;
+    next=(uint8_t *)malloc(STUN_MAX_PACKET);
+    if(!next){stun_unpack_free(&original);return KC_STUN_ENOMEM;}
+    stun_begin(next,STUN_REQUEST,new_id);
+    for(i=0;i<original.count;i++){
+        const stun_attribute_view_t *a=&original.attrs[i];
+        if(a->type==KC_STUN_MESSAGE_INTEGRITY||
+           a->type==KC_STUN_MESSAGE_INTEGRITY_SHA256||
+           a->type==KC_STUN_FINGERPRINT)continue;
+        if(!stun_append(next,&n,a->type,a->data,a->size))goto failed;
     }
-    stun_wr16(c->message+2,(uint16_t)(c->message_size-20U));
-    for(i=0;i<p.count;i++)if(p.attrs[i].type==KC_STUN_FINGERPRINT){
-        stun_wr32(c->message+p.attrs[i].offset+4,stun_crc32(c->message,p.attrs[i].offset)^0x5354554eU);
+    mode=c->negotiated_integrity?c->negotiated_integrity:c->integrity;
+    if(c->key){
+        if((mode&KC_STUN_HMAC_SHA1)!=0&&
+            !stun_sign(next,&n,c->key,c->key_size,1))goto failed;
+        if((mode&KC_STUN_HMAC_SHA256)!=0&&
+            !stun_sign(next,&n,c->key,c->key_size,2))goto failed;
     }
-    stun_unpack_free(&p);
+    if(!stun_finish(next,&n))goto failed;
+    stun_unpack_free(&original);
+    free(c->message);c->message=next;c->message_size=n;
+    memcpy(c->id,new_id,12);
     free(c->answer);free(c->response);c->answer=NULL;c->response=NULL;c->response_count=0;
     c->mapped.host=NULL;c->error=0;c->status=KC_STUN_PENDING;
+    c->integrity_violation=0;
     c->deadline=stun_deadline(timeout_ms?timeout_ms:STUN_DEFAULT_TIMEOUT);
     c->next_retry=stun_now();c->rto=STUN_RTO;
     return KC_STUN_OK;
+failed:
+    free(next);stun_unpack_free(&original);
+    return KC_STUN_EPROTO;
 }
 
 const kc_stun_endpoint_t *kc_stun_client_local(const kc_stun_client_t *c){return c&&c->local.host?&c->local:NULL;}
