@@ -695,6 +695,50 @@ int kc_stun_verify_integrity(const void *bytes,size_t size,
 }
 
 /**
+ * Encodes the RFC 8489 ERROR-CODE attribute value.
+ * @return KC_STUN_OK or a negative status.
+ */
+int kc_stun_encode_error(unsigned short code,const char *reason,
+    void *out,size_t *size)
+{
+    uint8_t *dst=(uint8_t *)out;
+    size_t reason_length=reason?strlen(reason):0;
+    if(!out||!size||code<300U||code>699U||reason_length>763U||
+        *size<4U+reason_length)return KC_STUN_EINVAL;
+    dst[0]=0;dst[1]=0;
+    dst[2]=(uint8_t)(code/100U);
+    dst[3]=(uint8_t)(code%100U);
+    if(reason_length)memcpy(dst+4,reason,reason_length);
+    *size=4U+reason_length;
+    return KC_STUN_OK;
+}
+
+/**
+ * Decodes an ERROR-CODE attribute without taking ownership of its bytes.
+ * @return KC_STUN_OK or a negative status.
+ */
+int kc_stun_decode_error(const kc_stun_attribute_t *attribute,
+    unsigned short *code,char *reason,size_t reason_size)
+{
+    const uint8_t *bytes;
+    size_t text_length;
+    if(!attribute||attribute->type!=KC_STUN_ERROR_CODE||
+        !attribute->data||attribute->size<4U||!code||
+        (reason_size&&!reason))return KC_STUN_EINVAL;
+    bytes=(const uint8_t *)attribute->data;
+    if(bytes[0]||bytes[1]||(bytes[2]&0xf8U)||bytes[2]<3U||
+        bytes[2]>6U||bytes[3]>99U)return KC_STUN_EPROTO;
+    text_length=attribute->size-4U;
+    if(reason){
+        if(reason_size<=text_length)return KC_STUN_EINVAL;
+        if(text_length)memcpy(reason,bytes+4,text_length);
+        reason[text_length]=0;
+    }
+    *code=(unsigned short)(bytes[2]*100U+bytes[3]);
+    return KC_STUN_OK;
+}
+
+/**
  * Checks a transaction identifier from a decoded STUN envelope.
  * @return 1 for the same identifier, 0 otherwise.
  */
