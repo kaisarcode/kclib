@@ -191,7 +191,8 @@ static void rdvz_test_cleanup(void)
         "beta.events", "gamma.events", "callback-a.events",
         "callback-b.events", "command-a.events", "command-b.events",
         "cli-a.events", "cli-b.events", "connected.txt",
-        "rdvz-cli-output.txt", "rdvz-cli-event.txt"
+        "rdvz-cli-output.txt", "rdvz-cli-event.txt",
+        "rdvz-cli-action.txt"
     };
     size_t i;
     char path[RDVZ_TEST_PATH_MAX];
@@ -427,7 +428,11 @@ static int case_kc_rdvz_callbacks(void)
         fail += rdvz_test_expect("initiator receives literal other ID",
             atomic_load(&connected.count) == 1 &&
             strcmp(connected.other, "callback-a") == 0);
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+        fail += rdvz_test_expect("created peer receives literal remote ID",
+            atomic_load(&incoming.count) == 1 &&
+            strcmp(incoming.other, "callback-b") == 0);
+#else
         fail += rdvz_test_expect("created peer observes remote ID",
             rdvz_test_wait(&incoming, "callback-b"));
 #endif
@@ -690,27 +695,38 @@ static int case_rdvz_cli_create(void)
 static int case_rdvz_cli_links(void)
 {
     char command[RDVZ_TEST_PATH_MAX * 2];
-    char path[RDVZ_TEST_PATH_MAX];
+    char path[RDVZ_TEST_PATH_MAX], action[RDVZ_TEST_PATH_MAX];
     int fail = 0;
 
-    fail += rdvz_test_expect("event output path",
+    fail += rdvz_test_expect("resident event output path",
         rdvz_test_path(path, sizeof(path), "rdvz-cli-event.txt") == 0);
+    fail += rdvz_test_expect("operation output path",
+        rdvz_test_path(action, sizeof(action), "rdvz-cli-action.txt") == 0);
     (void)snprintf(command, sizeof(command),
         "cli-a \"echo > '%s'\"", path);
     fail += rdvz_test_expect("create cli-a with resident command",
         rdvz_cli_run(command) == 0);
     fail += rdvz_test_expect("create cli-b",
         rdvz_cli_run("cli-b \"echo\"") == 0);
+    (void)snprintf(command, sizeof(command),
+        "cli-b -c cli-a \"echo > '%s'\"", action);
     fail += rdvz_test_expect("connect cli-b to cli-a",
-        rdvz_cli_run("cli-b -c cli-a") == 0);
+        rdvz_cli_run(command) == 0);
     fail += rdvz_test_expect("cli-a sees cli-b",
         rdvz_cli_equals("cli-a -l", "cli-b" KC_LINE_END));
     fail += rdvz_test_expect("cli-b sees cli-a",
         rdvz_cli_equals("cli-b -l", "cli-a" KC_LINE_END));
     fail += rdvz_test_expect("persistent command receives cli-b",
         rdvz_test_wait_file("rdvz-cli-event.txt", "cli-b"));
+    fail += rdvz_test_expect("connect operation command receives cli-a",
+        rdvz_test_wait_file("rdvz-cli-action.txt", "cli-a"));
+    (void)remove(action);
+    (void)snprintf(command, sizeof(command),
+        "cli-a -d cli-b \"echo > '%s'\"", action);
     fail += rdvz_test_expect("remove from reverse endpoint",
-        rdvz_cli_run("cli-a -d cli-b") == 0);
+        rdvz_cli_run(command) == 0);
+    fail += rdvz_test_expect("disconnect command receives cli-b",
+        rdvz_test_wait_file("rdvz-cli-action.txt", "cli-b"));
     fail += rdvz_test_expect("both peers remain without links",
         rdvz_cli_equals("cli-a -l", "") &&
         rdvz_cli_equals("cli-b -l", ""));
@@ -722,7 +738,6 @@ static int case_rdvz_cli_links(void)
         "CLI connects and disconnects the same symmetric relation");
     return fail != 0;
 }
-
 /**
  * Verify deleting a peer affects neither other identities nor CLI usability.
  * @return Zero on success.
