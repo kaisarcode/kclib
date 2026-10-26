@@ -578,6 +578,133 @@ static int stun_finish(uint8_t *out,size_t *size)
 }
 
 /**
+ * Decodes a complete STUN message with views into the supplied buffer.
+ * @return KC_STUN_OK or a negative status.
+ */
+int kc_stun_decode(const void *bytes,size_t size,kc_stun_message_t *out)
+{
+    stun_packet_view_t p;
+    size_t i;
+    if(!out||!bytes)return KC_STUN_EINVAL;
+    memset(out,0,sizeof(*out));
+    if(!stun_unpack((const uint8_t *)bytes,size,&p))return KC_STUN_EPROTO;
+    out->type=p.type;
+    memcpy(out->transaction_id,p.id,12);
+    out->attribute_count=p.count;
+    if(p.count){
+        out->attributes=(kc_stun_attribute_t *)calloc(p.count,sizeof(*out->attributes));
+        if(!out->attributes){stun_unpack_free(&p);return KC_STUN_ENOMEM;}
+        for(i=0;i<p.count;i++){
+            out->attributes[i].type=p.attrs[i].type;
+            out->attributes[i].data=p.attrs[i].data;
+            out->attributes[i].size=p.attrs[i].size;
+        }
+    }
+    stun_unpack_free(&p);
+    return KC_STUN_OK;
+}
+
+/**
+ * Releases only the decoded STUN attribute array.
+ * @return void.
+ */
+void kc_stun_message_free(kc_stun_message_t *message)
+{
+    if(!message)return;
+    free(message->attributes);
+    memset(message,0,sizeof(*message));
+}
+
+/**
+ * Encodes an arbitrary STUN message with optional authentication.
+ * @return KC_STUN_OK or a negative status.
+ */
+int kc_stun_encode(const kc_stun_message_t *message,
+    const kc_stun_credentials_t *credentials,void *out,size_t *size)
+{
+    uint8_t *data=(uint8_t *)out;
+    size_t n=20U,i,capacity;
+    unsigned mode=credentials?(credentials->integrity?credentials->integrity:KC_STUN_HMAC_BOTH):0;
+    if(!message||!out||!size||(!message->attributes&&message->attribute_count))
+        return KC_STUN_EINVAL;
+    capacity=*size;
+    if(capacity<28U||capacity>STUN_MAX_PACKET) {
+        if(capacity<28U)return KC_STUN_EINVAL;
+        capacity=STUN_MAX_PACKET;
+    }
+    if((message->type&0xc000U)!=0||!message->type||
+        (credentials&&((credentials->key&&!credentials->key_size)||
+        (!credentials->key&&credentials->key_size)||
+        (mode&~KC_STUN_HMAC_BOTH))))
+        return KC_STUN_EINVAL;
+    stun_begin(data,message->type,message->transaction_id);
+    for(i=0;i<message->attribute_count;i++){
+        const kc_stun_attribute_t *a=&message->attributes[i];
+        size_t padded;
+        if(a->type==KC_STUN_MESSAGE_INTEGRITY||
+           a->type==KC_STUN_MESSAGE_INTEGRITY_SHA256||
+           a->type==KC_STUN_FINGERPRINT||a->size>65535U||
+           (!a->data&&a->size))return KC_STUN_EINVAL;
+        padded=(a->size+3U)&~3U;
+        if(n+4U+padded>capacity||n+4U+padded>STUN_MAX_PACKET)
+            return KC_STUN_EINVAL;
+        if(!stun_append(data,&n,a->type,a->data,a->size))return KC_STUN_EINVAL;
+    }
+    if(credentials&&credentials->key){
+        if((mode&KC_STUN_HMAC_SHA1)!=0){
+            if(n+24U>capacity||!stun_sign(data,&n,credentials->key,credentials->key_size,1))
+                return KC_STUN_EINVAL;
+        }
+        if((mode&KC_STUN_HMAC_SHA256)!=0){
+            if(n+36U>capacity||!stun_sign(data,&n,credentials->key,credentials->key_size,2))
+                return KC_STUN_EINVAL;
+        }
+    }
+    if(n+8U>capacity||!stun_finish(data,&n))return KC_STUN_EINVAL;
+    *size=n;return KC_STUN_OK;
+}
+
+/**
+ * Validates a complete STUN fingerprint without performing authentication.
+ * @return KC_STUN_OK or KC_STUN_EPROTO.
+ */
+int kc_stun_verify_fingerprint(const void *bytes,size_t size)
+{
+    stun_packet_view_t p;int valid;
+    if(!bytes)return KC_STUN_EINVAL;
+    if(!stun_unpack((const uint8_t *)bytes,size,&p))return KC_STUN_EPROTO;
+    valid=stun_find(&p,KC_STUN_FINGERPRINT)!=NULL &&
+        stun_fingerprint_valid((const uint8_t *)bytes,size,&p);
+    stun_unpack_free(&p);
+    return valid?KC_STUN_OK:KC_STUN_EPROTO;
+}
+
+/**
+ * Verifies STUN short-term message integrity.
+ * @return KC_STUN_OK or an authentication/protocol error.
+ */
+int kc_stun_verify_integrity(const void *bytes,size_t size,
+    const void *key,size_t key_size)
+{
+    stun_packet_view_t p;int valid;
+    if(!bytes||!key||!key_size)return KC_STUN_EINVAL;
+    if(!stun_unpack((const uint8_t *)bytes,size,&p))return KC_STUN_EPROTO;
+    valid=stun_integrity_valid((const uint8_t *)bytes,size,&p,key,key_size);
+    stun_unpack_free(&p);
+    return valid?KC_STUN_OK:KC_STUN_EAUTH;
+}
+
+/**
+ * Checks a transaction identifier from a decoded STUN envelope.
+ * @return 1 for the same identifier, 0 otherwise.
+ */
+int kc_stun_transaction_matches(const kc_stun_message_t *message,
+    const unsigned char id[12])
+{
+    return message&&id&&memcmp(message->transaction_id,id,12)==0;
+}
+
+/**
  * Builds one Binding request packet.
  * @param data Destination packet buffer.
  * @param size Destination packet length.
