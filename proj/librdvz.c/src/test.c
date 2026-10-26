@@ -694,6 +694,7 @@ static int case_rdvz_cli_create(void)
         "CLI-created peers survive separate invocations");
     return fail != 0;
 }
+
 /**
  * Verify the CLI link and unlink operations are symmetric.
  * @return Zero on success.
@@ -732,6 +733,7 @@ static int case_rdvz_cli_links(void)
         "CLI connects and disconnects the same symmetric relation");
     return fail != 0;
 }
+
 /**
  * Verify deleting a peer affects neither other identities nor CLI usability.
  * @return Zero on success.
