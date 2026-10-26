@@ -35,6 +35,12 @@ typedef void (*kc_rdvz_handler_t)(const char *other, void *userdata);
  */
 typedef void (*kc_rdvz_visit_t)(const char *id, void *userdata);
 
+/**
+ * Optional peer registration settings.
+ * cmd persists on the registered peer and runs on each new direct link.
+ * on_connect and userdata belong only to the returned local handle;
+ * the callback receives the other endpoint's ID, not a peer object.
+ */
 typedef struct {
     const char *cmd;
     kc_rdvz_handler_t on_connect;
