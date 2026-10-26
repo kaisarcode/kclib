@@ -1323,7 +1323,7 @@ static int stun_server_process(kc_stun_server_t *s,stun_socket_t fd,const struct
     if(!mi)mi=stun_find(&p,KC_STUN_MESSAGE_INTEGRITY);
     if(s->credentials){
         char *name;
-        if(!user||!mi||user->size>512U){error=401;goto response;}
+        if(!user||!mi||user->size>512U){error=400;goto response;}
         name=(char *)malloc(user->size+1U);
         if(!name){stun_unpack_free(&p);return KC_STUN_ENOMEM;}
         memcpy(name,user->data,user->size);name[user->size]=0;
