@@ -46,6 +46,19 @@ Client objects can be driven independently by a higher-level checklist
 scheduler. STUN provides its own per-transaction retry timing; ICE supplies
 candidates, credential values, policy and extension attribute values.
 
+## External STUN messages
+
+The public codec can inspect, encode, decode, and authenticate STUN messages in
+caller-owned buffers without creating a Binding client or server. The input
+buffer remains owned by the caller; decoded attribute views borrow its storage
+until `kc_stun_message_free()` releases the descriptor array.
+
+`kc_stun_is_message()` classifies a complete STUN envelope.
+`kc_stun_transaction_matches()` checks transaction IDs. A composition with
+one receive loop routes incoming messages to client transactions or a Binding
+server as appropriate. STUN does not select a candidate pair or own the
+composition's transport lifecycle.
+
 ## Protocol
 
 STUN Binding uses the RFC 8489 message envelope, `XOR-MAPPED-ADDRESS`, short-term
