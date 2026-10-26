@@ -46,6 +46,28 @@ stun -h
 `client` writes the observed host and port as tab-separated fields.
 `server` writes its listening port and continues serving until stopped.
 
+## Message codec
+
+STUN messages can also be handled without creating a client, server, or UDP socket.
+`kc_stun_encode()` writes a caller-supplied message (type, 12-byte transaction ID,
+and attributes) into a caller-owned buffer, adds requested short-term integrity
+attributes, and appends FINGERPRINT. `kc_stun_decode()` parses a complete STUN
+datagram and provides attribute views; the caller retains the input buffer until
+`kc_stun_message_free()` releases the views.
+
+`kc_stun_verify_integrity()` and `kc_stun_verify_fingerprint()` validate
+externally received messages, while `kc_stun_transaction_matches()` checks
+transaction IDs. `kc_stun_encode_mapped()` and `kc_stun_decode_mapped()`
+encode and decode IPv4/IPv6 XOR-MAPPED-ADDRESS attributes using caller-owned
+storage. Other STUN and extension attributes use the generic attribute array,
+including those used by ICE; `libstun` does not interpret ICE roles or policy.
+
+The codec does not own UDP reception, maintain a transaction scheduler, or
+automatically route responses among outstanding transactions. A composition
+with multiple Binding transactions is responsible for dispatching each received
+datagram to its appropriate client. The client API maintains retransmission
+timers and matches the configured endpoint and transaction identifier.
+
 ## Composition
 
 On an owned UDP socket, datagrams unrelated to the active Binding transaction are
