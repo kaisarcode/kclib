@@ -58,6 +58,7 @@ typedef pthread_t stun_thread_t;
 #define STUN_DEFAULT_PORT 3478U
 #define STUN_DEFAULT_TIMEOUT 3000U
 #define STUN_REQUEST 0x0001U
+#define STUN_INDICATION 0x0011U
 #define STUN_SUCCESS 0x0101U
 #define STUN_ERROR 0x0111U
 #define STUN_ATTRIBUTE_MAX 16384U
@@ -563,30 +564,56 @@ int kc_stun_client_send(kc_stun_client_t *c,const kc_stun_endpoint_t *peer,const
     if(!stun_resolve(peer->host,peer->port,c->remote.ss_family,&dest,&len))return KC_STUN_ENET;
     return stun_socket_send(c->socket,&dest,len,(const uint8_t *)bytes,size);
 }
+/** Sends an unauthenticated STUN Binding Indication with a fingerprint. */
+int kc_stun_client_keepalive(kc_stun_client_t *c)
+{
+    uint8_t packet[32],id[12];size_t size=20U;
+    if(!c)return KC_STUN_EINVAL;
+    if(!stun_random(id,12))return KC_STUN_ENET;
+    stun_begin(packet,STUN_INDICATION,id);
+    if(!stun_finish(packet,&size))return KC_STUN_EPROTO;
+    if(c->borrowed)return c->transport.send(c->transport.context,&c->peer,packet,size)==0?KC_STUN_OK:KC_STUN_ENET;
+    return stun_socket_send(c->socket,&c->remote,c->remote_len,packet,size);
+}
 /** Reads one non-STUN datagram from an owned client mapping. */
 int kc_stun_client_read(kc_stun_client_t *c,kc_stun_datagram_t *out,uint64_t timeout_ms)
 {
-    uint8_t packet[STUN_MAX_PACKET];struct sockaddr_storage from;
-    stun_socklen_t len=(stun_socklen_t)sizeof(from);int ready,got;
-    char host[NI_MAXHOST];unsigned short port;
+    uint64_t end=timeout_ms?stun_deadline(timeout_ms):UINT64_MAX;
     if(!c||!out||c->borrowed)return KC_STUN_EINVAL;
     memset(out,0,sizeof(*out));
     if(c->status==KC_STUN_PENDING)return KC_STUN_PENDING;
-    ready=stun_wait(c->socket,timeout_ms);
-    if(ready<=0)return ready==0?KC_STUN_ETIMEOUT:KC_STUN_ENET;
+    for(;;){
+        uint8_t packet[STUN_MAX_PACKET];struct sockaddr_storage from;
+        stun_socklen_t len=(stun_socklen_t)sizeof(from);int ready,got;
+        char host[NI_MAXHOST];unsigned short port;
+        uint64_t wait=timeout_ms?stun_remaining(end):1000U;
+        if(timeout_ms&&!wait)return KC_STUN_ETIMEOUT;
+        ready=stun_wait(c->socket,wait);
+        if(ready<0)return KC_STUN_ENET;
+        if(ready==0)continue;
 #ifdef _WIN32
-    got=recvfrom(c->socket,(char *)packet,(int)sizeof(packet),0,(struct sockaddr *)&from,&len);
+        got=recvfrom(c->socket,(char *)packet,(int)sizeof(packet),0,(struct sockaddr *)&from,&len);
 #else
-    got=(int)recvfrom(c->socket,packet,sizeof(packet),0,(struct sockaddr *)&from,&len);
+        got=(int)recvfrom(c->socket,packet,sizeof(packet),0,(struct sockaddr *)&from,&len);
 #endif
-    if(got<0||!stun_endpoint_text(&from,len,host,&port))return KC_STUN_ENET;
-    out->host=(char *)malloc(strlen(host)+1U);
-    out->data=malloc(got?(size_t)got:1U);
-    if(!out->host||!out->data){kc_stun_datagram_free(out);return KC_STUN_ENOMEM;}
-    memcpy(out->host,host,strlen(host)+1U);out->port=port;
-    if(got)memcpy(out->data,packet,(size_t)got);
-    out->data_size=(size_t)got;
-    return KC_STUN_OK;
+        if(got<0||!stun_endpoint_text(&from,len,host,&port))return KC_STUN_ENET;
+        if(stun_endpoint_equal(&from,&c->remote)){
+            stun_packet_view_t parsed;
+            if(stun_unpack(packet,(size_t)got,&parsed)){
+                int correlated=memcmp(parsed.id,c->id,12)==0&&
+                   (parsed.type==STUN_SUCCESS||parsed.type==STUN_ERROR);
+                stun_unpack_free(&parsed);
+                if(correlated)continue;
+            }
+        }
+        out->host=(char *)malloc(strlen(host)+1U);
+        out->data=malloc(got?(size_t)got:1U);
+        if(!out->host||!out->data){kc_stun_datagram_free(out);return KC_STUN_ENOMEM;}
+        memcpy(out->host,host,strlen(host)+1U);out->port=port;
+        if(got)memcpy(out->data,packet,(size_t)got);
+        out->data_size=(size_t)got;
+        return KC_STUN_OK;
+    }
 }
 void kc_stun_datagram_free(kc_stun_datagram_t *d)
 {
@@ -654,7 +681,9 @@ static int stun_server_process(kc_stun_server_t *s,stun_socket_t fd,const struct
     unsigned short error=0;kc_stun_credentials_t auth={0};int authenticated=0;
     kc_stun_attribute_t *attrs=NULL;const stun_attribute_view_t *user,*mi;
     if(!stun_unpack(data,size,&p))return KC_STUN_EPROTO;
-    if(p.type!=STUN_REQUEST||!stun_fingerprint_valid(data,size,&p)){stun_unpack_free(&p);return KC_STUN_EPROTO;}
+    if(!stun_fingerprint_valid(data,size,&p)){stun_unpack_free(&p);return KC_STUN_EPROTO;}
+    if(p.type==STUN_INDICATION){stun_unpack_free(&p);return KC_STUN_OK;}
+    if(p.type!=STUN_REQUEST){stun_unpack_free(&p);return KC_STUN_EPROTO;}
     user=stun_find(&p,KC_STUN_USERNAME);
     mi=stun_find(&p,KC_STUN_MESSAGE_INTEGRITY_SHA256);
     if(!mi)mi=stun_find(&p,KC_STUN_MESSAGE_INTEGRITY);
@@ -694,7 +723,24 @@ static int stun_server_process(kc_stun_server_t *s,stun_socket_t fd,const struct
     }
 response:
     stun_begin(out,error?STUN_ERROR:STUN_SUCCESS,p.id);
-    if(error){if(!stun_append_error(out,&used,error))goto invalid;}
+    if(error){
+        if(!stun_append_error(out,&used,error))goto invalid;
+        if(error==420){
+            uint8_t unknown[256];size_t count=0;
+            for(i=0;i<p.count&&count+2U<=sizeof(unknown);i++){
+                unsigned short type=p.attrs[i].type;
+                if(type<0x8000U&&type!=KC_STUN_USERNAME&&
+                   type!=KC_STUN_MESSAGE_INTEGRITY&&
+                   type!=KC_STUN_MESSAGE_INTEGRITY_SHA256&&
+                   type!=KC_STUN_REALM&&type!=KC_STUN_NONCE&&
+                   type!=KC_STUN_ERROR_CODE&&type!=KC_STUN_UNKNOWN_ATTRIBUTES&&
+                   type!=KC_STUN_XOR_MAPPED_ADDRESS){
+                    stun_wr16(unknown+count,type);count+=2U;
+                }
+            }
+            if(count&&!stun_append(out,&used,KC_STUN_UNKNOWN_ATTRIBUTES,unknown,count))goto invalid;
+        }
+    }
     else if(!addr||!stun_append_mapped(out,&used,addr,p.id)){
         /* Borrowed transports do not expose sockaddr structures; resolve the
            peer's numeric endpoint for XOR-MAPPED-ADDRESS. */
