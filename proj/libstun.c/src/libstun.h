@@ -88,6 +88,16 @@ typedef struct {
 } kc_stun_server_options_t;
 
 /**
+ * Identifies a complete RFC 8489 STUN datagram in an external buffer.
+ * Checks the header bits, magic cookie, aligned message length and exact
+ * datagram size; it does not authenticate the contents or validate attributes.
+ * @param bytes Datagram bytes.
+ * @param size Datagram size.
+ * @return 1 for a STUN envelope, otherwise 0.
+ */
+int kc_stun_is_message(const void *bytes, size_t size);
+
+/**
  * Begins one authenticated or anonymous Binding transaction.
  * @param out Destination client pointer.
  * @param options Client options.
