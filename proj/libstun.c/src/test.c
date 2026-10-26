@@ -24,7 +24,6 @@ static unsigned int stun_test_replies;
 static unsigned int stun_test_failures;
 static int test_case_total;
 static int test_case_current;
-static int test_case_skipped;
 
 /**
  * Prints one test result in the canonical kclib format.
