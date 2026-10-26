@@ -407,22 +407,25 @@ static int case_kc_rdvz_callbacks(void)
 {
     kc_rdvz_peer_t *a = NULL, *b = NULL;
     kc_rdvz_options_t options;
-    rdvz_test_seen_t incoming, connected, disconnected;
+    rdvz_test_seen_t incoming, reciprocal, connected, disconnected;
     int fail = 0;
 
     memset(&options, 0, sizeof(options));
     memset(&incoming, 0, sizeof(incoming));
+    memset(&reciprocal, 0, sizeof(reciprocal));
     memset(&connected, 0, sizeof(connected));
     memset(&disconnected, 0, sizeof(disconnected));
     atomic_init(&incoming.count, 0);
+    atomic_init(&reciprocal.count, 0);
     atomic_init(&connected.count, 0);
     atomic_init(&disconnected.count, 0);
     options.on_connect = rdvz_test_handler;
     options.userdata = &incoming;
     fail += rdvz_test_expect("create callback peer",
         kc_rdvz_create(&a, "callback-a", &options) == KC_RDVZ_OK);
-    fail += rdvz_test_expect("create independent peer",
-        kc_rdvz_create(&b, "callback-b", NULL) == KC_RDVZ_OK);
+    options.userdata = &reciprocal;
+    fail += rdvz_test_expect("create other peer with callback",
+        kc_rdvz_create(&b, "callback-b", &options) == KC_RDVZ_OK);
     if (a && b) {
         fail += rdvz_test_expect("connect from other side",
             kc_rdvz_connect(b, "callback-a",
@@ -434,9 +437,14 @@ static int case_kc_rdvz_callbacks(void)
         fail += rdvz_test_expect("created peer receives literal remote ID",
             atomic_load(&incoming.count) == 1 &&
             strcmp(incoming.other, "callback-b") == 0);
+        fail += rdvz_test_expect("both endpoints receive reciprocal IDs",
+            atomic_load(&reciprocal.count) == 1 &&
+            strcmp(reciprocal.other, "callback-a") == 0);
 #else
         fail += rdvz_test_expect("created peer observes remote ID",
             rdvz_test_wait(&incoming, "callback-b"));
+        fail += rdvz_test_expect("other endpoint observes remote ID",
+            rdvz_test_wait(&reciprocal, "callback-a"));
 #endif
         fail += rdvz_test_expect("disconnect from either endpoint",
             kc_rdvz_peer_disconnect(a, "callback-b",
