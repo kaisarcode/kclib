@@ -5,6 +5,25 @@ transaction; a server answers Binding requests. Either may borrow UDP owned by a
 higher-level composition. Bindings project the C transaction state into an
 asynchronous language operation without exposing C buffer or pointer mechanics.
 
+## Native message processing
+
+The C API also exposes a transport-independent message codec:
+`kc_stun_is_message`, `kc_stun_encode`, `kc_stun_decode`,
+`kc_stun_verify_integrity`, `kc_stun_verify_fingerprint`, and
+`kc_stun_transaction_matches`. The generic attribute descriptors preserve
+unknown and protocol-extension attributes. Dedicated helpers serialize
+XOR-MAPPED-ADDRESS and ERROR-CODE attribute values.
+
+Encoding writes to caller-owned buffers. Decoding allocates only the attribute
+descriptor array: value pointers refer to the caller's input buffer and must not
+outlive it. These operations do not open or own UDP sockets and do not perform
+ICE candidate selection, scheduling or nomination.
+
+For concurrent transactions on a borrowed UDP mapping, the external owner
+receives datagrams once and routes them to the appropriate active transaction.
+The existing client poll and receive operations handle transaction state and
+retransmissions independently.
+
 ## JavaScript
 
 ```js
