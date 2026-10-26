@@ -1,508 +1,520 @@
 /**
- * test.c - Rendezvous peer relationship contract tests.
- * Summary: Verifies independent peers, direct links and delegated events.
+ * test.c - Named rendezvous peer contract tests.
+ * Summary: Verifies resident peer identity, symmetric links and CLI parity.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "librdvz.h"
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef __EMSCRIPTEN__
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#include <unistd.h>
+#endif
+
 #ifndef KC_CLI_PATH
 #define KC_CLI_PATH "rdvz"
 #endif
-#endif
+
+#define RDVZ_TEST_PATH_MAX 1024
+
+static char rdvz_test_dir[RDVZ_TEST_PATH_MAX];
+static int rdvz_case_current = 0;
+static int rdvz_case_total = 0;
 
 typedef struct {
-    kc_rdvz_t *rdvz;
-    unsigned connected;
-    unsigned disconnected;
-    unsigned seen_connected;
-    unsigned seen_disconnected;
-    int unexpected;
-} rdvz_events_t;
+    unsigned count;
+    char first[128];
+    char last[128];
+} rdvz_test_list_t;
 
 typedef struct {
-    size_t count;
-    const kc_rdvz_peer_t *first;
-    const kc_rdvz_peer_t *second;
-    const kc_rdvz_peer_t *last;
-} rdvz_list_t;
+    atomic_int count;
+    char other[128];
+} rdvz_test_seen_t;
 
 /**
- * Adds one received peer to an inspection summary.
- * @param peer Listed peer.
- * @param userdata Summary to update.
+ * Report one canonical contract test result.
+ * @param failed Nonzero when assertions failed.
+ * @param name Public function or CLI behavior.
+ * @param description Behavior verified by this case.
  * @return None.
  */
-static void rdvz_collect(const kc_rdvz_peer_t *peer, void *userdata) {
-    rdvz_list_t *list = (rdvz_list_t *)userdata;
+static void rdvz_test_result(int failed, const char *name,
+    const char *description)
+{
+    printf("[%d/%d] [%s] %s: %s\n", rdvz_case_current,
+        rdvz_case_total, failed ? "FAIL" : "PASS", name, description);
+}
+
+/**
+ * Check a contract expectation and report a failed condition.
+ * @param description Assertion description.
+ * @param condition Nonzero when successful.
+ * @return Zero for success, one for failure.
+ */
+static int rdvz_test_expect(const char *description, int condition)
+{
+    if (!condition) printf("[FAIL] %s\n", description);
+    return condition ? 0 : 1;
+}
+
+/**
+ * Collect one visited identifier.
+ * @param id Visited peer ID.
+ * @param userdata Collector state.
+ * @return None.
+ */
+static void rdvz_test_collect(const char *id, void *userdata)
+{
+    rdvz_test_list_t *list = (rdvz_test_list_t *)userdata;
+
+    if (list->count == 0U)
+        (void)snprintf(list->first, sizeof(list->first), "%s", id);
+    (void)snprintf(list->last, sizeof(list->last), "%s", id);
     list->count++;
-    if (list->count == 1U) list->first = peer;
-    if (list->count == 2U) list->second = peer;
-    list->last = peer;
 }
 
 /**
- * Checks if a peer has the expected number of direct neighbors.
- * @param peer Peer being inspected.
- * @param expected Expected direct neighbor count.
- * @return Nonzero on success.
- */
-static int rdvz_expect_links(const kc_rdvz_peer_t *peer, size_t expected) {
-    rdvz_list_t list = {0};
-    return kc_rdvz_peer_list(peer, rdvz_collect, &list) == KC_RDVZ_OK &&
-        list.count == expected;
-}
-
-/**
- * Observes a new link and verifies notification-time lookup and mutation rules.
- * @param peer Newly created peer.
- * @param other Existing peer.
- * @param userdata Test event state.
+ * Record the other peer's identifier from an operation or local notification.
+ * @param other Other peer ID.
+ * @param userdata Callback observation state.
  * @return None.
  */
-static void rdvz_on_connect(const kc_rdvz_peer_t *peer,
-    const kc_rdvz_peer_t *other, void *userdata)
+static void rdvz_test_handler(const char *other, void *userdata)
 {
-    rdvz_events_t *events = (rdvz_events_t *)userdata;
-    kc_rdvz_peer_t *reentrant = NULL;
-    rdvz_list_t list = {0};
+    rdvz_test_seen_t *seen = (rdvz_test_seen_t *)userdata;
 
-    events->connected++;
-    if (!peer || !other || !kc_rdvz_peer_id(peer) ||
-        !kc_rdvz_peer_id(other)) events->unexpected++;
-    if (kc_rdvz_list(events->rdvz, rdvz_collect, &list) != KC_RDVZ_OK ||
-        list.count < 2U)
-        events->unexpected++;
-    if (kc_rdvz_connect(events->rdvz, NULL, &reentrant) != KC_RDVZ_EBUSY ||
-        reentrant != NULL) events->unexpected++;
-    if (kc_rdvz_close(events->rdvz) != KC_RDVZ_EBUSY)
-        events->unexpected++;
-    events->seen_connected++;
+    (void)snprintf(seen->other, sizeof(seen->other), "%s", other);
+    (void)atomic_fetch_add(&seen->count, 1);
 }
 
 /**
- * Observes removal of one direct link after the link was detached.
- * @param peer Disconnecting peer.
- * @param other Remaining peer.
- * @param userdata Test event state.
+ * Sleep briefly while checking asynchronous callback delivery.
  * @return None.
  */
-static void rdvz_on_disconnect(const kc_rdvz_peer_t *peer,
-    const kc_rdvz_peer_t *other, void *userdata)
+static void rdvz_test_sleep(void)
 {
-    rdvz_events_t *events = (rdvz_events_t *)userdata;
-    if (!peer || !other || !kc_rdvz_peer_id(peer) ||
-        !kc_rdvz_peer_id(other)) events->unexpected++;
-    if (kc_rdvz_disconnect((kc_rdvz_peer_t *)other) != KC_RDVZ_EBUSY)
-        events->unexpected++;
-    events->disconnected++;
-    events->seen_disconnected++;
-}
-
-static int test_case_total = 0;
-static int test_case_current = 0;
-
-/**
- * Prints one canonical kclib contract test result.
- * @param fail Nonzero when the case failed.
- * @param name Public API function or CLI case name.
- * @param detail Behavior asserted.
- * @return None.
- */
-static void case_result(int fail, const char *name, const char *detail) {
-    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        fail ? "FAIL" : "PASS", name, detail);
+#ifdef _WIN32
+    Sleep(25);
+#else
+    struct timespec delay;
+    delay.tv_sec = 0;
+    delay.tv_nsec = 25000000L;
+    (void)nanosleep(&delay, NULL);
+#endif
 }
 
 /**
- * Runs one functional case with sequential progress tracking.
- * @param rc Aggregate failure counter.
- * @param fn Functional case to run.
- * @return None.
+ * Wait for one callback to observe a named peer.
+ * @param seen Callback observation state.
+ * @param expected Expected other peer ID.
+ * @return Nonzero when the callback was delivered.
  */
-static void run_case(int *rc, int (*fn)(void)) {
-    test_case_current++;
-    *rc += fn();
-}
+static int rdvz_test_wait(rdvz_test_seen_t *seen, const char *expected)
+{
+    int i;
 
-/**
- * Reports one failed assertion with its intended behavior.
- * @param name Assertion description.
- * @param condition Nonzero when the assertion passes.
- * @return Zero on success and one on failure.
- */
-static int expect_true(const char *name, int condition) {
-    if (!condition) {
-        printf("[FAIL] %s\n", name);
-        return 1;
+    for (i = 0; i < 80; i++) {
+        if (atomic_load(&seen->count) > 0)
+            return strcmp(seen->other, expected) == 0;
+        rdvz_test_sleep();
     }
     return 0;
 }
 
 /**
- * Tests kc_rdvz_open across independent registries and invalid arguments.
- * @return Zero when all assertions pass.
+ * Build the isolated per-run runtime directory.
+ * @return Zero on success.
  */
-static int case_kc_rdvz_open(void) {
-    kc_rdvz_t *first = NULL, *second = NULL;
-    kc_rdvz_peer_t *a = NULL, *b = NULL;
-    int fail = 0;
-
-    fail += expect_true("open rejects absent output",
-        kc_rdvz_open(NULL, NULL) == KC_RDVZ_EINVAL);
-    fail += expect_true("open creates first registry",
-        kc_rdvz_open(&first, NULL) == KC_RDVZ_OK && first != NULL);
-    fail += expect_true("open creates independent registry",
-        kc_rdvz_open(&second, NULL) == KC_RDVZ_OK && second != NULL);
-    if (first && second) {
-        fail += expect_true("first registry accepts an independent peer",
-            kc_rdvz_connect(first, NULL, &a) == KC_RDVZ_OK);
-        fail += expect_true("second registry accepts an independent peer",
-            kc_rdvz_connect(second, NULL, &b) == KC_RDVZ_OK);
-        if (a && b) {
-            fail += expect_true("IDs are scoped to individual registries",
-                strcmp(kc_rdvz_peer_id(a), kc_rdvz_peer_id(b)) == 0);
-        }
-    }
-    fail += expect_true("first registry closes", kc_rdvz_close(first) == KC_RDVZ_OK);
-    fail += expect_true("second registry closes", kc_rdvz_close(second) == KC_RDVZ_OK);
-
-    case_result(fail, "kc_rdvz_open",
-        "creates independent registries and rejects invalid output");
-    return fail != 0;
-}
-
-/**
- * Tests kc_rdvz_connect, direct linking, validation and lookup growth.
- * @return Zero when all assertions pass.
- */
-static int case_kc_rdvz_connect(void) {
-    kc_rdvz_t *rdvz = NULL;
-    kc_rdvz_peer_t *a = NULL, *b = NULL, *c = NULL, *extra = NULL;
-    int fail = 0;
-    unsigned i;
-
-    fail += expect_true("open registry",
-        kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    if (!rdvz) {
-        case_result(fail, "kc_rdvz_connect",
-            "creates independent and linked peers with strict ID validation");
+static int rdvz_test_setup(void)
+{
+#ifdef _WIN32
+    char temp[MAX_PATH];
+    DWORD size = GetTempPathA((DWORD)sizeof(temp), temp);
+    if (!size || size >= (DWORD)sizeof(temp)) return 1;
+    if ((size_t)snprintf(rdvz_test_dir, sizeof(rdvz_test_dir),
+            "%skc-rdvz-test-%lu", temp,
+            (unsigned long)GetCurrentProcessId()) >= sizeof(rdvz_test_dir))
         return 1;
-    }
-    fail += expect_true("connect rejects absent output",
-        kc_rdvz_connect(rdvz, NULL, NULL) == KC_RDVZ_EINVAL);
-    fail += expect_true("connect rejects zero ID",
-        kc_rdvz_connect(rdvz, "0", &extra) == KC_RDVZ_EINVAL);
-    fail += expect_true("connect rejects leading zero",
-        kc_rdvz_connect(rdvz, "01", &extra) == KC_RDVZ_EINVAL);
-    fail += expect_true("connect rejects invalid ID",
-        kc_rdvz_connect(rdvz, "abc", &extra) == KC_RDVZ_EINVAL);
-    fail += expect_true("connect rejects overflowing ID",
-        kc_rdvz_connect(rdvz, "18446744073709551616", &extra) == KC_RDVZ_EINVAL);
-    fail += expect_true("connect distinguishes missing peer",
-        kc_rdvz_connect(rdvz, "100", &extra) == KC_RDVZ_ENOENT);
-    fail += expect_true("failed connect clears output", extra == NULL);
+    return _putenv_s("KC_RDVZ_DIR", rdvz_test_dir) != 0;
+#else
+    if ((size_t)snprintf(rdvz_test_dir, sizeof(rdvz_test_dir),
+            "/tmp/kc-rdvz-test-%lu", (unsigned long)getpid()) >=
+            sizeof(rdvz_test_dir)) return 1;
+    return setenv("KC_RDVZ_DIR", rdvz_test_dir, 1) != 0;
+#endif
+}
 
-    fail += expect_true("connect creates an independent peer",
-        kc_rdvz_connect(rdvz, NULL, &a) == KC_RDVZ_OK);
-    if (a) {
-        fail += expect_true("connect links to an existing peer",
-            kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &b) == KC_RDVZ_OK);
+/**
+ * Construct one path inside the isolated runtime directory.
+ * @param out Destination buffer.
+ * @param cap Destination capacity.
+ * @param filename Leaf filename.
+ * @return Zero on success.
+ */
+static int rdvz_test_path(char *out, size_t cap, const char *filename)
+{
+#ifdef _WIN32
+    return (size_t)snprintf(out, cap, "%s\\%s",
+        rdvz_test_dir, filename) < cap ? 0 : 1;
+#else
+    return (size_t)snprintf(out, cap, "%s/%s",
+        rdvz_test_dir, filename) < cap ? 0 : 1;
+#endif
+}
+
+/**
+ * Remove all state used by the contract tests.
+ * @return None.
+ */
+static void rdvz_test_cleanup(void)
+{
+    const char *names[] = {
+        "state.bin", "state.tmp", ".lock", "alpha.events",
+        "beta.events", "gamma.events", "callback-a.events",
+        "callback-b.events", "command-a.events", "command-b.events",
+        "cli-a.events", "cli-b.events", "connected.txt",
+        "rdvz-cli-output.txt", "rdvz-cli-event.txt"
+    };
+    size_t i;
+    char path[RDVZ_TEST_PATH_MAX];
+
+    for (i = 0U; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (!rdvz_test_path(path, sizeof(path), names[i]))
+            (void)remove(path);
     }
-    if (b) {
-        fail += expect_true("connect supports chains",
-            kc_rdvz_connect(rdvz, kc_rdvz_peer_id(b), &c) == KC_RDVZ_OK);
-    }
+#ifdef _WIN32
+    (void)RemoveDirectoryA(rdvz_test_dir);
+    (void)_putenv_s("KC_RDVZ_DIR", "");
+#else
+    (void)rmdir(rdvz_test_dir);
+    (void)unsetenv("KC_RDVZ_DIR");
+#endif
+}
+
+/**
+ * Verify named create, open, enumeration and independent handle close.
+ * @return Zero on success.
+ */
+static int case_kc_rdvz_create(void)
+{
+    kc_rdvz_peer_t *created = NULL, *opened = NULL, *beta = NULL;
+    rdvz_test_list_t list = {0};
+    int fail = 0;
+
+    fail += rdvz_test_expect("create validates output",
+        kc_rdvz_create(NULL, "alpha", NULL) == KC_RDVZ_EINVAL);
+    fail += rdvz_test_expect("create named peer",
+        kc_rdvz_create(&created, "alpha", NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("opened handle has stable name",
+        created && strcmp(kc_rdvz_peer_id(created), "alpha") == 0);
+    fail += rdvz_test_expect("open same resident peer",
+        kc_rdvz_open(&opened, "alpha", NULL, NULL) == KC_RDVZ_OK);
+    kc_rdvz_close(created);
+    kc_rdvz_close(opened);
+    fail += rdvz_test_expect("peer remains after handle closes",
+        kc_rdvz_open(&opened, "alpha", NULL, NULL) == KC_RDVZ_OK);
+    kc_rdvz_close(opened);
+    fail += rdvz_test_expect("second named peer",
+        kc_rdvz_create(&beta, "beta", NULL) == KC_RDVZ_OK);
+    kc_rdvz_close(beta);
+    fail += rdvz_test_expect("list named peers",
+        kc_rdvz_list(rdvz_test_collect, &list) == KC_RDVZ_OK &&
+        list.count == 2U &&
+        strcmp(list.first, "alpha") == 0 &&
+        strcmp(list.last, "beta") == 0);
+    rdvz_test_result(fail, "kc_rdvz_create",
+        "named peers survive temporary handles and can be listed");
+    return fail != 0;
+}
+
+/**
+ * Verify that direct connections are undirected and never duplicate.
+ * @return Zero on success.
+ */
+static int case_kc_rdvz_connect(void)
+{
+    kc_rdvz_peer_t *a = NULL, *b = NULL, *c = NULL;
+    rdvz_test_list_t a_links = {0}, b_links = {0}, c_links = {0};
+    int fail = 0;
+
+    fail += rdvz_test_expect("open first",
+        kc_rdvz_open(&a, "alpha", NULL, NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("open second",
+        kc_rdvz_open(&b, "beta", NULL, NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create independent third",
+        kc_rdvz_create(&c, "gamma", NULL) == KC_RDVZ_OK);
     if (a && b && c) {
-        fail += expect_true("first endpoint has one link",
-            rdvz_expect_links(a, 1U));
-        fail += expect_true("middle peer has two links",
-            rdvz_expect_links(b, 2U));
-        fail += expect_true("last endpoint has one link",
-            rdvz_expect_links(c, 1U));
-        for (i = 0U; i < 1024U; i++) {
-            if (kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &extra) !=
-                KC_RDVZ_OK) break;
-        }
-        fail += expect_true("connect preserves lookup through hash growth",
-            i == 1024U && rdvz_expect_links(a, 1025U));
+        fail += rdvz_test_expect("link alpha and beta",
+            kc_rdvz_connect(a, "beta", NULL, NULL) == KC_RDVZ_OK);
+        fail += rdvz_test_expect("reverse link is the same link",
+            kc_rdvz_connect(b, "alpha", NULL, NULL) == KC_RDVZ_EEXIST);
+        fail += rdvz_test_expect("link gamma through beta",
+            kc_rdvz_connect(c, "beta", NULL, NULL) == KC_RDVZ_OK);
+        fail += rdvz_test_expect("reject self-link",
+            kc_rdvz_connect(a, "alpha", NULL, NULL) == KC_RDVZ_EINVAL);
+        fail += rdvz_test_expect("no implicit peer creation",
+            kc_rdvz_connect(a, "unknown", NULL, NULL) == KC_RDVZ_ENOENT);
+        fail += rdvz_test_expect("alpha has only beta",
+            kc_rdvz_peer_list(a, rdvz_test_collect, &a_links)
+                == KC_RDVZ_OK && a_links.count == 1U &&
+                strcmp(a_links.first, "beta") == 0);
+        fail += rdvz_test_expect("beta has two neighbors",
+            kc_rdvz_peer_list(b, rdvz_test_collect, &b_links)
+                == KC_RDVZ_OK && b_links.count == 2U);
+        fail += rdvz_test_expect("gamma has only beta; no transitivity",
+            kc_rdvz_peer_list(c, rdvz_test_collect, &c_links)
+                == KC_RDVZ_OK && c_links.count == 1U &&
+                strcmp(c_links.first, "beta") == 0);
     }
-    fail += expect_true("close frees created peers",
-        kc_rdvz_close(rdvz) == KC_RDVZ_OK);
-
-    case_result(fail, "kc_rdvz_connect",
-        "creates fresh peers and symmetric direct links, rejects invalid IDs");
+    kc_rdvz_close(a);
+    kc_rdvz_close(b);
+    kc_rdvz_close(c);
+    rdvz_test_result(fail, "kc_rdvz_connect",
+        "symmetric unique links between existing peers");
     return fail != 0;
 }
 
 /**
- * Tests kc_rdvz_peer_id uniqueness and lifetime across reconnects.
- * @return Zero when all assertions pass.
+ * Verify either endpoint can remove one relationship without deleting peers.
+ * @return Zero on success.
  */
-static int case_kc_rdvz_peer_id(void) {
-    kc_rdvz_t *rdvz = NULL;
-    kc_rdvz_peer_t *a = NULL, *b = NULL, *rejoined = NULL;
-    char previous[32] = {0};
-    int fail = 0;
-
-    fail += expect_true("NULL peer has no ID", kc_rdvz_peer_id(NULL) == NULL);
-    fail += expect_true("open registry", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    if (rdvz) {
-        fail += expect_true("create peer with ID",
-            kc_rdvz_connect(rdvz, NULL, &a) == KC_RDVZ_OK);
-        if (a) {
-            fail += expect_true("first peer has canonical ID",
-                strcmp(kc_rdvz_peer_id(a), "1") == 0);
-            snprintf(previous, sizeof(previous), "%s", kc_rdvz_peer_id(a));
-            fail += expect_true("second peer gets an independent identity",
-                kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &b) == KC_RDVZ_OK);
-        }
-        if (a && b) {
-            fail += expect_true("second peer has distinct ID",
-                strcmp(kc_rdvz_peer_id(a), kc_rdvz_peer_id(b)) != 0);
-            fail += expect_true("disconnect original peer",
-                kc_rdvz_disconnect(a) == KC_RDVZ_OK);
-            fail += expect_true("other peer retains its ID",
-                strcmp(kc_rdvz_peer_id(b), "2") == 0);
-            fail += expect_true("old ID cannot be reused as a target",
-                kc_rdvz_connect(rdvz, previous, &rejoined) == KC_RDVZ_ENOENT);
-            fail += expect_true("rejoining creates a fresh peer",
-                kc_rdvz_connect(rdvz, kc_rdvz_peer_id(b), &rejoined) == KC_RDVZ_OK);
-            if (rejoined) {
-                fail += expect_true("rejoining peer gets a new ID",
-                    strcmp(kc_rdvz_peer_id(rejoined), "3") == 0);
-            }
-        }
-        fail += expect_true("close registry", kc_rdvz_close(rdvz) == KC_RDVZ_OK);
-    }
-    case_result(fail, "kc_rdvz_peer_id",
-        "exposes registry-scoped unique IDs and fresh identity on rejoin");
-    return fail != 0;
-}
-
-/**
- * Tests kc_rdvz_list and stable insertion-order enumeration.
- * @return Zero when all assertions pass.
- */
-static int case_kc_rdvz_list(void) {
-    kc_rdvz_t *rdvz = NULL;
+static int case_kc_rdvz_peer_disconnect(void)
+{
     kc_rdvz_peer_t *a = NULL, *b = NULL, *c = NULL;
-    rdvz_list_t list = {0};
+    rdvz_test_list_t links = {0};
     int fail = 0;
 
-    fail += expect_true("list rejects NULL registry",
-        kc_rdvz_list(NULL, rdvz_collect, &list) == KC_RDVZ_EINVAL);
-    fail += expect_true("open registry", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    if (rdvz) {
-        fail += expect_true("list rejects NULL callback",
-            kc_rdvz_list(rdvz, NULL, &list) == KC_RDVZ_EINVAL);
-        fail += expect_true("list accepts an empty registry",
-            kc_rdvz_list(rdvz, rdvz_collect, &list) == KC_RDVZ_OK &&
-            list.count == 0U);
-        fail += expect_true("create first peer",
-            kc_rdvz_connect(rdvz, NULL, &a) == KC_RDVZ_OK);
-        fail += expect_true("create second peer",
-            kc_rdvz_connect(rdvz, NULL, &b) == KC_RDVZ_OK);
-        fail += expect_true("create third peer",
-            kc_rdvz_connect(rdvz, NULL, &c) == KC_RDVZ_OK);
-        if (a && b && c) {
-            memset(&list, 0, sizeof(list));
-            fail += expect_true("list reports insertion order",
-                kc_rdvz_list(rdvz, rdvz_collect, &list) == KC_RDVZ_OK &&
-                list.count == 3U && list.first == a &&
-                list.second == b && list.last == c);
-            fail += expect_true("disconnect middle peer",
-                kc_rdvz_disconnect(b) == KC_RDVZ_OK);
-            memset(&list, 0, sizeof(list));
-            fail += expect_true("list retains remaining peers in order",
-                kc_rdvz_list(rdvz, rdvz_collect, &list) == KC_RDVZ_OK &&
-                list.count == 2U && list.first == a && list.last == c);
-        }
-        fail += expect_true("close registry", kc_rdvz_close(rdvz) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("open alpha",
+        kc_rdvz_open(&a, "alpha", NULL, NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("open beta",
+        kc_rdvz_open(&b, "beta", NULL, NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("open gamma",
+        kc_rdvz_open(&c, "gamma", NULL, NULL) == KC_RDVZ_OK);
+    if (a && b && c) {
+        fail += rdvz_test_expect("remove alpha-beta from beta side",
+            kc_rdvz_peer_disconnect(b, "alpha", NULL, NULL) == KC_RDVZ_OK);
+        fail += rdvz_test_expect("alpha is now isolated",
+            kc_rdvz_peer_list(a, rdvz_test_collect, &links)
+                == KC_RDVZ_OK && links.count == 0U);
+        memset(&links, 0, sizeof(links));
+        fail += rdvz_test_expect("gamma-beta remains",
+            kc_rdvz_peer_list(c, rdvz_test_collect, &links)
+                == KC_RDVZ_OK && links.count == 1U &&
+                strcmp(links.first, "beta") == 0);
+        fail += rdvz_test_expect("reverse disconnect finds no duplicate",
+            kc_rdvz_peer_disconnect(a, "beta", NULL, NULL) == KC_RDVZ_ENOENT);
     }
-    case_result(fail, "kc_rdvz_list",
-        "enumerates live peers in insertion order without including removed peers");
+    kc_rdvz_close(a);
+    kc_rdvz_close(b);
+    kc_rdvz_close(c);
+    rdvz_test_result(fail, "kc_rdvz_peer_disconnect",
+        "removes only one direct link from either endpoint");
     return fail != 0;
 }
 
 /**
- * Tests kc_rdvz_peer_list and nontransitive symmetric neighbors.
- * @return Zero when all assertions pass.
+ * Verify deleting one peer removes its incident edges, not other peers.
+ * @return Zero on success.
  */
-static int case_kc_rdvz_peer_list(void) {
-    kc_rdvz_t *rdvz = NULL;
-    kc_rdvz_peer_t *a = NULL, *b = NULL, *c = NULL;
-    rdvz_list_t list = {0};
+static int case_kc_rdvz_disconnect(void)
+{
+    kc_rdvz_peer_t *beta = NULL, *gamma = NULL;
+    rdvz_test_list_t links = {0};
     int fail = 0;
 
-    fail += expect_true("peer_list rejects NULL peer",
-        kc_rdvz_peer_list(NULL, rdvz_collect, &list) == KC_RDVZ_EINVAL);
-    fail += expect_true("open registry", kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK);
-    if (rdvz) {
-        fail += expect_true("create first peer",
-            kc_rdvz_connect(rdvz, NULL, &a) == KC_RDVZ_OK);
-        if (a) fail += expect_true("create second peer linked to first",
-            kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &b) == KC_RDVZ_OK);
-        if (b) fail += expect_true("create third peer linked to second",
-            kc_rdvz_connect(rdvz, kc_rdvz_peer_id(b), &c) == KC_RDVZ_OK);
-        if (a && b && c) {
-            fail += expect_true("peer_list rejects NULL visitor",
-                kc_rdvz_peer_list(a, NULL, &list) == KC_RDVZ_EINVAL);
-            fail += expect_true("only direct neighbors are included",
-                rdvz_expect_links(a, 1U) && rdvz_expect_links(c, 1U));
-            fail += expect_true("middle peer lists both direct neighbors",
-                kc_rdvz_peer_list(b, rdvz_collect, &list) == KC_RDVZ_OK &&
-                list.count == 2U && list.first == a && list.last == c);
-            fail += expect_true("disconnect first endpoint",
-                kc_rdvz_disconnect(a) == KC_RDVZ_OK);
-            memset(&list, 0, sizeof(list));
-            fail += expect_true("removing an endpoint updates neighbors",
-                kc_rdvz_peer_list(b, rdvz_collect, &list) == KC_RDVZ_OK &&
-                list.count == 1U && list.first == c);
-        }
-        fail += expect_true("close registry", kc_rdvz_close(rdvz) == KC_RDVZ_OK);
-    }
-    case_result(fail, "kc_rdvz_peer_list",
-        "enumerates direct neighbors only and reflects link removals");
+    fail += rdvz_test_expect("open before deletion",
+        kc_rdvz_open(&beta, "beta", NULL, NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("delete beta",
+        kc_rdvz_disconnect("beta") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("deleted peer cannot reopen",
+        kc_rdvz_open(&gamma, "beta", NULL, NULL) == KC_RDVZ_ENOENT);
+    fail += rdvz_test_expect("stale handle cannot connect",
+        beta && kc_rdvz_connect(beta, "alpha", NULL, NULL)
+            == KC_RDVZ_ENOENT);
+    fail += rdvz_test_expect("gamma survives",
+        kc_rdvz_open(&gamma, "gamma", NULL, NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("gamma loses only its deleted neighbor",
+        gamma && kc_rdvz_peer_list(gamma, rdvz_test_collect, &links)
+            == KC_RDVZ_OK && links.count == 0U);
+    kc_rdvz_close(beta);
+    kc_rdvz_close(gamma);
+    rdvz_test_result(fail, "kc_rdvz_disconnect",
+        "deletes one peer with its edges and invalidates old handles");
     return fail != 0;
 }
 
 /**
- * Tests kc_rdvz_disconnect and one callback per removed link.
- * @return Zero when all assertions pass.
+ * Verify creation callbacks receive the other peer's ID as a plain string.
+ * @return Zero on success.
  */
-static int case_kc_rdvz_disconnect(void) {
-    kc_rdvz_t *rdvz = NULL;
-    kc_rdvz_peer_t *a = NULL, *b = NULL, *c = NULL, *rejoined = NULL;
-    kc_rdvz_options_t options = {0};
-    rdvz_events_t events = {0};
-    int fail = 0;
-
-    fail += expect_true("disconnect rejects NULL peer",
-        kc_rdvz_disconnect(NULL) == KC_RDVZ_EINVAL);
-    options.on_connect = rdvz_on_connect;
-    options.on_disconnect = rdvz_on_disconnect;
-    options.userdata = &events;
-    fail += expect_true("open registry with link callbacks",
-        kc_rdvz_open(&rdvz, &options) == KC_RDVZ_OK);
-    if (rdvz) {
-        events.rdvz = rdvz;
-        fail += expect_true("create first peer",
-            kc_rdvz_connect(rdvz, NULL, &a) == KC_RDVZ_OK);
-        if (a) fail += expect_true("link second peer",
-            kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &b) == KC_RDVZ_OK);
-        if (b) fail += expect_true("link third peer",
-            kc_rdvz_connect(rdvz, kc_rdvz_peer_id(b), &c) == KC_RDVZ_OK);
-        if (a && b && c) {
-            fail += expect_true("one connect notification per link",
-                events.connected == 2U && events.unexpected == 0);
-            fail += expect_true("disconnect middle peer",
-                kc_rdvz_disconnect(b) == KC_RDVZ_OK);
-            fail += expect_true("both links trigger disconnect notification",
-                events.disconnected == 2U && events.unexpected == 0);
-            fail += expect_true("remaining peers survive independently",
-                rdvz_expect_links(a, 0U) && rdvz_expect_links(c, 0U));
-            fail += expect_true("rejoin surviving peer with new identity",
-                kc_rdvz_connect(rdvz, kc_rdvz_peer_id(c), &rejoined) ==
-                KC_RDVZ_OK);
-            if (rejoined) {
-                fail += expect_true("rejoined peer has symmetric link",
-                    rdvz_expect_links(rejoined, 1U) && rdvz_expect_links(c, 1U));
-                fail += expect_true("new link gets a connect notification",
-                    events.connected == 3U && events.unexpected == 0);
-                fail += expect_true("disconnect rejoined peer",
-                    kc_rdvz_disconnect(rejoined) == KC_RDVZ_OK);
-            }
-            fail += expect_true("disconnect callback counts new removal",
-                events.disconnected == 3U && events.unexpected == 0);
-        }
-        fail += expect_true("close registry", kc_rdvz_close(rdvz) == KC_RDVZ_OK);
-    }
-    case_result(fail, "kc_rdvz_disconnect",
-        "removes links without removing neighbors and delegates link events");
-    return fail != 0;
-}
-
-/**
- * Tests kc_rdvz_close, cleanup and absence of implicit departure callbacks.
- * @return Zero when all assertions pass.
- */
-static int case_kc_rdvz_close(void) {
-    kc_rdvz_t *rdvz = NULL;
+static int case_kc_rdvz_callbacks(void)
+{
     kc_rdvz_peer_t *a = NULL, *b = NULL;
-    kc_rdvz_options_t options = {0};
-    rdvz_events_t events = {0};
+    kc_rdvz_options_t options;
+    rdvz_test_seen_t incoming, connected, disconnected;
     int fail = 0;
 
-    fail += expect_true("close accepts NULL", kc_rdvz_close(NULL) == KC_RDVZ_OK);
-    options.on_connect = rdvz_on_connect;
-    options.on_disconnect = rdvz_on_disconnect;
-    options.userdata = &events;
-    fail += expect_true("open registry with callbacks",
-        kc_rdvz_open(&rdvz, &options) == KC_RDVZ_OK);
-    if (rdvz) {
-        events.rdvz = rdvz;
-        fail += expect_true("create first peer",
-            kc_rdvz_connect(rdvz, NULL, &a) == KC_RDVZ_OK);
-        if (a) fail += expect_true("create linked peer",
-            kc_rdvz_connect(rdvz, kc_rdvz_peer_id(a), &b) == KC_RDVZ_OK);
-        fail += expect_true("link notifies on connect",
-            events.connected == 1U && events.unexpected == 0);
-        fail += expect_true("close frees all remaining peers and links",
-            kc_rdvz_close(rdvz) == KC_RDVZ_OK);
-        fail += expect_true("close does not emit disconnect events",
-            events.disconnected == 0U);
+    memset(&options, 0, sizeof(options));
+    memset(&incoming, 0, sizeof(incoming));
+    memset(&connected, 0, sizeof(connected));
+    memset(&disconnected, 0, sizeof(disconnected));
+    atomic_init(&incoming.count, 0);
+    atomic_init(&connected.count, 0);
+    atomic_init(&disconnected.count, 0);
+    options.on_connect = rdvz_test_handler;
+    options.userdata = &incoming;
+    fail += rdvz_test_expect("create callback peer",
+        kc_rdvz_create(&a, "callback-a", &options) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create independent peer",
+        kc_rdvz_create(&b, "callback-b", NULL) == KC_RDVZ_OK);
+    if (a && b) {
+        fail += rdvz_test_expect("connect from other side",
+            kc_rdvz_connect(b, "callback-a",
+                rdvz_test_handler, &connected) == KC_RDVZ_OK);
+        fail += rdvz_test_expect("initiator receives literal other ID",
+            atomic_load(&connected.count) == 1 &&
+            strcmp(connected.other, "callback-a") == 0);
+#ifndef __EMSCRIPTEN__
+        fail += rdvz_test_expect("created peer observes remote ID",
+            rdvz_test_wait(&incoming, "callback-b"));
+#endif
+        fail += rdvz_test_expect("disconnect from either endpoint",
+            kc_rdvz_peer_disconnect(a, "callback-b",
+                rdvz_test_handler, &disconnected) == KC_RDVZ_OK);
+        fail += rdvz_test_expect("disconnect callback receives other ID",
+            atomic_load(&disconnected.count) == 1 &&
+            strcmp(disconnected.other, "callback-b") == 0);
     }
-    case_result(fail, "kc_rdvz_close",
-        "releases registry resources without synthetic disconnect notifications");
+    kc_rdvz_close(a);
+    kc_rdvz_close(b);
+    fail += rdvz_test_expect("delete callback-a",
+        kc_rdvz_disconnect("callback-a") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("delete callback-b",
+        kc_rdvz_disconnect("callback-b") == KC_RDVZ_OK);
+    rdvz_test_result(fail, "kc_rdvz_callbacks",
+        "creation and operation callbacks receive only the other ID");
     return fail != 0;
 }
 
 /**
- * Tests kc_rdvz_strerror on all statuses and an unknown error.
- * @return Zero when all assertions pass.
+ * Check whether a text file contains an expected peer identifier.
+ * @param filename Filename within test directory.
+ * @param expected Expected substring.
+ * @return Nonzero when found.
  */
-static int case_kc_rdvz_strerror(void) {
+static int rdvz_test_file_contains(const char *filename,
+    const char *expected)
+{
+    char path[RDVZ_TEST_PATH_MAX], buffer[256];
+    FILE *file;
+
+    if (rdvz_test_path(path, sizeof(path), filename)) return 0;
+    file = fopen(path, "rb");
+    if (!file) return 0;
+    if (!fgets(buffer, sizeof(buffer), file)) {
+        (void)fclose(file);
+        return 0;
+    }
+    (void)fclose(file);
+    return strstr(buffer, expected) != NULL;
+}
+
+/**
+ * Wait for an asynchronous configured command to write its other-peer ID.
+ * @param filename Test output filename.
+ * @param expected Expected peer identifier.
+ * @return Nonzero when the ID appears.
+ */
+static int rdvz_test_wait_file(const char *filename,
+    const char *expected)
+{
+    int i;
+
+    for (i = 0; i < 80; i++) {
+        if (rdvz_test_file_contains(filename, expected)) return 1;
+        rdvz_test_sleep();
+    }
+    return 0;
+}
+
+/**
+ * Verify a resident command runs after the creating handle closes.
+ * @return Zero on success.
+ */
+static int case_kc_rdvz_command(void)
+{
+#ifdef __EMSCRIPTEN__
+    rdvz_test_result(0, "kc_rdvz_command",
+        "native resident commands are not required in WASM");
+    return 0;
+#else
+    kc_rdvz_peer_t *a = NULL, *b = NULL;
+    kc_rdvz_options_t options;
+    char output[RDVZ_TEST_PATH_MAX], command[RDVZ_TEST_PATH_MAX + 32];
     int fail = 0;
 
-    fail += expect_true("success has stable message",
-        strcmp(kc_rdvz_strerror(KC_RDVZ_OK), "success") == 0);
-    fail += expect_true("unknown peer has stable message",
-        strcmp(kc_rdvz_strerror(KC_RDVZ_ENOENT), "peer not found") == 0);
-    fail += expect_true("invalid argument has stable message",
-        strcmp(kc_rdvz_strerror(KC_RDVZ_EINVAL), "invalid argument") == 0);
-    fail += expect_true("memory failure has stable message",
-        strcmp(kc_rdvz_strerror(KC_RDVZ_ENOMEM), "out of memory") == 0);
-    fail += expect_true("busy has stable message",
-        strcmp(kc_rdvz_strerror(KC_RDVZ_EBUSY), "registry busy") == 0);
-    fail += expect_true("ID limit has stable message",
-        strcmp(kc_rdvz_strerror(KC_RDVZ_ELIMIT), "peer ID limit reached") == 0);
-    fail += expect_true("unknown error has fallback message",
-        strcmp(kc_rdvz_strerror(-999), "unknown error") == 0);
-
-    case_result(fail, "kc_rdvz_strerror",
-        "returns stable descriptions for known and unknown statuses");
+    fail += rdvz_test_expect("output path",
+        rdvz_test_path(output, sizeof(output), "connected.txt") == 0);
+    memset(&options, 0, sizeof(options));
+    (void)snprintf(command, sizeof(command), "echo > \"%s\"", output);
+    options.cmd = command;
+    fail += rdvz_test_expect("register persistent connect command",
+        kc_rdvz_create(&a, "command-a", &options) == KC_RDVZ_OK);
+    kc_rdvz_close(a);
+    a = NULL;
+    fail += rdvz_test_expect("create other peer",
+        kc_rdvz_create(&b, "command-b", NULL) == KC_RDVZ_OK);
+    if (b) {
+        fail += rdvz_test_expect("connect without creator handle",
+            kc_rdvz_connect(b, "command-a", NULL, NULL) == KC_RDVZ_OK);
+        fail += rdvz_test_expect("command receives command-b ID",
+            rdvz_test_wait_file("connected.txt", "command-b"));
+    }
+    kc_rdvz_close(b);
+    fail += rdvz_test_expect("remove command-a",
+        kc_rdvz_disconnect("command-a") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("remove command-b",
+        kc_rdvz_disconnect("command-b") == KC_RDVZ_OK);
+    rdvz_test_result(fail, "kc_rdvz_command",
+        "persisted commands run with other peer IDs after local close");
     return fail != 0;
+#endif
 }
 
 /**
- * Tests kc_rdvz_version generated-build metadata.
- * @return Zero when all assertions pass.
+ * Verify stable errors and the generated build version.
+ * @return Zero on success.
  */
-static int case_kc_rdvz_version(void) {
-    int fail = expect_true("version is nonzero", kc_rdvz_version() != 0U);
+static int case_kc_rdvz_metadata(void)
+{
+    int fail = 0;
 
-    case_result(fail, "kc_rdvz_version",
-        "returns a nonzero generated build version");
+    fail += rdvz_test_expect("build version is nonzero",
+        kc_rdvz_version() != 0U);
+    fail += rdvz_test_expect("known success description",
+        strcmp(kc_rdvz_strerror(KC_RDVZ_OK), "success") == 0);
+    fail += rdvz_test_expect("known missing peer description",
+        strstr(kc_rdvz_strerror(KC_RDVZ_ENOENT), "not found") != NULL);
+    fail += rdvz_test_expect("unknown status description",
+        strcmp(kc_rdvz_strerror(-999), "unknown error") == 0);
+    rdvz_test_result(fail, "kc_rdvz_metadata",
+        "version and public error messages are available");
     return fail != 0;
 }
 
@@ -514,180 +526,255 @@ static int case_kc_rdvz_version(void) {
 #endif
 
 /**
- * Executes one CLI command, discarding output.
- * @param args Optional CLI arguments.
- * @return Process status from system.
+ * Run one native CLI command and discard its output.
+ * @param args Command arguments.
+ * @return Process exit status from system().
  */
-static int rdvz_cli_run(const char *args) {
-    char command[4096];
+static int rdvz_cli_run(const char *args)
+{
+    char line[RDVZ_TEST_PATH_MAX * 4];
 
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
-        KC_CLI_PATH, args ? args : "");
+    (void)snprintf(line, sizeof(line),
+        "\"\"%s\" %s > NUL 2>&1\"", KC_CLI_PATH, args ? args : "");
 #else
-    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
-        KC_CLI_PATH, args ? args : "");
+    (void)snprintf(line, sizeof(line),
+        "\"%s\" %s > /dev/null 2>&1", KC_CLI_PATH, args ? args : "");
 #endif
-    return system(command);
+    return system(line);
 }
 
 /**
- * Runs a CLI command and checks its exact stdout.
- * @param args Required CLI command arguments.
- * @param expected Expected output including line endings.
- * @return Nonzero when the command succeeds and stdout matches.
+ * Run the native CLI and compare exact stdout.
+ * @param args CLI arguments.
+ * @param expected Expected stdout.
+ * @return Nonzero when stdout matches.
  */
-static int rdvz_cli_output_equals(const char *args, const char *expected) {
-    const char *output_path = "rdvz-cli-output.txt";
-    char command[4096];
-    char output[256];
+static int rdvz_cli_equals(const char *args, const char *expected)
+{
+    char line[RDVZ_TEST_PATH_MAX * 4];
+    char path[RDVZ_TEST_PATH_MAX], text[2048];
     FILE *file;
-    size_t size;
+    size_t count;
 
+    if (rdvz_test_path(path, sizeof(path), "rdvz-cli-output.txt")) return 0;
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "\"\"%s\" %s > %s 2>NUL\"",
-        KC_CLI_PATH, args, output_path);
+    (void)snprintf(line, sizeof(line),
+        "\"\"%s\" %s > \"%s\" 2>NUL\"",
+        KC_CLI_PATH, args, path);
 #else
-    snprintf(command, sizeof(command), "\"%s\" %s > %s 2>/dev/null",
-        KC_CLI_PATH, args, output_path);
+    (void)snprintf(line, sizeof(line),
+        "\"%s\" %s > \"%s\" 2>/dev/null",
+        KC_CLI_PATH, args, path);
 #endif
-    if (system(command) != 0) {
-        remove(output_path);
-        return 0;
-    }
-    file = fopen(output_path, "rb");
-    if (!file) {
-        remove(output_path);
-        return 0;
-    }
-    size = fread(output, 1U, sizeof(output) - 1U, file);
-    fclose(file);
-    remove(output_path);
-    output[size] = '\0';
-    return strcmp(output, expected) == 0;
+    if (system(line) != 0) return 0;
+    file = fopen(path, "rb");
+    if (!file) return 0;
+    count = fread(text, 1U, sizeof(text) - 1U, file);
+    (void)fclose(file);
+    text[count] = '\0';
+    return strcmp(text, expected) == 0;
 }
 
 /**
- * Prints one CLI result using the shared functional test counter.
- * @param name CLI test name.
- * @param detail CLI behavior under test.
- * @param ok Nonzero if the behavior matches the contract.
- * @return Zero on success and one on failure.
+ * Verify help and version are functional native CLI commands.
+ * @return Zero on success.
  */
-static int rdvz_cli_result(const char *name, const char *detail, int ok) {
-    test_case_current++;
-    case_result(!ok, name, detail);
-    return ok ? 0 : 1;
-}
-
-/**
- * Tests each supported CLI operation and invalid invocations.
- * @return Number of failed CLI cases.
- */
-static int case_rdvz_cli(void) {
-    char help[512];
-    int failures = 0;
-
-    snprintf(help, sizeof(help),
-        "Usage: %s connect" KC_LINE_END
+static int case_rdvz_cli_help(void)
+{
+    const char *expected =
+        "Usage: rdvz <id> [command...]" KC_LINE_END
+        KC_LINE_END
+        "Commands:" KC_LINE_END
+        "  rdvz <id> <cmd>              Create or update a peer" KC_LINE_END
+        "  rdvz [id1] -l                List peers or direct links" KC_LINE_END
+        "  rdvz <id1> -c <id2> [cmd]    Connect two peers" KC_LINE_END
+        "  rdvz <id1> -d [id2] [cmd]    Disconnect a link or remove a peer" KC_LINE_END
         KC_LINE_END
         "Options:" KC_LINE_END
-        "  -h, --help     Show this help" KC_LINE_END
-        "  -v, --version  Show version" KC_LINE_END,
-        KC_CLI_PATH);
-    failures += rdvz_cli_result("help", "-h and --help show usage and options",
-        rdvz_cli_output_equals("-h", help) &&
-        rdvz_cli_output_equals("--help", help));
-    failures += rdvz_cli_result("version", "-v and --version succeed",
-        rdvz_cli_run("-v") == 0 &&
-        rdvz_cli_run("--version") == 0);
-    failures += rdvz_cli_result("connect", "connect prints a fresh peer ID",
-        rdvz_cli_output_equals("connect", "1" KC_LINE_END));
-    failures += rdvz_cli_result("missing", "command is required",
-        rdvz_cli_run(NULL) != 0);
-    failures += rdvz_cli_result("unknown", "unknown command fails",
-        rdvz_cli_run("--unknown") != 0);
+        "  -l, --list        List peers or direct links" KC_LINE_END
+        "  -c, --connect     Connect two peers" KC_LINE_END
+        "  -d, --disconnect  Disconnect a link or remove a peer" KC_LINE_END
+        "  -h, --help        Show this help" KC_LINE_END
+        "  -v, --version     Show version" KC_LINE_END;
+    int fail = 0;
 
-    return failures;
+    fail += rdvz_test_expect("short help",
+        rdvz_cli_equals("-h", expected));
+    fail += rdvz_test_expect("long help",
+        rdvz_cli_equals("--help", expected));
+    fail += rdvz_test_expect("short version",
+        rdvz_cli_run("-v") == 0);
+    fail += rdvz_test_expect("long version",
+        rdvz_cli_run("--version") == 0);
+    rdvz_test_result(fail, "rdvz_cli_help",
+        "help and version follow the kclib convention");
+    return fail != 0;
+}
+
+/**
+ * Verify peer creation and listing across independent CLI processes.
+ * @return Zero on success.
+ */
+static int case_rdvz_cli_create(void)
+{
+    char command[RDVZ_TEST_PATH_MAX * 2];
+    char path[RDVZ_TEST_PATH_MAX];
+    int fail = 0;
+
+    fail += rdvz_test_expect("list starts without CLI peers",
+        rdvz_cli_equals("-l", "alpha" KC_LINE_END "gamma" KC_LINE_END));
+    fail += rdvz_test_expect("create cli-a",
+        rdvz_test_path(path, sizeof(path), "rdvz-cli-event.txt") == 0);
+    (void)snprintf(command, sizeof(command),
+        "cli-a \"echo > '%s'\"", path);
+    fail += rdvz_test_expect("create command is persisted",
+        rdvz_cli_run(command) == 0);
+    fail += rdvz_test_expect("create cli-b",
+        rdvz_cli_run("cli-b \"echo\"") == 0);
+    fail += rdvz_test_expect("list sees both CLI peers",
+        rdvz_cli_equals("-l",
+            "alpha" KC_LINE_END "gamma" KC_LINE_END
+            "cli-a" KC_LINE_END "cli-b" KC_LINE_END));
+    rdvz_test_result(fail, "rdvz_cli_create",
+        "CLI-created peers survive separate invocations");
+    return fail != 0;
+}
+
+/**
+ * Verify the CLI link and unlink operations are symmetric.
+ * @return Zero on success.
+ */
+static int case_rdvz_cli_links(void)
+{
+    int fail = 0;
+
+    fail += rdvz_test_expect("connect cli-b to cli-a",
+        rdvz_cli_run("cli-b -c cli-a") == 0);
+    fail += rdvz_test_expect("cli-a sees cli-b",
+        rdvz_cli_equals("cli-a -l", "cli-b" KC_LINE_END));
+    fail += rdvz_test_expect("cli-b sees cli-a",
+        rdvz_cli_equals("cli-b -l", "cli-a" KC_LINE_END));
+    fail += rdvz_test_expect("persistent command receives cli-b",
+        rdvz_test_wait_file("rdvz-cli-event.txt", "cli-b"));
+    fail += rdvz_test_expect("remove from reverse endpoint",
+        rdvz_cli_run("cli-a -d cli-b") == 0);
+    fail += rdvz_test_expect("both peers remain without links",
+        rdvz_cli_equals("cli-a -l", "") &&
+        rdvz_cli_equals("cli-b -l", ""));
+    rdvz_test_result(fail, "rdvz_cli_links",
+        "CLI connects and disconnects the same symmetric relation");
+    return fail != 0;
+}
+
+/**
+ * Verify deleting a peer affects neither other identities nor CLI usability.
+ * @return Zero on success.
+ */
+static int case_rdvz_cli_disconnect(void)
+{
+    int fail = 0;
+
+    fail += rdvz_test_expect("delete cli-a",
+        rdvz_cli_run("cli-a -d") == 0);
+    fail += rdvz_test_expect("cli-b remains",
+        rdvz_cli_equals("cli-b -l", ""));
+    fail += rdvz_test_expect("delete cli-b",
+        rdvz_cli_run("cli-b --disconnect") == 0);
+    fail += rdvz_test_expect("missing CLI peer fails",
+        rdvz_cli_run("cli-a -l") != 0);
+    fail += rdvz_test_expect("unknown command fails",
+        rdvz_cli_run("cli-a --unknown") != 0);
+    rdvz_test_result(fail, "rdvz_cli_disconnect",
+        "deleting a peer removes only that named identity");
+    return fail != 0;
 }
 #endif
 
 /**
- * Runs every public API contract and native CLI case.
- * @return Zero on success and nonzero on failure.
+ * Run one contract case and advance the shared progress counter.
+ * @param failures Accumulated failing case count.
+ * @param test One zero-on-success contract case.
+ * @return None.
  */
-static int case_all(void) {
-    int rc = 0;
+static void rdvz_run_case(int *failures, int (*test)(void))
+{
+    rdvz_case_current++;
+    *failures += test();
+}
+
+/**
+ * Run the entire native or WASM contract.
+ * @return Zero when all cases passed.
+ */
+static int rdvz_test_all(void)
+{
+    int failures = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 9;
+    rdvz_case_total = 7;
 #else
-    test_case_total = 14;
+    rdvz_case_total = 11;
 #endif
-    test_case_current = 0;
-    run_case(&rc, case_kc_rdvz_open);
-    run_case(&rc, case_kc_rdvz_connect);
-    run_case(&rc, case_kc_rdvz_peer_id);
-    run_case(&rc, case_kc_rdvz_list);
-    run_case(&rc, case_kc_rdvz_peer_list);
-    run_case(&rc, case_kc_rdvz_disconnect);
-    run_case(&rc, case_kc_rdvz_close);
-    run_case(&rc, case_kc_rdvz_strerror);
-    run_case(&rc, case_kc_rdvz_version);
+    rdvz_case_current = 0;
+    rdvz_run_case(&failures, case_kc_rdvz_create);
+    rdvz_run_case(&failures, case_kc_rdvz_connect);
+    rdvz_run_case(&failures, case_kc_rdvz_peer_disconnect);
+    rdvz_run_case(&failures, case_kc_rdvz_disconnect);
+    rdvz_run_case(&failures, case_kc_rdvz_callbacks);
+    rdvz_run_case(&failures, case_kc_rdvz_command);
+    rdvz_run_case(&failures, case_kc_rdvz_metadata);
 #ifndef __EMSCRIPTEN__
-    rc += case_rdvz_cli();
+    rdvz_run_case(&failures, case_rdvz_cli_help);
+    rdvz_run_case(&failures, case_rdvz_cli_create);
+    rdvz_run_case(&failures, case_rdvz_cli_links);
+    rdvz_run_case(&failures, case_rdvz_cli_disconnect);
 #endif
-
-    printf("%d passed, %d failed\n", test_case_total - rc, rc);
-    return rc ? 1 : 0;
+    printf("%d passed, %d failed\n",
+        rdvz_case_total - failures, failures);
+    return failures ? 1 : 0;
 }
 
 /**
- * Runs one named functional test or the complete contract suite.
+ * Execute all tests or one named public contract case.
  * @param argc Argument count.
- * @param argv Test name as one argument.
- * @return Zero on success, one on failure or two for invalid usage.
+ * @param argv Argument vector.
+ * @return Zero when successful.
  */
-int main(int argc, char **argv) {
-    typedef struct {
+int main(int argc, char **argv)
+{
+    static const struct {
         const char *name;
-        int (*fn)(void);
-    } rdvz_test_case_t;
-    static const rdvz_test_case_t cases[] = {
-        {"kc_rdvz_open", case_kc_rdvz_open},
+        int (*run)(void);
+    } cases[] = {
+        {"kc_rdvz_create", case_kc_rdvz_create},
         {"kc_rdvz_connect", case_kc_rdvz_connect},
-        {"kc_rdvz_peer_id", case_kc_rdvz_peer_id},
-        {"kc_rdvz_list", case_kc_rdvz_list},
-        {"kc_rdvz_peer_list", case_kc_rdvz_peer_list},
+        {"kc_rdvz_peer_disconnect", case_kc_rdvz_peer_disconnect},
         {"kc_rdvz_disconnect", case_kc_rdvz_disconnect},
-        {"kc_rdvz_close", case_kc_rdvz_close},
-        {"kc_rdvz_strerror", case_kc_rdvz_strerror},
-        {"kc_rdvz_version", case_kc_rdvz_version}
+        {"kc_rdvz_callbacks", case_kc_rdvz_callbacks},
+        {"kc_rdvz_command", case_kc_rdvz_command},
+        {"kc_rdvz_metadata", case_kc_rdvz_metadata}
     };
     size_t i;
+    int rc = 2;
 
     if (argc != 2) {
-        fprintf(stderr, "test case: expected one argument, got %d\n", argc - 1);
+        fprintf(stderr, "test case: expected one argument\n");
         return 2;
     }
-    if (strcmp(argv[1], "all") == 0) return case_all();
-    for (i = 0U; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        if (strcmp(argv[1], cases[i].name) == 0) {
-            test_case_total = 1;
-            test_case_current = 1;
-            return cases[i].fn();
+    if (rdvz_test_setup() != 0) return 2;
+    if (strcmp(argv[1], "all") == 0) rc = rdvz_test_all();
+    else {
+        for (i = 0U; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            if (strcmp(argv[1], cases[i].name) == 0) {
+                rdvz_case_current = 1;
+                rdvz_case_total = 1;
+                rc = cases[i].run();
+                break;
+            }
         }
+        if (rc == 2) fprintf(stderr, "unknown test case: %s\n", argv[1]);
     }
-#ifndef __EMSCRIPTEN__
-    if (strcmp(argv[1], "rdvz_cli") == 0) {
-        int failures;
-        test_case_total = 5;
-        test_case_current = 0;
-        failures = case_rdvz_cli();
-        printf("%d passed, %d failed\n", test_case_total - failures, failures);
-        return failures ? 1 : 0;
-    }
-#endif
-    fprintf(stderr, "unknown test case: %s\n", argv[1]);
-    return 2;
+    rdvz_test_cleanup();
+    return rc;
 }
