@@ -193,7 +193,7 @@ static void stun_test_ipv6(void)
     char address[128];int rc;
     so.host="::1";so.port=0;
     rc=kc_stun_server(&server,&so);
-    if(rc!=KC_STUN_OK){test_case_total -= 2; printf("[SKIP] IPv6 loopback unavailable\n"); return;}
+    if(rc!=KC_STUN_OK){test_case_total -= 1; printf("[SKIP] IPv6 loopback unavailable\n"); return;}
     snprintf(address,sizeof(address),"[::1]:%u",kc_stun_server_port(server));
     co.peer.host=address;co.host="::1";co.timeout_ms=1000;
     rc=kc_stun_client(&client,&co);
