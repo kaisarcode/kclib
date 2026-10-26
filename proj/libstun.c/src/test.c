@@ -17,8 +17,11 @@ static kc_stun_client_t *stun_test_client;
 static kc_stun_client_t *stun_test_second_client;
 static kc_stun_server_t *stun_test_server;
 static int stun_test_seen_priority;
+static int stun_test_seen_sha1;
+static int stun_test_seen_sha256;
 static int stun_test_role_conflict;
 static int stun_test_tamper;
+static int stun_test_wrong_integrity;
 static int stun_test_bad_key;
 static unsigned int stun_test_sent;
 static unsigned int stun_test_replies;
@@ -82,7 +85,28 @@ static int stun_test_server_send(void *context, const kc_stun_endpoint_t *peer,
     const kc_stun_endpoint_t from={"127.0.0.1",42424};
     (void)context;(void)peer;
     stun_test_replies++;
-    if(stun_test_tamper&&size){
+    if(stun_test_wrong_integrity&&size){
+        kc_stun_message_t decoded={0};
+        kc_stun_credentials_t credentials={0};
+        unsigned char forged[1024];
+        size_t n=sizeof(forged),i,j=0;
+        if(kc_stun_decode(bytes,size,&decoded)!=KC_STUN_OK)return 1;
+        for(i=0;i<decoded.attribute_count;i++){
+            if(decoded.attributes[i].type!=KC_STUN_MESSAGE_INTEGRITY&&
+                decoded.attributes[i].type!=KC_STUN_MESSAGE_INTEGRITY_SHA256&&
+                decoded.attributes[i].type!=KC_STUN_FINGERPRINT)
+                decoded.attributes[j++]=decoded.attributes[i];
+        }
+        decoded.attribute_count=j;
+        credentials.key="incorrect-key";
+        credentials.key_size=strlen((const char *)credentials.key);
+        credentials.integrity=KC_STUN_HMAC_SHA256;
+        if(kc_stun_encode(&decoded,&credentials,forged,&n)!=KC_STUN_OK){
+            kc_stun_message_free(&decoded);return 1;
+        }
+        kc_stun_message_free(&decoded);
+        (void)kc_stun_client_receive(stun_test_client,&from,forged,n);
+    }else if(stun_test_tamper&&size){
         unsigned char *copy=(unsigned char *)malloc(size);
         if(!copy)return 1;
         memcpy(copy,bytes,size);copy[size-1]^=0x10U;
@@ -128,8 +152,14 @@ static int stun_test_credentials(void *context,const char *username,kc_stun_cred
 static unsigned short stun_test_binding(void *context,const kc_stun_endpoint_t *peer,const kc_stun_attribute_t *attributes,size_t count)
 {
     size_t i;(void)context;(void)peer;
-    for(i=0;i<count;i++)if(attributes[i].type==0x0024&&attributes[i].size==4)
-        stun_test_seen_priority=1;
+    for(i=0;i<count;i++){
+        if(attributes[i].type==KC_STUN_PRIORITY&&attributes[i].size==4)
+            stun_test_seen_priority=1;
+        if(attributes[i].type==KC_STUN_MESSAGE_INTEGRITY)
+            stun_test_seen_sha1=1;
+        if(attributes[i].type==KC_STUN_MESSAGE_INTEGRITY_SHA256)
+            stun_test_seen_sha256=1;
+    }
     return stun_test_role_conflict?487U:0U;
 }
 
@@ -260,10 +290,13 @@ static void stun_test_borrowed(void)
             "verifies the authenticated Binding response");
         if(!stun_test_seen_priority)attributes_ok=0;
         if(i==2){
+            stun_test_seen_sha1=0;
+            stun_test_seen_sha256=0;
             rc=kc_stun_client_refresh(stun_test_client,500);
             if(rc!=KC_STUN_OK)refresh_ok=0;
             rc=kc_stun_client_poll(stun_test_client,0);
-            if(rc!=KC_STUN_OK)refresh_ok=0;
+            if(rc!=KC_STUN_OK||!stun_test_seen_sha256||stun_test_seen_sha1)
+                refresh_ok=0;
             {
                 unsigned int before=stun_test_replies;
                 rc=kc_stun_client_keepalive(stun_test_client);
@@ -296,7 +329,18 @@ static void stun_test_borrowed(void)
         kc_stun_client_close(stun_test_client);
     }else stun_test_check(0,"fingerprint", "starts the fingerprint rejection check");
     stun_test_tamper=0;
-    stun_test_group("kc_stun_integrity", "rejects responses with an invalid fingerprint");
+    stun_test_wrong_integrity=1;
+    co.timeout_ms=25;
+    rc=kc_stun_client(&stun_test_client,&co);
+    if(rc==KC_STUN_OK){
+        rc=kc_stun_client_poll(stun_test_client,0);
+        while(rc==KC_STUN_PENDING)rc=kc_stun_client_poll(stun_test_client,30);
+        stun_test_check(rc==KC_STUN_EAUTH,"invalid_hmac",
+            "reports an integrity violation instead of a network timeout");
+        kc_stun_client_close(stun_test_client);
+    }else stun_test_check(0,"invalid_hmac","starts a short-term HMAC verification");
+    stun_test_wrong_integrity=0;
+    stun_test_group("kc_stun_integrity", "rejects invalid fingerprints and HMACs");
     stun_test_bad_key=1;stun_test_sent=0;
     co.timeout_ms=10;
     rc=kc_stun_client(&stun_test_client,&co);
