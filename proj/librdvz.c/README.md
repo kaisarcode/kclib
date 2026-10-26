@@ -1,13 +1,12 @@
 # librdvz.c - Peer rendezvous
 
-`librdvz.c` creates named peers and maintains direct, bidirectional
-relationships between them. Peers remain registered across processes until
-explicitly disconnected. A relationship is symmetric: either peer can connect
-or disconnect without becoming the owner of the other.
+`librdvz.c` allows applications to register peers by name, connect them, and track their connections.
 
-Connections do not establish a network transport or deliver application
-messages. A peer may have multiple direct neighbors; relationships are not
-transitive and repeated connections do not create duplicate links.
+Each peer has a unique name and can connect to multiple peers. When a connection is established, the peer's callback receives the name of the connected peer, allowing the application to perform an action.
+
+Applications can list registered peers, check which peers are connected, and disconnect them individually. Peers remain registered across processes until explicitly removed.
+
+`librdvz.c` manages peer registration and connections without handling network communication or data transfer.
 
 ## Quick start
 
