@@ -97,6 +97,66 @@ typedef struct {
  */
 int kc_stun_is_message(const void *bytes, size_t size);
 
+#define KC_STUN_REQUEST 0x0001u
+#define KC_STUN_INDICATION 0x0011u
+#define KC_STUN_SUCCESS_RESPONSE 0x0101u
+#define KC_STUN_ERROR_RESPONSE 0x0111u
+#define KC_STUN_PRIORITY 0x0024u
+#define KC_STUN_USE_CANDIDATE 0x0025u
+#define KC_STUN_ICE_CONTROLLED 0x8029u
+#define KC_STUN_ICE_CONTROLLING 0x802au
+
+/**
+ * A decoded STUN message backed by the caller's immutable byte buffer.
+ * Attributes are returned as views: do not free their data pointers.
+ */
+typedef struct {
+    unsigned short type;
+    unsigned char transaction_id[12];
+    kc_stun_attribute_t *attributes;
+    size_t attribute_count;
+} kc_stun_message_t;
+
+/**
+ * Parses a complete STUN datagram into attribute views.
+ * Call kc_stun_message_free to release only the attribute array.
+ * @return KC_STUN_OK or a negative status.
+ */
+int kc_stun_decode(const void *bytes,size_t size,kc_stun_message_t *out);
+
+/** Frees decoded attribute views without freeing caller-owned bytes. */
+void kc_stun_message_free(kc_stun_message_t *message);
+
+/**
+ * Encodes a STUN message in an externally supplied buffer.
+ * If credentials has a key, appends requested SHA-1/SHA-256 integrity.
+ * Always appends FINGERPRINT. The caller supplies transaction_id.
+ * Raw attributes must not include integrity or fingerprint attributes.
+ * @param size In: buffer capacity; out: encoded length.
+ */
+int kc_stun_encode(const kc_stun_message_t *message,
+    const kc_stun_credentials_t *credentials,void *out,size_t *size);
+
+/** Verifies a message's FINGERPRINT; absence is an error. */
+int kc_stun_verify_fingerprint(const void *bytes,size_t size);
+
+/** Verifies a message's HMAC with caller-supplied credentials. */
+int kc_stun_verify_integrity(const void *bytes,size_t size,
+    const void *key,size_t key_size);
+
+/** Compares two STUN transaction identifiers. */
+int kc_stun_transaction_matches(const kc_stun_message_t *message,
+    const unsigned char id[12]);
+
+/** Decodes XOR-MAPPED-ADDRESS to caller-owned numeric host storage. */
+int kc_stun_decode_mapped(const kc_stun_attribute_t *attribute,
+    const unsigned char id[12],char *host,size_t host_size,
+    unsigned short *port);
+
+/** Encodes an XOR-MAPPED-ADDRESS value into caller-owned storage. */
+int kc_stun_encode_mapped(const kc_stun_endpoint_t *endpoint,
+    const unsigned char id[12],void *out,size_t *size);
+
 /**
  * Begins one authenticated or anonymous Binding transaction.
  * @param out Destination client pointer.
