@@ -51,10 +51,11 @@ static void case_result(int fail, const char *name, const char *detail)
  */
 static void stun_test_check(int pass, const char *name, const char *detail)
 {
-    (void)name;
-    (void)detail;
     stun_group_checks++;
-    if (!pass) stun_group_failures++;
+    if (!pass) {
+        fprintf(stderr, "    FAIL %s: %s\n", name, detail);
+        stun_group_failures++;
+    }
 }
 
 /**
@@ -160,6 +161,7 @@ static void stun_test_owned(void)
                 "pending_udp_receive","preserves data received during Binding polling");
             if(received)kc_stun_datagram_free(&data);
         }else stun_test_check(0,"pending_udp_receive","preserves data received during Binding polling");
+        stun_test_group("kc_stun_datagrams", "preserves application traffic during and after Binding");
         mapped=kc_stun_client_mapped(client);
         stun_test_check(rc==KC_STUN_OK&&mapped&&mapped->port&&strcmp(mapped->host,"127.0.0.1")==0,"kc_stun_client_mapped", "returns the IPv4 mapped endpoint");
         if(mapped){
@@ -170,15 +172,19 @@ static void stun_test_owned(void)
             stun_test_check(rc==KC_STUN_OK&&data.data_size==sizeof(payload)&&memcmp(data.data,payload,sizeof(payload))==0,"kc_stun_client_read", "receives application data through the mapping");
             kc_stun_datagram_free(&data);
         }
+        stun_test_group("kc_stun_mapping", "discovers public mapping and keeps the socket available");
         rc=kc_stun_client_refresh(client,2000);
         stun_test_check(rc==KC_STUN_OK,"kc_stun_client_refresh", "refreshes on the existing socket");
         if(rc==KC_STUN_OK){
             do{rc=kc_stun_client_poll(client,50);}while(rc==KC_STUN_PENDING);
             stun_test_check(rc==KC_STUN_OK,"kc_stun_client_poll", "receives the refreshed mapping response");
         }
+        stun_test_group("kc_stun_refresh", "renews Binding on the existing UDP mapping");
         kc_stun_client_close(client);
+    } else {
+        stun_test_group("kc_stun_datagrams", "preserves application traffic during and after Binding");
+        test_case_total -= 2;
     }
-    stun_test_group("kc_stun_client", "discovers mapping and preserves UDP application data");
     kc_stun_server_close(server);
 }
 
@@ -355,9 +361,9 @@ static void stun_test_command_line(void)
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 9;
+    test_case_total = 10;
 #else
-    test_case_total = 8;
+    test_case_total = 9;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
