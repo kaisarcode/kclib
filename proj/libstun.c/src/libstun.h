@@ -87,7 +87,7 @@ int kc_stun_client_receive(kc_stun_client_t *client, const kc_stun_endpoint_t *p
 const kc_stun_endpoint_t *kc_stun_client_local(const kc_stun_client_t *client);
 /** Endpoint observed by peer after a successful Binding transaction. */
 const kc_stun_endpoint_t *kc_stun_client_mapped(const kc_stun_client_t *client);
-/** Parsed response attributes, valid until client_close. */
+/** Parsed response attributes, valid until client_refresh() or client_close(). */
 const kc_stun_attribute_t *kc_stun_client_attributes(const kc_stun_client_t *client, size_t *count);
 /** Sends an application UDP datagram through the same mapping (owned or borrowed). */
 int kc_stun_client_send(kc_stun_client_t *client, const kc_stun_endpoint_t *peer, const void *bytes, size_t size);
