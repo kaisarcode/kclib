@@ -59,7 +59,8 @@ datagram and provides attribute views; the caller retains the input buffer until
 externally received messages, while `kc_stun_transaction_matches()` checks
 transaction IDs. `kc_stun_encode_mapped()` and `kc_stun_decode_mapped()`
 encode and decode IPv4/IPv6 XOR-MAPPED-ADDRESS attributes using caller-owned
-storage. Other STUN and extension attributes use the generic attribute array,
+storage. `kc_stun_encode_error()` and `kc_stun_decode_error()` handle ERROR-CODE
+attribute values. Other STUN and extension attributes use the generic attribute array,
 including those used by ICE; `libstun` does not interpret ICE roles or policy.
 
 The codec does not own UDP reception, maintain a transaction scheduler, or
