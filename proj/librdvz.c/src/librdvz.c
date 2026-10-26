@@ -93,12 +93,19 @@ struct kc_rdvz_peer {
     void *userdata;
     atomic_int stop;
     int started;
+#ifdef __EMSCRIPTEN__
+    struct kc_rdvz_peer *next;
+#endif
 #ifdef _WIN32
     HANDLE thread;
 #elif !defined(__EMSCRIPTEN__)
     pthread_t thread;
 #endif
 };
+
+#ifdef __EMSCRIPTEN__
+static kc_rdvz_peer_t *kc_rdvz_handles = NULL;
+#endif
 
 #ifdef _WIN32
 static SRWLOCK kc_rdvz_process_lock = SRWLOCK_INIT;
@@ -662,7 +669,10 @@ static int kc_rdvz_handle(kc_rdvz_peer_t **out, const char *dir,
     peer->userdata = userdata;
     peer->event_offset = kc_rdvz_event_size(dir, peer->id);
     atomic_init(&peer->stop, 0);
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+    peer->next = kc_rdvz_handles;
+    kc_rdvz_handles = peer;
+#else
     if (callback) {
 #ifdef _WIN32
         peer->thread = CreateThread(NULL, 0, kc_rdvz_worker, peer, 0, NULL);
@@ -957,6 +967,22 @@ done:
     if (rc == KC_RDVZ_OK) {
         kc_rdvz_command(left_command, other);
         kc_rdvz_command(right_command, peer->id);
+#ifdef __EMSCRIPTEN__
+        {
+            kc_rdvz_peer_t *current = kc_rdvz_handles;
+            while (current) {
+                kc_rdvz_peer_t *next = current->next;
+                if (current->on_connect) {
+                    if (strcmp(current->id, peer->id) == 0 &&
+                            current->generation == peer->generation)
+                        current->on_connect(other, current->userdata);
+                    else if (strcmp(current->id, other) == 0)
+                        current->on_connect(peer->id, current->userdata);
+                }
+                current = next;
+            }
+        }
+#endif
         if (callback) callback(other, userdata);
     }
     return rc;
@@ -1055,7 +1081,13 @@ void kc_rdvz_close(kc_rdvz_peer_t *peer)
 {
     if (!peer) return;
     atomic_store(&peer->stop, 1);
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+    {
+        kc_rdvz_peer_t **slot = &kc_rdvz_handles;
+        while (*slot && *slot != peer) slot = &(*slot)->next;
+        if (*slot) *slot = peer->next;
+    }
+#else
     if (peer->started) {
 #ifdef _WIN32
         (void)WaitForSingleObject(peer->thread, INFINITE);
