@@ -1,6 +1,6 @@
 /**
- * librdvz.h - Generic peer rendezvous relationships.
- * Summary: Public API for independent peers and their direct links.
+ * librdvz.h - Named peer rendezvous relationships.
+ * Summary: Public API for resident peers and direct symmetric links.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -16,125 +16,138 @@
 extern "C" {
 #endif
 
-typedef struct kc_rdvz kc_rdvz_t;
 typedef struct kc_rdvz_peer kc_rdvz_peer_t;
 
-#define KC_RDVZ_OK 0
-#define KC_RDVZ_ENOENT -1
-#define KC_RDVZ_EINVAL -2
-#define KC_RDVZ_ENOMEM -3
-#define KC_RDVZ_EBUSY -4
-#define KC_RDVZ_ELIMIT -5
-
 /**
- * Observes one created or removed direct link.
- * Both peers are valid during the notification. Callbacks may inspect the
- * registry but must not mutate or close it; mutations return KC_RDVZ_EBUSY.
- * @param peer Peer initiating connection or disconnection.
- * @param other Peer at the opposite end of the link.
- * @param userdata Application context supplied to open.
+ * Receives the identifier of the other peer in an established relationship.
+ * The string is borrowed and remains valid only during the callback.
+ * @param other Identifier of the other peer.
+ * @param userdata Caller-supplied context.
  * @return None.
  */
-typedef void (*kc_rdvz_link_fn)(const kc_rdvz_peer_t *peer,
-    const kc_rdvz_peer_t *other, void *userdata);
+typedef void (*kc_rdvz_handler_t)(const char *other, void *userdata);
 
 /**
- * Visits one peer during a list operation.
- * The registry cannot be mutated or closed during iteration.
- * @param peer Borrowed peer reference, valid until disconnection or close.
- * @param userdata Context supplied to the list operation.
+ * Visits one named peer. The identifier is borrowed for the visit.
+ * @param id Peer identifier.
+ * @param userdata Caller-supplied context.
  * @return None.
  */
-typedef void (*kc_rdvz_visit_fn)(const kc_rdvz_peer_t *peer, void *userdata);
+typedef void (*kc_rdvz_visit_t)(const char *id, void *userdata);
 
-/**
- * Optional rendezvous notifications.
- * Notifications are synchronous, occur once per created or removed direct
- * link, and do not imply transport, message delivery or peer authentication.
- */
 typedef struct {
-    kc_rdvz_link_fn on_connect;
-    kc_rdvz_link_fn on_disconnect;
+    const char *cmd;
+    kc_rdvz_handler_t on_connect;
     void *userdata;
 } kc_rdvz_options_t;
 
-/**
- * Opens an independent in-memory registry.
- * @param out Destination for the owned registry.
- * @param options Optional notification callbacks and application context.
- * @return KC_RDVZ_OK, KC_RDVZ_EINVAL, or KC_RDVZ_ENOMEM.
- */
-int kc_rdvz_open(kc_rdvz_t **out, const kc_rdvz_options_t *options);
+#define KC_RDVZ_OK        0
+#define KC_RDVZ_ENOENT   -1
+#define KC_RDVZ_EINVAL   -2
+#define KC_RDVZ_ENOMEM   -3
+#define KC_RDVZ_EEXIST  -4
+#define KC_RDVZ_EIO     -5
 
 /**
- * Creates a new peer and optionally links it to an existing peer.
- * Passing NULL as target_id creates an independent peer. Every successful
- * call creates a fresh, registry-unique ID; the supplied ID identifies the
- * target, not the new peer. A link is symmetric and never creates transitive
- * links. On success, on_connect runs once if a link was created.
- * @param rdvz Open registry.
- * @param target_id Existing peer ID, or NULL for an independent peer.
- * @param out Destination for the owned peer handle.
- * @return KC_RDVZ_OK, KC_RDVZ_ENOENT, KC_RDVZ_EINVAL,
- *         KC_RDVZ_ENOMEM, KC_RDVZ_EBUSY, or KC_RDVZ_ELIMIT.
+ * Create or update one named resident peer and open a local handle.
+ * The optional command persists and runs with the other peer ID for every
+ * newly created direct link, regardless of which side initiated it.
+ * The optional callback belongs to this handle, not to the resident peer.
+ * @param out Receives the local peer handle.
+ * @param id Peer identifier.
+ * @param options Optional resident command and local connect callback.
+ * @return KC_RDVZ_OK or a KC_RDVZ_* error.
  */
-int kc_rdvz_connect(kc_rdvz_t *rdvz, const char *target_id,
-    kc_rdvz_peer_t **out);
+int kc_rdvz_create(kc_rdvz_peer_t **out, const char *id,
+    const kc_rdvz_options_t *options);
 
 /**
- * Returns the stable ID of a connected peer.
- * The string remains valid until the peer disconnects or the registry closes.
- * @param peer Live peer.
- * @return Borrowed ID or NULL for an invalid handle.
+ * Open a temporary handle to an existing named peer.
+ * The callback receives future connections to this peer until close.
+ * @param out Receives the local peer handle.
+ * @param id Existing peer identifier.
+ * @param on_connect Optional local callback.
+ * @param userdata Callback context.
+ * @return KC_RDVZ_OK or a KC_RDVZ_* error.
+ */
+int kc_rdvz_open(kc_rdvz_peer_t **out, const char *id,
+    kc_rdvz_handler_t on_connect, void *userdata);
+
+/**
+ * Get the identifier associated with a local peer handle.
+ * @param peer Local peer handle.
+ * @return Borrowed identifier, or NULL.
  */
 const char *kc_rdvz_peer_id(const kc_rdvz_peer_t *peer);
 
 /**
- * Visits every live peer in registry insertion order.
- * @param rdvz Open registry.
- * @param visit Required visitor invoked once for each peer.
- * @param userdata Caller context.
- * @return KC_RDVZ_OK or KC_RDVZ_EINVAL.
+ * List every registered peer.
+ * @param visit Visitor called for each peer.
+ * @param userdata Visitor context.
+ * @return KC_RDVZ_OK or a KC_RDVZ_* error.
  */
-int kc_rdvz_list(kc_rdvz_t *rdvz, kc_rdvz_visit_fn visit, void *userdata);
+int kc_rdvz_list(kc_rdvz_visit_t visit, void *userdata);
 
 /**
- * Visits the direct neighbors of one peer in connection order.
- * Does not traverse indirect links.
- * @param peer Live peer.
- * @param visit Required visitor invoked for each directly linked peer.
- * @param userdata Caller context.
- * @return KC_RDVZ_OK or KC_RDVZ_EINVAL.
+ * List direct neighbors of one named peer.
+ * @param peer Local peer handle.
+ * @param visit Visitor called for each directly related peer.
+ * @param userdata Visitor context.
+ * @return KC_RDVZ_OK or a KC_RDVZ_* error.
  */
-int kc_rdvz_peer_list(const kc_rdvz_peer_t *peer, kc_rdvz_visit_fn visit,
-    void *userdata);
+int kc_rdvz_peer_list(const kc_rdvz_peer_t *peer,
+    kc_rdvz_visit_t visit, void *userdata);
 
 /**
- * Removes a peer and all its direct links, retaining every other peer.
- * on_disconnect runs once per removed link after that link is detached.
- * The peer handle and its ID become invalid when this function returns.
- * @param peer Live peer to disconnect.
- * @return KC_RDVZ_OK, KC_RDVZ_EINVAL, or KC_RDVZ_EBUSY.
+ * Establish one symmetric link between two existing peers.
+ * Connecting an existing link fails with KC_RDVZ_EEXIST.
+ * The optional callback receives the other peer identifier.
+ * @param peer One end of the relationship.
+ * @param other Identifier of the other end.
+ * @param callback Optional completion callback.
+ * @param userdata Callback context.
+ * @return KC_RDVZ_OK or a KC_RDVZ_* error.
  */
-int kc_rdvz_disconnect(kc_rdvz_peer_t *peer);
+int kc_rdvz_connect(kc_rdvz_peer_t *peer, const char *other,
+    kc_rdvz_handler_t callback, void *userdata);
 
 /**
- * Closes the registry and discards all peers and links.
- * Closing does not emit disconnect notifications.
- * @param rdvz Open registry; NULL is a successful no-op.
- * @return KC_RDVZ_OK or KC_RDVZ_EBUSY when invoked from a callback.
+ * Remove a direct relationship without removing either peer.
+ * Either endpoint can initiate the operation.
+ * The optional callback receives the other peer identifier.
+ * @param peer One end of the relationship.
+ * @param other Identifier of the other end.
+ * @param callback Optional completion callback.
+ * @param userdata Callback context.
+ * @return KC_RDVZ_OK or a KC_RDVZ_* error.
  */
-int kc_rdvz_close(kc_rdvz_t *rdvz);
+int kc_rdvz_peer_disconnect(kc_rdvz_peer_t *peer, const char *other,
+    kc_rdvz_handler_t callback, void *userdata);
 
 /**
- * Returns a stable textual description for one status code.
- * @param status Public status code.
- * @return Static NUL-terminated description.
+ * Delete a named peer and all its direct relationships.
+ * Existing local handles to this identifier become unusable.
+ * @param id Identifier of the peer to remove.
+ * @return KC_RDVZ_OK or a KC_RDVZ_* error.
+ */
+int kc_rdvz_disconnect(const char *id);
+
+/**
+ * Release a temporary local peer handle without deleting the resident peer.
+ * @param peer Local handle, or NULL.
+ * @return None.
+ */
+void kc_rdvz_close(kc_rdvz_peer_t *peer);
+
+/**
+ * Describe a library status code.
+ * @param status Library status.
+ * @return Static textual description.
  */
 const char *kc_rdvz_strerror(int status);
 
 /**
- * Returns the build version generated at compile time.
+ * Get the generated build version.
  * @return Build version.
  */
 uint64_t kc_rdvz_version(void);
