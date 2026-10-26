@@ -140,10 +140,8 @@ static void stun_test_owned(void)
     server_options.host="127.0.0.1";server_options.port=0;
     rc=kc_stun_server(&server,&server_options);
     stun_test_check(rc==KC_STUN_OK&&server!=NULL,"kc_stun_server", "starts an owned UDP server");
-    if(rc!=KC_STUN_OK){stun_test_group("kc_stun_server", "opens owned UDP Binding server");return;}
-    stun_test_group("kc_stun_server", "opens owned UDP Binding server");
-    snprintf(peer,sizeof(peer)
-,"%s:%u","127.0.0.1",kc_stun_server_port(server));
+    if(rc!=KC_STUN_OK){stun_test_group("kc_stun_binding", "serves Binding and discovers the mapped IPv4 address");test_case_total -= 2;return;}
+    snprintf(peer,sizeof(peer),"%s:%u","127.0.0.1",kc_stun_server_port(server));
     options.peer.host=peer;options.timeout_ms=2000;
     rc=kc_stun_client(&client,&options);
     stun_test_check(rc==KC_STUN_OK&&client!=NULL,"kc_stun_client", "starts an owned UDP client");
@@ -152,18 +150,18 @@ static void stun_test_owned(void)
         const char early[]="datagram during Binding";
         kc_stun_endpoint_t destination={"127.0.0.1",local?local->port:0};
         int sent=local&&kc_stun_client_send(client,&destination,early,sizeof(early))==KC_STUN_OK;
-        stun_test_check(sent,"pending_udp_send","sends application data while Binding is pending");
+
         do{rc=kc_stun_client_poll(client,50);}while(rc==KC_STUN_PENDING);
         if(sent){
             int received=kc_stun_client_read(client,&data,200)==KC_STUN_OK;
-            stun_test_check(received&&data.data_size==sizeof(early)&&
-                memcmp(data.data,early,sizeof(early))==0,
-                "pending_udp_receive","preserves data received during Binding polling");
+            int valid=received&&data.data_size==sizeof(early)&&
+                memcmp(data.data,early,sizeof(early))==0;
+            stun_test_check(sent&&valid,"pending_udp_receive","preserves data received during Binding polling");
             if(received)kc_stun_datagram_free(&data);
         }else stun_test_check(0,"pending_udp_receive","preserves data received during Binding polling");
-        stun_test_group("kc_stun_datagrams", "preserves application traffic during and after Binding");
         mapped=kc_stun_client_mapped(client);
         stun_test_check(rc==KC_STUN_OK&&mapped&&mapped->port&&strcmp(mapped->host,"127.0.0.1")==0,"kc_stun_client_mapped", "returns the IPv4 mapped endpoint");
+        stun_test_group("kc_stun_binding", "serves Binding and discovers the mapped IPv4 address");
         if(mapped){
             const char payload[]="application datagram";
             rc=kc_stun_client_send(client,mapped,payload,sizeof(payload));
@@ -172,7 +170,7 @@ static void stun_test_owned(void)
             stun_test_check(rc==KC_STUN_OK&&data.data_size==sizeof(payload)&&memcmp(data.data,payload,sizeof(payload))==0,"kc_stun_client_read", "receives application data through the mapping");
             kc_stun_datagram_free(&data);
         }
-        stun_test_group("kc_stun_mapping", "discovers public mapping and keeps the socket available");
+        stun_test_group("kc_stun_datagrams", "sends and receives through the preserved UDP mapping");
         rc=kc_stun_client_refresh(client,2000);
         stun_test_check(rc==KC_STUN_OK,"kc_stun_client_refresh", "refreshes on the existing socket");
         if(rc==KC_STUN_OK){
@@ -182,7 +180,7 @@ static void stun_test_owned(void)
         stun_test_group("kc_stun_refresh", "renews Binding on the existing UDP mapping");
         kc_stun_client_close(client);
     } else {
-        stun_test_group("kc_stun_datagrams", "preserves application traffic during and after Binding");
+        stun_test_group("kc_stun_binding", "serves Binding and discovers the mapped IPv4 address");
         test_case_total -= 2;
     }
     kc_stun_server_close(server);
@@ -233,8 +231,8 @@ static void stun_test_borrowed(void)
     so.transport=&server_udp;so.credentials=stun_test_credentials;so.binding=stun_test_binding;
     rc=kc_stun_server(&stun_test_server,&so);
     stun_test_check(rc==KC_STUN_OK,"borrowed_server", "starts with external UDP transport");
-    if(rc!=KC_STUN_OK){stun_test_group("kc_stun_borrowed", "opens borrowed UDP responder");return;}
-    stun_test_group("kc_stun_borrowed", "opens borrowed UDP responder");
+    if(rc!=KC_STUN_OK){stun_test_group("kc_stun_borrowed", "uses externally owned UDP for Binding");test_case_total -= 4;return;}
+    stun_test_group("kc_stun_borrowed", "uses externally owned UDP for Binding");
     co.peer.host="127.0.0.1:42424";co.transport=&client_udp;
     co.credentials.username="remote:local";co.credentials.key=stun_test_key;
     co.credentials.key_size=strlen(stun_test_key);co.attributes=attributes;co.attribute_count=1;
@@ -268,7 +266,7 @@ static void stun_test_borrowed(void)
         }
         kc_stun_client_close(stun_test_client);
     }
-    stun_test_group("kc_stun_authenticated", "SHA-1/SHA-256 Binding, extension attributes, refresh and keepalive");
+    stun_test_group("kc_stun_authenticated", "verifies authenticated Binding with SHA-1 and SHA-256");
     co.credentials.integrity=KC_STUN_HMAC_BOTH;
     stun_test_role_conflict=1;
     rc=kc_stun_client(&stun_test_client,&co);
@@ -297,7 +295,7 @@ static void stun_test_borrowed(void)
         kc_stun_client_close(stun_test_client);
     }else stun_test_check(0,"timeout", "starts a borrowed transport timeout check");
     stun_test_bad_key=0;
-    stun_test_group("kc_stun_validation", "validates fingerprint and transaction timeout");
+    stun_test_group("kc_stun_integrity_timeout", "rejects tampered responses and expires unanswered transactions");
     kc_stun_server_close(stun_test_server);stun_test_server=NULL;
     {
         kc_stun_server_options_t anonymous={0};kc_stun_client_options_t request={0};
