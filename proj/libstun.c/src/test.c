@@ -24,6 +24,8 @@ static unsigned int stun_test_replies;
 static unsigned int stun_test_failures;
 static int test_case_total;
 static int test_case_current;
+static int stun_group_failures;
+static int stun_group_checks;
 
 /**
  * Prints one test result in the canonical kclib format.
@@ -49,7 +51,23 @@ static void case_result(int fail, const char *name, const char *detail)
  */
 static void stun_test_check(int pass, const char *name, const char *detail)
 {
-    case_result(!pass, name, detail);
+    (void)name;
+    (void)detail;
+    stun_group_checks++;
+    if (!pass) stun_group_failures++;
+}
+
+/**
+ * Reports one public behavior case containing several assertions.
+ * @param name Public capability name.
+ * @param detail Contract exercised by the case.
+ * @return None.
+ */
+static void stun_test_group(const char *name, const char *detail)
+{
+    case_result(stun_group_failures != 0 || stun_group_checks == 0, name, detail);
+    stun_group_failures = 0;
+    stun_group_checks = 0;
 }
 
 /**
@@ -121,8 +139,10 @@ static void stun_test_owned(void)
     server_options.host="127.0.0.1";server_options.port=0;
     rc=kc_stun_server(&server,&server_options);
     stun_test_check(rc==KC_STUN_OK&&server!=NULL,"kc_stun_server", "starts an owned UDP server");
-    if(rc!=KC_STUN_OK)return;
-    snprintf(peer,sizeof(peer),"%s:%u","127.0.0.1",kc_stun_server_port(server));
+    if(rc!=KC_STUN_OK){stun_test_group("kc_stun_server", "opens owned UDP Binding server");return;}
+    stun_test_group("kc_stun_server", "opens owned UDP Binding server");
+    snprintf(peer,sizeof(peer)
+,"%s:%u","127.0.0.1",kc_stun_server_port(server));
     options.peer.host=peer;options.timeout_ms=2000;
     rc=kc_stun_client(&client,&options);
     stun_test_check(rc==KC_STUN_OK&&client!=NULL,"kc_stun_client", "starts an owned UDP client");
@@ -158,6 +178,7 @@ static void stun_test_owned(void)
         }
         kc_stun_client_close(client);
     }
+    stun_test_group("kc_stun_client", "discovers mapping and preserves UDP application data");
     kc_stun_server_close(server);
 }
 
@@ -187,6 +208,7 @@ static void stun_test_ipv6(void)
         kc_stun_client_close(client);
     }
     kc_stun_server_close(server);
+    stun_test_group("kc_stun_ipv6", "discovers an IPv6 mapped endpoint");
 }
 
 /**
@@ -205,7 +227,8 @@ static void stun_test_borrowed(void)
     so.transport=&server_udp;so.credentials=stun_test_credentials;so.binding=stun_test_binding;
     rc=kc_stun_server(&stun_test_server,&so);
     stun_test_check(rc==KC_STUN_OK,"borrowed_server", "starts with external UDP transport");
-    if(rc!=KC_STUN_OK)return;
+    if(rc!=KC_STUN_OK){stun_test_group("kc_stun_borrowed", "opens borrowed UDP responder");return;}
+    stun_test_group("kc_stun_borrowed", "opens borrowed UDP responder");
     co.peer.host="127.0.0.1:42424";co.transport=&client_udp;
     co.credentials.username="remote:local";co.credentials.key=stun_test_key;
     co.credentials.key_size=strlen(stun_test_key);co.attributes=attributes;co.attribute_count=1;
@@ -239,6 +262,7 @@ static void stun_test_borrowed(void)
         }
         kc_stun_client_close(stun_test_client);
     }
+    stun_test_group("kc_stun_authenticated", "SHA-1/SHA-256 Binding, extension attributes, refresh and keepalive");
     co.credentials.integrity=KC_STUN_HMAC_BOTH;
     stun_test_role_conflict=1;
     rc=kc_stun_client(&stun_test_client,&co);
@@ -248,6 +272,7 @@ static void stun_test_borrowed(void)
         kc_stun_client_close(stun_test_client);
     }else stun_test_check(0,"role_conflict", "starts the role conflict check");
     stun_test_role_conflict=0;
+    stun_test_group("kc_stun_errors", "returns authenticated STUN protocol errors");
     stun_test_tamper=1;
     rc=kc_stun_client(&stun_test_client,&co);
     if(rc==KC_STUN_OK){
@@ -266,6 +291,7 @@ static void stun_test_borrowed(void)
         kc_stun_client_close(stun_test_client);
     }else stun_test_check(0,"timeout", "starts a borrowed transport timeout check");
     stun_test_bad_key=0;
+    stun_test_group("kc_stun_validation", "validates fingerprint and transaction timeout");
     kc_stun_server_close(stun_test_server);stun_test_server=NULL;
     {
         kc_stun_server_options_t anonymous={0};kc_stun_client_options_t request={0};
@@ -292,6 +318,7 @@ static void stun_test_borrowed(void)
             kc_stun_server_close(stun_test_server);stun_test_server=NULL;
         }else stun_test_check(0,"unknown_attribute", "starts an anonymous server for unknown attribute handling");
     }
+    stun_test_group("kc_stun_unknown_attributes", "reports unsupported comprehension-required attributes");
 }
 #ifdef KC_CLI_PATH
 /**
@@ -317,6 +344,7 @@ static void stun_test_command_line(void)
 {
     stun_test_check(stun_test_cli("--help")==0,"help", "--help succeeds");
     stun_test_check(stun_test_cli("-v")==0,"version", "-v succeeds");
+    stun_test_group("stun_cli", "provides help and version commands");
 }
 #endif
 
@@ -327,12 +355,14 @@ static void stun_test_command_line(void)
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 30;
+    test_case_total = 9;
 #else
-    test_case_total = 28;
+    test_case_total = 8;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
+    stun_group_failures = 0;
+    stun_group_checks = 0;
     stun_test_owned();
     stun_test_ipv6();
     stun_test_borrowed();
