@@ -145,8 +145,13 @@ define macos_target
 $(call build_target,$(1),macos,-DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOSX_DEPLOYMENT_TARGET) -DCMAKE_C_COMPILER=$(2) -DCMAKE_AR=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ar -DCMAKE_RANLIB=$(OSXCROSS_ROOT)/bin/$(1)-apple-darwin25.1-ranlib)
 endef
 endif
+ifneq ($(HOST_SYSTEM),Darwin)
+macos/x86_64 macos/aarch64: export PATH := $(OSXCROSS_ROOT)/bin:$(PATH)
+endif
 macos/x86_64: ; $(call macos_target,x86_64,$(OSXCROSS_ROOT)/bin/o64-clang)
 macos/aarch64: ; $(call macos_target,aarch64,$(OSXCROSS_ROOT)/bin/oa64-clang)
+
+ios/aarch64 iossim/aarch64 iossim/x86_64: export PATH := $(OSXCROSS_ROOT)/bin:$(PATH)
 
 define ios_target
 	@if ! $(3) --version >/dev/null 2>&1 || [ ! -d "$(5)" ]; then echo "Missing iOS compiler or SDK" >&2; exit 1; fi

@@ -292,7 +292,7 @@ static int stun_resolve(const char *host,unsigned short port,int family,struct s
     memset(&hints,0,sizeof(hints));hints.ai_family=family;hints.ai_socktype=SOCK_DGRAM;hints.ai_protocol=IPPROTO_UDP;
     snprintf(service,sizeof(service),"%u",port);
     if(getaddrinfo(host,service,&hints,&head)!=0)return 0;
-    for(it=head;it;it=it->ai_next){if(it->ai_addrlen&&it->ai_addrlen<=sizeof(*addr)){memset(addr,0,sizeof(*addr));memcpy(addr,it->ai_addr,it->ai_addrlen);*len=(stun_socklen_t)it->ai_addrlen;found=1;break;}}
+    for(it=head;it;it=it->ai_next){if(it->ai_addrlen&&(size_t)it->ai_addrlen<=sizeof(*addr)){memset(addr,0,sizeof(*addr));memcpy(addr,it->ai_addr,it->ai_addrlen);*len=(stun_socklen_t)it->ai_addrlen;found=1;break;}}
     freeaddrinfo(head);return found;
 }
 
