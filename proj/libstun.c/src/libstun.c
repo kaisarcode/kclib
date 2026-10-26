@@ -579,6 +579,9 @@ static int stun_finish(uint8_t *out,size_t *size)
 
 /**
  * Decodes a complete STUN message with views into the supplied buffer.
+ * @param bytes STUN datagram bytes.
+ * @param size Datagram size.
+ * @param out Decoded attribute views and message identifiers.
  * @return KC_STUN_OK or a negative status.
  */
 int kc_stun_decode(const void *bytes,size_t size,kc_stun_message_t *out)
@@ -606,6 +609,7 @@ int kc_stun_decode(const void *bytes,size_t size,kc_stun_message_t *out)
 
 /**
  * Releases only the decoded STUN attribute array.
+ * @param message Decoded message descriptor to release.
  * @return void.
  */
 void kc_stun_message_free(kc_stun_message_t *message)
@@ -617,6 +621,10 @@ void kc_stun_message_free(kc_stun_message_t *message)
 
 /**
  * Encodes an arbitrary STUN message with optional authentication.
+ * @param message Message type, transaction ID and attributes.
+ * @param credentials Optional short-term credentials.
+ * @param out Caller-owned output byte buffer.
+ * @param size Input capacity and output size.
  * @return KC_STUN_OK or a negative status.
  */
 int kc_stun_encode(const kc_stun_message_t *message,
@@ -666,6 +674,8 @@ int kc_stun_encode(const kc_stun_message_t *message,
 
 /**
  * Validates a complete STUN fingerprint without performing authentication.
+ * @param bytes STUN datagram bytes.
+ * @param size Datagram size.
  * @return KC_STUN_OK or KC_STUN_EPROTO.
  */
 int kc_stun_verify_fingerprint(const void *bytes,size_t size)
@@ -681,6 +691,10 @@ int kc_stun_verify_fingerprint(const void *bytes,size_t size)
 
 /**
  * Verifies STUN short-term message integrity.
+ * @param bytes STUN datagram bytes.
+ * @param size Datagram size.
+ * @param key Shared integrity key.
+ * @param key_size Shared key length.
  * @return KC_STUN_OK or an authentication/protocol error.
  */
 int kc_stun_verify_integrity(const void *bytes,size_t size,
@@ -696,6 +710,10 @@ int kc_stun_verify_integrity(const void *bytes,size_t size,
 
 /**
  * Encodes the RFC 8489 ERROR-CODE attribute value.
+ * @param code Protocol error code.
+ * @param reason Optional reason phrase.
+ * @param out Caller-owned output buffer.
+ * @param size Input capacity and output value size.
  * @return KC_STUN_OK or a negative status.
  */
 int kc_stun_encode_error(unsigned short code,const char *reason,
@@ -715,6 +733,10 @@ int kc_stun_encode_error(unsigned short code,const char *reason,
 
 /**
  * Decodes an ERROR-CODE attribute without taking ownership of its bytes.
+ * @param attribute Encoded ERROR-CODE descriptor.
+ * @param code Destination decoded error code.
+ * @param reason Optional destination reason buffer.
+ * @param reason_size Reason buffer capacity.
  * @return KC_STUN_OK or a negative status.
  */
 int kc_stun_decode_error(const kc_stun_attribute_t *attribute,
@@ -740,6 +762,8 @@ int kc_stun_decode_error(const kc_stun_attribute_t *attribute,
 
 /**
  * Checks a transaction identifier from a decoded STUN envelope.
+ * @param message Decoded message to compare.
+ * @param id Twelve-byte expected transaction ID.
  * @return 1 for the same identifier, 0 otherwise.
  */
 int kc_stun_transaction_matches(const kc_stun_message_t *message,
@@ -804,6 +828,11 @@ static int stun_mapped(const stun_attribute_view_t *attr,const uint8_t id[12],ch
 
 /**
  * Decodes a mapped UDP endpoint into caller-owned host storage.
+ * @param attribute Encoded XOR-MAPPED-ADDRESS descriptor.
+ * @param id Transaction ID used in masking.
+ * @param host Destination numeric host.
+ * @param host_size Host buffer capacity.
+ * @param port Destination port.
  * @return KC_STUN_OK or a negative status.
  */
 int kc_stun_decode_mapped(const kc_stun_attribute_t *attribute,
@@ -826,6 +855,10 @@ int kc_stun_decode_mapped(const kc_stun_attribute_t *attribute,
 
 /**
  * Encodes XOR-MAPPED-ADDRESS bytes for a numeric IPv4/IPv6 endpoint.
+ * @param endpoint Numeric host and UDP port.
+ * @param id Transaction ID used in masking.
+ * @param out Destination encoded attribute value.
+ * @param size Input capacity and output value size.
  * @return KC_STUN_OK or a negative status.
  */
 int kc_stun_encode_mapped(const kc_stun_endpoint_t *endpoint,
