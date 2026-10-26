@@ -144,6 +144,14 @@ int kc_stun_verify_fingerprint(const void *bytes,size_t size);
 int kc_stun_verify_integrity(const void *bytes,size_t size,
     const void *key,size_t key_size);
 
+/** Encodes the ERROR-CODE attribute value for a STUN error response. */
+int kc_stun_encode_error(unsigned short code,const char *reason,
+    void *out,size_t *size);
+
+/** Decodes an ERROR-CODE attribute and optionally copies the reason. */
+int kc_stun_decode_error(const kc_stun_attribute_t *attribute,
+    unsigned short *code,char *reason,size_t reason_size);
+
 /** Compares two STUN transaction identifiers. */
 int kc_stun_transaction_matches(const kc_stun_message_t *message,
     const unsigned char id[12]);
