@@ -19,6 +19,7 @@ console.log(client.mapped);  // { host, port }
 await client.send({ host: "203.0.113.20", port: 5000 }, bytes);
 const datagram = await client.receive(1000);  // { from: { host, port }, data }
 await client.refresh();
+await client.keepalive();
 await client.close();
 
 const server = await stun.server({ port: 3478 });
@@ -46,7 +47,8 @@ const client = await stun.client({
 The host binding maps datagrams from `udp` to pending client transactions and the
 server's Binding handler. The UDP transport has a single receive owner. `stun`
 borrows it and never closes it. User applications do not construct STUN packets,
-transaction identifiers, HMACs or CRCs. The `credentials` and `attributes`
+transaction identifiers, HMACs or CRCs. `keepalive()` emits an
+unauthenticated STUN Binding Indication, not an ICE policy decision. The `credentials` and `attributes`
 values in the second example are produced by the higher-level composition.
 
 ## Lua
@@ -59,6 +61,7 @@ local client = stun.client {
 
 print(client.mapped.host, client.mapped.port)
 client:refresh()
+client:keepalive()
 client:close()
 
 local server = stun.server { port = 3478 }
