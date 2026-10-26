@@ -31,20 +31,20 @@ handled internally rather than returned as application datagrams.
 
 ## CLI
 
-The \`stun\` command provides two operations:
+The `stun` command provides two operations:
 
-\`\`\`sh
+```sh
 stun client stun.example.com:3478
 stun client stun.example.com:3478 --host 0.0.0.0 -p 5000 -t 3000
 stun server -p 3478
-\`\`\`
+```
 
-\`client\` prints the observed public host and port as tab-separated fields.
-\`server\` prints its listening port, then serves Binding requests until
+`client` prints the observed public host and port as tab-separated fields.
+`server` prints its listening port, then serves Binding requests until
 interrupted. The server defaults to port 3478; the client uses an
-OS-selected local port unless \`-p\` is provided.
+OS-selected local port unless `-p` is provided.
 
-Use \`stun -h\` for all commands and options.
+Use `stun -h` for all commands and options.
 
 ## Documentation
 
