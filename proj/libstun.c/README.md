@@ -48,6 +48,12 @@ stun -h
 
 ## Composition
 
+On an owned UDP socket, datagrams unrelated to the active Binding transaction are
+preserved while polling and are returned by `kc_stun_client_read()` afterward.
+This includes other STUN traffic, which the consuming application must
+identify and dispatch rather than treating it automatically as application data.
+The pending datagram queue is bounded to 64 entries.
+
 A client can borrow an existing UDP sender. The composition delivers inbound
 STUN responses using `kc_stun_client_receive()` and drives retransmissions using
 `kc_stun_client_poll()`. `kc_stun_client_keepalive()` emits an unauthenticated
