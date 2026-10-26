@@ -14,6 +14,8 @@ transitive and repeated connections do not create duplicate links.
 ```c
 #include "librdvz.h"
 
+#include <stdio.h>
+
 static void connected(const char *other, void *userdata)
 {
     (void)userdata;
