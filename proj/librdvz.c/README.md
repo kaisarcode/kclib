@@ -77,6 +77,7 @@ rdvz peer2 -c peer1 'echo linked-to'
 
 rdvz peer1 -l
 # peer2
+
 rdvz peer2 -l
 # peer1
 
