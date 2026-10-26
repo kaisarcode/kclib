@@ -95,6 +95,8 @@ int kc_stun_client_send(kc_stun_client_t *client, const kc_stun_endpoint_t *peer
 int kc_stun_client_read(kc_stun_client_t *client, kc_stun_datagram_t *out, uint64_t timeout_ms);
 /** Releases one datagram and resets its fields. */
 void kc_stun_datagram_free(kc_stun_datagram_t *datagram);
+/** Sends an unauthenticated STUN Binding Indication to keep the peer UDP path alive. */
+int kc_stun_client_keepalive(kc_stun_client_t *client);
 /** Performs a new Binding transaction on the same UDP mapping. */
 int kc_stun_client_refresh(kc_stun_client_t *client, uint64_t timeout_ms);
 /** Returns STUN error code from a rejected Binding transaction, or zero. */
