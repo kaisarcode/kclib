@@ -77,7 +77,15 @@ typedef struct {
     size_t count;
 } stun_packet_view_t;
 
+typedef struct stun_pending_datagram {
+    struct stun_pending_datagram *next;
+    kc_stun_datagram_t value;
+} stun_pending_datagram_t;
+
 struct kc_stun_client {
+    stun_pending_datagram_t *incoming_head;
+    stun_pending_datagram_t *incoming_tail;
+    size_t incoming_count;
     stun_socket_t socket;
     int borrowed;
     kc_stun_transport_t transport;
@@ -124,6 +132,52 @@ struct kc_stun_server {
     int wsa;
 #endif
 };
+
+/**
+ * Queues a datagram not consumed by the active Binding transaction.
+ * @param c Client preserving the datagram.
+ * @param from Source endpoint text.
+ * @param port Source UDP port.
+ * @param bytes Datagram payload.
+ * @param size Payload size.
+ * @return KC_STUN_OK, or a negative status.
+ */
+static int stun_queue_datagram(kc_stun_client_t *c,const char *from,unsigned short port,const void *bytes,size_t size)
+{
+    stun_pending_datagram_t *entry;
+    size_t host_size=strlen(from)+1U;
+    if(c->incoming_count>=64U)return KC_STUN_ENOMEM;
+    entry=(stun_pending_datagram_t *)calloc(1,sizeof(*entry));
+    if(!entry)return KC_STUN_ENOMEM;
+    entry->value.host=(char *)malloc(host_size);
+    entry->value.data=malloc(size?size:1U);
+    if(!entry->value.host||!entry->value.data){
+        free(entry->value.host);free(entry->value.data);free(entry);return KC_STUN_ENOMEM;
+    }
+    memcpy(entry->value.host,from,host_size);
+    if(size)memcpy(entry->value.data,bytes,size);
+    entry->value.port=port;entry->value.data_size=size;
+    if(c->incoming_tail)c->incoming_tail->next=entry;
+    else c->incoming_head=entry;
+    c->incoming_tail=entry;c->incoming_count++;
+    return KC_STUN_OK;
+}
+
+/**
+ * Transfers the oldest preserved datagram to its caller.
+ * @param c Client with a receive queue.
+ * @param out Destination taking ownership of payload and host.
+ * @return 1 if a datagram was available, otherwise 0.
+ */
+static int stun_take_datagram(kc_stun_client_t *c,kc_stun_datagram_t *out)
+{
+    stun_pending_datagram_t *entry=c->incoming_head;
+    if(!entry)return 0;
+    c->incoming_head=entry->next;
+    if(!c->incoming_head)c->incoming_tail=NULL;
+    c->incoming_count--;
+    *out=entry->value;free(entry);return 1;
+}
 
 static uint16_t stun_rd16(const uint8_t *p) { return (uint16_t)(((uint16_t)p[0]<<8)|p[1]); }
 static uint32_t stun_rd32(const uint8_t *p) { return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3]; }
@@ -760,9 +814,25 @@ int kc_stun_client_poll(kc_stun_client_t *c,uint64_t wait_ms)
         got=(int)recvfrom(c->socket,packet,sizeof(packet),0,(struct sockaddr *)&from,&flen);
 #endif
         if(got<0){c->status=KC_STUN_ENET;return c->status;}
-        if(stun_endpoint_equal(&from,&c->remote)&&stun_endpoint_text(&from,flen,host,&port)){
-            kc_stun_endpoint_t source={host,port};
-            return kc_stun_client_receive(c,&source,packet,(size_t)got);
+        if(stun_endpoint_text(&from,flen,host,&port)){
+            if(stun_endpoint_equal(&from,&c->remote)){
+                kc_stun_endpoint_t source={host,port};
+                int result=kc_stun_client_receive(c,&source,packet,(size_t)got);
+                if(result!=KC_STUN_PENDING)return result;
+                {
+                    stun_packet_view_t parsed;
+                    int correlated=0;
+                    if(stun_unpack(packet,(size_t)got,&parsed)){
+                        correlated=memcmp(parsed.id,c->id,12)==0&&
+                            (parsed.type==STUN_SUCCESS||parsed.type==STUN_ERROR);
+                        stun_unpack_free(&parsed);
+                    }
+                    if(correlated)return KC_STUN_PENDING;
+                }
+            }
+            if(stun_queue_datagram(c,host,port,packet,(size_t)got)!=KC_STUN_OK){
+                c->status=KC_STUN_ENOMEM;return c->status;
+            }
         }
     }
     return KC_STUN_PENDING;
@@ -807,6 +877,7 @@ int kc_stun_client_read(kc_stun_client_t *c,kc_stun_datagram_t *out,uint64_t tim
     if(!c||!out||c->borrowed)return KC_STUN_EINVAL;
     memset(out,0,sizeof(*out));
     if(c->status==KC_STUN_PENDING)return KC_STUN_PENDING;
+    if(stun_take_datagram(c,out))return KC_STUN_OK;
     for(;;){
         uint8_t packet[STUN_MAX_PACKET];struct sockaddr_storage from;
         stun_socklen_t len=(stun_socklen_t)sizeof(from);int ready,got;
@@ -901,6 +972,11 @@ void kc_stun_client_close(kc_stun_client_t *c)
     if(!c)return;
     if(c->socket!=STUN_BAD_SOCKET)stun_socket_close(c->socket);
     if(c->key){memset(c->key,0,c->key_size);free(c->key);}
+    while(c->incoming_head){
+        kc_stun_datagram_t datagram;
+        (void)stun_take_datagram(c,&datagram);
+        kc_stun_datagram_free(&datagram);
+    }
     free(c->message);free(c->answer);free(c->response);
 #ifdef _WIN32
     if(c->wsa)stun_runtime_stop();
