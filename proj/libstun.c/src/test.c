@@ -719,9 +719,18 @@ static int case_stun_cli(void)
 {
     int fail = 0;
     fail += stun_cli_run("--help") != 0;
+    fail += stun_cli_run("-h") != 0;
     fail += stun_cli_run("--version") != 0;
+    fail += stun_cli_run("-v") != 0;
     fail += stun_cli_run("client") == 0;
     fail += stun_cli_run("client :") == 0;
+    fail += stun_cli_run("client example.com --port 65536") == 0;
+    fail += stun_cli_run("client example.com --port abc") == 0;
+    fail += stun_cli_run("client example.com --timeout -1") == 0;
+    fail += stun_cli_run("client example.com --host") == 0;
+    fail += stun_cli_run("server --timeout 1000") == 0;
+    fail += stun_cli_run("server --port abc") == 0;
+    fail += stun_cli_run("server unexpected") == 0;
     fail += stun_cli_run("unknown") == 0;
     case_result(fail, "stun_cli", "reports metadata and validates commands");
     return fail ? 1 : 0;
