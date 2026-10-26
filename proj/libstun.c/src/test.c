@@ -531,6 +531,28 @@ static void stun_test_mapped_codec(void)
     rc=kc_stun_decode_mapped(&attribute,id,host,sizeof(host),&port);
     stun_test_check(rc==KC_STUN_OK&&strcmp(host,endpoint.host)==0&&port==endpoint.port,
         "mapped_ipv6_decode","decodes IPv6 XOR-MAPPED-ADDRESS");
+    {
+        kc_stun_message_t response={0},parsed={0};
+        kc_stun_attribute_t mapped_attribute={KC_STUN_XOR_MAPPED_ADDRESS,data,size};
+        unsigned char encoded[256];
+        size_t encoded_size=sizeof(encoded);
+        response.type=KC_STUN_SUCCESS_RESPONSE;
+        memcpy(response.transaction_id,id,12);
+        response.attributes=&mapped_attribute;
+        response.attribute_count=1;
+        rc=kc_stun_encode(&response,NULL,encoded,&encoded_size);
+        stun_test_check(rc==KC_STUN_OK,
+            "mapped_response_encode","builds a Binding success response");
+        if(rc==KC_STUN_OK){
+            rc=kc_stun_decode(encoded,encoded_size,&parsed);
+            stun_test_check(rc==KC_STUN_OK&&parsed.type==KC_STUN_SUCCESS_RESPONSE&&
+                parsed.attribute_count>=1&&
+                kc_stun_decode_mapped(&parsed.attributes[0],id,host,sizeof(host),&port)==KC_STUN_OK&&
+                strcmp(host,"::1")==0,
+                "mapped_response_decode","parses the mapped endpoint from a response");
+            kc_stun_message_free(&parsed);
+        }
+    }
     stun_test_group("kc_stun_mapped_codec",
         "encodes and decodes IPv4 and IPv6 mapped endpoint attributes");
 }
@@ -599,6 +621,26 @@ static void stun_test_error_codec(void)
     stun_test_check(rc==KC_STUN_OK&&code==487&&
         strcmp(reason,"Role Conflict")==0,
         "error_decode","decodes STUN error code and reason");
+    {
+        kc_stun_message_t message={0},parsed={0};
+        unsigned char encoded[256];
+        kc_stun_attribute_t error_attribute={KC_STUN_ERROR_CODE,data,size};
+        size_t encoded_size=sizeof(encoded);
+        message.type=KC_STUN_ERROR_RESPONSE;
+        message.attributes=&error_attribute;
+        message.attribute_count=1;
+        rc=kc_stun_encode(&message,NULL,encoded,&encoded_size);
+        stun_test_check(rc==KC_STUN_OK,
+            "error_response_encode","builds a complete STUN error response");
+        if(rc==KC_STUN_OK){
+            rc=kc_stun_decode(encoded,encoded_size,&parsed);
+            stun_test_check(rc==KC_STUN_OK&&parsed.type==KC_STUN_ERROR_RESPONSE&&
+                parsed.attribute_count>=1&&
+                kc_stun_decode_error(&parsed.attributes[0],&code,reason,sizeof(reason))==KC_STUN_OK&&
+                code==487,"error_response_decode","parses a complete STUN error response");
+            kc_stun_message_free(&parsed);
+        }
+    }
     stun_test_group("kc_stun_error_codec",
         "serializes and parses STUN protocol error attributes");
 }
