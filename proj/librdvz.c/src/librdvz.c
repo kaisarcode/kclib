@@ -15,6 +15,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -536,6 +537,7 @@ static void kc_rdvz_notify(const char *dir,
     (void)fclose(file);
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Dispatch new complete connection notifications to one local callback.
  * @param peer Open local peer handle.
@@ -600,7 +602,6 @@ static void kc_rdvz_poll(kc_rdvz_peer_t *peer)
     (void)fclose(file);
 }
 
-#ifndef __EMSCRIPTEN__
 /**
  * Run the temporary handle's callback notification loop.
  * @param userdata Local peer handle.
