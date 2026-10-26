@@ -64,6 +64,23 @@ typedef pthread_t stun_thread_t;
 #define STUN_ATTRIBUTE_MAX 16384U
 #define STUN_RTO 500U
 
+/**
+ * Checks whether an externally received UDP payload has a STUN envelope.
+ * @param bytes Datagram bytes.
+ * @param size Datagram size.
+ * @return 1 for a complete STUN message, otherwise 0.
+ */
+int kc_stun_is_message(const void *bytes,size_t size)
+{
+    const uint8_t *p=(const uint8_t *)bytes;
+    size_t length;
+    if(!p||size<20U||size>STUN_MAX_PACKET)return 0;
+    if((p[0]&0xc0U)!=0U)return 0;
+    length=((size_t)p[2]<<8)|(size_t)p[3];
+    if((length&3U)!=0U||length!=size-20U)return 0;
+    return p[4]==0x21U&&p[5]==0x12U&&p[6]==0xa4U&&p[7]==0x42U;
+}
+
 typedef struct {
     uint16_t type;
     const uint8_t *data;
