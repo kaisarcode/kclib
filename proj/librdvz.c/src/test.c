@@ -103,6 +103,7 @@ static void rdvz_test_handler(const char *other, void *userdata)
     (void)atomic_fetch_add(&seen->count, 1);
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Sleep briefly while checking asynchronous callback delivery.
  * @return None.
@@ -136,6 +137,7 @@ static int rdvz_test_wait(rdvz_test_seen_t *seen, const char *expected)
     }
     return 0;
 }
+#endif
 
 /**
  * Build the isolated per-run runtime directory.
@@ -227,6 +229,7 @@ static int case_kc_rdvz_create(void)
         kc_rdvz_open(&opened, "alpha", NULL, NULL) == KC_RDVZ_OK);
     kc_rdvz_close(created);
     kc_rdvz_close(opened);
+    opened = NULL;
     fail += rdvz_test_expect("peer remains after handle closes",
         kc_rdvz_open(&opened, "alpha", NULL, NULL) == KC_RDVZ_OK);
     kc_rdvz_close(opened);
@@ -238,6 +241,10 @@ static int case_kc_rdvz_create(void)
         list.count == 2U &&
         strcmp(list.first, "alpha") == 0 &&
         strcmp(list.last, "beta") == 0);
+    fail += rdvz_test_expect("delete alpha",
+        kc_rdvz_disconnect("alpha") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("delete beta",
+        kc_rdvz_disconnect("beta") == KC_RDVZ_OK);
     rdvz_test_result(fail, "kc_rdvz_create",
         "named peers survive temporary handles and can be listed");
     return fail != 0;
@@ -253,11 +260,11 @@ static int case_kc_rdvz_connect(void)
     rdvz_test_list_t a_links = {0}, b_links = {0}, c_links = {0};
     int fail = 0;
 
-    fail += rdvz_test_expect("open first",
-        kc_rdvz_open(&a, "alpha", NULL, NULL) == KC_RDVZ_OK);
-    fail += rdvz_test_expect("open second",
-        kc_rdvz_open(&b, "beta", NULL, NULL) == KC_RDVZ_OK);
-    fail += rdvz_test_expect("create independent third",
+    fail += rdvz_test_expect("create alpha",
+        kc_rdvz_create(&a, "alpha", NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create beta",
+        kc_rdvz_create(&b, "beta", NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create independent gamma",
         kc_rdvz_create(&c, "gamma", NULL) == KC_RDVZ_OK);
     if (a && b && c) {
         fail += rdvz_test_expect("link alpha and beta",
@@ -285,6 +292,12 @@ static int case_kc_rdvz_connect(void)
     kc_rdvz_close(a);
     kc_rdvz_close(b);
     kc_rdvz_close(c);
+    fail += rdvz_test_expect("delete alpha",
+        kc_rdvz_disconnect("alpha") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("delete beta",
+        kc_rdvz_disconnect("beta") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("delete gamma",
+        kc_rdvz_disconnect("gamma") == KC_RDVZ_OK);
     rdvz_test_result(fail, "kc_rdvz_connect",
         "symmetric unique links between existing peers");
     return fail != 0;
@@ -300,13 +313,17 @@ static int case_kc_rdvz_peer_disconnect(void)
     rdvz_test_list_t links = {0};
     int fail = 0;
 
-    fail += rdvz_test_expect("open alpha",
-        kc_rdvz_open(&a, "alpha", NULL, NULL) == KC_RDVZ_OK);
-    fail += rdvz_test_expect("open beta",
-        kc_rdvz_open(&b, "beta", NULL, NULL) == KC_RDVZ_OK);
-    fail += rdvz_test_expect("open gamma",
-        kc_rdvz_open(&c, "gamma", NULL, NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create alpha",
+        kc_rdvz_create(&a, "alpha", NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create beta",
+        kc_rdvz_create(&b, "beta", NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create gamma",
+        kc_rdvz_create(&c, "gamma", NULL) == KC_RDVZ_OK);
     if (a && b && c) {
+        fail += rdvz_test_expect("connect alpha-beta",
+            kc_rdvz_connect(a, "beta", NULL, NULL) == KC_RDVZ_OK);
+        fail += rdvz_test_expect("connect beta-gamma",
+            kc_rdvz_connect(b, "gamma", NULL, NULL) == KC_RDVZ_OK);
         fail += rdvz_test_expect("remove alpha-beta from beta side",
             kc_rdvz_peer_disconnect(b, "alpha", NULL, NULL) == KC_RDVZ_OK);
         fail += rdvz_test_expect("alpha is now isolated",
@@ -323,6 +340,12 @@ static int case_kc_rdvz_peer_disconnect(void)
     kc_rdvz_close(a);
     kc_rdvz_close(b);
     kc_rdvz_close(c);
+    fail += rdvz_test_expect("delete alpha",
+        kc_rdvz_disconnect("alpha") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("delete beta",
+        kc_rdvz_disconnect("beta") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("delete gamma",
+        kc_rdvz_disconnect("gamma") == KC_RDVZ_OK);
     rdvz_test_result(fail, "kc_rdvz_peer_disconnect",
         "removes only one direct link from either endpoint");
     return fail != 0;
@@ -334,26 +357,40 @@ static int case_kc_rdvz_peer_disconnect(void)
  */
 static int case_kc_rdvz_disconnect(void)
 {
-    kc_rdvz_peer_t *beta = NULL, *gamma = NULL;
+    kc_rdvz_peer_t *alpha = NULL, *beta = NULL, *gamma = NULL;
     rdvz_test_list_t links = {0};
     int fail = 0;
 
-    fail += rdvz_test_expect("open before deletion",
-        kc_rdvz_open(&beta, "beta", NULL, NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create alpha",
+        kc_rdvz_create(&alpha, "alpha", NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create beta",
+        kc_rdvz_create(&beta, "beta", NULL) == KC_RDVZ_OK);
+    fail += rdvz_test_expect("create gamma",
+        kc_rdvz_create(&gamma, "gamma", NULL) == KC_RDVZ_OK);
+    if (alpha && beta && gamma)
+        fail += rdvz_test_expect("connect beta-gamma",
+            kc_rdvz_connect(beta, "gamma", NULL, NULL) == KC_RDVZ_OK);
     fail += rdvz_test_expect("delete beta",
         kc_rdvz_disconnect("beta") == KC_RDVZ_OK);
-    fail += rdvz_test_expect("deleted peer cannot reopen",
-        kc_rdvz_open(&gamma, "beta", NULL, NULL) == KC_RDVZ_ENOENT);
+    {
+        kc_rdvz_peer_t *missing = NULL;
+        fail += rdvz_test_expect("deleted peer cannot reopen",
+            kc_rdvz_open(&missing, "beta", NULL, NULL) == KC_RDVZ_ENOENT);
+        kc_rdvz_close(missing);
+    }
     fail += rdvz_test_expect("stale handle cannot connect",
         beta && kc_rdvz_connect(beta, "alpha", NULL, NULL)
             == KC_RDVZ_ENOENT);
-    fail += rdvz_test_expect("gamma survives",
-        kc_rdvz_open(&gamma, "gamma", NULL, NULL) == KC_RDVZ_OK);
-    fail += rdvz_test_expect("gamma loses only its deleted neighbor",
+    fail += rdvz_test_expect("gamma loses deleted neighbor",
         gamma && kc_rdvz_peer_list(gamma, rdvz_test_collect, &links)
             == KC_RDVZ_OK && links.count == 0U);
+    kc_rdvz_close(alpha);
     kc_rdvz_close(beta);
     kc_rdvz_close(gamma);
+    fail += rdvz_test_expect("delete alpha",
+        kc_rdvz_disconnect("alpha") == KC_RDVZ_OK);
+    fail += rdvz_test_expect("delete gamma",
+        kc_rdvz_disconnect("gamma") == KC_RDVZ_OK);
     rdvz_test_result(fail, "kc_rdvz_disconnect",
         "deletes one peer with its edges and invalidates old handles");
     return fail != 0;
@@ -412,6 +449,7 @@ static int case_kc_rdvz_callbacks(void)
     return fail != 0;
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Check whether a text file contains an expected peer identifier.
  * @param filename Filename within test directory.
@@ -452,6 +490,7 @@ static int rdvz_test_wait_file(const char *filename,
     }
     return 0;
 }
+#endif
 
 /**
  * Verify a resident command runs after the creating handle closes.
@@ -622,8 +661,8 @@ static int case_rdvz_cli_create(void)
     char path[RDVZ_TEST_PATH_MAX];
     int fail = 0;
 
-    fail += rdvz_test_expect("list starts without CLI peers",
-        rdvz_cli_equals("-l", "alpha" KC_LINE_END "gamma" KC_LINE_END));
+    fail += rdvz_test_expect("list starts empty",
+        rdvz_cli_equals("-l", ""));
     fail += rdvz_test_expect("create cli-a",
         rdvz_test_path(path, sizeof(path), "rdvz-cli-event.txt") == 0);
     (void)snprintf(command, sizeof(command),
@@ -634,8 +673,11 @@ static int case_rdvz_cli_create(void)
         rdvz_cli_run("cli-b \"echo\"") == 0);
     fail += rdvz_test_expect("list sees both CLI peers",
         rdvz_cli_equals("-l",
-            "alpha" KC_LINE_END "gamma" KC_LINE_END
             "cli-a" KC_LINE_END "cli-b" KC_LINE_END));
+    fail += rdvz_test_expect("remove cli-a",
+        rdvz_cli_run("cli-a -d") == 0);
+    fail += rdvz_test_expect("remove cli-b",
+        rdvz_cli_run("cli-b -d") == 0);
     rdvz_test_result(fail, "rdvz_cli_create",
         "CLI-created peers survive separate invocations");
     return fail != 0;
@@ -647,8 +689,18 @@ static int case_rdvz_cli_create(void)
  */
 static int case_rdvz_cli_links(void)
 {
+    char command[RDVZ_TEST_PATH_MAX * 2];
+    char path[RDVZ_TEST_PATH_MAX];
     int fail = 0;
 
+    fail += rdvz_test_expect("event output path",
+        rdvz_test_path(path, sizeof(path), "rdvz-cli-event.txt") == 0);
+    (void)snprintf(command, sizeof(command),
+        "cli-a \"echo > '%s'\"", path);
+    fail += rdvz_test_expect("create cli-a with resident command",
+        rdvz_cli_run(command) == 0);
+    fail += rdvz_test_expect("create cli-b",
+        rdvz_cli_run("cli-b \"echo\"") == 0);
     fail += rdvz_test_expect("connect cli-b to cli-a",
         rdvz_cli_run("cli-b -c cli-a") == 0);
     fail += rdvz_test_expect("cli-a sees cli-b",
@@ -662,6 +714,10 @@ static int case_rdvz_cli_links(void)
     fail += rdvz_test_expect("both peers remain without links",
         rdvz_cli_equals("cli-a -l", "") &&
         rdvz_cli_equals("cli-b -l", ""));
+    fail += rdvz_test_expect("delete cli-a",
+        rdvz_cli_run("cli-a -d") == 0);
+    fail += rdvz_test_expect("delete cli-b",
+        rdvz_cli_run("cli-b -d") == 0);
     rdvz_test_result(fail, "rdvz_cli_links",
         "CLI connects and disconnects the same symmetric relation");
     return fail != 0;
@@ -675,6 +731,10 @@ static int case_rdvz_cli_disconnect(void)
 {
     int fail = 0;
 
+    fail += rdvz_test_expect("create cli-a",
+        rdvz_cli_run("cli-a \"echo\"") == 0);
+    fail += rdvz_test_expect("create cli-b",
+        rdvz_cli_run("cli-b \"echo\"") == 0);
     fail += rdvz_test_expect("delete cli-a",
         rdvz_cli_run("cli-a -d") == 0);
     fail += rdvz_test_expect("cli-b remains",
@@ -689,7 +749,6 @@ static int case_rdvz_cli_disconnect(void)
         "deleting a peer removes only that named identity");
     return fail != 0;
 }
-#endif
 
 /**
  * Run one contract case and advance the shared progress counter.
