@@ -759,6 +759,53 @@ static int stun_mapped(const stun_attribute_view_t *attr,const uint8_t id[12],ch
 }
 
 /**
+ * Decodes a mapped UDP endpoint into caller-owned host storage.
+ * @return KC_STUN_OK or a negative status.
+ */
+int kc_stun_decode_mapped(const kc_stun_attribute_t *attribute,
+    const unsigned char id[12],char *host,size_t host_size,
+    unsigned short *port)
+{
+    stun_attribute_view_t a;
+    char decoded[NI_MAXHOST];
+    if(!attribute||!id||!host||!host_size||!port||
+        (!attribute->data&&attribute->size))return KC_STUN_EINVAL;
+    memset(&a,0,sizeof(a));
+    a.type=attribute->type;a.data=(const uint8_t *)attribute->data;
+    a.size=attribute->size;
+    if(attribute->type!=KC_STUN_XOR_MAPPED_ADDRESS||
+        !stun_mapped(&a,id,decoded,port))return KC_STUN_EPROTO;
+    if(strlen(decoded)+1U>host_size)return KC_STUN_EINVAL;
+    memcpy(host,decoded,strlen(decoded)+1U);
+    return KC_STUN_OK;
+}
+
+/**
+ * Encodes XOR-MAPPED-ADDRESS bytes for a numeric IPv4/IPv6 endpoint.
+ * @return KC_STUN_OK or a negative status.
+ */
+int kc_stun_encode_mapped(const kc_stun_endpoint_t *endpoint,
+    const unsigned char id[12],void *out,size_t *size)
+{
+    uint8_t *dst=(uint8_t *)out;
+    uint8_t ip[16],mask[16]={0x21,0x12,0xa4,0x42};
+    size_t n,i;
+    int family;
+    if(!endpoint||!endpoint->host||!id||!out||!size||!endpoint->port)
+        return KC_STUN_EINVAL;
+    if(inet_pton(AF_INET,endpoint->host,ip)==1){family=1;n=4U;}
+    else if(inet_pton(AF_INET6,endpoint->host,ip)==1){family=2;n=16U;}
+    else return KC_STUN_EINVAL;
+    if(*size<n+4U)return KC_STUN_EINVAL;
+    memcpy(mask+4,id,12);
+    dst[0]=0;dst[1]=(uint8_t)family;
+    stun_wr16(dst+2,(uint16_t)(endpoint->port^(STUN_MAGIC>>16)));
+    for(i=0;i<n;i++)dst[4U+i]=(uint8_t)(ip[i]^mask[i]);
+    *size=n+4U;
+    return KC_STUN_OK;
+}
+
+/**
  * Appends an XOR-MAPPED-ADDRESS for a source address.
  * @param out Destination packet buffer.
  * @param size Current packet length in and out.
