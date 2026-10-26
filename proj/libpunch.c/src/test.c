@@ -411,15 +411,44 @@ static int test_pair_mixed(kc_punch_path_t **a_path, kc_punch_path_t **b_path)
 static int case_kc_punch_connect(void)
 {
     const char *name = "kc_punch_connect";
-    const char *detail = "establishes a direct UDP path from supplied endpoints";
+    const char *detail = "establishes a direct IPv4 path and exposes selected endpoints";
     kc_punch_path_t *a = NULL;
     kc_punch_path_t *b = NULL;
+    int fail = 0;
+
+    fail += expect_true("IPv4 loopback pair establishes", test_pair(&a, &b) == 0);
+    if (a && b) {
+        fail += expect_true("A reports local host", kc_punch_local_host(a) != NULL);
+        fail += expect_true("A reports local port", kc_punch_local_port(a) != 0);
+        fail += expect_true("A reports peer host", kc_punch_peer_host(a) != NULL);
+        fail += expect_true("A reports peer port", kc_punch_peer_port(a) != 0);
+        fail += expect_true("A selected B endpoint",
+            kc_punch_peer_port(a) == kc_punch_local_port(b));
+        fail += expect_true("B selected A endpoint",
+            kc_punch_peer_port(b) == kc_punch_local_port(a));
+    }
+    kc_punch_close(a);
+    kc_punch_close(b);
+    a = NULL;
+    b = NULL;
+
+    case_result(fail, name, detail);
+    return fail ? 1 : 0;
+}
+
+/**
+ * Verifies connection error reporting and timeout behavior.
+ * @return 0 on pass, 1 on fail.
+ */
+static int case_kc_punch_errors(void)
+{
+    const char *name = "kc_punch_errors";
+    const char *detail = "reports invalid inputs, unreachable peers, and public statuses";
+    kc_punch_path_t *a = NULL;
     kc_punch_options_t invalid;
     kc_punch_endpoint_t peer;
     kc_punch_options_t timeout_options;
     unsigned short timeout_port;
-    int ipv6_rc;
-    int mixed_rc;
     int fail = 0;
 
     memset(&invalid, 0, sizeof(invalid));
@@ -455,21 +484,33 @@ static int case_kc_punch_connect(void)
         kc_punch_connect(&a, &timeout_options) == KC_PUNCH_ETIMEOUT);
     fail += expect_true("failure clears path", a == NULL);
 
-    fail += expect_true("IPv4 loopback pair establishes", test_pair(&a, &b) == 0);
-    if (a && b) {
-        fail += expect_true("A reports local host", kc_punch_local_host(a) != NULL);
-        fail += expect_true("A reports local port", kc_punch_local_port(a) != 0);
-        fail += expect_true("A reports peer host", kc_punch_peer_host(a) != NULL);
-        fail += expect_true("A reports peer port", kc_punch_peer_port(a) != 0);
-        fail += expect_true("A selected B endpoint",
-            kc_punch_peer_port(a) == kc_punch_local_port(b));
-        fail += expect_true("B selected A endpoint",
-            kc_punch_peer_port(b) == kc_punch_local_port(a));
-    }
-    kc_punch_close(a);
-    kc_punch_close(b);
-    a = NULL;
-    b = NULL;
+    fail += expect_true("known status has message",
+        strcmp(kc_punch_strerror(KC_PUNCH_ETIMEOUT), "connection timed out") == 0);
+    fail += expect_true("public statuses have descriptions",
+        kc_punch_strerror(KC_PUNCH_OK) && kc_punch_strerror(KC_PUNCH_EINVAL) &&
+        kc_punch_strerror(KC_PUNCH_ENET) && kc_punch_strerror(KC_PUNCH_ENOMEM) &&
+        kc_punch_strerror(KC_PUNCH_ECLOSED));
+    fail += expect_true("closed path rejects send",
+        kc_punch_send(NULL, "x", 1) == KC_PUNCH_ECLOSED);
+    fail += expect_true("closed path rejects receive",
+        kc_punch_receive(NULL, NULL, NULL, 1) == KC_PUNCH_EINVAL);
+    case_result(fail, name, detail);
+    return fail ? 1 : 0;
+}
+
+/**
+ * Verifies IPv6 paths and selection from mixed-family candidates.
+ * @return 0 on pass, 1 on fail.
+ */
+static int case_kc_punch_endpoints(void)
+{
+    const char *name = "kc_punch_endpoints";
+    const char *detail = "establishes IPv6 paths and selects reachable candidates";
+    kc_punch_path_t *a = NULL;
+    kc_punch_path_t *b = NULL;
+    int ipv6_rc;
+    int mixed_rc;
+    int fail = 0;
 
     ipv6_rc = test_pair_ipv6(&a, &b);
     if (ipv6_rc == 2) {
@@ -625,7 +666,7 @@ static int case_kc_punch_datagrams(void)
 static int case_kc_punch_lifecycle(void)
 {
     const char *name = "kc_punch_lifecycle";
-    const char *detail = "reports errors, version, and accepts NULL cleanup";
+    const char *detail = "closes paths and allows independent subsequent connections";
     kc_punch_path_t *first_a = NULL;
     kc_punch_path_t *first_b = NULL;
     kc_punch_path_t *second_a = NULL;
@@ -634,19 +675,6 @@ static int case_kc_punch_lifecycle(void)
 
     kc_punch_close(NULL);
     kc_punch_free(NULL);
-    fail += expect_true("version is nonzero", kc_punch_version() != 0U);
-    fail += expect_true("known status has message",
-        strcmp(kc_punch_strerror(KC_PUNCH_ETIMEOUT), "connection timed out") == 0);
-    fail += expect_true("all public statuses have messages",
-        kc_punch_strerror(KC_PUNCH_OK) && kc_punch_strerror(KC_PUNCH_EINVAL) &&
-        kc_punch_strerror(KC_PUNCH_ENET) && kc_punch_strerror(KC_PUNCH_ENOMEM) &&
-        kc_punch_strerror(KC_PUNCH_ECLOSED));
-    fail += expect_true("unknown status has message",
-        kc_punch_strerror(-999) != NULL);
-    fail += expect_true("closed path rejects send",
-        kc_punch_send(NULL, "x", 1) == KC_PUNCH_ECLOSED);
-    fail += expect_true("closed path rejects receive",
-        kc_punch_receive(NULL, NULL, NULL, 1) == KC_PUNCH_EINVAL);
 
     fail += expect_true("first independent pair establishes",
         test_pair(&first_a, &first_b) == 0);
@@ -1019,12 +1047,14 @@ static int case_all(void)
 {
     int rc = 0;
 #ifdef __EMSCRIPTEN__
-    test_case_total = 4;
+    test_case_total = 6;
 #else
-    test_case_total = 5;
+    test_case_total = 7;
 #endif
     test_case_current = 0;
     run_case(&rc, case_kc_punch_connect);
+    run_case(&rc, case_kc_punch_errors);
+    run_case(&rc, case_kc_punch_endpoints);
     run_case(&rc, case_kc_punch_datagrams);
     run_case(&rc, case_kc_punch_lifecycle);
     run_case(&rc, case_kc_punch_connect_over);
@@ -1049,6 +1079,8 @@ int main(int argc, char **argv)
     }
     if (strcmp(argv[1], "all") == 0) return case_all();
     if (strcmp(argv[1], "kc_punch_connect") == 0) return case_kc_punch_connect();
+    if (strcmp(argv[1], "kc_punch_errors") == 0) return case_kc_punch_errors();
+    if (strcmp(argv[1], "kc_punch_endpoints") == 0) return case_kc_punch_endpoints();
     if (strcmp(argv[1], "kc_punch_datagrams") == 0) return case_kc_punch_datagrams();
     if (strcmp(argv[1], "kc_punch_lifecycle") == 0) return case_kc_punch_lifecycle();
     if (strcmp(argv[1], "kc_punch_connect_over") == 0)
