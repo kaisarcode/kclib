@@ -1,64 +1,96 @@
 # librdvz.c - Peer rendezvous
 
-`librdvz.c` creates independent peers and maintains direct, bidirectional
-relationships between them. It provides local rendezvous without imposing
-networking, processes, messaging, roles, rooms or application policy.
+`librdvz.c` creates named peers and maintains direct, bidirectional
+relationships between them. Peers remain registered across processes until
+explicitly disconnected. A relationship is symmetric: either peer can connect
+or disconnect without becoming the owner of the other.
 
-Each peer receives a unique ID within its registry. Connecting with another
-peer's ID creates a new peer and links the two. Disconnecting a peer removes
-its links without disconnecting other peers. Applications may observe every
-new or removed link and act on the encounter themselves.
+Connections do not establish a network transport or deliver application
+messages. A peer may have multiple direct neighbors; relationships are not
+transitive and repeated connections do not create duplicate links.
 
 ## Quick start
 
 ```c
 #include "librdvz.h"
 
-kc_rdvz_t *rdvz = NULL;
+static void connected(const char *other, void *userdata)
+{
+    (void)userdata;
+    printf("Connected to %s\n", other);
+}
+
 kc_rdvz_peer_t *first = NULL;
 kc_rdvz_peer_t *second = NULL;
 
-if (kc_rdvz_open(&rdvz, NULL) == KC_RDVZ_OK) {
-    kc_rdvz_connect(rdvz, NULL, &first);
-    kc_rdvz_connect(rdvz, kc_rdvz_peer_id(first), &second);
+kc_rdvz_options_t options = {
+    .cmd = NULL,
+    .on_connect = connected,
+    .userdata = NULL
+};
 
-    kc_rdvz_disconnect(first);
+kc_rdvz_create(&first, "peer1", &options);
+kc_rdvz_create(&second, "peer2", NULL);
 
-    /* The second peer still belongs to the registry. */
-    kc_rdvz_connect(rdvz, kc_rdvz_peer_id(second), &first);
+kc_rdvz_connect(second, "peer1", NULL, NULL);
 
-    kc_rdvz_disconnect(first);
-    kc_rdvz_disconnect(second);
-    kc_rdvz_close(rdvz);
-}
+kc_rdvz_peer_disconnect(first, "peer2", NULL, NULL);
+
+kc_rdvz_close(first);
+kc_rdvz_close(second);
+
+kc_rdvz_disconnect("peer1");
+kc_rdvz_disconnect("peer2");
 ```
 
-`kc_rdvz_list()` visits all peers in a registry.
-`kc_rdvz_peer_list()` visits only directly linked peers. Connections are
-symmetric, but not transitive.
+`kc_rdvz_list()` lists registered peers. `kc_rdvz_peer_list()`
+lists only direct neighbors. `kc_rdvz_open()` opens an additional
+local handle for an existing peer. Closing a handle does not remove the
+peer. `kc_rdvz_disconnect(id)` removes the named peer and
+all its relationships.
 
-## Encounter notifications
+The callback supplied when creating or opening a peer receives the **other
+peer's ID as a string** whenever a new relationship is established. For
+example, `peer1` receives `"peer2"` when `peer2`
+connects to it. These callbacks belong to a live local handle and may
+be delivered asynchronously when another process establishes the link.
 
-Pass `on_connect` and `on_disconnect` callbacks to `kc_rdvz_open()` to
-observe when a pair of peers becomes linked or is unlinked. Notifications
-are synchronous and occur once per direct link. The application decides what
-to do after an encounter. It may inspect the registry during a callback;
-mutations and registry closure are not permitted until the callback returns.
-
-Disconnecting and reconnecting creates a new peer identity. Applications
-that recognize returning participants manage that identity separately.
-The registry does not transport data or retain peers after disconnect.
+The callback supplied to `kc_rdvz_connect()` or
+`kc_rdvz_peer_disconnect()` runs on successful completion
+and receives the other peer's ID. A peer may also have a persistent command
+configured at creation, executed with the other ID when either endpoint
+establishes a new link.
 
 ## CLI
 
-The `rdvz` executable demonstrates the in-process primitive:
-
 ```sh
-rdvz connect
+rdvz peer1 'handler connected'
+rdvz peer2 'handler connected'
+
+rdvz -l
+rdvz peer1 -l
+
+rdvz peer2 -c peer1 'handler linked'
+rdvz peer1 -d peer2 'handler unlinked'
+
+rdvz peer1 -d
+rdvz peer2 -d
 ```
 
-`connect` creates one peer and prints its ID. Every invocation uses its
-own temporary registry; the CLI does not provide a cross-process service.
+`rdvz <id> <cmd>` creates or updates a named peer and
+configures the command executed for incoming connections from any peer.
+The command receives the other peer's ID as its final argument.
+An optional command passed to `-c` or `-d <id>`
+runs only for that particular successful operation. Commands are launched
+without waiting for their completion.
+
+`rdvz -l` lists every peer. `rdvz <id> -l`
+lists that peer's direct neighbors. `rdvz <id1> -c <id2>`
+creates the one symmetric relationship between existing peers.
+`rdvz <id1> -d <id2>` removes the relationship without removing
+either peer, whereas `rdvz <id> -d` removes that peer completely.
+
+All invocations share the same per-user local rendezvous state.
 
 ## Build
 
