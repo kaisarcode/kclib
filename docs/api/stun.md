@@ -1,108 +1,73 @@
 # stun scripting API
 
-UDP STUN Binding discovery and serving. Discovery keeps the same local mapping
-open so the observed endpoint and later application datagrams refer to the same
-UDP mapping. A listener autonomously answers Binding Requests from other
-machines.
-
-## Lua
-
-```lua
-local server = stun.listen {
-    host = nil,
-    port = 3478
-}
-
-print(server.port)
-
-local mapping = stun.discover {
-    server = "stun.example.com:3478",
-    host = nil,
-    port = 5000,
-    timeout_ms = 3000
-}
-
-local local_endpoint = mapping.local
-local mapped_endpoint = mapping.mapped
-
-mapping:refresh()
-
-mapping:send(
-    { host = "203.0.113.20", port = 5000 },
-    "hello"
-)
-
-local packet = mapping:receive(1000)
-local from = packet.from
-local data = packet.data
-
-mapping:close()
-server:close()
-```
-
-`stun.listen { host, port }` starts an autonomous UDP Binding endpoint. A nil or
-empty `host` listens on available IPv4 and IPv6 wildcard addresses. Port zero
-requests an operating-system-selected port, exposed as `server.port`; use 3478
-for the conventional public STUN UDP port.
-
-The discovery `server` option accepts `host:port`, `[IPv6]:port`, or a host
-without a port, which uses port 3478. `host` is optional. `port` may be zero to request an
-operating-system-selected local port. `timeout_ms` zero uses the default
-discovery timeout.
-
-`mapping.local` and `mapping.mapped` project as
-`{ host = ..., port = ... }` values.
-
-`mapping:refresh()` sends a fresh STUN Binding Request through the same mapping.
-It does not wait for the response. STUN responses are consumed internally and
-are not returned by `mapping:receive()`.
-
-`mapping:send(endpoint, bytes)` sends one UDP datagram.
-`mapping:receive(timeout_ms)` returns
-`{ from = { host = ..., port = ... }, data = ... }`. A zero receive timeout
-waits indefinitely.
+The canonical operations are `client` and `server`. A client performs a Binding
+transaction; a server answers Binding requests. Either may borrow UDP owned by a
+higher-level composition. Bindings project the C transaction state into an
+asynchronous language operation without exposing C buffer or pointer mechanics.
 
 ## JavaScript
 
 ```js
-const server = await stun.listen({
-  host: null,
-  port: 3478
+const client = await stun.client({
+  peer: "stun.example.com:3478",
+  port: 5000
 });
 
+console.log(client.local);   // { host, port }
+console.log(client.mapped);  // { host, port }
+
+await client.send({ host: "203.0.113.20", port: 5000 }, bytes);
+const datagram = await client.receive(1000);  // { from: { host, port }, data }
+await client.refresh();
+await client.close();
+
+const server = await stun.server({ port: 3478 });
 console.log(server.port);
-
-const mapping = await stun.discover({
-  server: "stun.example.com:3478",
-  host: null,
-  port: 5000,
-  timeout_ms: 3000
-});
-
-const localEndpoint = mapping.local;
-const mappedEndpoint = mapping.mapped;
-
-await mapping.refresh();
-
-await mapping.send(
-  { host: "203.0.113.20", port: 5000 },
-  new TextEncoder().encode("hello")
-);
-
-const packet = await mapping.receive(1000);
-const from = packet.from;
-const data = packet.data;
-
-await mapping.close();
 await server.close();
 ```
 
-The listener answers UDP STUN Binding Requests with `XOR-MAPPED-ADDRESS`. It
-does not expose request parsing or socket polling to the scripting caller. The
-current transport is UDP; TCP, TLS, and DTLS STUN transports are outside this
-API.
+Borrowing a UDP transport for ICE-style composition:
 
-The mapping supports IPv4 and IPv6. The chosen STUN server address family and
-explicit local bind host must be compatible.
+```js
+const server = await stun.server({
+  transport: udp,
+  credentials: username => localCredentials(username),
+  onBinding: ({ peer, attributes }) => validateBinding(peer, attributes)
+});
 
-`strerror(status)` and `version()` remain namespace functions.
+const client = await stun.client({
+  transport: udp,
+  peer: remoteEndpoint,
+  credentials: remoteCredentials,
+  attributes: checkAttributes
+});
+```
+
+The host binding maps datagrams from `udp` to pending client transactions and the
+server's Binding handler. The UDP transport has a single receive owner. `stun`
+borrows it and never closes it. User applications do not construct STUN packets,
+transaction identifiers, HMACs or CRCs. The `credentials` and `attributes`
+values in the second example are produced by the higher-level composition.
+
+## Lua
+
+```lua
+local client = stun.client {
+    peer = "stun.example.com:3478",
+    port = 5000
+}
+
+print(client.mapped.host, client.mapped.port)
+client:refresh()
+client:close()
+
+local server = stun.server { port = 3478 }
+print(server.port)
+server:close()
+```
+
+Borrowed UDP and credential/binding callback semantics are the same as in
+JavaScript. Native STUN statuses become ordinary binding errors, except where a
+higher-level protocol needs to inspect a returned STUN error (such as `487`).
+
+Use `stun.version()` to query the linked build version.
