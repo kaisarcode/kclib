@@ -1,67 +1,81 @@
-# libstun.c - STUN UDP mappings and endpoints
+# libstun.c - STUN Binding client and server
 
-`libstun.c` discovers externally observed UDP endpoints with STUN Binding and
-can run an autonomous UDP Binding endpoint for other clients. A discovered
-mapping keeps the same local UDP socket alive for application datagrams.
+`libstun.c` performs STUN Binding transactions and serves Binding requests over
+UDP. A client discovers the endpoint observed by a peer and keeps its UDP
+mapping available for application traffic. A server answers Binding requests.
+Both roles support UDP transports supplied by another composition.
+
+Client transactions support short-term STUN credentials, SHA-1 and SHA-256
+message integrity, fingerprint validation, retransmissions, extension attributes,
+error responses, and IPv4/IPv6. STUN does not implement ICE or require another
+kclib.
 
 ## Quick start
 
 ```c
 #include "libstun.h"
 
-kc_stun_options_t options = {
-    .server = "stun.example.com:3478",
-    .port = 0,
-    .timeout_ms = 3000
-};
-kc_stun_mapping_t *mapping = NULL;
+kc_stun_client_t *client = NULL;
+kc_stun_client_options_t options = {0};
+options.peer.host = "stun.example.com:3478";
 
-if (kc_stun_discover(&mapping, &options) == KC_STUN_OK) {
-    const char *host = kc_stun_mapped_host(mapping);
-    unsigned short port = kc_stun_mapped_port(mapping);
+if (kc_stun_client(&client, &options) == KC_STUN_OK) {
+    int status;
+    do {
+        status = kc_stun_client_poll(client, 100);
+    } while (status == KC_STUN_PENDING);
 
-    (void)host;
-    (void)port;
-    kc_stun_close(mapping);
+    if (status == KC_STUN_OK) {
+        const kc_stun_endpoint_t *public_address = kc_stun_client_mapped(client);
+        /* public_address->host, public_address->port */
+        (void)public_address;
+    }
+    kc_stun_client_close(client);
 }
 ```
 
-The current transport is UDP. STUN responses from the configured server are
-handled internally rather than returned as application datagrams.
-
 ## CLI
-
-The `stun` command provides two operations:
 
 ```sh
 stun client stun.example.com:3478
 stun client stun.example.com:3478 --host 0.0.0.0 -p 5000 -t 3000
 stun server -p 3478
+stun -h
 ```
 
-`client` prints the observed public host and port as tab-separated fields.
-`server` prints its listening port, then serves Binding requests until
-interrupted. The server defaults to port 3478; the client uses an
-OS-selected local port unless `-p` is provided.
+`client` writes the observed host and port as tab-separated fields.
+`server` writes its listening port and continues serving until stopped.
 
-Use `stun -h` for all commands and options.
+## Composition
 
-## Documentation
+A client can borrow an existing UDP sender. The composition delivers inbound
+STUN responses using `kc_stun_client_receive()` and drives retransmissions using
+`kc_stun_client_poll()`. A server can borrow the same sender and process inbound
+Binding requests with `kc_stun_server_receive()`. The caller remains the sole
+owner of UDP reception; STUN never closes borrowed transports.
 
-Read the [mapping lifecycle](doc/mapping-lifecycle.md) for discovery, refresh,
-listener behavior, address families, and application datagrams.
+A credentials callback on the server supplies a key for each username. A binding
+callback may reject a request with a protocol error code (for example, 487).
+STUN verifies credentials and signs authenticated responses, while the
+composition determines policy and any extension attributes.
+
+The supported transport is UDP. STUN short-term credentials are intended for
+protocols such as ICE. Long-term username/realm/nonce authentication and STUN
+transport variants over TCP/TLS/DTLS are outside this UDP Binding capability.
+
+See [Binding lifecycle](doc/mapping-lifecycle.md), the
+[public header](src/libstun.h) and the canonical
+[scripting projection](../../docs/api/stun.md).
 
 ## Build
 
-From this project directory:
-
-```bash
+```sh
 make
 make test
 ```
 
-Use `make all` for the configured cross-platform targets when their required
-toolchains are installed.
+Use `make all` for configured cross-platform targets when their toolchains are
+installed.
 
 ## Status
 
