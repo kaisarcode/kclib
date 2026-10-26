@@ -26,43 +26,17 @@ static int test_case_total;
 static int test_case_current;
 
 /**
- * Checks a contract condition and reports failures.
- * @param pass Nonzero when the assertion holds.
- * @param name Description of the assertion.
+ * Checks one named contract and reports its numbered result.
+ * @param pass Nonzero when the contract holds.
+ * @param name Public behavior under test.
  * @return None.
  */
 static void stun_test_check(int pass, const char *name)
 {
-    if (!pass) {
-        printf("[FAIL] %s\n", name);
-        stun_test_failures++;
-    }
-}
-
-/**
- * Reports a numbered public contract case.
- * @param failures Number of failed assertions in the case.
- * @param name Public contract case name.
- * @param detail Description of the expected behavior.
- * @return None.
- */
-static void stun_case_result(unsigned int failures, const char *name,
-    const char *detail)
-{
-    printf("[%d/%d] [%s] %s: %s\n", test_case_current, test_case_total,
-        failures ? "FAIL" : "PASS", name, detail);
-}
-
-/**
- * Runs one case and increments the shared progress counter.
- * @param failures Accumulated failing case count.
- * @param run Test case function.
- * @return None.
- */
-static void stun_run_case(int *failures, int (*run)(void))
-{
     test_case_current++;
-    *failures += run();
+    printf("[%d/%d] [%s] %s\n", test_case_current, test_case_total,
+        pass ? "PASS" : "FAIL", name);
+    if (!pass) stun_test_failures++;
 }
 
 /**
@@ -212,11 +186,20 @@ static void stun_test_borrowed(void)
     for(i=0;i<sizeof(modes)/sizeof(modes[0]);i++){
         co.credentials.integrity=modes[i];
         rc=kc_stun_client(&stun_test_client,&co);
-        stun_test_check(rc==KC_STUN_OK,"borrowed client starts");
+        stun_test_check(rc==KC_STUN_OK,
+            i==0 ? "HMAC-SHA1 borrowed client starts" :
+            i==1 ? "HMAC-SHA256 borrowed client starts" :
+                "HMAC-BOTH borrowed client starts");
         if(rc!=KC_STUN_OK)continue;
         rc=kc_stun_client_poll(stun_test_client,0);
-        stun_test_check(rc==KC_STUN_OK&&kc_stun_client_mapped(stun_test_client)!=NULL,"authenticated Binding response");
-        stun_test_check(stun_test_seen_priority,"opaque ICE attribute supplied to policy");
+        stun_test_check(rc==KC_STUN_OK&&kc_stun_client_mapped(stun_test_client)!=NULL,
+            i==0 ? "HMAC-SHA1 authenticated Binding response" :
+            i==1 ? "HMAC-SHA256 authenticated Binding response" :
+                "HMAC-BOTH authenticated Binding response");
+        stun_test_check(stun_test_seen_priority,
+            i==0 ? "HMAC-SHA1 ICE attribute supplied to policy" :
+            i==1 ? "HMAC-SHA256 ICE attribute supplied to policy" :
+                "HMAC-BOTH ICE attribute supplied to policy");
         if(i==2){
             rc=kc_stun_client_refresh(stun_test_client,500);
             stun_test_check(rc==KC_STUN_OK,"authenticated refresh starts");
@@ -317,110 +300,34 @@ static void stun_test_command_line(void)
 #endif
 
 /**
- * Verifies owned UDP mapping and reuse.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_stun_owned(void)
-{
-    unsigned int before = stun_test_failures;
-    stun_test_owned();
-    stun_case_result(stun_test_failures - before, "kc_stun_owned",
-        "creates, preserves and refreshes a UDP mapping");
-    return stun_test_failures != before;
-}
-
-/**
- * Verifies IPv6 binding when loopback is supported.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_stun_ipv6(void)
-{
-    unsigned int before = stun_test_failures;
-    stun_test_ipv6();
-    stun_case_result(stun_test_failures - before, "kc_stun_ipv6",
-        "decodes the IPv6 XOR-mapped address");
-    return stun_test_failures != before;
-}
-
-/**
- * Verifies borrowed UDP, authentication, extensions and errors.
- * @return Zero on success, nonzero on failure.
- */
-static int case_kc_stun_borrowed(void)
-{
-    unsigned int before = stun_test_failures;
-    stun_test_borrowed();
-    stun_case_result(stun_test_failures - before, "kc_stun_borrowed",
-        "handles authenticated borrowed transport and protocol errors");
-    return stun_test_failures != before;
-}
-
-#ifdef KC_CLI_PATH
-/**
- * Verifies the public STUN command-line interface.
- * @return Zero on success, nonzero on failure.
- */
-static int case_stun_cli(void)
-{
-    unsigned int before = stun_test_failures;
-    stun_test_command_line();
-    stun_case_result(stun_test_failures - before, "stun_cli",
-        "validates help, version and command arguments");
-    return stun_test_failures != before;
-}
-#endif
-
-/**
- * Runs all public contract cases.
- * @return Zero when every case passes.
+ * Runs the full numbered STUN contract suite.
+ * @return Zero when all assertions pass.
  */
 static int stun_test_all(void)
 {
-    int failures = 0;
-
 #ifdef KC_CLI_PATH
-    test_case_total = 4;
+    test_case_total = 32;
 #else
-    test_case_total = 3;
+    test_case_total = 26;
 #endif
     test_case_current = 0;
-    stun_run_case(&failures, case_kc_stun_owned);
-    stun_run_case(&failures, case_kc_stun_ipv6);
-    stun_run_case(&failures, case_kc_stun_borrowed);
+    stun_test_failures = 0;
+    stun_test_owned();
+    stun_test_ipv6();
+    stun_test_borrowed();
 #ifdef KC_CLI_PATH
-    stun_run_case(&failures, case_stun_cli);
+    stun_test_command_line();
 #endif
-    printf("%d passed, %d failed\n", test_case_total - failures, failures);
-    return failures ? 1 : 0;
+    printf("%d passed, %u failed\n",
+        test_case_current - (int)stun_test_failures, stun_test_failures);
+    return stun_test_failures ? 1 : 0;
 }
 
 /**
- * Runs the complete suite or a named public contract case.
- * @param argc Argument count.
- * @param argv Argument vector.
- * @return Process status.
+ * Runs STUN public contract tests.
+ * @return Process exit status.
  */
-int main(int argc, char **argv)
+int main(void)
 {
-    int (*run)(void) = NULL;
-
-    if (argc == 1 || (argc == 2 && strcmp(argv[1], "all") == 0))
-        return stun_test_all();
-    if (argc != 2) {
-        fprintf(stderr, "test case: expected one argument\n");
-        return 2;
-    }
-    if (strcmp(argv[1], "kc_stun_owned") == 0) run = case_kc_stun_owned;
-    else if (strcmp(argv[1], "kc_stun_ipv6") == 0) run = case_kc_stun_ipv6;
-    else if (strcmp(argv[1], "kc_stun_borrowed") == 0) run = case_kc_stun_borrowed;
-#ifdef KC_CLI_PATH
-    else if (strcmp(argv[1], "stun_cli") == 0) run = case_stun_cli;
-#endif
-    if (!run) {
-        fprintf(stderr, "unknown test case: %s\n", argv[1]);
-        return 2;
-    }
-    test_case_current = 1;
-    test_case_total = 1;
-    return run();
+    return stun_test_all();
 }
