@@ -105,6 +105,31 @@ static void stun_test_owned(void)
     }
     kc_stun_server_close(server);
 }
+/** Checks the Binding address family and XOR decoding over IPv6 when available. */
+static void stun_test_ipv6(void)
+{
+    kc_stun_server_options_t so={0};kc_stun_client_options_t co={0};
+    kc_stun_server_t *server=NULL;kc_stun_client_t *client=NULL;
+    char address[128];int rc;
+    so.host="::1";so.port=0;
+    rc=kc_stun_server(&server,&so);
+    if(rc!=KC_STUN_OK){printf("SKIP: IPv6 loopback unavailable\n");return;}
+    snprintf(address,sizeof(address),"[::1]:%u",kc_stun_server_port(server));
+    co.peer.host=address;co.host="::1";co.timeout_ms=1000;
+    rc=kc_stun_client(&client,&co);
+    stun_test_check(rc==KC_STUN_OK,"IPv6 Binding client starts");
+    if(rc==KC_STUN_OK){
+        const kc_stun_endpoint_t *mapped;
+        do{rc=kc_stun_client_poll(client,50);}while(rc==KC_STUN_PENDING);
+        mapped=kc_stun_client_mapped(client);
+        stun_test_check(rc==KC_STUN_OK&&mapped&&
+            strcmp(mapped->host,"::1")==0&&mapped->port!=0,
+            "IPv6 XOR-MAPPED-ADDRESS");
+        kc_stun_client_close(client);
+    }
+    kc_stun_server_close(server);
+}
+
 /** Runs authenticated transactions through an externally owned UDP path. */
 static void stun_test_borrowed(void)
 {
@@ -222,7 +247,7 @@ static void stun_test_command_line(void)
 #endif
 int main(void)
 {
-    stun_test_owned();stun_test_borrowed();
+    stun_test_owned();stun_test_ipv6();stun_test_borrowed();
 #ifdef KC_CLI_PATH
     stun_test_command_line();
 #endif
