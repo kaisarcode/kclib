@@ -36,10 +36,6 @@ set(RDVZ_CORE_SOURCES
     src/librdvz.c
 )
 
-if(UNIX AND NOT EMSCRIPTEN)
-    find_package(Threads REQUIRED)
-endif()
-
 if(EMSCRIPTEN)
     add_executable(librdvz_wasm ${RDVZ_CORE_SOURCES})
     target_include_directories(librdvz_wasm PRIVATE src)
@@ -56,8 +52,8 @@ elseif(NOT RDVZ_TEST_EXTERNAL_ARTIFACTS)
     add_library(rdvz_static STATIC ${RDVZ_CORE_SOURCES})
     set_target_properties(rdvz_static PROPERTIES OUTPUT_NAME "rdvz")
     target_include_directories(rdvz_static PRIVATE src)
-    if(UNIX)
-        target_link_libraries(rdvz_static PUBLIC Threads::Threads)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_libraries(rdvz_static PUBLIC pthread)
     endif()
 
     add_library(rdvz_shared SHARED ${RDVZ_CORE_SOURCES})
@@ -66,8 +62,8 @@ elseif(NOT RDVZ_TEST_EXTERNAL_ARTIFACTS)
         WINDOWS_EXPORT_ALL_SYMBOLS ON
     )
     target_include_directories(rdvz_shared PRIVATE src)
-    if(UNIX)
-        target_link_libraries(rdvz_shared PRIVATE Threads::Threads)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_libraries(rdvz_shared PRIVATE pthread)
     endif()
 endif()
 
