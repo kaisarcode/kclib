@@ -582,10 +582,12 @@ static int stun_build_request(uint8_t *data,size_t *size,const uint8_t id[12],co
             a->type==KC_STUN_USERNAME||a->type==KC_STUN_ERROR_CODE||(!a->data&&a->size))return 0;
         if(!stun_append(data,&n,a->type,a->data,a->size))return 0;
     }
-    if((o->credentials.integrity?o->credentials.integrity:KC_STUN_HMAC_BOTH)&KC_STUN_HMAC_SHA1)
-        if(!stun_sign(data,&n,o->credentials.key,o->credentials.key_size,1))return 0;
-    if((o->credentials.integrity?o->credentials.integrity:KC_STUN_HMAC_BOTH)&KC_STUN_HMAC_SHA256)
-        if(!stun_sign(data,&n,o->credentials.key,o->credentials.key_size,2))return 0;
+    if(o->credentials.key){
+        if((o->credentials.integrity?o->credentials.integrity:KC_STUN_HMAC_BOTH)&KC_STUN_HMAC_SHA1)
+            if(!stun_sign(data,&n,o->credentials.key,o->credentials.key_size,1))return 0;
+        if((o->credentials.integrity?o->credentials.integrity:KC_STUN_HMAC_BOTH)&KC_STUN_HMAC_SHA256)
+            if(!stun_sign(data,&n,o->credentials.key,o->credentials.key_size,2))return 0;
+    }
     if(!stun_finish(data,&n))return 0;
     *size=n;return 1;
 }
