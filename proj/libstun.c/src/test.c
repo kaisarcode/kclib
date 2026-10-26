@@ -51,11 +51,13 @@ static void stun_test_check(int pass, const char *name, const char *detail)
 {
     case_result(!pass, name, detail);
 }
+
 /**
  * Delivers one server reply to a borrowed client.
  * @return 0 after delivering the reply.
  */
-static int stun_test_server_send(void *context,const kc_stun_endpoint_t *peer,const void *bytes,size_t size)
+static int stun_test_server_send(void *context, const kc_stun_endpoint_t *peer,
+    const void *bytes, size_t size)
 {
     const kc_stun_endpoint_t from={"127.0.0.1",42424};
     (void)context;(void)peer;
