@@ -7,8 +7,8 @@ Both roles support UDP transports supplied by another composition.
 
 Client transactions support short-term STUN credentials, SHA-1 and SHA-256
 message integrity, fingerprint validation, retransmissions, extension attributes,
-error responses, and IPv4/IPv6. STUN does not implement ICE or require another
-kclib.
+error responses, unauthenticated Binding Indication keepalives and IPv4/IPv6.
+STUN does not implement ICE or require another kclib.
 
 ## Quick start
 
@@ -50,7 +50,9 @@ stun -h
 
 A client can borrow an existing UDP sender. The composition delivers inbound
 STUN responses using `kc_stun_client_receive()` and drives retransmissions using
-`kc_stun_client_poll()`. A server can borrow the same sender and process inbound
+`kc_stun_client_poll()`. `kc_stun_client_keepalive()` emits an unauthenticated
+Binding Indication without waiting for a response. A server can borrow the
+same sender and process inbound
 Binding requests with `kc_stun_server_receive()`. The caller remains the sole
 owner of UDP reception; STUN never closes borrowed transports.
 
