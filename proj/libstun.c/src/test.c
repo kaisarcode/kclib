@@ -127,7 +127,19 @@ static void stun_test_owned(void)
     rc=kc_stun_client(&client,&options);
     stun_test_check(rc==KC_STUN_OK&&client!=NULL,"kc_stun_client", "starts an owned UDP client");
     if(rc==KC_STUN_OK){
+        const kc_stun_endpoint_t *local=kc_stun_client_local(client);
+        const char early[]="datagram during Binding";
+        kc_stun_endpoint_t destination={"127.0.0.1",local?local->port:0};
+        int sent=local&&kc_stun_client_send(client,&destination,early,sizeof(early))==KC_STUN_OK;
+        stun_test_check(sent,"pending_udp_send","sends application data while Binding is pending");
         do{rc=kc_stun_client_poll(client,50);}while(rc==KC_STUN_PENDING);
+        if(sent){
+            int received=kc_stun_client_read(client,&data,200)==KC_STUN_OK;
+            stun_test_check(received&&data.data_size==sizeof(early)&&
+                memcmp(data.data,early,sizeof(early))==0,
+                "pending_udp_receive","preserves data received during Binding polling");
+            if(received)kc_stun_datagram_free(&data);
+        }else stun_test_check(0,"pending_udp_receive","preserves data received during Binding polling");
         mapped=kc_stun_client_mapped(client);
         stun_test_check(rc==KC_STUN_OK&&mapped&&mapped->port&&strcmp(mapped->host,"127.0.0.1")==0,"kc_stun_client_mapped", "returns the IPv4 mapped endpoint");
         if(mapped){
@@ -319,9 +331,9 @@ static void stun_test_command_line(void)
 static int stun_test_all(void)
 {
 #ifdef KC_CLI_PATH
-    test_case_total = 32;
+    test_case_total = 34;
 #else
-    test_case_total = 26;
+    test_case_total = 28;
 #endif
     test_case_current = 0;
     stun_test_failures = 0;
