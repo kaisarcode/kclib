@@ -12,7 +12,9 @@ transaction is running. A successful transaction yields `client_mapped()`.
 The client retains its UDP mapping until `client_close()`.
 
 `client_refresh()` starts another transaction on the same mapping, with a new
-transaction identifier and integrity values. `client_send()` sends application
+transaction identifier and integrity values. `client_keepalive()` sends an
+unauthenticated Binding Indication with a fingerprint, without expecting a
+response. The ICE composition decides when to use that operation. `client_send()` sends application
 UDP datagrams; `client_read()` receives them on owned transports after the
 transaction completes.
 
