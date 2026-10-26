@@ -29,6 +29,23 @@ if (kc_stun_discover(&mapping, &options) == KC_STUN_OK) {
 The current transport is UDP. STUN responses from the configured server are
 handled internally rather than returned as application datagrams.
 
+## CLI
+
+The \`stun\` command provides two operations:
+
+\`\`\`sh
+stun client stun.example.com:3478
+stun client stun.example.com:3478 --host 0.0.0.0 -p 5000 -t 3000
+stun server -p 3478
+\`\`\`
+
+\`client\` prints the observed public host and port as tab-separated fields.
+\`server\` prints its listening port, then serves Binding requests until
+interrupted. The server defaults to port 3478; the client uses an
+OS-selected local port unless \`-p\` is provided.
+
+Use \`stun -h\` for all commands and options.
+
 ## Documentation
 
 Read the [mapping lifecycle](doc/mapping-lifecycle.md) for discovery, refresh,
