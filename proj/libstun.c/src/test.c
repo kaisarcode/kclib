@@ -170,7 +170,7 @@ static void stun_test_owned(void)
             stun_test_check(rc==KC_STUN_OK,"kc_stun_client_send", "sends through the preserved mapping");
             rc=kc_stun_client_read(client,&data,200);
             stun_test_check(rc==KC_STUN_OK&&data.data_size==sizeof(payload)&&memcmp(data.data,payload,sizeof(payload))==0,"kc_stun_client_read", "receives application data through the mapping");
-            kc_stun_datagram_free(&data);
+            if(rc==KC_STUN_OK)kc_stun_datagram_free(&data);
         }
         stun_test_group("kc_stun_datagrams", "sends and receives through the preserved UDP mapping");
         rc=kc_stun_client_refresh(client,2000);
@@ -241,6 +241,7 @@ static void stun_test_borrowed(void)
     co.credentials.key_size=strlen(stun_test_key);co.attributes=attributes;co.attribute_count=1;
     for(i=0;i<sizeof(modes)/sizeof(modes[0]);i++){
         co.credentials.integrity=modes[i];
+        stun_test_seen_priority=0;
         rc=kc_stun_client(&stun_test_client,&co);
         stun_test_check(rc == KC_STUN_OK,
             i == 0 ? "hmac_sha1_client" :
