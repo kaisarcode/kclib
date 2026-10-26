@@ -147,7 +147,9 @@ const kc_stun_attribute_t *kc_stun_client_attributes(const kc_stun_client_t *cli
 int kc_stun_client_send(kc_stun_client_t *client, const kc_stun_endpoint_t *peer, const void *bytes, size_t size);
 
 /**
- * Reads an application datagram on an owned socket.
+ * Reads a datagram on an owned socket, including data preserved during Binding.
+ * Unrelated STUN messages are returned to the caller for dispatch; they are
+ * not automatically application payloads. The receive queue is bounded.
  * @param client Client owning the socket.
  * @param out Destination datagram.
  * @param timeout_ms Maximum wait in milliseconds.
