@@ -12,14 +12,18 @@ transaction is running. A successful transaction yields `client_mapped()`.
 The client retains its UDP mapping until `client_close()`.
 
 `client_refresh()` starts another transaction on the same mapping, with a new
-transaction identifier and integrity values. `client_keepalive()` sends an
+transaction identifier and integrity values. For short-term authentication,
+subsequent requests use the integrity algorithm selected by the server's
+previous authenticated response. `client_keepalive()` sends an
 unauthenticated Binding Indication with a fingerprint, without expecting a
 response. The ICE composition decides when to use that operation. `client_send()` sends application
 UDP datagrams; `client_read()` receives them on owned transports after the
 transaction completes.
 
 The client validates the response transaction ID, source endpoint, message
-integrity and fingerprint. Authentication and `487` error responses are returned
+integrity and fingerprint. If matching responses have invalid message
+integrity, a completed unsuccessful transaction reports authentication failure
+rather than an ordinary timeout. Authentication and `487` error responses are returned
 to the caller. Unknown extension attributes in responses remain available via
 `client_attributes()`.
 
