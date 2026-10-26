@@ -20,6 +20,7 @@ static int stun_test_role_conflict;
 static int stun_test_tamper;
 static int stun_test_bad_key;
 static unsigned int stun_test_sent;
+static unsigned int stun_test_replies;
 static unsigned int stun_test_failures;
 
 /** Reports a contract assertion. */
@@ -33,6 +34,7 @@ static int stun_test_server_send(void *context,const kc_stun_endpoint_t *peer,co
 {
     const kc_stun_endpoint_t from={"127.0.0.1",42424};
     (void)context;(void)peer;
+    stun_test_replies++;
     if(stun_test_tamper&&size){
         unsigned char *copy=(unsigned char *)malloc(size);
         if(!copy)return 1;
@@ -133,6 +135,12 @@ static void stun_test_borrowed(void)
             stun_test_check(rc==KC_STUN_OK,"authenticated refresh starts");
             rc=kc_stun_client_poll(stun_test_client,0);
             stun_test_check(rc==KC_STUN_OK,"authenticated refresh verifies");
+            {
+                unsigned int before=stun_test_replies;
+                rc=kc_stun_client_keepalive(stun_test_client);
+                stun_test_check(rc==KC_STUN_OK&&stun_test_replies==before,
+                    "Binding Indication keepalive sends no response");
+            }
         }
         kc_stun_client_close(stun_test_client);
     }
@@ -164,6 +172,31 @@ static void stun_test_borrowed(void)
     }else stun_test_check(0,"timeout case starts");
     stun_test_bad_key=0;
     kc_stun_server_close(stun_test_server);stun_test_server=NULL;
+    {
+        kc_stun_server_options_t anonymous={0};kc_stun_client_options_t request={0};
+        kc_stun_attribute_t unknown={0x0042,priority,4};
+        const kc_stun_attribute_t *response;size_t count=0,k;int found=0;
+        anonymous.transport=&server_udp;
+        request.peer.host="127.0.0.1:42424";
+        request.transport=&client_udp;
+        request.attributes=&unknown;request.attribute_count=1;
+        rc=kc_stun_server(&stun_test_server,&anonymous);
+        if(rc==KC_STUN_OK){
+            rc=kc_stun_client(&stun_test_client,&request);
+            if(rc==KC_STUN_OK){
+                rc=kc_stun_client_poll(stun_test_client,0);
+                response=kc_stun_client_attributes(stun_test_client,&count);
+                for(k=0;k<count;k++)if(response[k].type==KC_STUN_UNKNOWN_ATTRIBUTES&&
+                    response[k].size>=2&&((const unsigned char *)response[k].data)[0]==0&&
+                    ((const unsigned char *)response[k].data)[1]==0x42)found=1;
+                stun_test_check(rc==KC_STUN_EREJECTED&&
+                    kc_stun_client_error(stun_test_client)==420&&found,
+                    "unknown mandatory attribute yields 420 with details");
+                kc_stun_client_close(stun_test_client);
+            }else stun_test_check(0,"unknown attribute client starts");
+            kc_stun_server_close(stun_test_server);stun_test_server=NULL;
+        }else stun_test_check(0,"anonymous server starts");
+    }
 }
 #ifdef KC_CLI_PATH
 /** Executes one CLI invocation and returns its status. */
