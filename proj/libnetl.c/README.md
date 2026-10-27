@@ -75,10 +75,15 @@ Use `make all` for other platforms with installed toolchains.
 
 GNU Lesser General Public License, version 3 (LGPLv3).
 
-The CLI uses one creation syntax: `netl <id> <addr:port> [command...]`.
-A wildcard address (`0.0.0.0` or `::`) binds a local listener;
-a concrete destination establishes a remote endpoint. Neither creating the
-endpoint nor specifying a callback sends data. Sending happens later by
-piping stdin to `netl <id>`; incoming data is delivered asynchronously to
-the optional callback. For a wildcard listener, an incoming peer is needed to
-identify a destination for its response.
+The CLI exposes one address-based interface model: `netl <id> <addr:port> [command...]`.
+Creating an interface does not imply a client or server role, nor does it
+transmit any bytes. `netl <id>` sends stdin over its resident socket; the
+optional command processes received data asynchronously.
+
+For UDP, the runtime first attempts to bind the configured address locally.
+If the address is not available on this machine, the runtime uses an ephemeral
+local port and retains the configured address as its default send target.
+Failed UDP datagrams do not close the persistent socket. For TCP the native
+runtime must still use different listening and connected sockets internally:
+it tries local listening first and remote connection otherwise. TCP connection
+establishment and disconnection continue to follow OS socket semantics.
