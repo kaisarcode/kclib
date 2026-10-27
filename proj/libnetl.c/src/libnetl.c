@@ -91,6 +91,8 @@ struct kc_netl_peer {
 struct kc_netl {
     kc_netl_fd_t fd;
     int protocol;
+    int outbound;
+    kc_netl_peer_t *remote;
     int platform_ready;
     int max_pending_connections;
     unsigned short port;
@@ -503,6 +505,7 @@ static void kc_netl_peer_finish(
             peer->fd = KC_NETL_FD_INVALID;
         }
         kc_netl_peer_detach(listener, peer);
+        if(listener->remote==peer)listener->remote=NULL;
         disconnect = notify ? listener->disconnect : NULL;
         userdata = listener->userdata;
     }
@@ -1021,6 +1024,11 @@ static void kc_netl_destroy(kc_netl_t *listener) {
         free(peer);
     }
 
+    if(listener->remote){
+        kc_netl_output_free(listener->remote->out_head);
+        free(listener->remote);
+        listener->remote=NULL;
+    }
     kc_netl_output_free(listener->udp_out_head);
     free(listener->pollfds);
     free(listener->pollmap);
