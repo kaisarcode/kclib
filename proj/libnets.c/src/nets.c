@@ -1129,6 +1129,74 @@ static void nets_resident_remove_state(const char *directory,const char *name)
 }
 
 /**
+ * Waits for a previously signaled resident process to exit.
+ * @param pid Old process ID.
+ * @return void.
+ */
+static void nets_resident_wait_stopped(long pid)
+{
+    unsigned i;
+    for(i=0;i<40U&&nets_resident_alive(pid);i++){
+#ifdef _WIN32
+        Sleep(50U);
+#else
+        struct timespec delay={0,50000000L};
+        (void)nanosleep(&delay,NULL);
+#endif
+    }
+}
+
+/**
+ * Clears stale send requests from a retired resident endpoint.
+ * @param directory Runtime directory.
+ * @param name Endpoint ID.
+ * @return void.
+ */
+static void nets_resident_purge(const char *directory,const char *name)
+{
+    char first[NETS_RESIDENT_ID_MAX+16],second[NETS_RESIDENT_ID_MAX+16];
+    size_t a,b;
+    snprintf(first,sizeof(first),"%s.send.",name);
+    snprintf(second,sizeof(second),"%s.pending.",name);
+    a=strlen(first);b=strlen(second);
+#ifdef _WIN32
+    {
+        char pattern[NETS_RESIDENT_PATH_MAX];
+        WIN32_FIND_DATAA item;
+        HANDLE listing;
+        if((size_t)snprintf(pattern,sizeof(pattern),"%s\\*",directory)
+            >=sizeof(pattern))return;
+        listing=FindFirstFileA(pattern,&item);
+        if(listing==INVALID_HANDLE_VALUE)return;
+        do{
+            char path[NETS_RESIDENT_PATH_MAX];
+            if(strncmp(item.cFileName,first,a)!=0&&
+                strncmp(item.cFileName,second,b)!=0)continue;
+            if((size_t)snprintf(path,sizeof(path),"%s\\%s",
+                directory,item.cFileName)>=sizeof(path))continue;
+            (void)remove(path);
+        }while(FindNextFileA(listing,&item));
+        FindClose(listing);
+    }
+#else
+    {
+        DIR *listing=opendir(directory);
+        struct dirent *item;
+        if(!listing)return;
+        while((item=readdir(listing))!=NULL){
+            char path[NETS_RESIDENT_PATH_MAX];
+            if(strncmp(item->d_name,first,a)!=0&&
+                strncmp(item->d_name,second,b)!=0)continue;
+            if((size_t)snprintf(path,sizeof(path),"%s/%s",
+                directory,item->d_name)>=sizeof(path))continue;
+            (void)remove(path);
+        }
+        closedir(listing);
+    }
+#endif
+}
+
+/**
  * Stops a resident network endpoint and removes its registration.
  * @param directory State directory.
  * @param name Endpoint identifier.
@@ -1139,16 +1207,10 @@ static int nets_resident_delete(const char *directory,const char *name)
     long pid;
     if(nets_resident_read_pid(directory,name,&pid)==0&&nets_resident_alive(pid)){
         nets_resident_stop(pid);
-#ifdef _WIN32
-        Sleep(100U);
-#else
-        {
-            struct timespec delay={0,100000000L};
-            (void)nanosleep(&delay,NULL);
-        }
-#endif
+        nets_resident_wait_stopped(pid);
     }
     nets_resident_remove_state(directory,name);
+    nets_resident_purge(directory,name);
     return 0;
 }
 
@@ -1164,7 +1226,12 @@ static int nets_resident_create(const char *directory,
     long old_pid;
     if(nets_resident_mkdir(directory)!=0)return 1;
     if(nets_resident_read_pid(directory,info->name,&old_pid)==0&&
-        nets_resident_alive(old_pid))nets_resident_stop(old_pid);
+        nets_resident_alive(old_pid)){
+        nets_resident_stop(old_pid);
+        nets_resident_wait_stopped(old_pid);
+        if(nets_resident_alive(old_pid))return 1;
+    }
+    nets_resident_purge(directory,info->name);
     if(nets_resident_write(directory,info)!=0)return 1;
 #ifdef _WIN32
     {
