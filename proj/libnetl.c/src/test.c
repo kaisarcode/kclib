@@ -42,7 +42,7 @@ static int test_case_current;
 static void case_result(int failed,const char *name,const char *detail)
 {
     test_case_current++;
-    printf("[%d/%d] [%s] %s: %s\\n",test_case_current,test_case_total,
+    printf("[%d/%d] [%s] %s: %s\n",test_case_current,test_case_total,
         failed?"FAIL":"PASS",name,detail);
 }
 
