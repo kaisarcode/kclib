@@ -11,8 +11,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
-#define KC_NETL_INTERNAL_API
-#include "libnetl.h"
+#include "libnetl-private.h"
 typedef kc_netl_t kc_netl_interface_t;
 
 #include <limits.h>
