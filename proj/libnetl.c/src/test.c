@@ -1039,8 +1039,22 @@ static int case_netl_cli(void) {
     fail += netl_cli_run("sample 8080") == 0;
     fail += netl_cli_run("sample 8080 true --unknown") == 0;
     fail += netl_cli_run("bad/name -d") == 0;
-    fail += netl_cli_run("nonexistent -r 127.0.0.1:5000") == 0;
-    fail += netl_cli_run("nonexistent -r 127.0.0.1:invalid") == 0;
+    fail += netl_cli_run("nonexistent") == 0;
+    fail += netl_cli_run("sender -c 127.0.0.1:invalid -t udp") == 0;
+    fail += netl_cli_run("sender -c badendpoint -t udp") == 0;
+    {
+        char create[256],listed[256],remove[256];
+        unsigned short port=(unsigned short)(20000U+
+            ((unsigned)kc_netl_version()%15000U));
+        snprintf(create,sizeof(create),
+            "contract_%u -c 127.0.0.1:%u -t udp",
+            (unsigned)port,(unsigned)port);
+        snprintf(listed,sizeof(listed),"-l contract_%u",(unsigned)port);
+        snprintf(remove,sizeof(remove),"contract_%u -d",(unsigned)port);
+        fail += netl_cli_run(create);
+        fail += netl_cli_run(listed);
+        fail += netl_cli_run(remove);
+    }
     case_result(fail, "netl_cli",
         "validates listener administration arguments and errors");
     return fail != 0;
