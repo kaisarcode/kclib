@@ -44,12 +44,18 @@ typedef struct {
     const char *host;
     unsigned short port;
     int protocol;
-    /* Optional source address for the persistent UDP mapping. */
+} kc_nets_options_t;
+
+/**
+ * Extended UDP configuration; separate from kc_nets_options_t so existing
+ * client initializers retain their ABI and initialization contract.
+ */
+typedef struct {
+    kc_nets_options_t endpoint;
     const char *local_host;
     unsigned short local_port;
-    /* Optional source-aware UDP receive callback, replacing receive for UDP. */
     kc_nets_receive_from_fn receive_from;
-} kc_nets_options_t;
+} kc_nets_udp_options_t;
 
 /**
  * Receives bytes from one outbound network endpoint.
@@ -104,6 +110,21 @@ int kc_nets_open(
     kc_nets_error_fn error,
     void *userdata
 );
+
+/**
+ * Opens a persistent UDP sender with configurable local bind and source-aware
+ * receive. The default endpoint is used by kc_nets_send; send_to may target
+ * other remote endpoints without creating another socket.
+ * @param out New endpoint handle.
+ * @param options UDP configuration with endpoint.protocol KC_NETS_UDP.
+ * @param receive Optional legacy receive callback; either it or receive_from
+ * must be provided.
+ * @param error Optional asynchronous error callback.
+ * @param userdata User context.
+ * @return KC_NETS_OK or negative status.
+ */
+int kc_nets_open_udp(kc_nets_t **out,const kc_nets_udp_options_t *options,
+    kc_nets_receive_fn receive,kc_nets_error_fn error,void *userdata);
 
 /**
  * Sends bytes through one open endpoint.
