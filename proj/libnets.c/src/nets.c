@@ -46,6 +46,7 @@
 
 typedef struct {
     const char *host;
+    char host_storage[1025];
     unsigned short port;
     int protocol;
     const char *local_host;
@@ -67,13 +68,13 @@ static volatile sig_atomic_t nets_cli_stop;
  */
 static void nets_cli_help(const char *name)
 {
-    printf("Usage: %s <host> <port> [options]\n", name);
-    printf("       %s <id> -s [host port]\n",name);
+    printf("Usage: %s <host:port> [options]\n", name);
+    printf("       %s <id> -s [host:port]\n",name);
     printf("       %s <id> -d\n",name);
     printf("       %s -l [id]\n",name);
     printf("\n");
     printf("Commands:\n");
-    printf("  nets <id> -s [host port]  Send stdin from a resident UDP socket\n");
+    printf("  nets <id> -s [host:port]  Send stdin from a resident UDP socket\n");
     printf("  nets <id> -d             Remove a resident endpoint\n");
     printf("  nets -l [id]             List resident endpoints\n");
     printf("\n");
@@ -145,6 +146,38 @@ static int nets_cli_parse_port(const char *text, unsigned short *out)
 }
 
 /**
+ * Splits a destination into host and port. IPv6 uses [address]:port.
+ * @param endpoint Input host:port string.
+ * @param host Output host buffer.
+ * @param capacity Host buffer size.
+ * @param port Output port.
+ * @return One when the complete endpoint is valid.
+ */
+static int nets_cli_endpoint(const char *endpoint,char *host,
+    size_t capacity,unsigned short *port)
+{
+    const char *begin,*end,*service;
+    size_t n;
+    if(!endpoint||!host||!port||!capacity)return 0;
+    if(endpoint[0]=='['){
+        begin=endpoint+1;
+        end=strchr(begin,']');
+        if(!end||end[1]!=':')return 0;
+        service=end+2;
+    }else{
+        begin=endpoint;
+        end=strrchr(endpoint,':');
+        if(!end||memchr(begin,':',(size_t)(end-begin)))return 0;
+        service=end+1;
+    }
+    n=(size_t)(end-begin);
+    if(!n||n>=capacity||!nets_cli_parse_port(service,port))return 0;
+    memcpy(host,begin,n);
+    host[n]=0;
+    return 1;
+}
+
+/**
  * Reads one required option value.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -183,7 +216,7 @@ static int nets_cli_parse(
     nets_cli_options_t *options
 )
 {
-    const char *positionals[2];
+    const char *positionals[1];
     size_t positional_count;
     int index;
 
@@ -247,14 +280,12 @@ static int nets_cli_parse(
         }
     }
 
-    if (positional_count != 2U) {
-        return nets_cli_error("requires <host> <port>");
-    }
-    if (!positionals[0][0]) return nets_cli_error("host must not be empty");
-    if (!nets_cli_parse_port(positionals[1], &options->port)) {
-        return nets_cli_error_value("invalid port: ", positionals[1]);
-    }
-    options->host = positionals[0];
+    if (positional_count != 1U)
+        return nets_cli_error("requires <host:port>");
+    if(!nets_cli_endpoint(positionals[0],options->host_storage,
+        sizeof(options->host_storage),&options->port))
+        return nets_cli_error_value("invalid endpoint: ",positionals[0]);
+    options->host=options->host_storage;
     if(options->protocol!=KC_NETS_UDP &&
         (options->local_host||options->local_port))
         return nets_cli_error("local UDP options require -t udp");
@@ -1410,11 +1441,13 @@ static int nets_resident_dispatch(int argc,char **argv)
         }
         if(strcmp(argv[2],"-s")==0||strcmp(argv[2],"--send")==0){
             unsigned short port=0;
-            if(argc!=3&&argc!=5)return 1;
-            if(argc==5&&!nets_resident_port(argv[4],0,&port))return 1;
+            char host[1025];
+            if(argc!=3&&argc!=4)return 1;
+            if(argc==4&&!nets_cli_endpoint(argv[3],host,sizeof(host),&port))
+                return 1;
             if(nets_cli_prepare_stdio()!=0)return 1;
             return nets_resident_send(directory,argv[1],
-                argc==5?argv[3]:NULL,port);
+                argc==4?host:NULL,port);
         }
     }
     for(i=1;i<argc;i++)
@@ -1423,12 +1456,11 @@ static int nets_resident_dispatch(int argc,char **argv)
     {
         nets_resident_info_t info;
         int transport=KC_NETS_TCP;
-        if(argc<5)return 1;
+        if(argc<4)return 1;
         memset(&info,0,sizeof(info));
-        if(!nets_resident_port(argv[2],0,&info.port)||
-            !argv[1][0]||strlen(argv[1])>=sizeof(info.host))return 1;
-        snprintf(info.host,sizeof(info.host),"%s",argv[1]);
-        for(i=3;i<argc;i++){
+        if(!nets_cli_endpoint(argv[1],info.host,sizeof(info.host),
+            &info.port))return 1;
+        for(i=2;i<argc;i++){
             const char *arg=argv[i],*value;
             if(i+1>=argc)return 1;
             value=argv[++i];
