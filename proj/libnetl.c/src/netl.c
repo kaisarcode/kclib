@@ -121,11 +121,13 @@ static void netl_cli_help(void)
     printf("  netl <id> <port> <cmd>  Register or replace a listener\n");
     printf("  netl -l [id]             List listeners\n");
     printf("  netl <id> -d             Remove a listener\n");
+    printf("  netl <id> -r <host> <port>  Reply via resident UDP listener\n");
     printf("\n");
     printf("Options:\n");
     printf("  -t, --transport <type>   tcp or udp (default: tcp)\n");
     printf("  -l, --list               List listeners\n");
     printf("  -d, --delete             Remove a listener\n");
+    printf("  -r, --reply              Send stdin as one UDP datagram\n");
     printf("  -h, --help               Show this help\n");
     printf("  -v, --version            Show version\n");
 }
@@ -1331,7 +1333,11 @@ static int netl_cli_serve(const char *dir, const char *name)
     (void)signal(SIGINT, netl_cli_signal);
     (void)signal(SIGTERM, netl_cli_signal);
 #endif
-    while (!netl_cli_stop) netl_cli_sleep();
+    while (!netl_cli_stop) {
+        if(registration.protocol==KC_NETL_UDP)
+            netl_cli_drain_replies(dir,name,listener);
+        netl_cli_sleep();
+    }
 
     kc_netl_close(listener);
     netl_cli_cleanup(&state);
@@ -1341,6 +1347,140 @@ static int netl_cli_serve(const char *dir, const char *name)
     (void)pthread_mutex_destroy(&state.lock);
 #endif
     return 0;
+}
+
+/**
+ * Copies standard input to a private, complete UDP reply request file.
+ * A final rename prevents the worker from observing partial binary payloads.
+ * @param dir Resident listener state directory.
+ * @param name Listener identifier.
+ * @param host Destination host.
+ * @param port Destination UDP port.
+ * @return Zero when queued, otherwise failure.
+ */
+static int netl_cli_reply(const char *dir,const char *name,
+    const char *host,unsigned short port)
+{
+    char path[NETL_CLI_PATH_MAX],pending[NETL_CLI_PATH_MAX];
+    char suffix[64],partial[64];
+    netl_cli_registration_t registration;
+    FILE *file;
+    unsigned char buffer[65508];
+    size_t size;
+    long worker;
+    unsigned long process_id;
+    if(!host||!*host||strchr(host,'\n')||strchr(host,'\r')||
+        netl_cli_read_registration(dir,name,&registration)!=0||
+        registration.protocol!=KC_NETL_UDP||
+        netl_cli_read_pid(dir,name,&worker)!=0||
+        !netl_cli_pid_alive(worker))return 1;
+#ifdef _WIN32
+    process_id=(unsigned long)GetCurrentProcessId();
+#else
+    process_id=(unsigned long)getpid();
+#endif
+    snprintf(suffix,sizeof(suffix),".reply.%lu",process_id);
+    snprintf(partial,sizeof(partial),".pending.%lu",process_id);
+    if(netl_cli_state_path(path,sizeof(path),dir,name,suffix)!=0||
+        netl_cli_state_path(pending,sizeof(pending),dir,name,partial)!=0)
+        return 1;
+    file=fopen(pending,"wb");
+    if(!file)return 1;
+#ifndef _WIN32
+    (void)chmod(pending,0600);
+#endif
+    size=fread(buffer,1,sizeof(buffer),stdin);
+    if(ferror(stdin)||size>65507U||
+        fprintf(file,"%s\n%u\n",host,(unsigned)port)<0||
+        (size&&fwrite(buffer,1,size,file)!=size)||
+        fflush(file)!=0){
+        fclose(file);remove(pending);return 1;
+    }
+    if(fclose(file)!=0||rename(pending,path)!=0){
+        remove(pending);return 1;
+    }
+    return 0;
+}
+
+/**
+ * Sends one fully written queued datagram through the resident listener.
+ * @param listener UDP listener.
+ * @param path Completed request file.
+ * @return Zero on successful handoff.
+ */
+static int netl_cli_process_reply(kc_netl_t *listener,const char *path)
+{
+    FILE *file=fopen(path,"rb");
+    char host[1025],port_text[32];
+    unsigned short port;
+    unsigned char buffer[65508];
+    size_t size;
+    int rc=1;
+    if(!file)return 1;
+    if(fgets(host,sizeof(host),file)&&fgets(port_text,sizeof(port_text),file)){
+        size_t n=strlen(host);
+        if(n&&host[n-1U]=='\n'){
+            host[n-1U]=0;
+            if(netl_cli_port(port_text,&port)){
+                size=fread(buffer,1,sizeof(buffer),file);
+                if(!ferror(file)&&size<=65507U&&feof(file))
+                    rc=kc_netl_reply_to(listener,host,port,buffer,size)==KC_NETL_OK?0:1;
+            }
+        }
+    }
+    fclose(file);
+    return rc;
+}
+
+/**
+ * Drains complete queued UDP reply files for this resident listener.
+ * @param dir Resident state directory.
+ * @param name Listener identifier.
+ * @param listener Live UDP listener.
+ * @return void.
+ */
+static void netl_cli_drain_replies(const char *dir,const char *name,
+    kc_netl_t *listener)
+{
+    char prefix[NETL_CLI_NAME_MAX+16];
+    size_t prefix_size;
+    snprintf(prefix,sizeof(prefix),"%s.reply.",name);
+    prefix_size=strlen(prefix);
+#ifdef _WIN32
+    {
+        char pattern[NETL_CLI_PATH_MAX];
+        WIN32_FIND_DATAA entry;
+        HANDLE search;
+        if((size_t)snprintf(pattern,sizeof(pattern),"%s\\%s*",dir,prefix)
+            >=sizeof(pattern))return;
+        search=FindFirstFileA(pattern,&entry);
+        if(search==INVALID_HANDLE_VALUE)return;
+        do {
+            char path[NETL_CLI_PATH_MAX];
+            if(strncmp(entry.cFileName,prefix,prefix_size)!=0)continue;
+            if((size_t)snprintf(path,sizeof(path),"%s\\%s",dir,entry.cFileName)
+                >=sizeof(path))continue;
+            (void)netl_cli_process_reply(listener,path);
+            (void)remove(path);
+        }while(FindNextFileA(search,&entry));
+        FindClose(search);
+    }
+#else
+    {
+        DIR *directory=opendir(dir);
+        struct dirent *entry;
+        if(!directory)return;
+        while((entry=readdir(directory))!=NULL){
+            char path[NETL_CLI_PATH_MAX];
+            if(strncmp(entry->d_name,prefix,prefix_size)!=0)continue;
+            if((size_t)snprintf(path,sizeof(path),"%s/%s",dir,entry->d_name)
+                >=sizeof(path))continue;
+            (void)netl_cli_process_reply(listener,path);
+            (void)remove(path);
+        }
+        closedir(directory);
+    }
+#endif
 }
 
 /**
@@ -1608,6 +1748,7 @@ int main(int argc, char **argv)
     int protocol;
     int list;
     int remove;
+    int reply;
     int positional;
     int i;
 
@@ -1634,6 +1775,7 @@ int main(int argc, char **argv)
     protocol = KC_NETL_TCP;
     list = 0;
     remove = 0;
+    reply = 0;
     positional = 0;
 
     for (i = 1; i < argc; i++) {
@@ -1651,6 +1793,9 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "-d") == 0 ||
                 strcmp(argv[i], "--delete") == 0) {
             remove = 1;
+        } else if (strcmp(argv[i], "-r") == 0 ||
+                strcmp(argv[i], "--reply") == 0) {
+            reply = 1;
         } else if (strcmp(argv[i], "-t") == 0 ||
                 strcmp(argv[i], "--transport") == 0) {
             if (++i >= argc) {
@@ -1684,7 +1829,7 @@ int main(int argc, char **argv)
     }
 
     if (list) {
-        if (remove || port_text || command[0] || protocol != KC_NETL_TCP) {
+        if (reply || remove || port_text || command[0] || protocol != KC_NETL_TCP) {
             fprintf(stderr, "netl: invalid list arguments\n");
             return 1;
         }
@@ -1702,6 +1847,16 @@ int main(int argc, char **argv)
     if (!netl_cli_name_valid(name)) {
         fprintf(stderr, "netl: invalid id: %s\n", name);
         return 1;
+    }
+
+    if(reply){
+        unsigned short destination_port;
+        if(remove||protocol!=KC_NETL_TCP||positional!=3||
+            !port_text||!command[0]||!netl_cli_port(command,&destination_port)){
+            fprintf(stderr,"netl: usage: netl <id> -r <host> <port>\\n");
+            return 1;
+        }
+        return netl_cli_reply(dir,name,port_text,destination_port);
     }
 
     if (remove) {
