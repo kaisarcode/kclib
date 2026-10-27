@@ -38,6 +38,7 @@ typedef HANDLE kc_nets_thread_t;
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
 #include <sys/socket.h>
@@ -58,6 +59,10 @@ typedef pthread_t kc_nets_thread_t;
 #define KC_NETS_SEND_FLAGS MSG_NOSIGNAL
 #else
 #define KC_NETS_SEND_FLAGS 0
+#endif
+
+#ifndef NI_MAXHOST
+#define NI_MAXHOST 1025
 #endif
 
 #define KC_NETS_BUFFER_SIZE 65536U
