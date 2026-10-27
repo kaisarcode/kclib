@@ -2041,8 +2041,10 @@ int main(int argc, char **argv)
     }
     registration.protocol=protocol;
     /* Wildcard interfaces bind locally; specific remote endpoints connect. */
-    registration.outbound=strcmp(registration.host,"0.0.0.0")!=0&&
-        strcmp(registration.host,"::")!=0;
+    /* UDP owns one bidirectional socket regardless of destination address. */
+    registration.outbound=protocol==KC_NETL_UDP||
+        (strcmp(registration.host,"0.0.0.0")!=0&&
+         strcmp(registration.host,"::")!=0);
     if(command[0]){
         if(!netl_cli_line_valid(command)){
             fprintf(stderr,"netl: invalid command\n");return 1;
