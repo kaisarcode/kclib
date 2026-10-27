@@ -812,7 +812,10 @@ static netl_cli_session_t *netl_cli_tcp_start(
     startup.hStdInput = input_read;
     startup.hStdOutput = output_write;
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    snprintf(command, sizeof(command), "cmd.exe /c %s", state->command);
+    if((size_t)snprintf(command,sizeof(command),"cmd.exe /c %s %s %u",
+        state->command,host,(unsigned)port)>=sizeof(command)) {
+        CloseHandle(input_read);CloseHandle(input_write);return 1;
+    }
 
     if (!CreateProcessA(
             NULL,
@@ -887,7 +890,9 @@ static netl_cli_session_t *netl_cli_tcp_start(
 static int netl_cli_udp_start(
     netl_cli_state_t *state,
     const void *data,
-    size_t size
+    size_t size,
+    const char *host,
+    unsigned short port
 )
 {
     SECURITY_ATTRIBUTES attributes;
@@ -1024,7 +1029,13 @@ static netl_cli_session_t *netl_cli_tcp_start(
         }
         if (input_pipe[0] > STDERR_FILENO) (void)close(input_pipe[0]);
         if (output_pipe[1] > STDERR_FILENO) (void)close(output_pipe[1]);
-        execl("/bin/sh", "sh", "-c", state->command, (char *)NULL);
+        {
+            char shell_command[NETL_CLI_BUF+128];
+            if((size_t)snprintf(shell_command,sizeof(shell_command),
+                "%s %s %u",state->command,host,(unsigned)port)>=sizeof(shell_command))
+                _exit(1);
+            execl("/bin/sh","sh","-c",shell_command,(char *)NULL);
+        }
         _exit(1);
     }
 
@@ -1077,7 +1088,9 @@ static netl_cli_session_t *netl_cli_tcp_start(
 static int netl_cli_udp_start(
     netl_cli_state_t *state,
     const void *data,
-    size_t size
+    size_t size,
+    const char *host,
+    unsigned short port
 )
 {
     int pipefd[2];
@@ -1131,7 +1144,8 @@ static void netl_cli_receive(const kc_netl_input_t *input, void *userdata)
     state = (netl_cli_state_t *)userdata;
     if (!input || !state) return;
     if (input->protocol == KC_NETL_UDP) {
-        (void)netl_cli_udp_start(state, input->data, input->data_size);
+        (void)netl_cli_udp_start(state, input->data, input->data_size,
+            input->host, input->port);
         return;
     }
 
