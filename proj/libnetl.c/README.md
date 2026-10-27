@@ -87,6 +87,23 @@ pointer alive.
 
 TCP behavior is unchanged.
 
+## CLI: delayed UDP replies
+
+The existing `netl <id> <port> <command...>` registration remains unchanged.
+A received UDP datagram invokes `<command...> <host> <port>`; the complete
+binary datagram is supplied on command stdin.
+
+```sh
+netl servidor 5000 'handler' -t udp
+printf respuesta | netl servidor -r 127.0.0.1 6000
+netl -l servidor
+netl servidor -d
+```
+
+`-r` submits one binary datagram to the resident listener by local IPC. The
+registered listener sends from its original bound UDP socket, even when the
+incoming callback has already ended.
+
 ## Build
 
 From this project directory:
