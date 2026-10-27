@@ -118,7 +118,7 @@ static void netl_cli_unlock(netl_cli_state_t *state)
 static void netl_cli_help(void)
 {
     printf("Usage: netl <id> <port> <command...>\n");
-    printf("       netl <id> -r <host> <port>\n");
+    printf("       netl <id> -r <host:port>\n");
     printf("       netl -l [id]\n");
     printf("       netl <id> -d\n");
     printf("\n");
@@ -126,7 +126,7 @@ static void netl_cli_help(void)
     printf("  netl <id> <port> <cmd>  Register or replace a listener\n");
     printf("  netl -l [id]             List listeners\n");
     printf("  netl <id> -d             Remove a listener\n");
-    printf("  netl <id> -r <host> <port>  Reply via resident UDP listener\n");
+    printf("  netl <id> -r <host:port>  Reply via resident UDP listener\n");
     printf("\n");
     printf("Options:\n");
     printf("  -t, --transport <type>   tcp or udp (default: tcp)\n");
@@ -192,6 +192,38 @@ static int netl_cli_port(const char *text, unsigned short *out)
     value = strtoul(text, &end, 10);
     if (errno || *end != '\0' || value == 0UL || value > 65535UL) return 0;
     *out = (unsigned short)value;
+    return 1;
+}
+
+/**
+ * Parses a host:port endpoint; IPv6 requires [host]:port.
+ * @param endpoint Endpoint string.
+ * @param host Output host buffer.
+ * @param capacity Buffer size.
+ * @param port Parsed port.
+ * @return Nonzero on success.
+ */
+static int netl_cli_endpoint(const char *endpoint,char *host,
+    size_t capacity,unsigned short *port)
+{
+    const char *start,*end,*service;
+    size_t n;
+    if(!endpoint||!host||!port)return 0;
+    if(endpoint[0]=='['){
+        start=endpoint+1;
+        end=strchr(start,']');
+        if(!end||end[1]!=':')return 0;
+        service=end+2;
+    }else{
+        start=endpoint;
+        end=strrchr(endpoint,':');
+        if(!end||memchr(start,':',(size_t)(end-start)))return 0;
+        service=end+1;
+    }
+    n=(size_t)(end-start);
+    if(!n||n>=capacity||!netl_cli_port(service,port))return 0;
+    memcpy(host,start,n);
+    host[n]=0;
     return 1;
 }
 
@@ -1908,12 +1940,15 @@ int main(int argc, char **argv)
 
     if(reply){
         unsigned short destination_port;
-        if(remove||protocol!=KC_NETL_TCP||positional!=3||
-            !port_text||!command[0]||!netl_cli_port(command,&destination_port)){
-            fprintf(stderr,"netl: usage: netl <id> -r <host> <port>\n");
+        char destination_host[1025];
+        if(remove||protocol!=KC_NETL_TCP||positional!=2||
+            !port_text||command[0]||
+            !netl_cli_endpoint(port_text,destination_host,
+                sizeof(destination_host),&destination_port)){
+            fprintf(stderr,"netl: usage: netl <id> -r <host:port>\n");
             return 1;
         }
-        return netl_cli_reply(dir,name,port_text,destination_port);
+        return netl_cli_reply(dir,name,destination_host,destination_port);
     }
 
     if (remove) {
