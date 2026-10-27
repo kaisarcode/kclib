@@ -223,9 +223,7 @@ static int case_tcp(void)
     return fail?1:0;
 }
 
-#ifndef KC_CLI_PATH
-#define KC_CLI_PATH "netl"
-#endif
+#if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
 
 /**
  * Run the netl CLI with output discarded.
