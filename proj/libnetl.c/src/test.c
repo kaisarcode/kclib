@@ -307,7 +307,8 @@ static int test_socket_expect(
  * @param userdata Test state.
  * @return void.
  */
-static void receive(const kc_netl_input_t *input, void *userdata) {
+static void receive(kc_netl_peer_t *peer,const void *data,
+    size_t data_size,void *userdata) {
     receive_state_t *state;
     int index;
 
@@ -317,35 +318,35 @@ static void receive(const kc_netl_input_t *input, void *userdata) {
     if (index < 12) {
         size_t copy_size;
 
-        copy_size = input->data_size < sizeof(state->data[index])
-            ? input->data_size
+        copy_size = data_size < sizeof(state->data[index])
+            ? data_size
             : sizeof(state->data[index]);
-        state->peers[index] = input->peer;
-        state->protocols[index] = input->protocol;
-        state->ports[index] = input->port;
+        state->peers[index] = peer;
+        state->protocols[index] = kc_netl_peer_protocol(peer);
+        state->ports[index] = kc_netl_peer_port(peer);
         snprintf(
             state->hosts[index],
             sizeof(state->hosts[index]),
             "%s",
-            input->host != NULL ? input->host : ""
+            kc_netl_peer_host(peer) != NULL ? kc_netl_peer_host(peer) : ""
         );
         if (copy_size != 0U) {
-            memcpy(state->data[index], input->data, copy_size);
+            memcpy(state->data[index], data, copy_size);
         }
         state->sizes[index] = copy_size;
     }
 
     if (
-        input->protocol == KC_NETL_TCP &&
+        kc_netl_peer_protocol(peer) == KC_NETL_TCP &&
         atomic_load(&state->tcp_callback_reply)
     ) {
-        (void)kc_netl_respond(input->peer, "callback", 8U);
+        (void)kc_netl_send(peer, "callback", 8U);
     }
     if (
-        input->protocol == KC_NETL_UDP &&
+        kc_netl_peer_protocol(peer) == KC_NETL_UDP &&
         atomic_load(&state->udp_reply)
     ) {
-        (void)kc_netl_respond(input->peer, "pong", 4U);
+        (void)kc_netl_send(peer, "pong", 4U);
     }
 
     atomic_fetch_add(&state->receive_count, 1);
@@ -403,7 +404,7 @@ static DWORD WINAPI respond_thread_main(LPVOID userdata) {
     respond_job_t *job;
 
     job = (respond_job_t *)userdata;
-    job->status = kc_netl_respond(job->peer, job->data, job->data_size);
+    job->status = kc_netl_send(job->peer, job->data, job->data_size);
     return 0;
 }
 #else
@@ -416,7 +417,7 @@ static void *respond_thread_main(void *userdata) {
     respond_job_t *job;
 
     job = (respond_job_t *)userdata;
-    job->status = kc_netl_respond(job->peer, job->data, job->data_size);
+    job->status = kc_netl_send(job->peer, job->data, job->data_size);
     return NULL;
 }
 #endif
@@ -624,12 +625,12 @@ static int case_kc_netl_tcp(void) {
         fail += expect_int(
             "first ordered response",
             KC_NETL_OK,
-            kc_netl_respond(peer_a, "one", 3U)
+            kc_netl_send(peer_a, "one", 3U)
         );
         fail += expect_int(
             "second ordered response",
             KC_NETL_OK,
-            kc_netl_respond(peer_a, "two", 3U)
+            kc_netl_send(peer_a, "two", 3U)
         );
         fail += test_socket_expect(client_a, "onetwo", 6U);
     }
@@ -647,7 +648,7 @@ static int case_kc_netl_tcp(void) {
         fail += expect_int(
             "pending close response",
             KC_NETL_OK,
-            kc_netl_respond(peer_a, "bye", 3U)
+            kc_netl_send(peer_a, "bye", 3U)
         );
         kc_netl_peer_close(peer_a);
         fail += test_socket_expect(client_a, "bye", 3U);
@@ -901,7 +902,7 @@ static int case_kc_netl_status(void) {
     fail += expect_int(
         "NULL peer respond",
         KC_NETL_EINVAL,
-        kc_netl_respond(NULL, "x", 1U)
+        kc_netl_send(NULL, "x", 1U)
     );
     fail += expect_int("NULL delayed reply",KC_NETL_EINVAL,
         kc_netl_reply_to(NULL,"127.0.0.1",5000,"x",1U));
