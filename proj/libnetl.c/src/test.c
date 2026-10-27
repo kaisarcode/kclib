@@ -1157,7 +1157,8 @@ static int case_netl_cli(void) {
     fail += netl_cli_run("--help");
     fail += netl_cli_run("--version");
     fail += netl_cli_run("") == 0;
-    fail += netl_cli_run("sample 0.0.0.0:8080") == 0;
+    /* Endpoint-only registration is valid; lifecycle is covered below. */
+    fail += netl_cli_run("sample invalid-endpoint") == 0;
     fail += netl_cli_run("sample 0.0.0.0:8080 true --unknown") == 0;
     fail += netl_cli_run("bad/name -d") == 0;
     fail += netl_cli_run("nonexistent") == 0;
@@ -1177,7 +1178,7 @@ static int case_netl_cli(void) {
         fail += netl_cli_run(remove);
     }
     case_result(fail, "netl_cli",
-        "validates listener administration arguments and errors");
+        "validates interface administration arguments and errors");
     return fail != 0;
 }
 #endif
