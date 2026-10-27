@@ -1036,13 +1036,7 @@ static netl_cli_session_t *netl_cli_tcp_start(
         }
         if (input_pipe[0] > STDERR_FILENO) (void)close(input_pipe[0]);
         if (output_pipe[1] > STDERR_FILENO) (void)close(output_pipe[1]);
-        {
-            char shell_command[NETL_CLI_BUF+128];
-            if((size_t)snprintf(shell_command,sizeof(shell_command),
-                "%s %s %u",state->command,host,(unsigned)port)>=sizeof(shell_command))
-                _exit(1);
-            execl("/bin/sh","sh","-c",shell_command,(char *)NULL);
-        }
+        execl("/bin/sh", "sh", "-c", state->command, (char *)NULL);
         _exit(1);
     }
 
@@ -1103,7 +1097,11 @@ static int netl_cli_udp_start(
     int pipefd[2];
     pid_t pid;
     size_t offset;
+    char shell_command[NETL_CLI_BUF+256];
 
+    if((size_t)snprintf(shell_command,sizeof(shell_command),
+        "%s %s %u",state->command,host,(unsigned)port)>=sizeof(shell_command))
+        return 1;
     if (pipe(pipefd) != 0) return 1;
     pid = fork();
     if (pid < 0) {
@@ -1115,7 +1113,7 @@ static int netl_cli_udp_start(
         (void)close(pipefd[1]);
         if (dup2(pipefd[0], STDIN_FILENO) < 0) _exit(1);
         if (pipefd[0] > STDERR_FILENO) (void)close(pipefd[0]);
-        execl("/bin/sh", "sh", "-c", state->command, (char *)NULL);
+        execl("/bin/sh", "sh", "-c", shell_command, (char *)NULL);
         _exit(1);
     }
 
