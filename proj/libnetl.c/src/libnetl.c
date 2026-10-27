@@ -1496,6 +1496,146 @@ void kc_netl_close(kc_netl_t *listener) {
     kc_netl_destroy(listener);
 }
 
+
+/**
+ * A single public interface may own a listener and a connected peer.
+ * The distinction is an implementation detail rather than a caller role.
+ */
+struct kc_netl_interface {
+    kc_netl_t *listening;
+    kc_netl_t *outgoing;
+    kc_netl_peer_t *peer;
+    char host[1025];
+    unsigned short port;
+    int protocol;
+    kc_netl_receive_fn receive;
+    kc_netl_disconnect_fn disconnect;
+    kc_netl_error_fn error;
+    void *userdata;
+};
+
+/**
+ * Forward incoming data without exposing listener or connection selection.
+ */
+static void kc_netl_interface_receive(kc_netl_peer_t *peer,
+    const void *data,size_t size,void *userdata)
+{
+    kc_netl_interface_t *interface=(kc_netl_interface_t *)userdata;
+    if(interface->receive)interface->receive(peer,data,size,interface->userdata);
+}
+
+/**
+ * Forget disconnected outbound connections and forward notifications.
+ */
+static void kc_netl_interface_disconnect(kc_netl_peer_t *peer,void *userdata)
+{
+    kc_netl_interface_t *interface=(kc_netl_interface_t *)userdata;
+    if(interface->peer==peer)interface->peer=NULL;
+    if(interface->disconnect)
+        interface->disconnect(peer,interface->userdata);
+}
+
+/**
+ * Forward asynchronous errors to the owner.
+ */
+static void kc_netl_interface_error(int status,void *userdata)
+{
+    kc_netl_interface_t *interface=(kc_netl_interface_t *)userdata;
+    if(interface->error)interface->error(status,interface->userdata);
+}
+
+/**
+ * Open a reusable address-oriented interface without exposing TCP roles.
+ */
+int kc_netl_interface_open(kc_netl_interface_t **out,
+    const kc_netl_options_t *options,kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata)
+{
+    kc_netl_interface_t *interface;
+    kc_netl_connect_options_t remote;
+    int result;
+    if(!out)return KC_NETL_EINVAL;
+    *out=NULL;
+    if(!options||!options->host||!*options->host||!options->port||
+       !receive||(options->protocol!=KC_NETL_TCP&&
+       options->protocol!=KC_NETL_UDP))return KC_NETL_EINVAL;
+    interface=(kc_netl_interface_t *)calloc(1,sizeof(*interface));
+    if(!interface)return KC_NETL_ENOMEM;
+    if(strlen(options->host)>=sizeof(interface->host)){
+        free(interface);return KC_NETL_EINVAL;
+    }
+    memcpy(interface->host,options->host,strlen(options->host)+1U);
+    interface->port=options->port;
+    interface->protocol=options->protocol;
+    interface->receive=receive;
+    interface->disconnect=disconnect;
+    interface->error=error;
+    interface->userdata=userdata;
+    if(options->protocol==KC_NETL_TCP){
+        /* Binding succeeds only when the address belongs to this host. */
+        result=kc_netl_open(&interface->listening,options,
+            kc_netl_interface_receive,kc_netl_interface_disconnect,
+            kc_netl_interface_error,interface);
+        /* Failure to bind does not stop the interface being send-capable. */
+        (void)result;
+    }else{
+        memset(&remote,0,sizeof(remote));
+        remote.host=interface->host;
+        remote.port=interface->port;
+        remote.protocol=KC_NETL_UDP;
+        result=kc_netl_connect(&interface->outgoing,&interface->peer,
+            &remote,kc_netl_interface_receive,
+            kc_netl_interface_disconnect,kc_netl_interface_error,interface);
+        if(result!=KC_NETL_OK){
+            free(interface);return result;
+        }
+    }
+    *out=interface;
+    return KC_NETL_OK;
+}
+
+/**
+ * Send using a persistent socket; a TCP connection is established lazily.
+ */
+int kc_netl_interface_send(kc_netl_interface_t *interface,
+    const void *data,size_t size)
+{
+    kc_netl_connect_options_t options;
+    int result;
+    const char *destination;
+    if(!interface||(!data&&size))return KC_NETL_EINVAL;
+    if(interface->protocol==KC_NETL_TCP&&!interface->peer){
+        if(interface->outgoing){
+            kc_netl_close(interface->outgoing);
+            interface->outgoing=NULL;
+        }
+        memset(&options,0,sizeof(options));
+        destination=interface->host;
+        if(strcmp(destination,"0.0.0.0")==0)destination="127.0.0.1";
+        else if(strcmp(destination,"::")==0)destination="::1";
+        options.host=destination;
+        options.port=interface->port;
+        options.protocol=KC_NETL_TCP;
+        result=kc_netl_connect(&interface->outgoing,&interface->peer,
+            &options,kc_netl_interface_receive,
+            kc_netl_interface_disconnect,kc_netl_interface_error,interface);
+        if(result!=KC_NETL_OK)return result;
+    }
+    if(!interface->peer)return KC_NETL_ECLOSED;
+    return kc_netl_send(interface->peer,data,size);
+}
+
+/**
+ * Shut down every socket owned by the interface.
+ */
+void kc_netl_interface_close(kc_netl_interface_t *interface)
+{
+    if(!interface)return;
+    kc_netl_close(interface->outgoing);
+    kc_netl_close(interface->listening);
+    free(interface);
+}
+
 #ifdef KC_NETL_CLI
 /**
  * Cli open.
