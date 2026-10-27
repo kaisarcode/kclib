@@ -1,70 +1,60 @@
 # netl scripting API
 
-`netl` maintains TCP or UDP listeners and exchanges raw bytes with incoming
-peers.
+`libnetl` is a general-purpose TCP/UDP listener. JavaScript below is an
+**API projection**, not a binding or implementation.
 
-## Lua
-
-```lua
-local listener = netl.open({
-    host = "0.0.0.0",
-    port = 8080,
-    protocol = netl.TCP,
-
-    receive = function(input)
-        input.peer:respond("ok")
-    end,
-
-    disconnect = function(peer)
-    end,
-
-    error = function(status)
-    end
-})
-
-local port = listener:port()
-listener:close()
-```
-
-`receive` is required. `disconnect` and `error` are optional. A TCP peer remains
-the same object across receives until it closes. The peer can respond multiple
-times, including after a receive callback has returned, and responses preserve
-call order.
-
-A UDP peer is receive-local and each `respond(bytes)` call produces one datagram
-to that datagram's origin.
-
-Peer methods:
-
-```lua
-peer:respond(bytes)
-peer:close()
-```
-
-## JavaScript
+## JavaScript projection
 
 ```js
-const listener = await netl.open({
-  host: "0.0.0.0",
-  port: 8080,
-  protocol: netl.TCP,
+const listener = netl.open({
+    host: "0.0.0.0",
+    port: 5000,
+    protocol: netl.UDP
+}, function(input) {
+    // Respond during this callback:
+    input.peer.respond(input.data);
 
-  receive(input) {
-    input.peer.respond(new TextEncoder().encode("ok"));
-  },
-
-  disconnect(peer) {
-  },
-
-  error(status) {
-  }
+    // Keep the numeric address (not the temporary UDP peer object).
+    peer = {host: input.host, port: input.port};
 });
 
-const port = await listener.port();
-await listener.close();
+// Respond later from the same bound UDP listener socket:
+listener.replyTo(peer.host, peer.port, data);
+
+listener.port();
+listener.close();
 ```
 
-A TCP peer is usable outside the receive callback while its connection remains
-live. `disconnect(peer)` is terminal for that peer.
+Callbacks are arguments to `open()`, not options. For TCP, the peer can live
+across receives until disconnect; for UDP, `input.peer` is scoped to the
+receive callback. Saving only `input.host`/`input.port` supports delayed
+`replyTo` calls.
 
-`strerror(status)` and `version()` remain namespace functions.
+## Native C contract
+
+`kc_netl_open()`, `kc_netl_respond()`, `kc_netl_port()` and
+`kc_netl_close()` retain their public semantics.
+`kc_netl_reply_to(listener, host, port, bytes, size)` is UDP-only,
+copies a datagram into the listener's outgoing queue and uses its bound socket.
+
+## CLI
+
+```sh
+# Register a resident UDP listener and a callback command.
+netl servidor 5000 'handler' -t udp
+
+# Incoming UDP invokes: handler <host> <port>
+# Its stdin contains the binary datagram.
+
+# Later, reply using the existing listener:
+printf respuesta | netl servidor -r 192.168.1.20 6000
+
+netl -l
+netl servidor -d
+```
+
+The new `-r/--reply` command delivers one binary UDP datagram via a local
+IPC request to the resident listener. It does not open another UDP listener.
+The registered command receives source host and port as arguments and the
+incoming datagram on stdin. The old listener registration, list and delete
+commands are unchanged.
