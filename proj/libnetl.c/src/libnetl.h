@@ -82,6 +82,22 @@ typedef void (*kc_netl_error_fn)(
 );
 
 /**
+ * Owns one persistent bidirectional interface independently of TCP roles.
+ * The configured address is attempted as a local bind; if it is not local,
+ * it is retained as the outbound destination.
+ */
+typedef struct kc_netl_interface kc_netl_interface_t;
+
+int kc_netl_interface_open(kc_netl_interface_t **out,
+    const kc_netl_options_t *options,kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata);
+
+int kc_netl_interface_send(kc_netl_interface_t *interface,
+    const void *data,size_t size);
+
+void kc_netl_interface_close(kc_netl_interface_t *interface);
+
+/**
  * Opens an operational TCP or UDP listener.
  * NULL or empty host binds all interfaces. Port zero requests an ephemeral
  * operating-system-selected port. NULL max_pending_connections uses the
