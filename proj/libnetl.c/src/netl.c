@@ -25,6 +25,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
 #else
 #include <dirent.h>
 #include <fcntl.h>
@@ -789,7 +791,7 @@ static netl_cli_session_t *netl_cli_tcp_start(
     HANDLE output_read;
     HANDLE output_write;
     netl_cli_session_t *session;
-    char command[NETL_CLI_BUF + 32];
+    char command[NETL_CLI_BUF + 256];
 
     memset(&attributes, 0, sizeof(attributes));
     attributes.nLength = sizeof(attributes);
@@ -1384,6 +1386,9 @@ static int netl_cli_reply(const char *dir,const char *name,
     if(netl_cli_state_path(path,sizeof(path),dir,name,suffix)!=0||
         netl_cli_state_path(pending,sizeof(pending),dir,name,partial)!=0)
         return 1;
+#ifdef _WIN32
+    if(_setmode(_fileno(stdin),_O_BINARY)==-1)return 1;
+#endif
     file=fopen(pending,"wb");
     if(!file)return 1;
 #ifndef _WIN32
@@ -1853,7 +1858,7 @@ int main(int argc, char **argv)
         unsigned short destination_port;
         if(remove||protocol!=KC_NETL_TCP||positional!=3||
             !port_text||!command[0]||!netl_cli_port(command,&destination_port)){
-            fprintf(stderr,"netl: usage: netl <id> -r <host> <port>\\n");
+            fprintf(stderr,"netl: usage: netl <id> -r <host> <port>\n");
             return 1;
         }
         return netl_cli_reply(dir,name,port_text,destination_port);
