@@ -95,6 +95,19 @@ int kc_netl_interface_open(kc_netl_interface_t **out,
 int kc_netl_interface_send(kc_netl_interface_t *interface,
     const void *data,size_t size);
 
+/**
+ * Queue one UDP datagram to an explicit address using the interface's
+ * existing socket and local port. The configured destination is unchanged.
+ * @param interface Persistent UDP interface.
+ * @param host Destination address.
+ * @param port Destination port.
+ * @param data Payload.
+ * @param size Payload size.
+ * @return Status code.
+ */
+int kc_netl_interface_send_to(kc_netl_interface_t *interface,
+    const char *host,unsigned short port,const void *data,size_t size);
+
 void kc_netl_interface_close(kc_netl_interface_t *interface);
 
 /**
