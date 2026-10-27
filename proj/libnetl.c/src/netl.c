@@ -50,12 +50,17 @@ typedef struct {
     char name[NETL_CLI_NAME_MAX];
     unsigned short port;
     int protocol;
+    int outbound;
+    char host[1025];
+    char local_host[1025];
+    unsigned short local_port;
     char command[NETL_CLI_BUF];
     long pid;
 } netl_cli_registration_t;
 
 typedef struct {
     const char *command;
+    kc_netl_peer_t *outgoing;
 #ifdef _WIN32
     CRITICAL_SECTION lock;
 #else
@@ -437,6 +442,10 @@ static int netl_cli_write_registration(
         registration->protocol == KC_NETL_UDP ? "udp" : "tcp"
     );
     fprintf(file, "%s\n", registration->command);
+    fprintf(file,"%d\n",registration->outbound);
+    fprintf(file,"%s\n",registration->host);
+    fprintf(file,"%s\n",registration->local_host);
+    fprintf(file,"%u\n",(unsigned)registration->local_port);
     fclose(file);
 #ifndef _WIN32
     (void)chmod(path, 0600);
@@ -460,6 +469,7 @@ static int netl_cli_read_registration(
     char path[NETL_CLI_PATH_MAX];
     char port_text[32];
     char transport[16];
+    char mode_text[16],local_port_text[32];
     FILE *file;
     size_t size;
 
@@ -482,7 +492,11 @@ static int netl_cli_read_registration(
                 registration->command,
                 sizeof(registration->command),
                 file
-            )) {
+            ) ||
+            !fgets(mode_text,sizeof(mode_text),file)||
+            !fgets(registration->host,sizeof(registration->host),file)||
+            !fgets(registration->local_host,sizeof(registration->local_host),file)||
+            !fgets(local_port_text,sizeof(local_port_text),file)) {
         fclose(file);
         return 1;
     }
@@ -505,7 +519,24 @@ static int netl_cli_read_registration(
     } else {
         return 1;
     }
-    if (!netl_cli_line_valid(registration->command)) return 1;
+    registration->outbound=mode_text[0]=='1';
+    if(mode_text[0]!='0'&&mode_text[0]!='1')return 1;
+    {
+        char *fields[]={registration->host,registration->local_host};
+        size_t i;
+        for(i=0;i<2;i++){
+            size_t n=strlen(fields[i]);
+            if(n&&fields[i][n-1U]=='\n')fields[i][n-1U]=0;
+        }
+    }
+    {
+        char *end=NULL;
+        unsigned long n=strtoul(local_port_text,&end,10);
+        if(!end||(*end!='\n'&&*end!='\0')||n>65535UL)return 1;
+        registration->local_port=(unsigned short)n;
+    }
+    if (!netl_cli_line_valid(registration->command)&&
+        !registration->outbound)return 1;
     snprintf(registration->name, sizeof(registration->name), "%s", name);
     return 0;
 }
