@@ -1100,28 +1100,28 @@ static int case_nets_cli(void) {
     failures += nets_cli_result("missing port", "host without port fails",
         nets_cli_run("localhost") != 0);
     failures += nets_cli_result("zero port", "port zero fails",
-        nets_cli_run("localhost 0") != 0);
+        nets_cli_run("localhost:0") != 0);
     failures += nets_cli_result("invalid port", "non-numeric port fails",
-        nets_cli_run("localhost invalid") != 0);
+        nets_cli_run("localhost:invalid") != 0);
     failures += nets_cli_result("invalid transport", "transport requires tcp or udp",
-        nets_cli_run("localhost 9 --transport tls") != 0);
+        nets_cli_run("localhost:9 --transport tls") != 0);
     failures += nets_cli_result("transport value", "transport requires a following value",
-        nets_cli_run("localhost 9 --transport") != 0);
+        nets_cli_run("localhost:9 --transport") != 0);
     failures += nets_cli_result("removed tls option", "TLS option is not accepted",
-        nets_cli_run("localhost 9 --tls") != 0);
+        nets_cli_run("localhost:9 --tls") != 0);
     failures += nets_cli_result("extra positional", "extra endpoint arguments fail",
-        nets_cli_run("localhost 9 extra") != 0);
+        nets_cli_run("localhost:9 extra") != 0);
     failures += nets_cli_result("resident send missing",
         "unregistered sender cannot send",
         nets_cli_run("nonexistent -s") != 0);
     failures += nets_cli_result("resident invalid id",
         "rejects unsafe resident identifiers",
-        nets_cli_run("127.0.0.1 9 -t udp --id bad/name") != 0);
+        nets_cli_run("127.0.0.1:9 -t udp --id bad/name") != 0);
     {
         char create[256],list[160],remove[160];
         unsigned short port=(unsigned short)(port_base()+7U);
         snprintf(create,sizeof(create),
-            "127.0.0.1 %u -t udp --id contract_%u --local-host 127.0.0.1",
+            "127.0.0.1:%u -t udp --id contract_%u --local-host 127.0.0.1",
             (unsigned)port,(unsigned)port);
         snprintf(list,sizeof(list),"-l contract_%u",(unsigned)port);
         snprintf(remove,sizeof(remove),"contract_%u -d",(unsigned)port);
