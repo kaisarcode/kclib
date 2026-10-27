@@ -993,7 +993,7 @@ static int case_kc_netl_interface_tcp(void)
             disconnect,error,&received));
     if(interface){
         fail+=expect_int("interface TCP send",KC_NETL_OK,
-            kc_netl_send(interface,"ping",4U));
+            kc_netl_send(interface,"ping",4U,NULL));
         fail+=expect_int("interface TCP callback",0,
             wait_atomic_at_least(&received.receive_count,1));
         fail+=expect_true("interface TCP response",
@@ -1031,9 +1031,14 @@ static int case_kc_netl_interface_udp(void)
         kc_netl_open(&interface,&options,receive,
             disconnect,error,&client));
     if(interface){
-        fail+=expect_int("interface UDP send to explicit destination",
-            KC_NETL_OK,kc_netl_send_to(interface,
-            "127.0.0.1",kc_netl_socket_port(server),"ping",4U));
+        {
+            kc_netl_endpoint_t destination={
+                "127.0.0.1",kc_netl_socket_port(server)
+            };
+            fail+=expect_int("interface UDP send to explicit destination",
+                KC_NETL_OK,kc_netl_send(interface,"ping",4U,
+                    &destination));
+        }
         fail+=expect_int("interface UDP receives",0,
             wait_atomic_at_least(&client.receive_count,1));
         fail+=expect_true("interface UDP response",
