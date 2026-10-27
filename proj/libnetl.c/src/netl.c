@@ -61,6 +61,7 @@ typedef struct {
 typedef struct {
     const char *command;
     kc_netl_peer_t *outgoing;
+    kc_netl_interface_t *interface;
 #ifdef _WIN32
     CRITICAL_SECTION lock;
 #else
@@ -1291,10 +1292,6 @@ static void netl_cli_disconnect(kc_netl_peer_t *peer, void *userdata)
 
     state = (netl_cli_state_t *)userdata;
     if (!state) return;
-    if(state->outgoing==peer){
-        netl_cli_stop=1;
-        return;
-    }
     netl_cli_lock(state);
     session = netl_cli_find(state, peer);
     if (!session) {
@@ -1381,72 +1378,31 @@ static void netl_cli_drain_sends(
  * @param name Listener identifier.
  * @return Process status.
  */
-static int netl_cli_serve(const char *dir, const char *name)
+static int netl_cli_serve(const char *dir,const char *name)
 {
     netl_cli_registration_t registration;
     kc_netl_options_t options;
-    kc_netl_t *listener;
-    kc_netl_t *local_sender=NULL;
     netl_cli_state_t state;
     int rc;
-
-    if (netl_cli_read_registration(dir, name, &registration) != 0) return 1;
-
-    memset(&state, 0, sizeof(state));
-    state.command = registration.command;
+    if(netl_cli_read_registration(dir,name,&registration)!=0)return 1;
+    memset(&state,0,sizeof(state));
+    state.command=registration.command;
 #ifdef _WIN32
     InitializeCriticalSection(&state.lock);
 #else
-    if (pthread_mutex_init(&state.lock, NULL) != 0) return 1;
-    (void)signal(SIGINT, netl_cli_signal);
-    (void)signal(SIGTERM, netl_cli_signal);
-    (void)signal(SIGPIPE, SIG_IGN);
-    (void)signal(SIGCHLD, netl_cli_reap);
+    if(pthread_mutex_init(&state.lock,NULL)!=0)return 1;
+    (void)signal(SIGINT,netl_cli_signal);
+    (void)signal(SIGTERM,netl_cli_signal);
+    (void)signal(SIGPIPE,SIG_IGN);
+    (void)signal(SIGCHLD,netl_cli_reap);
 #endif
-
-    memset(&options, 0, sizeof(options));
+    memset(&options,0,sizeof(options));
     options.host=registration.host;
-    options.port = registration.port;
-    options.protocol = registration.protocol;
-    listener = NULL;
-    if(registration.protocol==KC_NETL_TCP){
-        /* Test the local bind; address spelling never defines a role. */
-        rc=kc_netl_open(&listener,&options,netl_cli_receive,
-            netl_cli_disconnect,netl_cli_error,&state);
-    }else{
-        rc=KC_NETL_ENET;
-    }
+    options.port=registration.port;
+    options.protocol=registration.protocol;
+    rc=kc_netl_interface_open(&state.interface,&options,
+        netl_cli_receive,netl_cli_disconnect,netl_cli_error,&state);
     if(rc!=KC_NETL_OK){
-        kc_netl_connect_options_t remote;
-        memset(&remote,0,sizeof(remote));
-        remote.host=registration.host;
-        remote.port=registration.port;
-        remote.protocol=registration.protocol;
-        remote.local_host=registration.local_host[0]?
-            registration.local_host:NULL;
-        remote.local_port=registration.local_port;
-        rc=kc_netl_connect(&listener,&state.outgoing,&remote,
-            netl_cli_receive,netl_cli_disconnect,netl_cli_error,&state);
-    }
-    /*
-     * A locally bound TCP endpoint needs a connected socket for stdin sends.
-     * Establish it against the listening interface without exposing a role
-     * selector or changing the listener's accept behavior.
-     */
-    if(rc==KC_NETL_OK && registration.protocol==KC_NETL_TCP &&
-        !state.outgoing){
-        kc_netl_connect_options_t local;
-        memset(&local,0,sizeof(local));
-        local.host=strcmp(registration.host,"0.0.0.0")==0?
-            "127.0.0.1":strcmp(registration.host,"::")==0?
-            "::1":registration.host;
-        local.port=registration.port;
-        local.protocol=KC_NETL_TCP;
-        if(kc_netl_connect(&local_sender,&state.outgoing,&local,
-            netl_cli_receive,netl_cli_disconnect,netl_cli_error,
-            &state)!=KC_NETL_OK)state.outgoing=NULL;
-    }
-    if (rc != KC_NETL_OK) {
 #ifdef _WIN32
         DeleteCriticalSection(&state.lock);
 #else
@@ -1454,19 +1410,15 @@ static int netl_cli_serve(const char *dir, const char *name)
 #endif
         return 1;
     }
-
 #ifdef _WIN32
-    (void)signal(SIGINT, netl_cli_signal);
-    (void)signal(SIGTERM, netl_cli_signal);
+    (void)signal(SIGINT,netl_cli_signal);
+    (void)signal(SIGTERM,netl_cli_signal);
 #endif
-    while (!netl_cli_stop) {
-        if(state.outgoing&&!netl_cli_stop)
-            netl_cli_drain_sends(dir,name,state.outgoing,registration.protocol);
+    while(!netl_cli_stop){
+        netl_cli_drain_sends(dir,name,state.interface,registration.protocol);
         netl_cli_sleep();
     }
-
-    kc_netl_close(local_sender);
-    kc_netl_close(listener);
+    kc_netl_interface_close(state.interface);
     netl_cli_cleanup(&state);
 #ifdef _WIN32
     DeleteCriticalSection(&state.lock);
@@ -1546,14 +1498,14 @@ static int netl_cli_process_send(
     unsigned char buffer[65508];
     size_t size;
     int rc=0;
-    if(!file||!outgoing){if(file)fclose(file);return 1;}
+    if(!file||!interface){if(file)fclose(file);return 1;}
     if(protocol==KC_NETL_UDP){
         size=fread(buffer,1,sizeof(buffer),file);
         if(ferror(file)||!feof(file)||size>65507U||
-            kc_netl_send(outgoing,buffer,size)!=KC_NETL_OK)rc=1;
+            kc_netl_interface_send(interface,buffer,size)!=KC_NETL_OK)rc=1;
     }else{
         while((size=fread(buffer,1,sizeof(buffer),file))!=0U){
-            if(kc_netl_send(outgoing,buffer,size)!=KC_NETL_OK){
+            if(kc_netl_interface_send(interface,buffer,size)!=KC_NETL_OK){
                 rc=1;break;
             }
         }
@@ -1600,7 +1552,7 @@ static void netl_cli_drain_sends(
             if(strncmp(entry.cFileName,prefix,prefix_size)!=0)continue;
             if((size_t)snprintf(path,sizeof(path),"%s\\%s",
                 dir,entry.cFileName)>=sizeof(path))continue;
-            (void)netl_cli_process_send(outgoing,protocol,path);
+            (void)netl_cli_process_send(interface,protocol,path);
             (void)remove(path);
         }while(FindNextFileA(scan,&entry));
         FindClose(scan);
@@ -1615,7 +1567,7 @@ static void netl_cli_drain_sends(
             if(strncmp(entry->d_name,prefix,prefix_size)!=0)continue;
             if((size_t)snprintf(path,sizeof(path),"%s/%s",
                 dir,entry->d_name)>=sizeof(path))continue;
-            (void)netl_cli_process_send(outgoing,protocol,path);
+            (void)netl_cli_process_send(interface,protocol,path);
             (void)remove(path);
         }
         closedir(scan);
