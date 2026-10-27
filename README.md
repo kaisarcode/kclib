@@ -211,5 +211,8 @@ and Makefile.
 ## Status and license
 
 The projects are beta software and are validated primarily on Debian x86_64,
-although many include targets for other architectures and platforms. They are
-distributed under LGPLv3; consult each project for its exact terms.
+although many include targets for other architectures and platforms. The monorepo infrastructure and root-level build and distribution tooling are
+licensed under GNU GPL v3. Each independent library in `proj/` retains its
+own license, normally GNU LGPL v3, which governs that library's source and
+published artifacts. The repository's GPLv3 license does not replace the
+licenses of contained libraries.
