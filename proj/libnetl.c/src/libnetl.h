@@ -1,6 +1,6 @@
 /**
- * libnetl.h - Incoming network listener.
- * Summary: Receives bytes from TCP/UDP peers and optionally responds.
+ * libnetl.h - Persistent bidirectional TCP/UDP socket interfaces.
+ * Summary: Opens, maintains and operates bidirectional network endpoints.
  *
  * Author: KaisarCode
  * Website: https://kaisarcode.com
@@ -38,12 +38,14 @@ typedef struct {
 
 /**
  * Receives bytes from one remote peer.
- * The input and its data and host values are borrowed for the
+ * The peer and received bytes are borrowed for the
  * callback duration.
  * TCP peer identity remains stable across receives until disconnect or peer
  * close. A UDP peer represents one datagram origin and is valid only for the
  * callback duration.
- * @param peer Borrowed peer description.\n * @param data Borrowed received bytes.\n * @param data_size Byte count.
+ * @param peer Borrowed peer description.
+ * @param data Borrowed received bytes.
+ * @param data_size Byte count.
  * @param userdata Consumer data supplied when opening the listener.
  * @return void.
  */
