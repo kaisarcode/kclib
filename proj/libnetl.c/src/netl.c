@@ -123,7 +123,8 @@ static void netl_cli_unlock(netl_cli_state_t *state)
 static void netl_cli_help(void)
 {
     printf("Usage: netl <id> <port> <command...>\n");
-    printf("       netl <id> -r <host:port>\n");
+    printf("       netl <id> -c <host:port> [options]\n");
+    printf("       netl <id>\n");
     printf("       netl -l [id]\n");
     printf("       netl <id> -d\n");
     printf("\n");
@@ -131,13 +132,16 @@ static void netl_cli_help(void)
     printf("  netl <id> <port> <cmd>  Register or replace a listener\n");
     printf("  netl -l [id]             List listeners\n");
     printf("  netl <id> -d             Remove a listener\n");
-    printf("  netl <id> -r <host:port>  Reply via resident UDP listener\n");
+    printf("  netl <id>                Send stdin to an outgoing endpoint\n");
     printf("\n");
     printf("Options:\n");
+    printf("  -c, --connect <host:port>  Open persistent outgoing socket\n");
+    printf("  --receive <cmd>            Receive callback command\n");
+    printf("  --local-host <host>        Local bind address\n");
+    printf("  --local-port <port>        Local bind port\n");
     printf("  -t, --transport <type>   tcp or udp (default: tcp)\n");
     printf("  -l, --list               List listeners\n");
     printf("  -d, --delete             Remove a listener\n");
-    printf("  -r, --reply              Send stdin as one UDP datagram\n");
     printf("  -h, --help               Show this help\n");
     printf("  -v, --version            Show version\n");
 }
@@ -1877,7 +1881,6 @@ int main(int argc, char **argv)
     int protocol;
     int list;
     int remove;
-    int reply;
     int connect_mode;
     const char *target=NULL;
     const char *receive_cmd=NULL;
@@ -1909,7 +1912,6 @@ int main(int argc, char **argv)
     protocol = KC_NETL_TCP;
     list = 0;
     remove = 0;
-    reply = 0;
     connect_mode = 0;
     positional = 0;
 
@@ -1928,9 +1930,6 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "-d") == 0 ||
                 strcmp(argv[i], "--delete") == 0) {
             remove = 1;
-        } else if (strcmp(argv[i], "-r") == 0 ||
-                strcmp(argv[i], "--reply") == 0) {
-            reply = 1;
         } else if(strcmp(argv[i],"-c")==0||
             strcmp(argv[i],"--connect")==0){
             if(++i>=argc)return 1;
@@ -1977,7 +1976,7 @@ int main(int argc, char **argv)
 
     if (list) {
         if (connect_mode||receive_cmd||local_host||local_port||
-            reply || remove || port_text || command[0] || protocol != KC_NETL_TCP) {
+            remove || port_text || command[0] || protocol != KC_NETL_TCP) {
             fprintf(stderr, "netl: invalid list arguments\n");
             return 1;
         }
@@ -1995,19 +1994,6 @@ int main(int argc, char **argv)
     if (!netl_cli_name_valid(name)) {
         fprintf(stderr, "netl: invalid id: %s\n", name);
         return 1;
-    }
-
-    if(reply){
-        unsigned short destination_port;
-        char destination_host[1025];
-        if(remove||protocol!=KC_NETL_TCP||positional!=2||
-            !port_text||command[0]||
-            !netl_cli_endpoint(port_text,destination_host,
-                sizeof(destination_host),&destination_port)){
-            fprintf(stderr,"netl: usage: netl <id> -r <host:port>\n");
-            return 1;
-        }
-        return netl_cli_reply(dir,name,destination_host,destination_port);
     }
 
     if (remove) {
@@ -2048,7 +2034,7 @@ int main(int argc, char **argv)
     if(!port_text){
         if(protocol!=KC_NETL_TCP||receive_cmd||local_host||local_port||
             command[0])return 1;
-        return netl_cli_reply(dir,name,NULL,0);
+        return netl_cli_send(dir,name);
     }
     memset(&registration, 0, sizeof(registration));
     snprintf(registration.name, sizeof(registration.name), "%s", name);
