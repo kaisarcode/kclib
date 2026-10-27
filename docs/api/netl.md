@@ -64,7 +64,7 @@ netl servidor 5000 'handler' -t udp
 # Its stdin contains the binary datagram.
 
 # Later, reply using the existing listener:
-printf respuesta | netl servidor -r 192.168.1.20 6000
+printf respuesta | netl servidor -r 192.168.1.20:6000
 
 netl -l
 netl servidor -d
