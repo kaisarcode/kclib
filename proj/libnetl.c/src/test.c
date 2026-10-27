@@ -1030,8 +1030,9 @@ static int case_kc_netl_interface_udp(void)
         kc_netl_interface_open(&interface,&options,receive,
             disconnect,error,&client));
     if(interface){
-        fail+=expect_int("interface UDP send",KC_NETL_OK,
-            kc_netl_interface_send(interface,"ping",4U));
+        fail+=expect_int("interface UDP send to explicit destination",
+            KC_NETL_OK,kc_netl_interface_send_to(interface,
+            "127.0.0.1",kc_netl_port(server),"ping",4U));
         fail+=expect_int("interface UDP receives",0,
             wait_atomic_at_least(&client.receive_count,1));
         fail+=expect_true("interface UDP response",
