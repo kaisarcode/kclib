@@ -887,11 +887,12 @@ static netl_cli_session_t *netl_cli_tcp_start(
     startup.hStdOutput = output_write;
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     if ((size_t)snprintf(command, sizeof(command),
-            "cmd.exe /c %s %s %u", state->command, host,
-            (unsigned)port) >= sizeof(command)) {
+            "cmd.exe /c %s", state->command) >= sizeof(command)) {
         CloseHandle(input_read);
         CloseHandle(input_write);
-        return 1;
+        CloseHandle(output_read);
+        CloseHandle(output_write);
+        return NULL;
     }
 
     if (!CreateProcessA(
@@ -996,7 +997,13 @@ static int netl_cli_udp_start(
     startup.hStdInput = input_read;
     startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    snprintf(command, sizeof(command), "cmd.exe /c %s", state->command);
+    if ((size_t)snprintf(command, sizeof(command),
+            "cmd.exe /c %s %s %u", state->command, host,
+            (unsigned)port) >= sizeof(command)) {
+        CloseHandle(input_read);
+        CloseHandle(input_write);
+        return 1;
+    }
 
     if (!CreateProcessA(
             NULL,
