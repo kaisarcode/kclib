@@ -30,6 +30,22 @@ typedef SOCKET test_socket_t;
 typedef int test_socket_t;
 #endif
 
+static int test_case_total;
+static int test_case_current;
+
+/**
+ * Print one test result in the standard kclib format.
+ * @param failed Nonzero on failure.
+ * @param name Case name.
+ * @param detail Verified behavior.
+ */
+static void case_result(int failed,const char *name,const char *detail)
+{
+    test_case_current++;
+    printf("[%d/%d] [%s] %s: %s\\n",test_case_current,test_case_total,
+        failed?"FAIL":"PASS",name,detail);
+}
+
 typedef struct {
     atomic_int received;
     atomic_int errors;
@@ -157,7 +173,7 @@ static int case_open(void)
     kc_netl_close(NULL);
     fail+=(kc_netl_strerror(KC_NETL_OK)==NULL);
     fail+=(kc_netl_version()==0U);
-    printf("[public_open] %s\n",fail?"FAIL":"PASS");
+    case_result(fail,"kc_netl_open","validates the public interface and status helpers");
     return fail?1:0;
 }
 
@@ -194,7 +210,7 @@ static int case_udp(void)
     fail+=(atomic_load(&received.errors)!=0);
     kc_netl_close(sender);
     kc_netl_close(receiver);
-    printf("[public_udp] %s\n",fail?"FAIL":"PASS");
+    case_result(fail,"kc_netl_udp","sends and receives UDP datagrams on persistent interfaces");
     return fail?1:0;
 }
 
@@ -221,7 +237,7 @@ static int case_tcp(void)
     fail+=!test_wait(&state,2);
     fail+=(atomic_load(&state.errors)!=0);
     kc_netl_close(interface);
-    printf("[public_tcp] %s\n",fail?"FAIL":"PASS");
+    case_result(fail,"kc_netl_tcp","uses a persistent bidirectional TCP interface");
     return fail?1:0;
 }
 
@@ -274,7 +290,7 @@ static int case_netl_cli(void) {
         fail += netl_cli_run(listed);
         fail += netl_cli_run(remove);
     }
-    printf("[netl_cli] %s\n",fail?"FAIL":"PASS");
+    case_result(fail,"netl_cli","validates command-line interface arguments and errors");
     return fail != 0;
 }
 #endif
@@ -294,6 +310,12 @@ int main(int argc,char **argv)
 #endif
     if(argc!=2){fprintf(stderr,"expected test case\n");return 2;}
     if(strcmp(argv[1],"all")==0){
+#if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
+        test_case_total=4;
+#else
+        test_case_total=3;
+#endif
+        test_case_current=0;
         fails+=case_open();total++;
         fails+=case_udp();total++;
         fails+=case_tcp();total++;
@@ -303,6 +325,8 @@ int main(int argc,char **argv)
         printf("%d passed, %d failed\n",total-fails,fails);
         return fails;
     }
+    test_case_total=1;
+    test_case_current=0;
     if(strcmp(argv[1],"kc_netl_open")==0)return case_open();
     if(strcmp(argv[1],"kc_netl_udp")==0)return case_udp();
     if(strcmp(argv[1],"kc_netl_tcp")==0)return case_tcp();
