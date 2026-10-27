@@ -2015,9 +2015,6 @@ int main(int argc, char **argv)
         return 1;
     }
     registration.protocol=protocol;
-    /* Wildcard interfaces bind locally; specific remote endpoints connect. */
-    /* UDP owns one bidirectional socket regardless of destination address. */
-    /* Every registration can later receive stdin independent of address. */
     registration.outbound=1;
     if(command[0]){
         if(!netl_cli_line_valid(command)){

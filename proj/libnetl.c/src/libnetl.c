@@ -643,7 +643,6 @@ static void kc_netl_receive_udp(kc_netl_t *listener) {
         &address_size
     );
     if (received < 0) {
-        /* An unreachable UDP peer is not a terminal socket failure. */
         return;
     }
 
@@ -759,10 +758,6 @@ static void kc_netl_flush_udp(kc_netl_t *listener) {
         kc_netl_unlock(listener);
         free(output->data);
         free(output);
-        /*
-         * Failure to reach one UDP destination does not invalidate the bound
-         * socket or prevent later sends and receives.
-         */
         continue;
     }
 }
@@ -1263,12 +1258,6 @@ int kc_netl_connect(
         int bound=0;
         socket_fd=socket(item->ai_family,item->ai_socktype,item->ai_protocol);
         if(socket_fd==KC_NETL_FD_INVALID)continue;
-        /*
-         * UDP accepts the configured address as a local bind when possible.
-         * Otherwise it uses an ephemeral local socket and retains the same
-         * address as the default destination for send(). Neither case changes
-         * the public receive/send contract.
-         */
         if(options->protocol==KC_NETL_UDP &&
             !options->local_host && options->local_port==0U) {
             if(bind(socket_fd,item->ai_addr,
@@ -1494,7 +1483,6 @@ void kc_netl_close(kc_netl_t *listener) {
     kc_netl_destroy(listener);
 }
 
-
 /**
  * A single public interface may own a listener and a connected peer.
  * The distinction is an implementation detail rather than a caller role.
@@ -1514,6 +1502,7 @@ struct kc_netl_interface {
 
 /**
  * Forward incoming data without exposing listener or connection selection.
+ * @return void.
  */
 static void kc_netl_interface_receive(kc_netl_peer_t *peer,
     const void *data,size_t size,void *userdata)
@@ -1524,6 +1513,7 @@ static void kc_netl_interface_receive(kc_netl_peer_t *peer,
 
 /**
  * Forget disconnected outbound connections and forward notifications.
+ * @return void.
  */
 static void kc_netl_interface_disconnect(kc_netl_peer_t *peer,void *userdata)
 {
@@ -1535,6 +1525,7 @@ static void kc_netl_interface_disconnect(kc_netl_peer_t *peer,void *userdata)
 
 /**
  * Forward asynchronous errors to the owner.
+ * @return void.
  */
 static void kc_netl_interface_error(int status,void *userdata)
 {
@@ -1544,6 +1535,7 @@ static void kc_netl_interface_error(int status,void *userdata)
 
 /**
  * Open a reusable address-oriented interface without exposing TCP roles.
+ * @return KC_NETL_OK on success, an error code otherwise.
  */
 int kc_netl_interface_open(kc_netl_interface_t **out,
     const kc_netl_options_t *options,kc_netl_receive_fn receive,
@@ -1555,8 +1547,8 @@ int kc_netl_interface_open(kc_netl_interface_t **out,
     if(!out)return KC_NETL_EINVAL;
     *out=NULL;
     if(!options||!options->host||!*options->host||!options->port||
-       !receive||(options->protocol!=KC_NETL_TCP&&
-       options->protocol!=KC_NETL_UDP))return KC_NETL_EINVAL;
+        !receive||(options->protocol!=KC_NETL_TCP&&
+        options->protocol!=KC_NETL_UDP))return KC_NETL_EINVAL;
     interface=(kc_netl_interface_t *)calloc(1,sizeof(*interface));
     if(!interface)return KC_NETL_ENOMEM;
     if(strlen(options->host)>=sizeof(interface->host)){
@@ -1570,11 +1562,9 @@ int kc_netl_interface_open(kc_netl_interface_t **out,
     interface->error=error;
     interface->userdata=userdata;
     if(options->protocol==KC_NETL_TCP){
-        /* Binding succeeds only when the address belongs to this host. */
         result=kc_netl_open(&interface->listening,options,
             kc_netl_interface_receive,kc_netl_interface_disconnect,
             kc_netl_interface_error,interface);
-        /* Failure to bind does not stop the interface being send-capable. */
         (void)result;
     }else{
         memset(&remote,0,sizeof(remote));
@@ -1594,6 +1584,7 @@ int kc_netl_interface_open(kc_netl_interface_t **out,
 
 /**
  * Send using a persistent socket; a TCP connection is established lazily.
+ * @return KC_NETL_OK on success, an error code otherwise.
  */
 int kc_netl_interface_send(kc_netl_interface_t *interface,
     const void *data,size_t size)
@@ -1625,6 +1616,7 @@ int kc_netl_interface_send(kc_netl_interface_t *interface,
 
 /**
  * Shut down every socket owned by the interface.
+ * @return void.
  */
 void kc_netl_interface_close(kc_netl_interface_t *interface)
 {

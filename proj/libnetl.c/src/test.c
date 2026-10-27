@@ -925,6 +925,7 @@ static int case_kc_netl_outbound_udp(void)
 /**
  * Checks that a concrete local UDP address is bidirectional without a role.
  * The same socket binds its requested endpoint and sends to it through send.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_local_udp(void)
 {
@@ -968,6 +969,7 @@ static int case_kc_netl_local_udp(void)
 
 /**
  * Tests the single address-oriented TCP interface without a public role.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_interface_tcp(void)
 {
@@ -1006,6 +1008,7 @@ static int case_kc_netl_interface_tcp(void)
 
 /**
  * Tests UDP send and receive through one address-based interface.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_interface_udp(void)
 {
@@ -1157,7 +1160,6 @@ static int case_netl_cli(void) {
     fail += netl_cli_run("--help");
     fail += netl_cli_run("--version");
     fail += netl_cli_run("") == 0;
-    /* Endpoint-only registration is valid; lifecycle is covered below. */
     fail += netl_cli_run("sample invalid-endpoint") == 0;
     fail += netl_cli_run("sample 0.0.0.0:8080 true --unknown") == 0;
     fail += netl_cli_run("bad/name -d") == 0;
