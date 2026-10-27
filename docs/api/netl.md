@@ -49,28 +49,28 @@ All callbacks are positional arguments, never options fields.
 
 ## Unified native interface
 
-`kc_netl_interface_open()` creates a persistent address-oriented interface
+`kc_netl_open()` creates a persistent address-oriented interface
 without a client/server parameter. A TCP listener is created when the address
 can be bound locally; outbound TCP is established on the first
-`kc_netl_interface_send()`. The instance remains available when the remote
+`kc_netl_send()`. The instance remains available when the remote
 destination is not listening, allowing a later send attempt. UDP uses one
 persistent bound datagram socket for both send and receive. Incoming traffic
 is always delivered as `peer, data, size, userdata`.
 
 ```c
-kc_netl_interface_t *channel = NULL;
+kc_netl_t *channel = NULL;
 kc_netl_options_t options = {
     .host = "127.0.0.1",
     .port = 8080,
     .protocol = KC_NETL_TCP
 };
 
-int status = kc_netl_interface_open(
+int status = kc_netl_open(
     &channel, &options, receive, disconnect, error, userdata
 );
 if (status == KC_NETL_OK) {
-    (void)kc_netl_interface_send(channel, "Hello", 5U);
-    kc_netl_interface_close(channel);
+    (void)kc_netl_send(channel, "Hello", 5U, NULL);
+    kc_netl_close(channel);
 }
 ```
 
@@ -129,3 +129,10 @@ Failed UDP datagrams do not close the persistent socket. For TCP the native
 runtime must still use different listening and connected sockets internally:
 it tries local listening first and remote connection otherwise. TCP connection
 establishment and disconnection continue to follow OS socket semantics.
+
+The native public API exposes `kc_netl_open`, `kc_netl_send`,
+`kc_netl_peer_send`, and `kc_netl_close`. An optional
+`kc_netl_endpoint_t` argument to `kc_netl_send` selects a UDP destination
+for an individual datagram; NULL uses the configured address. It does not
+alter the local bind or create another socket. A wildcard address is never
+rewritten to loopback. The low-level socket machinery is private.
