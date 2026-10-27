@@ -71,6 +71,22 @@ be retained after that callback returns.
 For UDP, each receive describes one datagram and its origin. A response through
 that receive-local peer produces one datagram back to the same origin.
 
+## Deferred UDP replies
+
+Incoming UDP datagrams include the source host and port. Calling
+`kc_netl_respond(input->peer, bytes, size)` during the receive callback sends
+a response from the listening socket to that source.
+
+For an asynchronous or delayed response, the application may retain the
+numeric source address and call
+`kc_netl_reply_to(listener, host, port, bytes, size)` later. This copies the
+datagram into the listener's existing send queue and uses the **same bound UDP
+socket**. The destination must have an address family compatible with the
+listener's bound socket. It does not require keeping the callback-scoped peer
+pointer alive.
+
+TCP behavior is unchanged.
+
 ## Build
 
 From this project directory:
