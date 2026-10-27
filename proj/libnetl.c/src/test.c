@@ -53,7 +53,8 @@ static void test_receive(kc_netl_peer_t *peer,const void *data,
     memcpy(state->data,data,size);
     state->size=size;
     state->last_port=kc_netl_peer_port(peer);
-    if(state->reply && size!=4U) (void)kc_netl_peer_send(peer,"pong",4U);
+    if(state->reply && !(size==4U && memcmp(data,"pong",4U)==0))
+        (void)kc_netl_peer_send(peer,"pong",4U);
     atomic_fetch_add(&state->received,1);
 }
 
@@ -286,6 +287,10 @@ static int case_netl_cli(void) {
 int main(int argc,char **argv)
 {
     int fails=0,total=0;
+#ifdef _WIN32
+    WSADATA winsock;
+    if(WSAStartup(MAKEWORD(2,2),&winsock)!=0)return 1;
+#endif
     if(argc!=2){fprintf(stderr,"expected test case\n");return 2;}
     if(strcmp(argv[1],"all")==0){
         fails+=case_open();total++;
