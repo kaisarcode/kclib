@@ -37,11 +37,11 @@ if(STUN_BUILD_TESTS AND STUN_TEST_SHARED_LIBRARY)
 endif()
 
 if(NOT STUN_TEST_EXTERNAL_ARTIFACTS)
-    add_library(stun_static STATIC src/libstun.c src/stun-crypto.c)
+    add_library(stun_static STATIC src/libstun.c)
     set_target_properties(stun_static PROPERTIES OUTPUT_NAME "stun")
     target_include_directories(stun_static PUBLIC src)
 
-    add_library(stun_shared SHARED src/libstun.c src/stun-crypto.c)
+    add_library(stun_shared SHARED src/libstun.c)
     set_target_properties(stun_shared PROPERTIES OUTPUT_NAME "stun"
         WINDOWS_EXPORT_ALL_SYMBOLS ON)
     target_include_directories(stun_shared PUBLIC src)
