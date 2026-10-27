@@ -923,6 +923,50 @@ static int case_kc_netl_outbound_udp(void)
 }
 
 /**
+ * Checks that a concrete local UDP address is bidirectional without a role.
+ * The same socket binds its requested endpoint and sends to it through send.
+ */
+static int case_kc_netl_local_udp(void)
+{
+    kc_netl_t *temporary=NULL,*endpoint=NULL;
+    kc_netl_peer_t *peer=NULL;
+    kc_netl_options_t listener_options;
+    kc_netl_connect_options_t options;
+    receive_state_t state;
+    unsigned short port;
+    int fail=0;
+    state_init(&state);
+    memset(&listener_options,0,sizeof(listener_options));
+    listener_options.host="127.0.0.1";
+    listener_options.protocol=KC_NETL_UDP;
+    if(kc_netl_open(&temporary,&listener_options,receive,disconnect,error,
+        &state)!=KC_NETL_OK)return 1;
+    port=kc_netl_port(temporary);
+    kc_netl_close(temporary);
+    memset(&options,0,sizeof(options));
+    options.host="127.0.0.1";
+    options.port=port;
+    options.protocol=KC_NETL_UDP;
+    fail+=expect_int("local UDP address opens",KC_NETL_OK,
+        kc_netl_connect(&endpoint,&peer,&options,receive,disconnect,
+            error,&state));
+    if(peer){
+        fail+=expect_int("local UDP retains configured port",(int)port,
+            (int)kc_netl_port(endpoint));
+        fail+=expect_int("local UDP sends from bound socket",KC_NETL_OK,
+            kc_netl_send(peer,"hi",2U));
+        fail+=expect_int("local UDP receives on same interface",0,
+            wait_atomic_at_least(&state.receive_count,1));
+        fail+=expect_int("local UDP source is same port",(int)port,
+            (int)state.ports[0]);
+    }
+    kc_netl_close(endpoint);
+    case_result(fail,"kc_netl_local_udp",
+        "sends and receives from the same concrete local UDP interface");
+    return fail!=0;
+}
+
+/**
  * Exercises one persistent outgoing TCP peer against a listening socket.
  * @return Zero on success, non-zero on failure.
  */
@@ -1071,13 +1115,14 @@ static int case_all(void) {
     int result;
 
     result = 0;
-    test_case_total = 8;
+    test_case_total = 9;
     test_case_current = 0;
     run_case(&result, case_kc_netl_open);
     run_case(&result, case_kc_netl_tcp);
     run_case(&result, case_kc_netl_listener_close);
     run_case(&result, case_kc_netl_udp);
     run_case(&result, case_kc_netl_outbound_udp);
+    run_case(&result, case_kc_netl_local_udp);
     run_case(&result, case_kc_netl_outbound_tcp);
     run_case(&result, case_kc_netl_status);
 #ifndef __EMSCRIPTEN__
@@ -1108,6 +1153,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "kc_netl_udp") == 0) return case_kc_netl_udp();
     if (strcmp(argv[1], "kc_netl_outbound_udp") == 0) return case_kc_netl_outbound_udp();
+    if(strcmp(argv[1],"kc_netl_local_udp")==0)return case_kc_netl_local_udp();
     if (strcmp(argv[1], "kc_netl_outbound_tcp") == 0) return case_kc_netl_outbound_tcp();
     if (strcmp(argv[1], "kc_netl_status") == 0) return case_kc_netl_status();
 #ifndef __EMSCRIPTEN__
