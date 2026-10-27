@@ -958,9 +958,9 @@ static int case_udp_multi(void)
     options.endpoint.port=a;
     options.endpoint.protocol=KC_NETS_UDP;
     options.local_host=TEST_HOST;
-    options.receive_from=receive_from_callback;
     fail+=expect_int("UDP multidest open",KC_NETS_OK,
-        kc_nets_open_udp(&state.network,&options,NULL,error_callback,&state));
+        kc_nets_open_udp(&state.network,&options,receive_from_callback,
+            error_callback,&state));
     if(state.network){
         fail+=expect_true("UDP local port",kc_nets_local_port(state.network)!=0);
         fail+=expect_int("UDP default destination",KC_NETS_OK,
