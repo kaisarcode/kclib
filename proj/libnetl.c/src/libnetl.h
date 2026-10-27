@@ -126,10 +126,10 @@ int kc_netl_connect(
 );
 
 /**
- * Responds to one peer.
+ * Sends bytes to a peer.
  * The library copies the supplied bytes before returning and absorbs transport
  * buffering, partial writes, and retries. TCP responses preserve call order.
- * Respond may be called repeatedly, from receive, after receive returns, or
+ * Send may be called repeatedly, from receive, after receive returns, or
  * from another thread while the TCP peer remains connected. Each UDP response
  * is one datagram to the receive-local peer.
  * @param peer Destination peer.
@@ -142,20 +142,6 @@ int kc_netl_send(
     const void *data,
     size_t data_size
 );
-
-/**
- * Queues a UDP reply to a retained numeric or hostname endpoint.
- * Unlike kc_netl_respond(), this operation does not require a live,
- * callback-scoped UDP peer. Uses the listener's same bound socket.
- * @param listener Open UDP listener.
- * @param host Destination hostname or numeric IP.
- * @param port Destination port.
- * @param data Datagram bytes, copied before returning.
- * @param data_size Datagram size.
- * @return KC_NETL_OK or a negative status.
- */
-int kc_netl_reply_to(kc_netl_t *listener,const char *host,
-    unsigned short port,const void *data,size_t data_size);
 
 /**
  * Returns the protocol of a peer received from a callback.
