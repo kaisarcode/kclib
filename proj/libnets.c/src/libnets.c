@@ -26,6 +26,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 typedef SOCKET kc_nets_fd_t;
+typedef int kc_nets_socklen_t;
 typedef WSAPOLLFD kc_nets_pollfd_t;
 typedef CRITICAL_SECTION kc_nets_mutex_t;
 typedef HANDLE kc_nets_thread_t;
@@ -43,6 +44,7 @@ typedef HANDLE kc_nets_thread_t;
 #include <sys/types.h>
 #include <unistd.h>
 typedef int kc_nets_fd_t;
+typedef socklen_t kc_nets_socklen_t;
 typedef struct pollfd kc_nets_pollfd_t;
 typedef pthread_mutex_t kc_nets_mutex_t;
 typedef pthread_t kc_nets_thread_t;
@@ -65,6 +67,8 @@ typedef struct kc_nets_output {
     unsigned char *data;
     size_t size;
     size_t offset;
+    struct sockaddr_storage destination;
+    kc_nets_socklen_t destination_size;
     struct kc_nets_output *next;
 } kc_nets_output_t;
 
@@ -73,6 +77,11 @@ struct kc_nets {
     int protocol;
     int platform_ready;
     kc_nets_receive_fn receive;
+    kc_nets_receive_from_fn receive_from;
+    struct sockaddr_storage default_destination;
+    kc_nets_socklen_t default_destination_size;
+    unsigned short local_port;
+    int udp_family;
     kc_nets_disconnect_fn disconnect;
     kc_nets_error_fn error;
     void *userdata;
@@ -297,7 +306,7 @@ static void kc_nets_output_free(kc_nets_output_t *output) {
  */
 static int kc_nets_connect(
     const kc_nets_options_t *options,
-    kc_nets_fd_t *out_fd
+    kc_nets_t *nets
 ) {
     struct addrinfo hints;
     struct addrinfo *result;
@@ -305,46 +314,69 @@ static int kc_nets_connect(
     char service[16];
     int rc;
 
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = options->protocol == KC_NETS_UDP
-        ? SOCK_DGRAM
-        : SOCK_STREAM;
-
-    snprintf(service, sizeof(service), "%u", (unsigned)options->port);
-    result = NULL;
-    rc = getaddrinfo(options->host, service, &hints, &result);
-    if (rc != 0) return KC_NETS_ENET;
-
-    for (item = result; item != NULL; item = item->ai_next) {
-        kc_nets_fd_t fd;
-
-        fd = socket(item->ai_family, item->ai_socktype, item->ai_protocol);
-        if (fd == KC_NETS_FD_INVALID) continue;
+    memset(&hints,0,sizeof(hints));
+    hints.ai_family=AF_UNSPEC;
+    hints.ai_socktype=options->protocol==KC_NETS_UDP?SOCK_DGRAM:SOCK_STREAM;
+    snprintf(service,sizeof(service),"%u",(unsigned)options->port);
+    result=NULL;
+    rc=getaddrinfo(options->host,service,&hints,&result);
+    if(rc!=0)return KC_NETS_ENET;
+    for(item=result;item!=NULL;item=item->ai_next){
+        kc_nets_fd_t fd=socket(item->ai_family,item->ai_socktype,item->ai_protocol);
+        if(fd==KC_NETS_FD_INVALID)continue;
         kc_nets_disable_sigpipe(fd);
-
+        if(options->protocol==KC_NETS_UDP){
+            struct addrinfo bind_hints,*local=NULL,*it;
+            char port_text[16];
+            int bound=0;
+            memset(&bind_hints,0,sizeof(bind_hints));
+            bind_hints.ai_family=item->ai_family;
+            bind_hints.ai_socktype=SOCK_DGRAM;
+            bind_hints.ai_flags=AI_PASSIVE;
+            snprintf(port_text,sizeof(port_text),"%u",(unsigned)options->local_port);
+            if(getaddrinfo(options->local_host&&*options->local_host?
+                options->local_host:NULL,port_text,&bind_hints,&local)!=0){
+                KC_NETS_CLOSE(fd);continue;
+            }
+            for(it=local;it!=NULL;it=it->ai_next){
 #ifdef _WIN32
-        rc = connect(
-            fd,
-            item->ai_addr,
-            (int)item->ai_addrlen
-        );
+                if(bind(fd,it->ai_addr,(int)it->ai_addrlen)==0){bound=1;break;}
 #else
-        rc = connect(
-            fd,
-            item->ai_addr,
-            item->ai_addrlen
-        );
+                if(bind(fd,it->ai_addr,it->ai_addrlen)==0){bound=1;break;}
 #endif
-        if (rc == 0 && kc_nets_nonblocking(fd) == KC_NETS_OK) {
-            *out_fd = fd;
+            }
+            freeaddrinfo(local);
+            if(!bound){KC_NETS_CLOSE(fd);continue;}
+            if(kc_nets_nonblocking(fd)!=KC_NETS_OK){KC_NETS_CLOSE(fd);continue;}
+            memcpy(&nets->default_destination,item->ai_addr,item->ai_addrlen);
+            nets->default_destination_size=(kc_nets_socklen_t)item->ai_addrlen;
+            nets->udp_family=item->ai_family;
+            {
+                struct sockaddr_storage local_addr;
+                kc_nets_socklen_t len=(kc_nets_socklen_t)sizeof(local_addr);
+                if(getsockname(fd,(struct sockaddr *)&local_addr,&len)!=0){
+                    KC_NETS_CLOSE(fd);continue;
+                }
+                nets->local_port=local_addr.ss_family==AF_INET?
+                    ntohs(((struct sockaddr_in *)&local_addr)->sin_port):
+                    ntohs(((struct sockaddr_in6 *)&local_addr)->sin6_port);
+            }
+            nets->fd=fd;
             freeaddrinfo(result);
             return KC_NETS_OK;
         }
-
+#ifdef _WIN32
+        rc=connect(fd,item->ai_addr,(int)item->ai_addrlen);
+#else
+        rc=connect(fd,item->ai_addr,item->ai_addrlen);
+#endif
+        if(rc==0&&kc_nets_nonblocking(fd)==KC_NETS_OK){
+            nets->fd=fd;
+            freeaddrinfo(result);
+            return KC_NETS_OK;
+        }
         KC_NETS_CLOSE(fd);
     }
-
     freeaddrinfo(result);
     return KC_NETS_ENET;
 }
@@ -485,19 +517,25 @@ static void kc_nets_receive_tcp(kc_nets_t *nets) {
  */
 static void kc_nets_receive_udp(kc_nets_t *nets) {
     unsigned char buffer[KC_NETS_BUFFER_SIZE];
-    int received;
-
-    received = (int)recv(
-        nets->fd,
-        (char *)buffer,
-        (int)sizeof(buffer),
-        0
-    );
-    if (received >= 0) {
-        kc_nets_deliver(nets, buffer, (size_t)received);
+    struct sockaddr_storage source;
+    kc_nets_socklen_t source_size=(kc_nets_socklen_t)sizeof(source);
+    int received=(int)recvfrom(nets->fd,(char *)buffer,(int)sizeof(buffer),
+        0,(struct sockaddr *)&source,&source_size);
+    if(received>=0){
+        if(nets->receive_from){
+            char host[NI_MAXHOST],service[16];
+            if(getnameinfo((struct sockaddr *)&source,source_size,
+                host,(kc_nets_socklen_t)sizeof(host),
+                service,(kc_nets_socklen_t)sizeof(service),
+                NI_NUMERICHOST|NI_NUMERICSERV)!=0){
+                kc_nets_fail(nets,KC_NETS_ENET);return;
+            }
+            nets->receive_from(host,(unsigned short)strtoul(service,NULL,10),
+                buffer,(size_t)received,nets->userdata);
+        }else if(nets->receive)kc_nets_deliver(nets,buffer,(size_t)received);
         return;
     }
-    if (!kc_nets_would_block()) kc_nets_fail(nets, KC_NETS_ENET);
+    if(!kc_nets_would_block())kc_nets_fail(nets,KC_NETS_ENET);
 }
 
 /**
@@ -574,12 +612,10 @@ static void kc_nets_flush_udp(kc_nets_t *nets) {
             return;
         }
 
-        sent = (int)send(
-            nets->fd,
-            (const char *)output->data,
-            (int)output->size,
-            KC_NETS_SEND_FLAGS
-        );
+        sent = (int)sendto(nets->fd,(const char *)output->data,
+            (int)output->size,KC_NETS_SEND_FLAGS,
+            (const struct sockaddr *)&output->destination,
+            output->destination_size);
         if (sent == (int)output->size) {
             nets->out_head = output->next;
             if (nets->out_head == NULL) nets->out_tail = NULL;
@@ -834,7 +870,8 @@ int kc_nets_open(
             options->protocol != KC_NETS_TCP &&
             options->protocol != KC_NETS_UDP
         ) ||
-        receive == NULL
+        (receive == NULL && !(options->protocol==KC_NETS_UDP && options->receive_from)) ||
+        (options->protocol==KC_NETS_TCP && (options->local_host || options->local_port || options->receive_from))
     ) {
         return KC_NETS_EINVAL;
     }
@@ -844,6 +881,7 @@ int kc_nets_open(
     nets->fd = KC_NETS_FD_INVALID;
     nets->protocol = options->protocol;
     nets->receive = receive;
+    nets->receive_from = options->receive_from;
     nets->disconnect = disconnect;
     nets->error = error;
     nets->userdata = userdata;
@@ -861,7 +899,7 @@ int kc_nets_open(
     }
     nets->mutex_ready = 1;
 
-    rc = kc_nets_connect(options, &nets->fd);
+    rc = kc_nets_connect(options, nets);
     if (rc != KC_NETS_OK) {
         kc_nets_destroy(nets);
         return rc;
@@ -900,6 +938,10 @@ int kc_nets_send(
 
     output = kc_nets_output_new(data, data_size);
     if (output == NULL) return KC_NETS_ENOMEM;
+    if(nets->protocol==KC_NETS_UDP){
+        output->destination=nets->default_destination;
+        output->destination_size=nets->default_destination_size;
+    }
 
     kc_nets_lock(nets);
     if (nets->stop || nets->terminal) {
@@ -917,6 +959,57 @@ int kc_nets_send(
     kc_nets_unlock(nets);
 
     return KC_NETS_OK;
+}
+
+/**
+ * Queues an independent datagram to an arbitrary destination.
+ * @param nets Persistent UDP sender.
+ * @param host Destination host.
+ * @param port Destination port.
+ * @param data Datagram bytes.
+ * @param data_size Byte count.
+ * @return KC_NETS_OK or a negative status.
+ */
+int kc_nets_send_to(kc_nets_t *nets,const char *host,unsigned short port,
+    const void *data,size_t data_size)
+{
+    struct addrinfo hints,*result,*item;
+    char service[16];
+    kc_nets_output_t *output;
+    if(!nets||nets->protocol!=KC_NETS_UDP||!host||!*host||!port||
+        (!data&&data_size)||data_size>(size_t)INT_MAX)return KC_NETS_EINVAL;
+    memset(&hints,0,sizeof(hints));hints.ai_family=nets->udp_family;
+    hints.ai_socktype=SOCK_DGRAM;
+    snprintf(service,sizeof(service),"%u",(unsigned)port);
+    if(getaddrinfo(host,service,&hints,&result)!=0)return KC_NETS_ENET;
+    item=result;
+    if(!item||item->ai_addrlen>sizeof(struct sockaddr_storage)){
+        freeaddrinfo(result);return KC_NETS_ENET;
+    }
+    output=kc_nets_output_new(data,data_size);
+    if(!output){freeaddrinfo(result);return KC_NETS_ENOMEM;}
+    memcpy(&output->destination,item->ai_addr,item->ai_addrlen);
+    output->destination_size=(kc_nets_socklen_t)item->ai_addrlen;
+    freeaddrinfo(result);
+    kc_nets_lock(nets);
+    if(nets->stop||nets->terminal){
+        kc_nets_unlock(nets);kc_nets_output_free(output);return KC_NETS_ECLOSED;
+    }
+    if(nets->out_tail)nets->out_tail->next=output;
+    else nets->out_head=output;
+    nets->out_tail=output;
+    kc_nets_unlock(nets);
+    return KC_NETS_OK;
+}
+
+/**
+ * Returns the locally bound UDP port.
+ * @param nets Open endpoint.
+ * @return The local port, or zero.
+ */
+unsigned short kc_nets_local_port(const kc_nets_t *nets)
+{
+    return nets?nets->local_port:0;
 }
 
 /**
