@@ -872,6 +872,223 @@ static int nets_resident_write_pid(const char *directory,const char *id,long pid
 }
 
 /**
+ * Executes the configured callback command for one UDP datagram.
+ * @param command Registered command line.
+ * @param host Numeric source host.
+ * @param port Source port.
+ * @param bytes Borrowed datagram.
+ * @param size Datagram size.
+ * @return Zero on successful command handoff.
+ */
+static int nets_resident_callback(const char *command,const char *host,
+    unsigned short port,const void *bytes,size_t size)
+{
+    char invocation[NETS_RESIDENT_CMD_MAX+1150];
+    if((size_t)snprintf(invocation,sizeof(invocation),"%s %s %u",
+        command,host,(unsigned)port)>=sizeof(invocation))return 1;
+#ifdef _WIN32
+    {
+        SECURITY_ATTRIBUTES attributes;
+        STARTUPINFOA startup;
+        PROCESS_INFORMATION process;
+        HANDLE input_read=NULL,input_write=NULL;
+        char shell[NETS_RESIDENT_CMD_MAX+1180];
+        DWORD sent;
+        size_t offset=0;
+        memset(&attributes,0,sizeof(attributes));
+        attributes.nLength=sizeof(attributes);
+        attributes.bInheritHandle=TRUE;
+        if(!CreatePipe(&input_read,&input_write,&attributes,0))return 1;
+        SetHandleInformation(input_write,HANDLE_FLAG_INHERIT,0);
+        memset(&startup,0,sizeof(startup));
+        startup.cb=sizeof(startup);
+        startup.dwFlags=STARTF_USESTDHANDLES;
+        startup.hStdInput=input_read;
+        startup.hStdOutput=GetStdHandle(STD_OUTPUT_HANDLE);
+        startup.hStdError=GetStdHandle(STD_ERROR_HANDLE);
+        memset(&process,0,sizeof(process));
+        snprintf(shell,sizeof(shell),"cmd.exe /c %s",invocation);
+        if(!CreateProcessA(NULL,shell,NULL,NULL,TRUE,CREATE_NO_WINDOW,
+            NULL,NULL,&startup,&process)){
+            CloseHandle(input_read);CloseHandle(input_write);return 1;
+        }
+        CloseHandle(process.hThread);
+        CloseHandle(input_read);
+        while(offset<size){
+            if(!WriteFile(input_write,(const unsigned char *)bytes+offset,
+                (DWORD)(size-offset),&sent,NULL)||!sent)break;
+            offset+=(size_t)sent;
+        }
+        CloseHandle(input_write);
+        CloseHandle(process.hProcess);
+        return offset==size?0:1;
+    }
+#else
+    {
+        int pipefd[2];
+        pid_t child;
+        size_t offset=0;
+        if(pipe(pipefd)!=0)return 1;
+        child=fork();
+        if(child<0){close(pipefd[0]);close(pipefd[1]);return 1;}
+        if(child==0){
+            close(pipefd[1]);
+            if(dup2(pipefd[0],STDIN_FILENO)<0)_exit(1);
+            if(pipefd[0]>STDERR_FILENO)close(pipefd[0]);
+            execl("/bin/sh","sh","-c",invocation,(char *)NULL);
+            _exit(1);
+        }
+        close(pipefd[0]);
+        while(offset<size){
+            ssize_t sent=write(pipefd[1],(const unsigned char *)bytes+offset,
+                size-offset);
+            if(sent<0&&errno==EINTR)continue;
+            if(sent<=0)break;
+            offset+=(size_t)sent;
+        }
+        close(pipefd[1]);
+        return offset==size?0:1;
+    }
+#endif
+}
+
+/**
+ * Delivers inbound UDP bytes to an external command with source arguments.
+ * @param host Source host.
+ * @param port Source port.
+ * @param bytes Datagram.
+ * @param size Datagram size.
+ * @param userdata Resident configuration.
+ * @return void.
+ */
+static void nets_resident_receive(const char *host,unsigned short port,
+    const void *bytes,size_t size,void *userdata)
+{
+    const nets_resident_info_t *info=(const nets_resident_info_t *)userdata;
+    (void)nets_resident_callback(info->command,host,port,bytes,size);
+}
+
+/**
+ * Reads one resident send request and queues it through the existing socket.
+ * @param network Persistent network endpoint.
+ * @param path Completed request path.
+ * @return Zero on successful handoff.
+ */
+static int nets_resident_process_send(kc_nets_t *network,const char *path)
+{
+    FILE *file=fopen(path,"rb");
+    char host[1025],port_text[32];
+    unsigned short port;
+    unsigned char buffer[65508];
+    size_t size;
+    int result=1;
+    if(!file)return 1;
+    if(fgets(host,sizeof(host),file)&&fgets(port_text,sizeof(port_text),file)){
+        size_t len=strlen(host);
+        if(len&&host[len-1U]=='\n'){
+            host[len-1U]=0;
+            if(nets_resident_port(port_text,0,&port)){
+                size=fread(buffer,1,sizeof(buffer),file);
+                if(!ferror(file)&&feof(file)&&size<=65507U)
+                    result=kc_nets_send_to(network,host,port,buffer,size)==KC_NETS_OK?0:1;
+            }
+        }
+    }
+    fclose(file);
+    return result;
+}
+
+/**
+ * Processes queued binary send requests for one resident endpoint.
+ * @param directory Resident state directory.
+ * @param info Registered endpoint.
+ * @param network Open persistent endpoint.
+ * @return void.
+ */
+static void nets_resident_drain(const char *directory,
+    const nets_resident_info_t *info,kc_nets_t *network)
+{
+    char prefix[NETS_RESIDENT_ID_MAX+16];
+    size_t len;
+    snprintf(prefix,sizeof(prefix),"%s.send.",info->name);
+    len=strlen(prefix);
+#ifdef _WIN32
+    {
+        WIN32_FIND_DATAA entry;
+        HANDLE listing;
+        char pattern[NETS_RESIDENT_PATH_MAX];
+        if((size_t)snprintf(pattern,sizeof(pattern),"%s\\%s*",
+            directory,prefix)>=sizeof(pattern))return;
+        listing=FindFirstFileA(pattern,&entry);
+        if(listing==INVALID_HANDLE_VALUE)return;
+        do{
+            char path[NETS_RESIDENT_PATH_MAX];
+            if(strncmp(entry.cFileName,prefix,len)!=0)continue;
+            if((size_t)snprintf(path,sizeof(path),"%s\\%s",
+                directory,entry.cFileName)>=sizeof(path))continue;
+            (void)nets_resident_process_send(network,path);
+            (void)remove(path);
+        }while(FindNextFileA(listing,&entry));
+        FindClose(listing);
+    }
+#else
+    {
+        DIR *listing=opendir(directory);
+        struct dirent *entry;
+        if(!listing)return;
+        while((entry=readdir(listing))!=NULL){
+            char path[NETS_RESIDENT_PATH_MAX];
+            if(strncmp(entry->d_name,prefix,len)!=0)continue;
+            if((size_t)snprintf(path,sizeof(path),"%s/%s",
+                directory,entry->d_name)>=sizeof(path))continue;
+            (void)nets_resident_process_send(network,path);
+            (void)remove(path);
+        }
+        closedir(listing);
+    }
+#endif
+}
+
+/**
+ * Runs one resident UDP endpoint with the same socket for every destination.
+ * @param directory Per-user resident state directory.
+ * @param name Registered endpoint ID.
+ * @return Process exit status.
+ */
+static int nets_resident_worker(const char *directory,const char *name)
+{
+    nets_resident_info_t info;
+    kc_nets_t *network=NULL;
+    kc_nets_udp_options_t options;
+    int result;
+    if(nets_resident_read(directory,name,&info)!=0)return 1;
+    memset(&options,0,sizeof(options));
+    options.endpoint.host=info.host;
+    options.endpoint.port=info.port;
+    options.endpoint.protocol=KC_NETS_UDP;
+    options.local_host=*info.local_host?info.local_host:NULL;
+    options.local_port=info.local_port;
+    options.receive_from=nets_resident_receive;
+    result=kc_nets_open_udp(&network,&options,NULL,NULL,&info);
+    if(result!=KC_NETS_OK)return 1;
+#ifdef _WIN32
+    (void)signal(SIGINT,nets_cli_signal);
+    (void)signal(SIGTERM,nets_cli_signal);
+#else
+    (void)signal(SIGINT,nets_cli_signal);
+    (void)signal(SIGTERM,nets_cli_signal);
+    (void)signal(SIGPIPE,SIG_IGN);
+    (void)signal(SIGCHLD,SIG_IGN);
+#endif
+    while(!nets_cli_stop){
+        nets_resident_drain(directory,&info,network);
+        nets_cli_idle();
+    }
+    kc_nets_close(network);
+    return 0;
+}
+
+/**
  * Runs metadata handling or one endpoint relay.
  * @param argc Argument count.
  * @param argv Argument vector.
