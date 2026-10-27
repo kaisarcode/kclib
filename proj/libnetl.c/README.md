@@ -95,7 +95,7 @@ binary datagram is supplied on command stdin.
 
 ```sh
 netl servidor 5000 'handler' -t udp
-printf respuesta | netl servidor -r 127.0.0.1 6000
+printf respuesta | netl servidor -r 127.0.0.1:6000
 netl -l servidor
 netl servidor -d
 ```
