@@ -786,7 +786,7 @@ static DWORD WINAPI netl_cli_tcp_output(LPVOID arg)
         ) && amount != 0U) {
         netl_cli_lock(session->state);
         if (!session->active ||
-                kc_netl_respond(session->peer, buffer, (size_t)amount) !=
+                kc_netl_send(session->peer, buffer, (size_t)amount) !=
                 KC_NETL_OK) {
             netl_cli_unlock(session->state);
             break;
@@ -1008,7 +1008,7 @@ static void *netl_cli_tcp_output(void *arg)
     while ((amount = read(session->output_fd, buffer, sizeof(buffer))) > 0) {
         netl_cli_lock(session->state);
         if (!session->active ||
-                kc_netl_respond(session->peer, buffer, (size_t)amount) !=
+                kc_netl_send(session->peer, buffer, (size_t)amount) !=
                 KC_NETL_OK) {
             netl_cli_unlock(session->state);
             break;
@@ -1173,25 +1173,26 @@ static int netl_cli_udp_start(
  * @param userdata CLI runtime state.
  * @return None.
  */
-static void netl_cli_receive(const kc_netl_input_t *input, void *userdata)
+static void netl_cli_receive(kc_netl_peer_t *peer, const void *data,
+    size_t data_size, void *userdata)
 {
     netl_cli_state_t *state;
     netl_cli_session_t *session;
 
     state = (netl_cli_state_t *)userdata;
-    if (!input || !state) return;
-    if (input->protocol == KC_NETL_UDP) {
-        (void)netl_cli_udp_start(state, input->data, input->data_size,
-            input->host, input->port);
+    if (!peer || !state) return;
+    if (kc_netl_peer_protocol(peer) == KC_NETL_UDP) {
+        (void)netl_cli_udp_start(state, data, data_size,
+            kc_netl_peer_host(peer), kc_netl_peer_port(peer));
         return;
     }
 
     netl_cli_lock(state);
-    session = netl_cli_find(state, input->peer);
+    session = netl_cli_find(state, peer);
     netl_cli_unlock(state);
-    if (!session) session = netl_cli_tcp_start(state, input->peer);
+    if (!session) session = netl_cli_tcp_start(state, peer);
     if (!session) {
-        kc_netl_peer_close(input->peer);
+        kc_netl_peer_close(peer);
         return;
     }
 
@@ -1200,15 +1201,15 @@ static void netl_cli_receive(const kc_netl_input_t *input, void *userdata)
         DWORD written;
         size_t offset = 0U;
 
-        while (offset < input->data_size) {
+        while (offset < data_size) {
             if (!WriteFile(
                     session->input_write,
-                    (const unsigned char *)input->data + offset,
-                    (DWORD)(input->data_size - offset),
+                    (const unsigned char *)data + offset,
+                    (DWORD)(data_size - offset),
                     &written,
                     NULL
                 ) || written == 0U) {
-                kc_netl_peer_close(input->peer);
+                kc_netl_peer_close(peer);
                 return;
             }
             offset += (size_t)written;
@@ -1218,16 +1219,16 @@ static void netl_cli_receive(const kc_netl_input_t *input, void *userdata)
     {
         size_t offset = 0U;
 
-        while (offset < input->data_size) {
+        while (offset < data_size) {
             ssize_t written;
 
             written = write(
                 session->input_fd,
-                (const unsigned char *)input->data + offset,
-                input->data_size - offset
+                (const unsigned char *)data + offset,
+                data_size - offset
             );
             if (written <= 0) {
-                kc_netl_peer_close(input->peer);
+                kc_netl_peer_close(peer);
                 return;
             }
             offset += (size_t)written;
