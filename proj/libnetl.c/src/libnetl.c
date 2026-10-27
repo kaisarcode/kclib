@@ -1192,6 +1192,135 @@ int kc_netl_open(
 }
 
 /**
+ * Creates a persistent remote TCP or UDP endpoint. TCP connects once, while
+ * UDP remains unconnected so incoming datagrams retain their source identity.
+ * All sends and receives use the same descriptor until close.
+ */
+int kc_netl_connect(kc_netl_t **out,kc_netl_peer_t **peer_out,
+    const kc_netl_connect_options_t *options,kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata)
+{
+    kc_netl_t *endpoint;
+    kc_netl_peer_t *peer;
+    struct addrinfo hints,*addresses=NULL,*item;
+    kc_netl_fd_t socket_fd=KC_NETL_FD_INVALID;
+    char service[16];
+    int rc=KC_NETL_ENET;
+    if(!out||!peer_out)return KC_NETL_EINVAL;
+    *out=NULL;*peer_out=NULL;
+    if(!options||!options->host||!*options->host||!options->port||
+       !receive||(options->protocol!=KC_NETL_TCP&&
+       options->protocol!=KC_NETL_UDP))return KC_NETL_EINVAL;
+    endpoint=(kc_netl_t *)calloc(1,sizeof(*endpoint));
+    if(!endpoint)return KC_NETL_ENOMEM;
+    endpoint->fd=KC_NETL_FD_INVALID;
+    endpoint->protocol=options->protocol;
+    endpoint->outbound=1;
+    endpoint->receive=receive;
+    endpoint->disconnect=disconnect;
+    endpoint->error=error;
+    endpoint->userdata=userdata;
+    rc=kc_netl_platform_open();
+    if(rc!=KC_NETL_OK){free(endpoint);return rc;}
+    endpoint->platform_ready=1;
+    if(kc_netl_mutex_open(&endpoint->mutex)!=0){
+        kc_netl_destroy(endpoint);return KC_NETL_ENET;
+    }
+    endpoint->mutex_ready=1;
+    memset(&hints,0,sizeof(hints));
+    hints.ai_family=AF_UNSPEC;
+    hints.ai_socktype=options->protocol==KC_NETL_UDP?SOCK_DGRAM:SOCK_STREAM;
+    snprintf(service,sizeof(service),"%u",(unsigned)options->port);
+    if(getaddrinfo(options->host,service,&hints,&addresses)!=0){
+        kc_netl_destroy(endpoint);return KC_NETL_ENET;
+    }
+    for(item=addresses;item;item=item->ai_next){
+        struct addrinfo bind_hints,*local=NULL,*it;
+        char local_port[16];
+        int bound=0;
+        socket_fd=socket(item->ai_family,item->ai_socktype,item->ai_protocol);
+        if(socket_fd==KC_NETL_FD_INVALID)continue;
+        if(options->local_host||options->local_port||
+           options->protocol==KC_NETL_UDP){
+            memset(&bind_hints,0,sizeof(bind_hints));
+            bind_hints.ai_family=item->ai_family;
+            bind_hints.ai_socktype=hints.ai_socktype;
+            bind_hints.ai_flags=AI_PASSIVE;
+            snprintf(local_port,sizeof(local_port),"%u",
+                (unsigned)options->local_port);
+            if(getaddrinfo(options->local_host&&*options->local_host?
+                options->local_host:NULL,local_port,&bind_hints,&local)==0){
+                for(it=local;it;it=it->ai_next){
+                    if(bind(socket_fd,it->ai_addr,
+                        (socklen_t)it->ai_addrlen)==0){
+                        bound=1;break;
+                    }
+                }
+                freeaddrinfo(local);
+            }
+            if(!bound){
+                KC_NETL_CLOSE(socket_fd);
+                socket_fd=KC_NETL_FD_INVALID;
+                continue;
+            }
+        }
+        if(options->protocol==KC_NETL_TCP&&
+           connect(socket_fd,item->ai_addr,(socklen_t)item->ai_addrlen)!=0){
+            KC_NETL_CLOSE(socket_fd);
+            socket_fd=KC_NETL_FD_INVALID;
+            continue;
+        }
+        kc_netl_disable_sigpipe(socket_fd);
+        if(kc_netl_nonblocking(socket_fd)!=KC_NETL_OK){
+            KC_NETL_CLOSE(socket_fd);
+            socket_fd=KC_NETL_FD_INVALID;
+            continue;
+        }
+        peer=(kc_netl_peer_t *)calloc(1,sizeof(*peer));
+        if(!peer){
+            KC_NETL_CLOSE(socket_fd);
+            rc=KC_NETL_ENOMEM;
+            break;
+        }
+        peer->listener=endpoint;
+        peer->protocol=options->protocol;
+        peer->fd=options->protocol==KC_NETL_TCP?
+            socket_fd:KC_NETL_FD_INVALID;
+        peer->address_size=(socklen_t)item->ai_addrlen;
+        memcpy(&peer->address,item->ai_addr,item->ai_addrlen);
+        if(kc_netl_peer_text(item->ai_addr,(socklen_t)item->ai_addrlen,
+            peer->host,sizeof(peer->host),&peer->port)!=KC_NETL_OK){
+            KC_NETL_CLOSE(socket_fd);
+            free(peer);
+            socket_fd=KC_NETL_FD_INVALID;
+            continue;
+        }
+        endpoint->remote=peer;
+        if(options->protocol==KC_NETL_TCP)endpoint->peers=peer;
+        else endpoint->fd=socket_fd;
+        {
+            struct sockaddr_storage local_address;
+            socklen_t local_size=(socklen_t)sizeof(local_address);
+            char local_host[KC_NETL_HOST_SIZE];
+            if(getsockname(socket_fd,(struct sockaddr *)&local_address,
+                &local_size)==0)
+                (void)kc_netl_peer_text((struct sockaddr *)&local_address,
+                    local_size,local_host,sizeof(local_host),&endpoint->port);
+        }
+        rc=kc_netl_worker_start(endpoint);
+        if(rc==KC_NETL_OK){
+            freeaddrinfo(addresses);
+            *out=endpoint;*peer_out=peer;
+            return KC_NETL_OK;
+        }
+        break;
+    }
+    freeaddrinfo(addresses);
+    kc_netl_destroy(endpoint);
+    return rc;
+}
+
+/**
  * Respond.
  * @return Function result.
  */
