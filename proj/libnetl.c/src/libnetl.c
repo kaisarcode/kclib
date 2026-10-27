@@ -759,8 +759,11 @@ static void kc_netl_flush_udp(kc_netl_t *listener) {
         kc_netl_unlock(listener);
         free(output->data);
         free(output);
-        kc_netl_fail(listener, KC_NETL_ENET);
-        return;
+        /*
+         * Failure to reach one UDP destination does not invalidate the bound
+         * socket or prevent later sends and receives.
+         */
+        continue;
     }
 }
 
