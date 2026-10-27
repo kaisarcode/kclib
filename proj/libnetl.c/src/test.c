@@ -178,6 +178,27 @@ static int case_open(void)
 }
 
 /**
+ * Verify TCP open reports a failed bind instead of returning a dead handle.
+ * @return Zero on success.
+ */
+static int case_tcp_open_failure(void)
+{
+    kc_netl_t *net=NULL;
+    kc_netl_options_t options={0};
+    test_state_t state={0};
+    int rc,fail;
+    options.host="not-a-local-interface.invalid";
+    options.port=12345U;
+    options.protocol=KC_NETL_TCP;
+    rc=kc_netl_open(&net,&options,test_receive,NULL,test_error,&state);
+    fail=(rc==KC_NETL_OK||net!=NULL);
+    kc_netl_close(net);
+    case_result(fail,"kc_netl_tcp_open_failure",
+        "reports invalid listening addresses without returning a handle");
+    return fail!=0;
+}
+
+/**
  * Verify persistent UDP, directed datagrams, and callback replies.
  * @return Zero on success.
  */
@@ -483,12 +504,13 @@ int main(int argc,char **argv)
     if(argc!=2){fprintf(stderr,"expected test case\n");return 2;}
     if(strcmp(argv[1],"all")==0){
 #if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
-        test_case_total=9;
+        test_case_total=10;
 #else
-        test_case_total=8;
+        test_case_total=9;
 #endif
         test_case_current=0;
         fails+=case_open();total++;
+        fails+=case_tcp_open_failure();total++;
         fails+=case_udp();total++;
         fails+=case_tcp();total++;
         fails+=case_invalid_destination();total++;
@@ -505,6 +527,7 @@ int main(int argc,char **argv)
     test_case_total=1;
     test_case_current=0;
     if(strcmp(argv[1],"kc_netl_open")==0)return case_open();
+    if(strcmp(argv[1],"kc_netl_tcp_open_failure")==0)return case_tcp_open_failure();
     if(strcmp(argv[1],"kc_netl_udp")==0)return case_udp();
     if(strcmp(argv[1],"kc_netl_tcp")==0)return case_tcp();
     if(strcmp(argv[1],"kc_netl_invalid_destination")==0)return case_invalid_destination();
