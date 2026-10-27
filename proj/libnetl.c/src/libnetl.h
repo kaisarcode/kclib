@@ -96,26 +96,24 @@ int kc_netl_open(kc_netl_t **out,const kc_netl_options_t *options,
     kc_netl_error_fn error,void *userdata);
 
 /**
- * Queue bytes for the address configured on this persistent interface.
- * @param interface Interface handle.
- * @param data Data bytes.
- * @param size Byte count.
- * @return Status code.
+ * Optional destination for an individual UDP datagram.
  */
-int kc_netl_send(kc_netl_t *interface,const void *data,size_t size);
+typedef struct {
+    const char *host;
+    unsigned short port;
+} kc_netl_endpoint_t;
 
 /**
- * Queue one UDP datagram to another address using the same local socket.
- * The interface's configured destination remains unchanged.
+ * Send using a persistent interface. NULL destination uses the configured
+ * address. An explicit UDP destination leaves the local socket unchanged.
  * @param interface Interface handle.
- * @param host Destination host.
- * @param port Destination port.
- * @param data Datagram bytes.
+ * @param data Bytes to send.
  * @param size Byte count.
+ * @param destination Optional remote endpoint, or NULL.
  * @return Status code.
  */
-int kc_netl_send_to(kc_netl_t *interface,const char *host,
-    unsigned short port,const void *data,size_t size);
+int kc_netl_send(kc_netl_t *interface,const void *data,size_t size,
+    const kc_netl_endpoint_t *destination);
 
 /**
  * Send to the peer supplied by the receive callback.
