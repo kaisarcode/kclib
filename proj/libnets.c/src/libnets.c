@@ -311,6 +311,7 @@ static void kc_nets_output_free(kc_nets_output_t *output) {
  */
 static int kc_nets_connect(
     const kc_nets_options_t *options,
+    const kc_nets_udp_options_t *advanced,
     kc_nets_t *nets
 ) {
     struct addrinfo hints;
@@ -338,9 +339,9 @@ static int kc_nets_connect(
             bind_hints.ai_family=item->ai_family;
             bind_hints.ai_socktype=SOCK_DGRAM;
             bind_hints.ai_flags=AI_PASSIVE;
-            snprintf(port_text,sizeof(port_text),"%u",(unsigned)options->local_port);
-            if(getaddrinfo(options->local_host&&*options->local_host?
-                options->local_host:NULL,port_text,&bind_hints,&local)!=0){
+            snprintf(port_text,sizeof(port_text),"%u",(unsigned)(advanced?advanced->local_port:0));
+            if(getaddrinfo(advanced&&advanced->local_host&&*advanced->local_host?
+                advanced->local_host:NULL,port_text,&bind_hints,&local)!=0){
                 KC_NETS_CLOSE(fd);continue;
             }
             for(it=local;it!=NULL;it=it->ai_next){
@@ -853,9 +854,10 @@ static void kc_nets_worker_join(kc_nets_t *nets) {
  * @param userdata Consumer callback data.
  * @return KC_NETS_OK on success, otherwise a negative status.
  */
-int kc_nets_open(
+static int kc_nets_open_internal(
     kc_nets_t **out,
     const kc_nets_options_t *options,
+    const kc_nets_udp_options_t *advanced,
     kc_nets_receive_fn receive,
     kc_nets_disconnect_fn disconnect,
     kc_nets_error_fn error,
@@ -875,8 +877,8 @@ int kc_nets_open(
             options->protocol != KC_NETS_TCP &&
             options->protocol != KC_NETS_UDP
         ) ||
-        (receive == NULL && !(options->protocol==KC_NETS_UDP && options->receive_from)) ||
-        (options->protocol==KC_NETS_TCP && (options->local_host || options->local_port || options->receive_from))
+        (receive == NULL && !(advanced && advanced->receive_from)) ||
+        (advanced && options->protocol != KC_NETS_UDP)
     ) {
         return KC_NETS_EINVAL;
     }
@@ -886,7 +888,7 @@ int kc_nets_open(
     nets->fd = KC_NETS_FD_INVALID;
     nets->protocol = options->protocol;
     nets->receive = receive;
-    nets->receive_from = options->receive_from;
+    nets->receive_from = advanced?advanced->receive_from:NULL;
     nets->disconnect = disconnect;
     nets->error = error;
     nets->userdata = userdata;
@@ -904,7 +906,7 @@ int kc_nets_open(
     }
     nets->mutex_ready = 1;
 
-    rc = kc_nets_connect(options, nets);
+    rc = kc_nets_connect(options, advanced, nets);
     if (rc != KC_NETS_OK) {
         kc_nets_destroy(nets);
         return rc;
@@ -918,6 +920,40 @@ int kc_nets_open(
 
     *out = nets;
     return KC_NETS_OK;
+}
+
+/**
+ * Opens the established legacy TCP/UDP endpoint contract.
+ * @param out Endpoint handle.
+ * @param options Destination configuration.
+ * @param receive Received bytes callback.
+ * @param disconnect TCP disconnect callback.
+ * @param error Error callback.
+ * @param userdata User context.
+ * @return Public status.
+ */
+int kc_nets_open(kc_nets_t **out,const kc_nets_options_t *options,
+    kc_nets_receive_fn receive,kc_nets_disconnect_fn disconnect,
+    kc_nets_error_fn error,void *userdata)
+{
+    return kc_nets_open_internal(out,options,NULL,receive,disconnect,error,userdata);
+}
+
+/**
+ * Opens a configurable UDP endpoint without altering legacy initialization.
+ * @param out Endpoint handle.
+ * @param options Extended UDP options.
+ * @param receive Optional generic receive callback.
+ * @param error Error callback.
+ * @param userdata User context.
+ * @return Public status.
+ */
+int kc_nets_open_udp(kc_nets_t **out,const kc_nets_udp_options_t *options,
+    kc_nets_receive_fn receive,kc_nets_error_fn error,void *userdata)
+{
+    if(!options)return KC_NETS_EINVAL;
+    return kc_nets_open_internal(out,&options->endpoint,options,
+        receive,NULL,error,userdata);
 }
 
 /**
