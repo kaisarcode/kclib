@@ -1262,30 +1262,27 @@ int kc_netl_connect(
         int bound=0;
         socket_fd=socket(item->ai_family,item->ai_socktype,item->ai_protocol);
         if(socket_fd==KC_NETL_FD_INVALID)continue;
-        if (
-            options->local_host || options->local_port ||
-            options->protocol == KC_NETL_UDP
-        ) {
-            memset(&bind_hints, 0, sizeof(bind_hints));
-            bind_hints.ai_family = item->ai_family;
-            bind_hints.ai_socktype = hints.ai_socktype;
-            bind_hints.ai_flags = AI_PASSIVE;
-            snprintf(
-                local_port,
-                sizeof(local_port),
-                "%u",
-                (unsigned)options->local_port
-            );
-            if (
-                getaddrinfo(
-                    options->local_host && *options->local_host
-                        ? options->local_host
-                        : NULL,
-                    local_port,
-                    &bind_hints,
-                    &local
-                ) == 0
-            ) {
+        /*
+         * UDP accepts the configured address as a local bind when possible.
+         * Otherwise it uses an ephemeral local socket and retains the same
+         * address as the default destination for send(). Neither case changes
+         * the public receive/send contract.
+         */
+        if(options->protocol==KC_NETL_UDP &&
+            !options->local_host && options->local_port==0U) {
+            if(bind(socket_fd,item->ai_addr,
+                (socklen_t)item->ai_addrlen)==0)bound=1;
+        }
+        if(!bound && (options->local_host || options->local_port ||
+            options->protocol==KC_NETL_UDP)) {
+            memset(&bind_hints,0,sizeof(bind_hints));
+            bind_hints.ai_family=item->ai_family;
+            bind_hints.ai_socktype=hints.ai_socktype;
+            bind_hints.ai_flags=AI_PASSIVE;
+            snprintf(local_port,sizeof(local_port),"%u",
+                (unsigned)options->local_port);
+            if(getaddrinfo(options->local_host&&*options->local_host?
+                options->local_host:NULL,local_port,&bind_hints,&local)==0){
                 for(it=local;it;it=it->ai_next){
                     if(bind(socket_fd,it->ai_addr,
                         (socklen_t)it->ai_addrlen)==0){
