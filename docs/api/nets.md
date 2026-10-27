@@ -66,15 +66,15 @@ The default `kc_nets_send()` continues sending to the configured destination.
 
 ```sh
 # Existing stdin/stdout relay remains available.
-nets 192.168.1.10 5000 -t udp
-nets 192.168.1.10 5000 -t udp --local-port 4000
+nets 192.168.1.10:5000 -t udp
+nets 192.168.1.10:5000 -t udp --local-port 4000
 
 # Register a persistent UDP sender, optionally with a receive command.
-nets 192.168.1.10 5000 -t udp --id canal1 --local-port 4000 --receive 'handler'
+nets 192.168.1.10:5000 -t udp --id canal1 --local-port 4000 --receive 'handler'
 
 # Use the same resident socket, including for other destinations.
 printf hola | nets canal1 -s
-printf hola | nets canal1 -s 192.168.1.20 6000
+printf hola | nets canal1 -s 192.168.1.20:6000
 
 nets -l
 nets -l canal1
