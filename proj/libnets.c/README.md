@@ -94,7 +94,7 @@ unchanged.
 
 ## CLI: persistent UDP sender
 
-The original `nets <host> <port> -t udp` stream relay still reads stdin and
+The original `nets <host:port> -t udp` stream relay still reads stdin and
 writes network replies to stdout. `--local-host` and `--local-port` configure
 its UDP source address.
 
@@ -102,9 +102,9 @@ To keep a single socket open across separate invocations, register an optional
 resident sender:
 
 ```sh
-nets 127.0.0.1 5000 -t udp --id sender --local-port 4000 --receive 'handler'
+nets 127.0.0.1:5000 -t udp --id sender --local-port 4000 --receive 'handler'
 printf hello | nets sender -s
-printf hello | nets sender -s 127.0.0.1 6000
+printf hello | nets sender -s 127.0.0.1:6000
 nets -l sender
 nets sender -d
 ```
