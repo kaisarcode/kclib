@@ -458,33 +458,18 @@ static void nets_cli_signal(int signal_number)
 static void nets_cli_receive(
     const void *data,
     size_t data_size,
+    const kc_nets_endpoint_t *peer,
     void *userdata
 )
 {
     nets_cli_state_t *state;
 
     state = (nets_cli_state_t *)userdata;
+    (void)peer;
     if (nets_cli_write_stdout(data, data_size) != 0) {
         atomic_store(&state->io_failed, 1);
         atomic_store(&state->terminal, 1);
     }
-}
-
-/**
- * Preserves binary stdout relay semantics for source-aware UDP reception.
- * @param host Numeric source host.
- * @param port Source port.
- * @param data Datagram bytes.
- * @param data_size Datagram length.
- * @param userdata Relay state.
- * @return void.
- */
-static void nets_cli_receive_from(const char *host,unsigned short port,
-    const void *data,size_t data_size,void *userdata)
-{
-    (void)host;
-    (void)port;
-    nets_cli_receive(data,data_size,userdata);
 }
 
 /**
@@ -524,7 +509,6 @@ static int nets_cli_run(const nets_cli_options_t *options)
 {
     unsigned char buffer[NETS_CLI_BUFFER_SIZE];
     kc_nets_options_t network_options;
-    kc_nets_udp_options_t udp_options;
     kc_nets_t *network;
     nets_cli_state_t state;
     int stdin_open;
@@ -541,18 +525,10 @@ static int nets_cli_run(const nets_cli_options_t *options)
     network_options.protocol = options->protocol;
     network = NULL;
 
-    if(options->protocol==KC_NETS_UDP &&
-        (options->local_host||options->local_port)){
-        memset(&udp_options,0,sizeof(udp_options));
-        udp_options.endpoint=network_options;
-        udp_options.local_host=options->local_host;
-        udp_options.local_port=options->local_port;
-        status=kc_nets_open_udp(&network,&udp_options,nets_cli_receive_from,
-            nets_cli_network_error,&state);
-    }else{
-        status=kc_nets_open(&network,&network_options,nets_cli_receive,
-            nets_cli_disconnect,nets_cli_network_error,&state);
-    }
+    network_options.local_host=options->local_host;
+    network_options.local_port=options->local_port;
+    status=kc_nets_open(&network,&network_options,nets_cli_receive,
+        nets_cli_disconnect,nets_cli_network_error,&state);
     if (status != KC_NETS_OK) {
         return nets_cli_error_value("open failed: ", kc_nets_strerror(status));
     }
@@ -986,12 +962,13 @@ static int nets_resident_callback(const char *command,const char *host,
  * @param userdata Resident configuration.
  * @return void.
  */
-static void nets_resident_receive(const char *host,unsigned short port,
-    const void *bytes,size_t size,void *userdata)
+static void nets_resident_receive(const void *bytes,size_t size,
+    const kc_nets_endpoint_t *peer,void *userdata)
 {
     const nets_resident_info_t *info=(const nets_resident_info_t *)userdata;
-    if(*info->command)
-        (void)nets_resident_callback(info->command,host,port,bytes,size);
+    if(*info->command&&peer)
+        (void)nets_resident_callback(info->command,peer->host,peer->port,
+            bytes,size);
 }
 
 /**
@@ -1016,7 +993,10 @@ static int nets_resident_process_send(kc_nets_t *network,const char *path)
             if(nets_resident_port(port_text,0,&port)){
                 size=fread(buffer,1,sizeof(buffer),file);
                 if(!ferror(file)&&feof(file)&&size<=65507U)
-                    result=kc_nets_send_to(network,host,port,buffer,size)==KC_NETS_OK?0:1;
+                    {
+                        kc_nets_endpoint_t peer={host,port};
+                        result=kc_nets_send_to(network,&peer,buffer,size)==KC_NETS_OK?0:1;
+                    }
             }
         }
     }
@@ -1085,16 +1065,17 @@ static int nets_resident_worker(const char *directory,const char *name)
 {
     nets_resident_info_t info;
     kc_nets_t *network=NULL;
-    kc_nets_udp_options_t options;
+    kc_nets_options_t options;
     int result;
     if(nets_resident_read(directory,name,&info)!=0)return 1;
     memset(&options,0,sizeof(options));
-    options.endpoint.host=info.host;
-    options.endpoint.port=info.port;
-    options.endpoint.protocol=KC_NETS_UDP;
+    options.host=info.host;
+    options.port=info.port;
+    options.protocol=KC_NETS_UDP;
     options.local_host=*info.local_host?info.local_host:NULL;
     options.local_port=info.local_port;
-    result=kc_nets_open_udp(&network,&options,nets_resident_receive,NULL,&info);
+    result=kc_nets_open(&network,&options,nets_resident_receive,
+        NULL,NULL,&info);
     if(result!=KC_NETS_OK)return 1;
 #ifdef _WIN32
     (void)signal(SIGINT,nets_cli_signal);
