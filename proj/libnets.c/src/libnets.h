@@ -54,7 +54,6 @@ typedef struct {
     kc_nets_options_t endpoint;
     const char *local_host;
     unsigned short local_port;
-    kc_nets_receive_from_fn receive_from;
 } kc_nets_udp_options_t;
 
 /**
@@ -117,14 +116,13 @@ int kc_nets_open(
  * other remote endpoints without creating another socket.
  * @param out New endpoint handle.
  * @param options UDP configuration with endpoint.protocol KC_NETS_UDP.
- * @param receive Optional legacy receive callback; either it or receive_from
- * must be provided.
+ * @param receive Source-aware UDP receive callback, separate from options.
  * @param error Optional asynchronous error callback.
  * @param userdata User context.
  * @return KC_NETS_OK or negative status.
  */
 int kc_nets_open_udp(kc_nets_t **out,const kc_nets_udp_options_t *options,
-    kc_nets_receive_fn receive,kc_nets_error_fn error,void *userdata);
+    kc_nets_receive_from_fn receive,kc_nets_error_fn error,void *userdata);
 
 /**
  * Sends bytes through one open endpoint.
