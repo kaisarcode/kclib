@@ -4,6 +4,26 @@
 is an **API projection** to describe the native C contract; no JavaScript
 implementation or bindings are required.
 
+## Lua projection
+
+```lua
+local network = nets.open({
+    host = "192.168.1.10",
+    port = 5000,
+    protocol = nets.UDP,
+    localHost = "0.0.0.0",
+    localPort = 4000
+}, function(data, peer)
+    print(peer.host, peer.port)
+end)
+
+network:send(bytes)
+network:sendTo("192.168.1.20", 6000, bytes)
+network:close()
+```
+
+This is also a contract projection, not a required language binding.
+
 ## JavaScript projection
 
 ```js
