@@ -128,10 +128,9 @@ int kc_netl_peer_send(kc_netl_peer_t *peer,const void *data,size_t size);
 /**
  * Close an interface and release its sockets.
  * @param interface Interface handle, or NULL.
+ * @return void
  */
 void kc_netl_close(kc_netl_t *interface);
-
-
 
 /**
  * Returns the protocol of a peer received from a callback.

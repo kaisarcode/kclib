@@ -38,6 +38,7 @@ static int test_case_current;
  * @param failed Nonzero on failure.
  * @param name Case name.
  * @param detail Verified behavior.
+ * @return void
  */
 static void case_result(int failed,const char *name,const char *detail)
 {
@@ -61,6 +62,7 @@ typedef struct {
  * @param data Received bytes.
  * @param size Received byte count.
  * @param userdata Test state.
+ * @return void
  */
 static void test_receive(kc_netl_peer_t *peer,const void *data,
     size_t size,void *userdata)
@@ -79,6 +81,7 @@ static void test_receive(kc_netl_peer_t *peer,const void *data,
  * Register asynchronous failures.
  * @param status Failure status.
  * @param userdata Test state.
+ * @return void
  */
 static void test_error(int status,void *userdata)
 {
@@ -90,6 +93,7 @@ static void test_error(int status,void *userdata)
 /**
  * Delay briefly while callbacks run.
  * @param milliseconds Wait interval.
+ * @return void
  */
 static void test_sleep(unsigned milliseconds)
 {

@@ -1464,12 +1464,9 @@ void kc_netl_peer_close(kc_netl_peer_t *peer) {
 }
 
 /**
- * Port.
- * @return Function result.
- */
-/**
- * Close.
- * @return None.
+ * Close a listener socket and stop its worker.
+ * @param listener Listener socket to close.
+ * @return void
  */
 static void kc_netl_socket_close(kc_netl_socket_t *listener) {
     int from_worker = 0;
@@ -1598,10 +1595,6 @@ int kc_netl_open(kc_netl_interface_t **out,
 }
 
 /**
- * Send using a persistent socket; a TCP connection is established lazily.
- * @return KC_NETL_OK on success, an error code otherwise.
- */
-/**
  * Queue a UDP datagram to a supplied endpoint without changing the socket.
  * @param interface Open interface.
  * @param host Destination.
@@ -1613,6 +1606,14 @@ int kc_netl_open(kc_netl_interface_t **out,
 static int kc_netl_send_directed(kc_netl_interface_t *interface,
     const char *host,unsigned short port,const void *data,size_t size);
 
+/**
+ * Send using a persistent socket; a TCP connection is established lazily.
+ * @param interface Open interface.
+ * @param data Payload bytes.
+ * @param size Payload size.
+ * @param destination Optional destination endpoint.
+ * @return KC_NETL_OK on success, an error code otherwise.
+ */
 int kc_netl_send(kc_netl_interface_t *interface,
     const void *data,size_t size,const kc_netl_endpoint_t *destination)
 {
@@ -1632,9 +1633,8 @@ int kc_netl_send(kc_netl_interface_t *interface,
         }
         memset(&options,0,sizeof(options));
         target_host=interface->host;
-        /* A wildcard bind address is not a remote destination. */
-        if(strcmp(target_host,"0.0.0.0")==0||
-            strcmp(target_host,"::")==0)return KC_NETL_EINVAL;
+        if(strcmp(target_host,"0.0.0.0")==0||strcmp(target_host,"::")==0)
+            return KC_NETL_EINVAL;
         options.host=target_host;
         options.port=interface->port;
         options.protocol=KC_NETL_TCP;
