@@ -866,6 +866,104 @@ static int case_kc_netl_udp(void) {
 }
 
 /**
+ * Exercises one persistent outgoing UDP peer against a listener.
+ * Both peers receive through the same callback contract and send through
+ * kc_netl_send without reopening their socket.
+ */
+static int case_kc_netl_outbound_udp(void)
+{
+    kc_netl_t *listener=NULL,*outbound=NULL;
+    kc_netl_peer_t *remote=NULL;
+    kc_netl_options_t listen_options;
+    kc_netl_connect_options_t connect_options;
+    receive_state_t server,client;
+    int fail=0;
+    state_init(&server);
+    state_init(&client);
+    atomic_store(&server.udp_reply,1);
+    memset(&listen_options,0,sizeof(listen_options));
+    listen_options.host="127.0.0.1";
+    listen_options.protocol=KC_NETL_UDP;
+    if(kc_netl_open(&listener,&listen_options,receive,disconnect,error,
+        &server)!=KC_NETL_OK)return 1;
+    memset(&connect_options,0,sizeof(connect_options));
+    connect_options.host="127.0.0.1";
+    connect_options.port=kc_netl_port(listener);
+    connect_options.protocol=KC_NETL_UDP;
+    connect_options.local_host="127.0.0.1";
+    fail+=expect_int("outbound UDP open",KC_NETL_OK,
+        kc_netl_connect(&outbound,&remote,&connect_options,receive,
+            disconnect,error,&client));
+    if(remote){
+        unsigned short local_port=kc_netl_port(outbound);
+        fail+=expect_true("UDP outgoing persistent local port",
+            local_port!=0);
+        fail+=expect_int("outgoing UDP first send",KC_NETL_OK,
+            kc_netl_send(remote,"a",1U));
+        fail+=expect_int("outgoing UDP first response",0,
+            wait_atomic_at_least(&client.receive_count,1));
+        fail+=expect_int("outgoing UDP second send",KC_NETL_OK,
+            kc_netl_send(remote,"b",1U));
+        fail+=expect_int("outgoing UDP second response",0,
+            wait_atomic_at_least(&client.receive_count,2));
+        fail+=expect_int("UDP source port retained",local_port,
+            server.ports[0]);
+        fail+=expect_int("UDP source port stable",local_port,
+            server.ports[1]);
+        fail+=expect_true("outgoing response contains pong",
+            client.sizes[0]==4U&&
+            memcmp(client.data[0],"pong",4U)==0);
+    }
+    kc_netl_close(outbound);
+    kc_netl_close(listener);
+    case_result(fail,"kc_netl_outbound_udp",
+        "uses persistent local socket for repeated bidirectional UDP");
+    return fail!=0;
+}
+
+/**
+ * Exercises one persistent outgoing TCP peer against a listening socket.
+ */
+static int case_kc_netl_outbound_tcp(void)
+{
+    kc_netl_t *listener=NULL,*outbound=NULL;
+    kc_netl_peer_t *remote=NULL;
+    kc_netl_options_t listen_options;
+    kc_netl_connect_options_t connect_options;
+    receive_state_t server,client;
+    int fail=0;
+    state_init(&server);
+    state_init(&client);
+    atomic_store(&server.tcp_callback_reply,1);
+    memset(&listen_options,0,sizeof(listen_options));
+    listen_options.host="127.0.0.1";
+    listen_options.protocol=KC_NETL_TCP;
+    if(kc_netl_open(&listener,&listen_options,receive,disconnect,error,
+        &server)!=KC_NETL_OK)return 1;
+    memset(&connect_options,0,sizeof(connect_options));
+    connect_options.host="127.0.0.1";
+    connect_options.port=kc_netl_port(listener);
+    connect_options.protocol=KC_NETL_TCP;
+    fail+=expect_int("outbound TCP connect",KC_NETL_OK,
+        kc_netl_connect(&outbound,&remote,&connect_options,receive,
+            disconnect,error,&client));
+    if(remote){
+        fail+=expect_int("outbound TCP send",KC_NETL_OK,
+            kc_netl_send(remote,"hello",5U));
+        fail+=expect_int("outbound TCP callback response",0,
+            wait_atomic_at_least(&client.receive_count,1));
+        fail+=expect_true("outbound TCP response",
+            client.sizes[0]==8U&&
+            memcmp(client.data[0],"callback",8U)==0);
+    }
+    kc_netl_close(outbound);
+    kc_netl_close(listener);
+    case_result(fail,"kc_netl_outbound_tcp",
+        "keeps one bidirectional TCP connection open across operations");
+    return fail!=0;
+}
+
+/**
  * Tests public status helpers.
  * @return Zero on success, non-zero on failure.
  */
@@ -957,12 +1055,14 @@ static int case_all(void) {
     int result;
 
     result = 0;
-    test_case_total = 6;
+    test_case_total = 8;
     test_case_current = 0;
     run_case(&result, case_kc_netl_open);
     run_case(&result, case_kc_netl_tcp);
     run_case(&result, case_kc_netl_listener_close);
     run_case(&result, case_kc_netl_udp);
+    run_case(&result, case_kc_netl_outbound_udp);
+    run_case(&result, case_kc_netl_outbound_tcp);
     run_case(&result, case_kc_netl_status);
 #ifndef __EMSCRIPTEN__
     run_case(&result, case_netl_cli);
@@ -991,6 +1091,8 @@ int main(int argc, char **argv) {
         return case_kc_netl_listener_close();
     }
     if (strcmp(argv[1], "kc_netl_udp") == 0) return case_kc_netl_udp();
+    if (strcmp(argv[1], "kc_netl_outbound_udp") == 0) return case_kc_netl_outbound_udp();
+    if (strcmp(argv[1], "kc_netl_outbound_tcp") == 0) return case_kc_netl_outbound_tcp();
     if (strcmp(argv[1], "kc_netl_status") == 0) return case_kc_netl_status();
 #ifndef __EMSCRIPTEN__
     if (strcmp(argv[1], "netl_cli") == 0) return case_netl_cli();
