@@ -825,6 +825,36 @@ static void kc_netl_worker_run(kc_netl_t *listener) {
         kc_netl_close_requested_peers(listener);
         if (kc_netl_should_stop(listener)) break;
 
+        if(listener->outbound&&listener->protocol==KC_NETL_TCP){
+            kc_netl_peer_t *remote=listener->remote;
+            short events;
+            if(!remote||remote->closed)break;
+            if(kc_netl_poll_reserve(listener,1U)!=KC_NETL_OK){
+                kc_netl_fail(listener,KC_NETL_ENOMEM);break;
+            }
+            memset(listener->pollfds,0,sizeof(*listener->pollfds));
+            listener->pollfds[0].fd=remote->fd;
+            listener->pollfds[0].events=remote->closing?0:POLLIN;
+            if(remote->out_head)listener->pollfds[0].events|=POLLOUT;
+            ready=KC_NETL_POLL(listener->pollfds,1U,KC_NETL_POLL_TIMEOUT_MS);
+            if(ready<0){kc_netl_fail(listener,KC_NETL_ENET);break;}
+            if(ready==0)continue;
+            events=listener->pollfds[0].revents;
+            if(events&POLLIN){
+                kc_netl_receive_tcp(listener,remote);
+                continue;
+            }
+            if(events&POLLOUT){
+                kc_netl_flush_tcp(listener,remote);
+                continue;
+            }
+            if(events&(POLLERR|POLLHUP|POLLNVAL)){
+                kc_netl_peer_finish(listener,remote,1);
+                break;
+            }
+            continue;
+        }
+
         kc_netl_lock(listener);
         count = listener->protocol == KC_NETL_TCP
             ? kc_netl_peer_count(listener)
@@ -1019,6 +1049,7 @@ static void kc_netl_destroy(kc_netl_t *listener) {
     while (listener->peers != NULL) {
         peer = listener->peers;
         listener->peers = peer->next;
+        if(peer==listener->remote)listener->remote=NULL;
         if (peer->fd != KC_NETL_FD_INVALID) KC_NETL_CLOSE(peer->fd);
         kc_netl_output_free(peer->out_head);
         free(peer);
