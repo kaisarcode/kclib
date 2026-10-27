@@ -86,7 +86,6 @@ typedef struct kc_netl_output {
 
 static int kc_netl_socket_open(kc_netl_socket_t **out,const kc_netl_options_t *options,kc_netl_receive_fn receive,kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata);
 static int kc_netl_socket_connect(kc_netl_socket_t **out,kc_netl_peer_t **peer,const kc_netl_connect_options_t *options,kc_netl_receive_fn receive,kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata);
-static unsigned short kc_netl_socket_port(const kc_netl_socket_t *socket);
 static void kc_netl_socket_close(kc_netl_socket_t *socket);
 
 struct kc_netl_peer {
@@ -1468,10 +1467,6 @@ void kc_netl_peer_close(kc_netl_peer_t *peer) {
  * Port.
  * @return Function result.
  */
-static unsigned short kc_netl_socket_port(const kc_netl_socket_t *listener) {
-    return listener != NULL ? listener->port : 0U;
-}
-
 /**
  * Close.
  * @return None.
