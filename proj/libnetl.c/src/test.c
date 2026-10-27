@@ -1038,18 +1038,18 @@ static int case_netl_cli(void) {
     fail += netl_cli_run("--help");
     fail += netl_cli_run("--version");
     fail += netl_cli_run("") == 0;
-    fail += netl_cli_run("sample 8080") == 0;
-    fail += netl_cli_run("sample 8080 true --unknown") == 0;
+    fail += netl_cli_run("sample 0.0.0.0:8080") == 0;
+    fail += netl_cli_run("sample 0.0.0.0:8080 true --unknown") == 0;
     fail += netl_cli_run("bad/name -d") == 0;
     fail += netl_cli_run("nonexistent") == 0;
-    fail += netl_cli_run("sender -c 127.0.0.1:invalid -t udp") == 0;
-    fail += netl_cli_run("sender -c badendpoint -t udp") == 0;
+    fail += netl_cli_run("sender 127.0.0.1:invalid -t udp") == 0;
+    fail += netl_cli_run("sender badendpoint -t udp") == 0;
     {
         char create[256],listed[256],remove[256];
         unsigned short port=(unsigned short)(20000U+
             ((unsigned)kc_netl_version()%15000U));
         snprintf(create,sizeof(create),
-            "contract_%u -c 127.0.0.1:%u -t udp",
+            "contract_%u 127.0.0.1:%u -t udp",
             (unsigned)port,(unsigned)port);
         snprintf(listed,sizeof(listed),"-l contract_%u",(unsigned)port);
         snprintf(remove,sizeof(remove),"contract_%u -d",(unsigned)port);
