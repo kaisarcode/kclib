@@ -3,7 +3,7 @@
 # Summary: Builds one or all kclib projects with make all.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
-# License: GNU Lesser General Public License v3.0
+# License: GNU General Public License v3.0
 
 set -e
 
