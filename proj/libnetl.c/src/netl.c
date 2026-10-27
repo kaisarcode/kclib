@@ -1500,7 +1500,8 @@ static int netl_cli_process_reply(kc_netl_t *listener,
         size_t n=strlen(host);
         if(n&&host[n-1U]=='\n'){
             host[n-1U]=0;
-            if(netl_cli_port(port_text,&port)){
+            if((outgoing&&strcmp(host,"-")==0)||
+                netl_cli_port(port_text,&port)){
                 size=fread(buffer,1,sizeof(buffer),file);
                 if(!ferror(file)&&size<=65507U&&feof(file)){
                     int status=outgoing?kc_netl_send(outgoing,buffer,size):
@@ -1882,6 +1883,11 @@ int main(int argc, char **argv)
     int list;
     int remove;
     int reply;
+    int connect_mode;
+    const char *target=NULL;
+    const char *receive_cmd=NULL;
+    const char *local_host=NULL;
+    unsigned short local_port=0;
     int positional;
     int i;
 
@@ -1909,6 +1915,7 @@ int main(int argc, char **argv)
     list = 0;
     remove = 0;
     reply = 0;
+    connect_mode = 0;
     positional = 0;
 
     for (i = 1; i < argc; i++) {
@@ -1929,6 +1936,18 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "-r") == 0 ||
                 strcmp(argv[i], "--reply") == 0) {
             reply = 1;
+        } else if(strcmp(argv[i],"-c")==0||
+            strcmp(argv[i],"--connect")==0){
+            if(++i>=argc)return 1;
+            connect_mode=1;target=argv[i];
+        } else if(strcmp(argv[i],"--receive")==0){
+            if(++i>=argc)return 1;
+            receive_cmd=argv[i];
+        } else if(strcmp(argv[i],"--local-host")==0){
+            if(++i>=argc)return 1;
+            local_host=argv[i];
+        } else if(strcmp(argv[i],"--local-port")==0){
+            if(++i>=argc||!netl_cli_port(argv[i],&local_port))return 1;
         } else if (strcmp(argv[i], "-t") == 0 ||
                 strcmp(argv[i], "--transport") == 0) {
             if (++i >= argc) {
@@ -1962,7 +1981,8 @@ int main(int argc, char **argv)
     }
 
     if (list) {
-        if (reply || remove || port_text || command[0] || protocol != KC_NETL_TCP) {
+        if (connect_mode||receive_cmd||local_host||local_port||
+            reply || remove || port_text || command[0] || protocol != KC_NETL_TCP) {
             fprintf(stderr, "netl: invalid list arguments\n");
             return 1;
         }
@@ -1996,16 +2016,44 @@ int main(int argc, char **argv)
     }
 
     if (remove) {
-        if (port_text || command[0] || protocol != KC_NETL_TCP) {
+        if (connect_mode||receive_cmd||local_host||local_port||
+            port_text || command[0] || protocol != KC_NETL_TCP) {
             fprintf(stderr, "netl: invalid delete arguments\n");
             return 1;
         }
         return netl_cli_delete(dir, name);
     }
 
-    if (!port_text) {
-        fprintf(stderr, "netl: missing port\n");
-        return 1;
+    if(connect_mode){
+        char host[1025];
+        unsigned short remote_port;
+        if(port_text||command[0]||!target||
+            !netl_cli_endpoint(target,host,sizeof(host),&remote_port))
+            return 1;
+        memset(&registration,0,sizeof(registration));
+        registration.outbound=1;
+        registration.protocol=protocol;
+        registration.port=remote_port;
+        registration.local_port=local_port;
+        snprintf(registration.name,sizeof(registration.name),"%s",name);
+        snprintf(registration.host,sizeof(registration.host),"%s",host);
+        if(local_host){
+            if(strlen(local_host)>=sizeof(registration.local_host))return 1;
+            snprintf(registration.local_host,sizeof(registration.local_host),
+                "%s",local_host);
+        }
+        if(receive_cmd){
+            if(!netl_cli_line_valid(receive_cmd)||
+                strlen(receive_cmd)>=sizeof(registration.command))return 1;
+            snprintf(registration.command,sizeof(registration.command),
+                "%s",receive_cmd);
+        }
+        return netl_cli_create(dir,&registration);
+    }
+    if(!port_text){
+        if(protocol!=KC_NETL_TCP||receive_cmd||local_host||local_port||
+            command[0])return 1;
+        return netl_cli_reply(dir,name,NULL,0);
     }
     memset(&registration, 0, sizeof(registration));
     snprintf(registration.name, sizeof(registration.name), "%s", name);
