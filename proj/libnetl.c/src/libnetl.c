@@ -84,6 +84,11 @@ typedef struct kc_netl_output {
     struct kc_netl_output *next;
 } kc_netl_output_t;
 
+static int kc_netl_socket_open(kc_netl_socket_t **out,const kc_netl_options_t *options,kc_netl_receive_fn receive,kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata);
+static int kc_netl_socket_connect(kc_netl_socket_t **out,kc_netl_peer_t **peer,const kc_netl_connect_options_t *options,kc_netl_receive_fn receive,kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata);
+static unsigned short kc_netl_socket_port(const kc_netl_socket_t *socket);
+static void kc_netl_socket_close(kc_netl_socket_t *socket);
+
 struct kc_netl_peer {
     kc_netl_socket_t *listener;
     int protocol;
@@ -1176,7 +1181,7 @@ static int kc_netl_open_internal(
  * Open.
  * @return Function result.
  */
-int kc_netl_socket_open(
+static int kc_netl_socket_open(
     kc_netl_socket_t **out,
     const kc_netl_options_t *options,
     kc_netl_receive_fn receive,
@@ -1213,7 +1218,7 @@ int kc_netl_socket_open(
  * @param userdata Consumer data passed to callbacks.
  * @return KC_NETL_OK on success, otherwise a negative status.
  */
-int kc_netl_socket_connect(
+static int kc_netl_socket_connect(
     kc_netl_socket_t **out,
     kc_netl_peer_t **peer_out,
     const kc_netl_connect_options_t *options,
@@ -1463,7 +1468,7 @@ void kc_netl_peer_close(kc_netl_peer_t *peer) {
  * Port.
  * @return Function result.
  */
-unsigned short kc_netl_socket_port(const kc_netl_socket_t *listener) {
+static unsigned short kc_netl_socket_port(const kc_netl_socket_t *listener) {
     return listener != NULL ? listener->port : 0U;
 }
 
@@ -1471,7 +1476,7 @@ unsigned short kc_netl_socket_port(const kc_netl_socket_t *listener) {
  * Close.
  * @return None.
  */
-void kc_netl_socket_close(kc_netl_socket_t *listener) {
+static void kc_netl_socket_close(kc_netl_socket_t *listener) {
     int from_worker = 0;
 
     if (listener == NULL) return;
@@ -1615,7 +1620,7 @@ int kc_netl_send(kc_netl_interface_t *interface,
 {
     kc_netl_connect_options_t options;
     int result;
-    const char *destination;
+    const char *target_host;
     if(!interface||(!data&&size))return KC_NETL_EINVAL;
     if(destination){
         if(interface->protocol!=KC_NETL_UDP)return KC_NETL_EINVAL;
@@ -1628,11 +1633,11 @@ int kc_netl_send(kc_netl_interface_t *interface,
             interface->outgoing=NULL;
         }
         memset(&options,0,sizeof(options));
-        destination=interface->host;
+        target_host=interface->host;
         /* A wildcard bind address is not a remote destination. */
-        if(strcmp(destination,"0.0.0.0")==0||
-            strcmp(destination,"::")==0)return KC_NETL_EINVAL;
-        options.host=destination;
+        if(strcmp(target_host,"0.0.0.0")==0||
+            strcmp(target_host,"::")==0)return KC_NETL_EINVAL;
+        options.host=target_host;
         options.port=interface->port;
         options.protocol=KC_NETL_TCP;
         result=kc_netl_socket_connect(&interface->outgoing,&interface->peer,
