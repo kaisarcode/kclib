@@ -1270,6 +1270,21 @@ int kc_netl_reply_to(kc_netl_t *listener,const char *host,
     return KC_NETL_OK;
 }
 
+int kc_netl_peer_protocol(const kc_netl_peer_t *peer)
+{
+    return peer?peer->protocol:0;
+}
+
+const char *kc_netl_peer_host(const kc_netl_peer_t *peer)
+{
+    return peer?peer->host:NULL;
+}
+
+unsigned short kc_netl_peer_port(const kc_netl_peer_t *peer)
+{
+    return peer?peer->port:0U;
+}
+
 /**
  * Peer close.
  * @return None.
