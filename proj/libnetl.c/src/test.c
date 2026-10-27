@@ -951,8 +951,8 @@ static int case_netl_cli(void) {
     fail += netl_cli_run("sample 8080") == 0;
     fail += netl_cli_run("sample 8080 true --unknown") == 0;
     fail += netl_cli_run("bad/name -d") == 0;
-    fail += netl_cli_run("nonexistent -r 127.0.0.1 5000") == 0;
-    fail += netl_cli_run("nonexistent -r 127.0.0.1 invalid") == 0;
+    fail += netl_cli_run("nonexistent -r 127.0.0.1:5000") == 0;
+    fail += netl_cli_run("nonexistent -r 127.0.0.1:invalid") == 0;
     case_result(fail, "netl_cli",
         "validates listener administration arguments and errors");
     return fail != 0;
