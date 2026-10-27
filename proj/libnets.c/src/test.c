@@ -373,12 +373,14 @@ static int state_wait(test_state_t *state) {
 static void receive_callback(
     const void *data,
     size_t data_size,
+    const kc_nets_endpoint_t *peer,
     void *userdata
 ) {
     test_state_t *state;
     int send_second;
 
     state = (test_state_t *)userdata;
+    (void)peer;
     send_second = 0;
 
     mutex_lock(&state->mutex);
@@ -422,16 +424,16 @@ static void receive_callback(
  * @param userdata Test state.
  * @return void.
  */
-static void receive_from_callback(const char *host,unsigned short port,
-    const void *data,size_t data_size,void *userdata)
+static void receive_from_callback(const void *data,size_t data_size,
+    const kc_nets_endpoint_t *peer,void *userdata)
 {
     test_state_t *state=(test_state_t *)userdata;
     mutex_lock(&state->mutex);
     if(state->receive_count<4U)
         state->source_ports[state->receive_count]=
-            strcmp(host,TEST_HOST)==0?port:0;
+            peer&&peer->host&&strcmp(peer->host,TEST_HOST)==0?peer->port:0;
     mutex_unlock(&state->mutex);
-    receive_callback(data,data_size,userdata);
+    receive_callback(data,data_size,peer,userdata);
 }
 
 /**
@@ -475,10 +477,12 @@ static void error_callback(int status, void *userdata) {
 static void discard_receive(
     const void *data,
     size_t data_size,
+    const kc_nets_endpoint_t *peer,
     void *userdata
 ) {
     (void)data;
     (void)data_size;
+    (void)peer;
     (void)userdata;
 }
 
@@ -703,7 +707,7 @@ static int case_validation(void) {
     const char *name = "validation";
     const char *detail = "rejects invalid endpoint arguments";
     kc_nets_t *network;
-    kc_nets_options_t options;
+    kc_nets_options_t options={0};
     int fail;
 
     network = NULL;
@@ -771,7 +775,7 @@ static int case_tcp(void) {
     static const unsigned char expected_reply[] = {'r', '1', 'r', '2', 0};
     const char *name = "tcp";
     const char *detail = "keeps one ordered stream across repeated sends";
-    kc_nets_options_t options;
+    kc_nets_options_t options={0};
     test_server_t server;
     test_state_t state;
     test_thread_t sender;
@@ -855,7 +859,7 @@ static int case_udp(void) {
     static const unsigned char expected[] = {'a', 0, 'b', 'c', 'd'};
     const char *name = "udp";
     const char *detail = "preserves datagram boundaries across repeated sends";
-    kc_nets_options_t options;
+    kc_nets_options_t options={0};
     test_server_t server;
     test_state_t state;
     unsigned short port;
@@ -942,7 +946,8 @@ static int case_udp_multi(void)
     const char *detail="sends to multiple peers and preserves source addresses";
     test_server_t server_a,server_b;
     test_state_t state;
-    kc_nets_udp_options_t options;
+    kc_nets_options_t options={0};
+    kc_nets_endpoint_t remote={TEST_HOST,0};
     unsigned short a=(unsigned short)(port_base()+3U);
     unsigned short b=(unsigned short)(port_base()+4U);
     int fail=0,step;
@@ -954,23 +959,24 @@ static int case_udp_multi(void)
         state_close(&state);return 1;
     }
     memset(&options,0,sizeof(options));
-    options.endpoint.host=TEST_HOST;
-    options.endpoint.port=a;
-    options.endpoint.protocol=KC_NETS_UDP;
+    options.host=TEST_HOST;
+    options.port=a;
+    options.protocol=KC_NETS_UDP;
     options.local_host=TEST_HOST;
+    remote.port=b;
     fail+=expect_int("UDP multidest open",KC_NETS_OK,
-        kc_nets_open_udp(&state.network,&options,receive_from_callback,
-            error_callback,&state));
+        kc_nets_open(&state.network,&options,receive_from_callback,
+            NULL,error_callback,&state));
     if(state.network){
         fail+=expect_true("UDP local port",kc_nets_local_port(state.network)!=0);
         fail+=expect_int("UDP default destination",KC_NETS_OK,
             kc_nets_send(state.network,"a",1U));
         fail+=expect_int("UDP alternate destination",KC_NETS_OK,
-            kc_nets_send_to(state.network,TEST_HOST,b,"b",1U));
+            kc_nets_send_to(state.network,&remote,"b",1U));
         fail+=expect_int("UDP default repeated",KC_NETS_OK,
             kc_nets_send(state.network,"c",1U));
         fail+=expect_int("UDP alternate repeated",KC_NETS_OK,
-            kc_nets_send_to(state.network,TEST_HOST,b,"d",1U));
+            kc_nets_send_to(state.network,&remote,"d",1U));
         for(step=0;step<TEST_WAIT_STEPS;step++){
             size_t count;
             mutex_lock(&state.mutex);
