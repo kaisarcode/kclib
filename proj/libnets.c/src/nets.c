@@ -68,11 +68,19 @@ static volatile sig_atomic_t nets_cli_stop;
 static void nets_cli_help(const char *name)
 {
     printf("Usage: %s <host> <port> [options]\n", name);
+    printf("       %s <id> -s [host port]\\n",name);
+    printf("       %s <id> -d\\n",name);
+    printf("       %s -l [id]\\n",name);
     printf("\n");
     printf("Options:\n");
     printf("  -t, --transport <type>  tcp or udp (default: tcp)\n");
     printf("  --local-host <host>     UDP source bind address\n");
     printf("  --local-port <port>     UDP source port (default: 0)\n");
+    printf("  --id <id>                Register resident UDP sender\\n");
+    printf("  --receive <cmd>          Run command for incoming datagrams\\n");
+    printf("  -s, --send               Send stdin through resident endpoint\\n");
+    printf("  -l, --list               List resident endpoints\\n");
+    printf("  -d, --delete             Remove resident endpoint\\n");
     printf("  -h, --help              Show this help\n");
     printf("  -v, --version           Show version\n");
 }
@@ -791,7 +799,7 @@ static int nets_resident_read(const char *directory,const char *id,
     }
     if(!nets_resident_port(port,0,&info->port)||
        !nets_resident_port(local,1,&info->local_port)||
-       !*info->host||!*info->command)return 1;
+       !*info->host)return 1;
     snprintf(info->name,sizeof(info->name),"%s",id);
     return 0;
 }
@@ -965,7 +973,8 @@ static void nets_resident_receive(const char *host,unsigned short port,
     const void *bytes,size_t size,void *userdata)
 {
     const nets_resident_info_t *info=(const nets_resident_info_t *)userdata;
-    (void)nets_resident_callback(info->command,host,port,bytes,size);
+    if(*info->command)
+        (void)nets_resident_callback(info->command,host,port,bytes,size);
 }
 
 /**
@@ -1303,6 +1312,81 @@ static int nets_resident_list(const char *directory,const char *id)
 }
 
 /**
+ * Dispatches optional persistent UDP sender commands.
+ * Ordinary nets host port relay invocations are returned to the old parser.
+ * @param argc CLI argument count.
+ * @param argv CLI arguments.
+ * @return -1 for legacy mode or a resident command's process exit status.
+ */
+static int nets_resident_dispatch(int argc,char **argv)
+{
+    char directory[NETS_RESIDENT_PATH_MAX];
+    const char *worker=getenv("KC_NETS_WORKER");
+    int i,create=0;
+    if(nets_resident_directory(directory,sizeof(directory))!=0)return 1;
+    if(worker&&*worker){
+        if(!nets_resident_id_valid(worker))return 1;
+        nets_cli_stop=0;
+        return nets_resident_worker(directory,worker);
+    }
+    if(argc>=2&&(strcmp(argv[1],"-l")==0||
+        strcmp(argv[1],"--list")==0)){
+        if(argc>3|| (argc==3&&!nets_resident_id_valid(argv[2])))return 1;
+        return nets_resident_list(directory,argc==3?argv[2]:NULL);
+    }
+    if(argc>=3&&nets_resident_id_valid(argv[1])){
+        if(strcmp(argv[2],"-d")==0||strcmp(argv[2],"--delete")==0){
+            if(argc!=3)return 1;
+            return nets_resident_delete(directory,argv[1]);
+        }
+        if(strcmp(argv[2],"-s")==0||strcmp(argv[2],"--send")==0){
+            unsigned short port=0;
+            if(argc!=3&&argc!=5)return 1;
+            if(argc==5&&!nets_resident_port(argv[4],0,&port))return 1;
+            if(nets_cli_prepare_stdio()!=0)return 1;
+            return nets_resident_send(directory,argv[1],
+                argc==5?argv[3]:NULL,port);
+        }
+    }
+    for(i=1;i<argc;i++)
+        if(strcmp(argv[i],"--id")==0)create=1;
+    if(!create)return -1;
+    {
+        nets_resident_info_t info;
+        int transport=KC_NETS_TCP;
+        if(argc<5||!nets_resident_port(argv[2],0,&info.port))return 1;
+        memset(&info,0,sizeof(info));
+        if(!nets_resident_port(argv[2],0,&info.port)||
+            !argv[1][0]||strlen(argv[1])>=sizeof(info.host))return 1;
+        snprintf(info.host,sizeof(info.host),"%s",argv[1]);
+        for(i=3;i<argc;i++){
+            const char *arg=argv[i],*value;
+            if(i+1>=argc)return 1;
+            value=argv[++i];
+            if(strcmp(arg,"--id")==0){
+                if(!nets_resident_id_valid(value))return 1;
+                snprintf(info.name,sizeof(info.name),"%s",value);
+            }else if(strcmp(arg,"-t")==0||strcmp(arg,"--transport")==0){
+                if(strcmp(value,"udp")!=0)return 1;
+                transport=KC_NETS_UDP;
+            }else if(strcmp(arg,"--local-host")==0){
+                if(strlen(value)>=sizeof(info.local_host)||
+                    strchr(value,'\n')||strchr(value,'\r'))return 1;
+                snprintf(info.local_host,sizeof(info.local_host),"%s",value);
+            }else if(strcmp(arg,"--local-port")==0){
+                if(!nets_resident_port(value,1,&info.local_port))return 1;
+            }else if(strcmp(arg,"--receive")==0){
+                if(strlen(value)>=sizeof(info.command)||
+                    strchr(value,'\n')||strchr(value,'\r'))return 1;
+                snprintf(info.command,sizeof(info.command),"%s",value);
+            }else return 1;
+        }
+        if(transport!=KC_NETS_UDP||!*info.name)return 1;
+        return nets_resident_create(directory,&info);
+    }
+}
+
+/**
  * Runs metadata handling or one endpoint relay.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -1312,6 +1396,11 @@ int main(int argc, char **argv)
 {
     nets_cli_options_t options;
     int index;
+
+    {
+        int resident=nets_resident_dispatch(argc,argv);
+        if(resident>=0)return resident;
+    }
 
     for (index = 1; index < argc; index++) {
         if (strcmp(argv[index], "-h") == 0 || strcmp(argv[index], "--help") == 0) {
