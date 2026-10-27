@@ -3,7 +3,7 @@
 # Summary: Tests one or all kclib projects natively, through Wine, and through WASM when supported.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
-# License: GNU Lesser General Public License v3.0
+# License: GNU General Public License v3.0
 
 set -eo pipefail
 
