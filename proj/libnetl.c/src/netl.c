@@ -1379,14 +1379,21 @@ static int netl_cli_serve(const char *dir, const char *name)
     options.port = registration.port;
     options.protocol = registration.protocol;
     listener = NULL;
-    rc = kc_netl_open(
-        &listener,
-        &options,
-        netl_cli_receive,
-        netl_cli_disconnect,
-        netl_cli_error,
-        &state
-    );
+    if(registration.outbound){
+        kc_netl_connect_options_t remote;
+        memset(&remote,0,sizeof(remote));
+        remote.host=registration.host;
+        remote.port=registration.port;
+        remote.protocol=registration.protocol;
+        remote.local_host=registration.local_host[0]?
+            registration.local_host:NULL;
+        remote.local_port=registration.local_port;
+        rc=kc_netl_connect(&listener,&state.outgoing,&remote,
+            netl_cli_receive,netl_cli_disconnect,netl_cli_error,&state);
+    }else{
+        rc=kc_netl_open(&listener,&options,netl_cli_receive,
+            netl_cli_disconnect,netl_cli_error,&state);
+    }
     if (rc != KC_NETL_OK) {
 #ifdef _WIN32
         DeleteCriticalSection(&state.lock);
@@ -1401,8 +1408,8 @@ static int netl_cli_serve(const char *dir, const char *name)
     (void)signal(SIGTERM, netl_cli_signal);
 #endif
     while (!netl_cli_stop) {
-        if(registration.protocol==KC_NETL_UDP)
-            netl_cli_drain_replies(dir,name,listener);
+        if(registration.protocol==KC_NETL_UDP||registration.outbound)
+            netl_cli_drain_replies(dir,name,listener,state.outgoing);
         netl_cli_sleep();
     }
 
