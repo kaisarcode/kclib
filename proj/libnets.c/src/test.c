@@ -65,6 +65,7 @@ typedef struct {
     size_t received_size;
     size_t receive_count;
     size_t datagram_sizes[2];
+    unsigned short source_ports[4];
     int disconnect_count;
     int error_status;
     int done;
@@ -410,6 +411,27 @@ static void receive_callback(
     if (send_second) {
         (void)kc_nets_send(state->network, "second", 6U);
     }
+}
+
+/**
+ * Captures a UDP datagram's source address before delivering its bytes.
+ * @param host Numeric sender host.
+ * @param port Sender port.
+ * @param data Datagram bytes.
+ * @param data_size Datagram length.
+ * @param userdata Test state.
+ * @return void.
+ */
+static void receive_from_callback(const char *host,unsigned short port,
+    const void *data,size_t data_size,void *userdata)
+{
+    test_state_t *state=(test_state_t *)userdata;
+    mutex_lock(&state->mutex);
+    if(state->receive_count<4U)
+        state->source_ports[state->receive_count]=
+            strcmp(host,TEST_HOST)==0?port:0;
+    mutex_unlock(&state->mutex);
+    receive_callback(data,data_size,userdata);
 }
 
 /**
@@ -911,6 +933,73 @@ static int case_udp(void) {
 }
 
 /**
+ * Tests multiple UDP destinations from one persistent source mapping.
+ * @return Zero when all checks pass.
+ */
+static int case_udp_multi(void)
+{
+    const char *name="udp_multi";
+    const char *detail="sends to multiple peers and preserves source addresses";
+    test_server_t server_a,server_b;
+    test_state_t state;
+    kc_nets_udp_options_t options;
+    unsigned short a=(unsigned short)(port_base()+3U);
+    unsigned short b=(unsigned short)(port_base()+4U);
+    int fail=0,step;
+    if(state_open(&state,KC_NETS_UDP)!=0)return 1;
+    if(server_start(&server_a,KC_NETS_UDP,a)!=0){
+        state_close(&state);return 1;
+    }
+    if(server_start(&server_b,KC_NETS_UDP,b)!=0){
+        state_close(&state);return 1;
+    }
+    memset(&options,0,sizeof(options));
+    options.endpoint.host=TEST_HOST;
+    options.endpoint.port=a;
+    options.endpoint.protocol=KC_NETS_UDP;
+    options.local_host=TEST_HOST;
+    options.receive_from=receive_from_callback;
+    fail+=expect_int("UDP multidest open",KC_NETS_OK,
+        kc_nets_open_udp(&state.network,&options,NULL,error_callback,&state));
+    if(state.network){
+        fail+=expect_true("UDP local port",kc_nets_local_port(state.network)!=0);
+        fail+=expect_int("UDP default destination",KC_NETS_OK,
+            kc_nets_send(state.network,"a",1U));
+        fail+=expect_int("UDP alternate destination",KC_NETS_OK,
+            kc_nets_send_to(state.network,TEST_HOST,b,"b",1U));
+        fail+=expect_int("UDP default repeated",KC_NETS_OK,
+            kc_nets_send(state.network,"c",1U));
+        fail+=expect_int("UDP alternate repeated",KC_NETS_OK,
+            kc_nets_send_to(state.network,TEST_HOST,b,"d",1U));
+        for(step=0;step<TEST_WAIT_STEPS;step++){
+            size_t count;
+            mutex_lock(&state.mutex);
+            count=state.receive_count;
+            mutex_unlock(&state.mutex);
+            if(count>=4U)break;
+            sleep_ms(TEST_WAIT_MS);
+        }
+        fail+=expect_true("UDP four responses",state.receive_count==4U);
+        fail+=expect_true("UDP recognized source A",
+            state.source_ports[0]==a||state.source_ports[1]==a||
+            state.source_ports[2]==a||state.source_ports[3]==a);
+        fail+=expect_true("UDP recognized source B",
+            state.source_ports[0]==b||state.source_ports[1]==b||
+            state.source_ports[2]==b||state.source_ports[3]==b);
+        kc_nets_close(state.network);
+    }
+    fail+=expect_int("UDP server A",0,server_join(&server_a));
+    fail+=expect_int("UDP server B",0,server_join(&server_b));
+    fail+=expect_true("UDP destination A payloads",
+        server_a.received_size==2U&&memcmp(server_a.received,"ac",2U)==0);
+    fail+=expect_true("UDP destination B payloads",
+        server_b.received_size==2U&&memcmp(server_b.received,"bd",2U)==0);
+    state_close(&state);
+    case_result(fail,name,detail);
+    return fail!=0;
+}
+
+/**
  * Runs the libnets public contract test program.
  * @return Zero when all cases pass, otherwise one.
  */
@@ -921,14 +1010,15 @@ int main(void) {
 
     result = 0;
 #ifdef __EMSCRIPTEN__
-    test_case_total = 3;
+    test_case_total = 4;
 #else
-    test_case_total = 15;
+    test_case_total = 18;
 #endif
     test_case_current = 0;
     run_case(&result, case_validation);
     run_case(&result, case_tcp);
     run_case(&result, case_udp);
+    run_case(&result, case_udp_multi);
 #ifndef __EMSCRIPTEN__
     result += case_nets_cli();
 #endif
@@ -1005,6 +1095,12 @@ static int case_nets_cli(void) {
         nets_cli_run("localhost 9 --tls") != 0);
     failures += nets_cli_result("extra positional", "extra endpoint arguments fail",
         nets_cli_run("localhost 9 extra") != 0);
+    failures += nets_cli_result("resident send missing",
+        "unregistered sender cannot send",
+        nets_cli_run("nonexistent -s") != 0);
+    failures += nets_cli_result("resident invalid id",
+        "rejects unsafe resident identifiers",
+        nets_cli_run("127.0.0.1 9 -t udp --id bad/name") != 0);
     return failures;
 }
 #endif
