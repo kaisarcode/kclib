@@ -57,7 +57,9 @@ typedef struct {
  * @return void.
  */
 typedef void (*kc_netl_receive_fn)(
-    const kc_netl_input_t *input,
+    kc_netl_peer_t *peer,
+    const void *data,
+    size_t data_size,
     void *userdata
 );
 
@@ -121,7 +123,7 @@ int kc_netl_open(
  * @param data_size Byte count.
  * @return KC_NETL_OK on success, otherwise a negative status.
  */
-int kc_netl_respond(
+int kc_netl_send(
     kc_netl_peer_t *peer,
     const void *data,
     size_t data_size
