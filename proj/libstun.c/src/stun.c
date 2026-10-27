@@ -37,7 +37,7 @@ static void stun_cli_help(void)
     printf("\nOptions:\n");
     printf("  --host <host>           Local bind host\n");
     printf("  -p, --port <port>       Local UDP port (client: 0, server: 3478)\n");
-    printf("  -t, --timeout <ms>      Client timeout in ms (default: library)\n");
+    printf("  -t, --timeout <ms>      Client timeout in ms (default: 3000)\n");
     printf("  -h, --help              Show this help\n");
     printf("  -v, --version           Show version\n");
 }
