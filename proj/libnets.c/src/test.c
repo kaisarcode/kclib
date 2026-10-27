@@ -33,6 +33,7 @@ typedef int test_socklen_t;
 #include <errno.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 typedef int test_socket_t;
@@ -539,6 +540,15 @@ static void *server_main(void *userdata)
 
     if (server->protocol == KC_NETS_UDP) {
         int index;
+#ifdef _WIN32
+        DWORD timeout=5000U;
+        (void)setsockopt(listener,SOL_SOCKET,SO_RCVTIMEO,
+            (const char *)&timeout,(int)sizeof(timeout));
+#else
+        struct timeval timeout={5,0};
+        (void)setsockopt(listener,SOL_SOCKET,SO_RCVTIMEO,
+            &timeout,(socklen_t)sizeof(timeout));
+#endif
 
         for (index = 0; index < 2; index++) {
             struct sockaddr_in peer;
