@@ -73,6 +73,25 @@ ordered byte stream. Repeated UDP sends remain separate datagrams.
 called from a callback. A local close does not report a remote disconnect or a
 network error.
 
+## UDP with multiple destinations
+
+A UDP instance keeps one socket and one local port. The original `kc_nets_send()`
+queues datagrams for the configured default destination. The additional
+`kc_nets_send_to(network, host, port, bytes, size)` queues a datagram to any
+destination using **that same UDP socket**, without changing the default.
+
+`kc_nets_options_t.local_host` and `local_port` optionally select the local
+interface and port (zero means an ephemeral port). Query the assigned port with
+`kc_nets_local_port()`. For source-aware receiving, configure
+`options.receive_from` to receive the numeric source host and port of each
+UDP datagram; the original receive callback remains supported. Either receive
+callback can be provided for UDP, but the source-aware callback takes precedence.
+
+A UDP sender is not restricted to datagrams from the initial destination.
+The configured default host determines the address family of the socket;
+additional destinations must use that same address family. TCP behavior is
+unchanged.
+
 ## Build
 
 From this project directory:
