@@ -11,7 +11,18 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
-#include "libnetl-private.h"
+#include "libnetl.h"
+
+/* Socket details are private to this translation unit. */
+typedef struct kc_netl_socket kc_netl_socket_t;
+typedef struct {
+    const char *host;
+    unsigned short port;
+    int protocol;
+    const char *local_host;
+    unsigned short local_port;
+} kc_netl_connect_options_t;
+
 typedef kc_netl_t kc_netl_interface_t;
 
 #include <limits.h>
