@@ -3,7 +3,7 @@
 # Summary: Publishes individual library artifacts with checksums and a manifest.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
-# License: GNU Lesser General Public License v3.0
+# License: GNU General Public License v3.0
 
 set -e
 
