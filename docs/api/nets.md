@@ -32,16 +32,14 @@ connection and ordered-stream semantics; `sendTo` is UDP-only.
 
 ## Native C contract
 
-Existing callers continue using `kc_nets_open()`, `kc_nets_send()` and
-`kc_nets_close()`. Extended UDP configuration is available through
-`kc_nets_open_udp()` with `kc_nets_udp_options_t`. The receive callback is always an argument of the opening function:
-`kc_nets_open_udp(out, options, receive, error, userdata)` receives a
-source-aware callback with `(host, port, bytes, size, userdata)`. Configuration
-contains no callbacks. The original `kc_nets_open()` callback receives
-`(bytes, size, userdata)` for the legacy TCP/UDP relay API.
+The native `kc_nets_open(out, options, receive, disconnect, error, userdata)`
+takes one options struct containing host, port, protocol, local_host and
+local_port. The receive callback is **always a function argument** and receives
+`(bytes, size, peer, userdata)`; `peer` describes the numeric UDP source and
+is NULL for TCP. Configuration contains no callbacks.
 
-`kc_nets_send_to()` sends to arbitrary same-family UDP destinations through
-the existing socket; `kc_nets_local_port()` reports the bound local port.
+`kc_nets_send_to(network, peer, bytes, size)` sends to an arbitrary
+same-family UDP destination through the existing socket; `kc_nets_local_port()` reports the bound local port.
 The default `kc_nets_send()` continues sending to the configured destination.
 
 ## CLI
