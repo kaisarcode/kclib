@@ -128,6 +128,20 @@ int kc_netl_respond(
 );
 
 /**
+ * Queues a UDP reply to a retained numeric or hostname endpoint.
+ * Unlike kc_netl_respond(), this operation does not require a live,
+ * callback-scoped UDP peer. Uses the listener's same bound socket.
+ * @param listener Open UDP listener.
+ * @param host Destination hostname or numeric IP.
+ * @param port Destination port.
+ * @param data Datagram bytes, copied before returning.
+ * @param data_size Datagram size.
+ * @return KC_NETL_OK or a negative status.
+ */
+int kc_netl_reply_to(kc_netl_t *listener,const char *host,
+    unsigned short port,const void *data,size_t data_size);
+
+/**
  * Stops interacting with one peer.
  * For TCP, queued responses are sent in order before the peer is closed. For a
  * UDP peer this only prevents further response through that receive-local peer.
