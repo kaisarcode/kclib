@@ -34,11 +34,11 @@ connection and ordered-stream semantics; `sendTo` is UDP-only.
 
 Existing callers continue using `kc_nets_open()`, `kc_nets_send()` and
 `kc_nets_close()`. Extended UDP configuration is available through
-`kc_nets_open_udp()` with `kc_nets_udp_options_t`. The receive callback is
-still an argument of the opening function for regular use; for source-aware UDP,
-the native `kc_nets_udp_options_t.receive_from` callback receives
-`(host, port, bytes, size, userdata)`. This native detail differs from the
-logical projection shown above.
+`kc_nets_open_udp()` with `kc_nets_udp_options_t`. The receive callback is always an argument of the opening function:
+`kc_nets_open_udp(out, options, receive, error, userdata)` receives a
+source-aware callback with `(host, port, bytes, size, userdata)`. Configuration
+contains no callbacks. The original `kc_nets_open()` callback receives
+`(bytes, size, userdata)` for the legacy TCP/UDP relay API.
 
 `kc_nets_send_to()` sends to arbitrary same-family UDP destinations through
 the existing socket; `kc_nets_local_port()` reports the bound local port.
