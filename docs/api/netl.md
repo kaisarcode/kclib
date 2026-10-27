@@ -1,77 +1,88 @@
-# netl scripting API
+# libnetl — Public API projection
 
-`libnetl` is a general-purpose TCP/UDP listener. JavaScript below is an
-**API projection**, not a binding or implementation.
+`libnetl` manages persistent, bidirectional TCP and UDP sockets. The snippets
+below are **conceptual projections** of the native C API, not JavaScript or Lua
+implementations.
 
-## Lua projection
-
-```lua
-local listener = netl.open({
-    host = "0.0.0.0",
-    port = 5000,
-    protocol = netl.UDP
-}, function(input)
-    input.peer:respond(input.data)
-end)
-
-listener:replyTo("192.168.1.20", 6000, bytes)
-listener:close()
-```
-
-As in the JS projection, receive callbacks are arguments to `open()`.
-
-## JavaScript projection
+## Listener
 
 ```js
-const listener = netl.open({
+const server = netl.open({
     host: "0.0.0.0",
     port: 5000,
     protocol: netl.UDP
-}, function(input) {
-    // Respond during this callback:
-    input.peer.respond(input.data);
-
-    // Keep the numeric address (not the temporary UDP peer object).
-    peer = {host: input.host, port: input.port};
+}, function(peer, data) {
+    console.log(data);
+    peer.send("Received OK");
 });
 
-// Respond later from the same bound UDP listener socket:
-listener.replyTo(peer.host, peer.port, data);
-
-listener.port();
-listener.close();
+server.close();
 ```
 
-Callbacks are arguments to `open()`, not options. For TCP, the peer can live
-across receives until disconnect; for UDP, `input.peer` is scoped to the
-receive callback. Saving only `input.host`/`input.port` supports delayed
-`replyTo` calls.
+The incoming `peer` identifies the remote endpoint and uses the same underlying
+socket to send a reply. The reply may differ entirely from the received data.
+Responding is optional. TCP peers remain valid until disconnected; a UDP
+receive peer is valid only during its callback.
 
-## Native C contract
+## Persistent outgoing endpoint
 
-`kc_netl_open()`, `kc_netl_respond()`, `kc_netl_port()` and
-`kc_netl_close()` retain their public semantics.
-`kc_netl_reply_to(listener, host, port, bytes, size)` is UDP-only,
-copies a datagram into the listener's outgoing queue and uses its bound socket.
+```js
+const client = netl.connect({
+    host: "192.168.1.20",
+    port: 6000,
+    protocol: netl.UDP,
+    localPort: 4000
+}, function(peer, data) {
+    console.log(data);
+});
+
+client.send("message 1");
+client.send("message 2");
+client.close();
+```
+
+Connecting creates a persistent socket once. Every `send()` reuses it until
+the instance is explicitly closed. TCP establishes a persistent stream
+connection; UDP binds one persistent datagram socket.
+
+All callbacks are positional arguments, never options fields.
+
+## C contract
+
+- `kc_netl_open(out, options, receive, disconnect, error, userdata)` opens
+  a persistent TCP or UDP listener.
+- `kc_netl_connect(out, peer, options, receive, disconnect, error, userdata)`
+  creates one persistent outgoing endpoint.
+- `kc_netl_send(peer, bytes, size)` sends or replies using that peer's
+  existing socket.
+- `kc_netl_peer_host(peer)`, `kc_netl_peer_port(peer)`, and
+  `kc_netl_peer_protocol(peer)` describe the remote endpoint.
+- `kc_netl_close(instance)` ends a persistent instance.
+
+There is no `respond()`, `sendTo()`, or `replyTo()`.
 
 ## CLI
 
 ```sh
-# Register a resident UDP listener and a callback command.
-netl servidor 5000 'handler' -t udp
+# Register a TCP or UDP listener with an external callback command:
+netl servidor 5000 handler -t udp
 
-# Incoming UDP invokes: handler <host> <port>
-# Its stdin contains the binary datagram.
+# Register one persistent outgoing endpoint:
+netl cliente -c 192.168.1.20:6000 -t udp --local-port 4000
 
-# Later, reply using the existing listener:
-printf respuesta | netl servidor -r 192.168.1.20:6000
+# Send stdin without opening another socket:
+echo "message 1" | netl cliente
+echo "message 2" | netl cliente
 
 netl -l
+netl cliente -d
 netl servidor -d
 ```
 
-The new `-r/--reply` command delivers one binary UDP datagram via a local
-IPC request to the resident listener. It does not open another UDP listener.
-The registered command receives source host and port as arguments and the
-incoming datagram on stdin. The old listener registration, list and delete
-commands are unchanged.
+An external UDP receive command is invoked with the source host and port
+as arguments, and receives the datagram on stdin. TCP streams are delivered
+to the registered command's stdin; its stdout is sent to the peer.
+
+The CLI maintains sockets in resident processes; ordinary `netl <id>`
+invocations communicate with the registered process via private local IPC.
+IPv6 destination syntax uses brackets: `[::1]:6000`.
