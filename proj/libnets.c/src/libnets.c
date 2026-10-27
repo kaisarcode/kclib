@@ -153,6 +153,36 @@ static int kc_nets_interrupted(void) {
 }
 
 /**
+ * Classifies peer-specific UDP reachability errors. These do not invalidate
+ * the local socket or its mapping and therefore must not terminate the
+ * persistent sender when another destination may still be reachable.
+ * @param code Platform socket error.
+ * @return Non-zero when the error is per-remote-endpoint.
+ */
+static int kc_nets_udp_peer_error(int code)
+{
+#ifdef _WIN32
+    return code==WSAECONNRESET||code==WSAECONNREFUSED||
+        code==WSAEHOSTUNREACH||code==WSAENETUNREACH;
+#else
+    return code==ECONNREFUSED||code==EHOSTUNREACH||code==ENETUNREACH;
+#endif
+}
+
+/**
+ * Returns the most recent socket error in the current thread.
+ * @return Platform socket error.
+ */
+static int kc_nets_socket_error(void)
+{
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+/**
  * Makes one socket nonblocking.
  * @param fd Socket descriptor.
  * @return KC_NETS_OK on success, otherwise KC_NETS_ENET.
@@ -541,7 +571,9 @@ static void kc_nets_receive_udp(kc_nets_t *nets) {
         kc_nets_deliver(nets,buffer,(size_t)received,&peer);
         return;
     }
-    if(!kc_nets_would_block())kc_nets_fail(nets,KC_NETS_ENET);
+    if(!kc_nets_would_block()&&
+        !kc_nets_udp_peer_error(kc_nets_socket_error()))
+        kc_nets_fail(nets,KC_NETS_ENET);
 }
 
 /**
@@ -634,6 +666,13 @@ static void kc_nets_flush_udp(kc_nets_t *nets) {
             kc_nets_unlock(nets);
             return;
         }
+        if(sent<0&&kc_nets_udp_peer_error(kc_nets_socket_error())){
+            nets->out_head=output->next;
+            if(nets->out_head==NULL)nets->out_tail=NULL;
+            kc_nets_unlock(nets);
+            free(output->data);free(output);
+            continue;
+        }
 
         kc_nets_unlock(nets);
         kc_nets_fail(nets, KC_NETS_ENET);
@@ -704,16 +743,29 @@ static void kc_nets_worker_run(kc_nets_t *nets) {
         if (!kc_nets_active(nets)) break;
 
         if ((pollfd.revents & (POLLERR | POLLNVAL)) != 0) {
+            if(nets->protocol==KC_NETS_UDP&&
+                (pollfd.revents&POLLNVAL)==0){
+                int code=0;
+#ifdef _WIN32
+                int bytes=(int)sizeof(code);
+                if(getsockopt(nets->fd,SOL_SOCKET,SO_ERROR,
+                    (char *)&code,&bytes)==0&&
+                    (code==0||kc_nets_udp_peer_error(code)))continue;
+#else
+                socklen_t bytes=(socklen_t)sizeof(code);
+                if(getsockopt(nets->fd,SOL_SOCKET,SO_ERROR,
+                    &code,&bytes)==0&&
+                    (code==0||kc_nets_udp_peer_error(code)))continue;
+#endif
+            }
             kc_nets_fail(nets, KC_NETS_ENET);
             break;
         }
         if ((pollfd.revents & POLLHUP) != 0) {
-            if (nets->protocol == KC_NETS_TCP) {
+            if(nets->protocol==KC_NETS_TCP){
                 kc_nets_disconnected(nets);
-            } else {
-                kc_nets_fail(nets, KC_NETS_ENET);
+                break;
             }
-            break;
         }
     }
 }
