@@ -471,6 +471,23 @@ static void nets_cli_receive(
 }
 
 /**
+ * Preserves binary stdout relay semantics for source-aware UDP reception.
+ * @param host Numeric source host.
+ * @param port Source port.
+ * @param data Datagram bytes.
+ * @param data_size Datagram length.
+ * @param userdata Relay state.
+ * @return void.
+ */
+static void nets_cli_receive_from(const char *host,unsigned short port,
+    const void *data,size_t data_size,void *userdata)
+{
+    (void)host;
+    (void)port;
+    nets_cli_receive(data,data_size,userdata);
+}
+
+/**
  * Marks one TCP remote disconnect as terminal.
  * @param userdata Relay state.
  * @return void.
@@ -530,7 +547,7 @@ static int nets_cli_run(const nets_cli_options_t *options)
         udp_options.endpoint=network_options;
         udp_options.local_host=options->local_host;
         udp_options.local_port=options->local_port;
-        status=kc_nets_open_udp(&network,&udp_options,nets_cli_receive,
+        status=kc_nets_open_udp(&network,&udp_options,nets_cli_receive_from,
             nets_cli_network_error,&state);
     }else{
         status=kc_nets_open(&network,&network_options,nets_cli_receive,
@@ -1077,8 +1094,7 @@ static int nets_resident_worker(const char *directory,const char *name)
     options.endpoint.protocol=KC_NETS_UDP;
     options.local_host=*info.local_host?info.local_host:NULL;
     options.local_port=info.local_port;
-    options.receive_from=nets_resident_receive;
-    result=kc_nets_open_udp(&network,&options,NULL,NULL,&info);
+    result=kc_nets_open_udp(&network,&options,nets_resident_receive,NULL,&info);
     if(result!=KC_NETS_OK)return 1;
 #ifdef _WIN32
     (void)signal(SIGINT,nets_cli_signal);
