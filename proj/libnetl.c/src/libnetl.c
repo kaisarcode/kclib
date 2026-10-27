@@ -1577,7 +1577,10 @@ int kc_netl_open(kc_netl_interface_t **out,
         result=kc_netl_socket_open(&interface->listening,options,
             kc_netl_interface_receive,kc_netl_interface_disconnect,
             kc_netl_interface_error,interface);
-        (void)result;
+        if(result!=KC_NETL_OK){
+            free(interface);
+            return result;
+        }
     }else{
         memset(&remote,0,sizeof(remote));
         remote.host=interface->host;
