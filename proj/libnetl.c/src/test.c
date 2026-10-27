@@ -156,7 +156,7 @@ static unsigned short test_port(int protocol)
  */
 static int case_open(void)
 {
-    kc_netl_t *interface=NULL;
+    kc_netl_t *net=NULL;
     kc_netl_options_t options;
     test_state_t state={0};
     int fail=0;
@@ -165,15 +165,15 @@ static int case_open(void)
     options.port=12345U;
     options.protocol=KC_NETL_TCP;
     fail+=(kc_netl_open(NULL,&options,test_receive,NULL,test_error,&state)!=KC_NETL_EINVAL);
-    fail+=(kc_netl_open(&interface,NULL,test_receive,NULL,test_error,&state)!=KC_NETL_EINVAL);
-    fail+=(kc_netl_open(&interface,&options,NULL,NULL,test_error,&state)!=KC_NETL_EINVAL);
+    fail+=(kc_netl_open(&net,NULL,test_receive,NULL,test_error,&state)!=KC_NETL_EINVAL);
+    fail+=(kc_netl_open(&net,&options,NULL,NULL,test_error,&state)!=KC_NETL_EINVAL);
     options.protocol=99;
-    fail+=(kc_netl_open(&interface,&options,test_receive,NULL,test_error,&state)!=KC_NETL_EINVAL);
-    fail+=(interface!=NULL);
+    fail+=(kc_netl_open(&net,&options,test_receive,NULL,test_error,&state)!=KC_NETL_EINVAL);
+    fail+=(net!=NULL);
     kc_netl_close(NULL);
     fail+=(kc_netl_strerror(KC_NETL_OK)==NULL);
     fail+=(kc_netl_version()==0U);
-    case_result(fail,"kc_netl_open","validates the public interface and status helpers");
+    case_result(fail,"kc_netl_open","validates the public net and status helpers");
     return fail?1:0;
 }
 
@@ -187,7 +187,7 @@ static int case_tcp_open_failure(void)
     kc_netl_options_t options={0};
     test_state_t state={0};
     int rc,fail;
-    options.host="not-a-local-interface.invalid";
+    options.host="not-a-local-net.invalid";
     options.port=12345U;
     options.protocol=KC_NETL_TCP;
     rc=kc_netl_open(&net,&options,test_receive,NULL,test_error,&state);
@@ -236,12 +236,12 @@ static int case_udp(void)
 }
 
 /**
- * Verify persistent TCP and callback replies through the unified interface.
+ * Verify persistent TCP and callback replies through the unified net.
  * @return Zero on success.
  */
 static int case_tcp(void)
 {
-    kc_netl_t *interface=NULL;
+    kc_netl_t *net=NULL;
     kc_netl_options_t options;
     test_state_t state={0};
     unsigned short port=test_port(KC_NETL_TCP);
@@ -252,18 +252,18 @@ static int case_tcp(void)
     options.port=port;
     options.protocol=KC_NETL_TCP;
     state.reply=1;
-    if(kc_netl_open(&interface,&options,test_receive,NULL,test_error,&state)!=KC_NETL_OK)
+    if(kc_netl_open(&net,&options,test_receive,NULL,test_error,&state)!=KC_NETL_OK)
         return 1;
-    fail+=(kc_netl_send(interface,"hello",5U,NULL)!=KC_NETL_OK);
+    fail+=(kc_netl_send(net,"hello",5U,NULL)!=KC_NETL_OK);
     fail+=!test_wait(&state,2);
     fail+=(atomic_load(&state.errors)!=0);
-    kc_netl_close(interface);
-    case_result(fail,"kc_netl_tcp","uses a persistent bidirectional TCP interface");
+    kc_netl_close(net);
+    case_result(fail,"kc_netl_tcp","uses a persistent bidirectional TCP net");
     return fail?1:0;
 }
 
 /**
- * Verify invalid explicit destinations do not change the interface.
+ * Verify invalid explicit destinations do not change the net.
  * @return Zero on success.
  */
 static int case_invalid_destination(void)
@@ -290,7 +290,7 @@ static int case_invalid_destination(void)
 }
 
 /**
- * Verify one interface reaches two independent UDP destinations.
+ * Verify one net reaches two independent UDP destinations.
  * @return Zero on success.
  */
 static int case_udp_multidestination(void)
@@ -389,7 +389,7 @@ failure:
  */
 static int case_tcp_destination(void)
 {
-    kc_netl_t *interface=NULL;
+    kc_netl_t *net=NULL;
     kc_netl_options_t options={0};
     kc_netl_endpoint_t other={"127.0.0.1",1234U};
     test_state_t state={0};
@@ -397,13 +397,13 @@ static int case_tcp_destination(void)
     options.host="127.0.0.1";
     options.port=test_port(KC_NETL_TCP);
     options.protocol=KC_NETL_TCP;
-    if(!options.port||kc_netl_open(&interface,&options,test_receive,
+    if(!options.port||kc_netl_open(&net,&options,test_receive,
         NULL,test_error,&state)!=KC_NETL_OK){
         case_result(1,"kc_netl_tcp_destination",
             "does not reinterpret TCP addresses");return 1;
     }
-    fail+=(kc_netl_send(interface,"x",1U,&other)!=KC_NETL_EINVAL);
-    kc_netl_close(interface);
+    fail+=(kc_netl_send(net,"x",1U,&other)!=KC_NETL_EINVAL);
+    kc_netl_close(net);
     case_result(fail,"kc_netl_tcp_destination",
         "does not reinterpret TCP addresses");
     return fail!=0;
@@ -483,7 +483,7 @@ static int case_netl_cli(void) {
         fail += netl_cli_run(listed);
         fail += netl_cli_run(remove);
     }
-    case_result(fail,"netl_cli","validates command-line interface arguments and errors");
+    case_result(fail,"netl_cli","validates command-line net arguments and errors");
     return fail != 0;
 }
 #endif
