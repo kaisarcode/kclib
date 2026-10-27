@@ -47,6 +47,36 @@ connection; UDP binds one persistent datagram socket.
 
 All callbacks are positional arguments, never options fields.
 
+## Unified native interface
+
+`kc_netl_interface_open()` creates a persistent address-oriented interface
+without a client/server parameter. A TCP listener is created when the address
+can be bound locally; outbound TCP is established on the first
+`kc_netl_interface_send()`. The instance remains available when the remote
+destination is not listening, allowing a later send attempt. UDP uses one
+persistent bound datagram socket for both send and receive. Incoming traffic
+is always delivered as `peer, data, size, userdata`.
+
+```c
+kc_netl_interface_t *channel = NULL;
+kc_netl_options_t options = {
+    .host = "127.0.0.1",
+    .port = 8080,
+    .protocol = KC_NETL_TCP
+};
+
+int status = kc_netl_interface_open(
+    &channel, &options, receive, disconnect, error, userdata
+);
+if (status == KC_NETL_OK) {
+    (void)kc_netl_interface_send(channel, "Hello", 5U);
+    kc_netl_interface_close(channel);
+}
+```
+
+The low-level socket functions used inside the implementation still exist;
+CLI callers do not select between them.
+
 ## C contract
 
 - `kc_netl_open(out, options, receive, disconnect, error, userdata)` opens
