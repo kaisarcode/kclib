@@ -1489,6 +1489,56 @@ static void netl_cli_drain_replies(const char *dir,const char *name,
 }
 
 /**
+ * Removes stale queued UDP reply files when a listener is deleted.
+ * @param dir Private resident directory.
+ * @param name Listener identifier.
+ * @return void.
+ */
+static void netl_cli_purge_replies(const char *dir,const char *name)
+{
+    char first[NETL_CLI_NAME_MAX+16],second[NETL_CLI_NAME_MAX+16];
+    size_t a,b;
+    snprintf(first,sizeof(first),"%s.reply.",name);
+    snprintf(second,sizeof(second),"%s.pending.",name);
+    a=strlen(first);b=strlen(second);
+#ifdef _WIN32
+    {
+        char pattern[NETL_CLI_PATH_MAX];
+        WIN32_FIND_DATAA entry;
+        HANDLE scan;
+        if((size_t)snprintf(pattern,sizeof(pattern),"%s\\*",dir)>=sizeof(pattern))
+            return;
+        scan=FindFirstFileA(pattern,&entry);
+        if(scan==INVALID_HANDLE_VALUE)return;
+        do{
+            char path[NETL_CLI_PATH_MAX];
+            if(strncmp(entry.cFileName,first,a)!=0&&
+               strncmp(entry.cFileName,second,b)!=0)continue;
+            if((size_t)snprintf(path,sizeof(path),"%s\\%s",
+                dir,entry.cFileName)>=sizeof(path))continue;
+            (void)remove(path);
+        }while(FindNextFileA(scan,&entry));
+        FindClose(scan);
+    }
+#else
+    {
+        DIR *scan=opendir(dir);
+        struct dirent *entry;
+        if(!scan)return;
+        while((entry=readdir(scan))!=NULL){
+            char path[NETL_CLI_PATH_MAX];
+            if(strncmp(entry->d_name,first,a)!=0&&
+                strncmp(entry->d_name,second,b)!=0)continue;
+            if((size_t)snprintf(path,sizeof(path),"%s/%s",
+                dir,entry->d_name)>=sizeof(path))continue;
+            (void)remove(path);
+        }
+        closedir(scan);
+    }
+#endif
+}
+
+/**
  * Delete one registration and stop its resident process.
  * @param dir Runtime directory.
  * @param name Listener identifier.
@@ -1503,6 +1553,7 @@ static int netl_cli_delete(const char *dir, const char *name)
         netl_cli_wait_stopped(pid);
     }
     netl_cli_remove_state(dir, name);
+    netl_cli_purge_replies(dir,name);
     return 0;
 }
 
