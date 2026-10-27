@@ -620,7 +620,7 @@ static void kc_netl_receive_tcp(
         input.port = peer->port;
         input.data = buffer;
         input.data_size = (size_t)received;
-        listener->receive(&input, listener->userdata);
+        listener->receive(input.peer, input.data, input.data_size, listener->userdata);
         return;
     }
 
@@ -679,7 +679,7 @@ static void kc_netl_receive_udp(kc_netl_t *listener) {
     input.port = peer.port;
     input.data = buffer;
     input.data_size = (size_t)received;
-    listener->receive(&input, listener->userdata);
+    listener->receive(input.peer, input.data, input.data_size, listener->userdata);
     peer.closed = 1;
 }
 
@@ -1172,7 +1172,7 @@ int kc_netl_open(
  * Respond.
  * @return Function result.
  */
-int kc_netl_respond(
+int kc_netl_send(
     kc_netl_peer_t *peer,
     const void *data,
     size_t data_size
