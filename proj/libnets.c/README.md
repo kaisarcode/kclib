@@ -77,7 +77,7 @@ network error.
 
 A UDP instance keeps one socket and one local port. The original `kc_nets_send()`
 queues datagrams for the configured default destination. The additional
-`kc_nets_send_to(network, host, port, bytes, size)` queues a datagram to any
+`kc_nets_send_to(network, peer, bytes, size)` queues a datagram to any
 destination using **that same UDP socket**, without changing the default.
 
 Use one `kc_nets_open()` call with a `kc_nets_options_t` containing `host`,
