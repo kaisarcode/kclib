@@ -241,6 +241,178 @@ static int case_tcp(void)
     return fail?1:0;
 }
 
+/**
+ * Verify invalid explicit destinations do not change the interface.
+ * @return Zero on success.
+ */
+static int case_invalid_destination(void)
+{
+    kc_netl_t *net=NULL;
+    kc_netl_options_t options={0};
+    kc_netl_endpoint_t destination={NULL,0};
+    test_state_t state={0};
+    unsigned short port=test_port(KC_NETL_UDP);
+    int fail=0;
+    options.host="127.0.0.1";
+    options.port=port;options.protocol=KC_NETL_UDP;
+    if(!port||kc_netl_open(&net,&options,test_receive,NULL,
+        test_error,&state)!=KC_NETL_OK){case_result(1,"kc_netl_invalid_destination",
+        "rejects invalid datagram endpoints");return 1;}
+    fail+=(kc_netl_send(net,"x",1U,&destination)!=KC_NETL_EINVAL);
+    destination.host="127.0.0.1";
+    fail+=(kc_netl_send(net,"x",1U,&destination)!=KC_NETL_EINVAL);
+    fail+=(kc_netl_send(net,NULL,1U,NULL)!=KC_NETL_EINVAL);
+    kc_netl_close(net);
+    case_result(fail,"kc_netl_invalid_destination",
+        "rejects invalid datagram endpoints");
+    return fail!=0;
+}
+
+/**
+ * Verify one interface reaches two independent UDP destinations.
+ * @return Zero on success.
+ */
+static int case_udp_multidestination(void)
+{
+    kc_netl_t *sender=NULL,*first=NULL,*second=NULL;
+    kc_netl_options_t options={0};
+    kc_netl_endpoint_t destination;
+    test_state_t outbound={0},one={0},two={0};
+    unsigned short a=test_port(KC_NETL_UDP);
+    unsigned short b=test_port(KC_NETL_UDP);
+    unsigned short c=test_port(KC_NETL_UDP);
+    int fail=0;
+    if(!a||!b||!c||a==b||b==c||a==c){
+        case_result(1,"kc_netl_udp_multidestination",
+            "uses one persistent socket for multiple peers");return 1;
+    }
+    options.host="127.0.0.1";options.protocol=KC_NETL_UDP;
+    options.port=b;
+    if(kc_netl_open(&first,&options,test_receive,NULL,test_error,
+        &one)!=KC_NETL_OK)goto failure;
+    options.port=c;
+    if(kc_netl_open(&second,&options,test_receive,NULL,test_error,
+        &two)!=KC_NETL_OK)goto failure;
+    options.port=a;
+    if(kc_netl_open(&sender,&options,test_receive,NULL,test_error,
+        &outbound)!=KC_NETL_OK)goto failure;
+    destination.host="127.0.0.1";
+    destination.port=b;
+    fail+=(kc_netl_send(sender,"one",3U,&destination)!=KC_NETL_OK);
+    destination.port=c;
+    fail+=(kc_netl_send(sender,"two",3U,&destination)!=KC_NETL_OK);
+    destination.port=b;
+    fail+=(kc_netl_send(sender,"last",4U,&destination)!=KC_NETL_OK);
+    fail+=!test_wait(&one,2);
+    fail+=!test_wait(&two,1);
+    fail+=(two.size!=3U||memcmp(two.data,"two",3U)!=0);
+    fail+=(one.size!=4U||memcmp(one.data,"last",4U)!=0);
+    fail+=(one.last_port!=a||two.last_port!=a);
+    fail+=(atomic_load(&outbound.errors)!=0);
+    kc_netl_close(sender);kc_netl_close(first);kc_netl_close(second);
+    case_result(fail,"kc_netl_udp_multidestination",
+        "uses one persistent socket for multiple peers");
+    return fail!=0;
+failure:
+    kc_netl_close(sender);kc_netl_close(first);kc_netl_close(second);
+    case_result(1,"kc_netl_udp_multidestination",
+        "uses one persistent socket for multiple peers");
+    return 1;
+}
+
+/**
+ * Verify direct sends do not replace the configured UDP destination.
+ * @return Zero on success.
+ */
+static int case_udp_default_destination(void)
+{
+    kc_netl_t *sender=NULL,*receiver=NULL;
+    kc_netl_options_t options={0};
+    kc_netl_endpoint_t destination;
+    test_state_t outbound={0},inbound={0};
+    unsigned short a=test_port(KC_NETL_UDP);
+    unsigned short b=test_port(KC_NETL_UDP);
+    int fail=0;
+    if(!a||!b||a==b){
+        case_result(1,"kc_netl_udp_default",
+            "keeps the configured destination after explicit sends");return 1;
+    }
+    options.host="127.0.0.1";options.protocol=KC_NETL_UDP;
+    options.port=b;
+    if(kc_netl_open(&receiver,&options,test_receive,NULL,test_error,
+        &inbound)!=KC_NETL_OK)goto failure;
+    options.port=a;
+    if(kc_netl_open(&sender,&options,test_receive,NULL,test_error,
+        &outbound)!=KC_NETL_OK)goto failure;
+    destination.host="127.0.0.1";destination.port=b;
+    fail+=(kc_netl_send(sender,"target",6U,&destination)!=KC_NETL_OK);
+    fail+=!test_wait(&inbound,1);
+    fail+=(kc_netl_send(sender,"self",4U,NULL)!=KC_NETL_OK);
+    fail+=!test_wait(&outbound,1);
+    fail+=(outbound.size!=4U||memcmp(outbound.data,"self",4U)!=0);
+    fail+=(inbound.size!=6U||memcmp(inbound.data,"target",6U)!=0);
+    kc_netl_close(sender);kc_netl_close(receiver);
+    case_result(fail,"kc_netl_udp_default",
+        "keeps the configured destination after explicit sends");
+    return fail!=0;
+failure:
+    kc_netl_close(sender);kc_netl_close(receiver);
+    case_result(1,"kc_netl_udp_default",
+        "keeps the configured destination after explicit sends");
+    return 1;
+}
+
+/**
+ * Verify TCP rejects destination overrides rather than switching connections.
+ * @return Zero on success.
+ */
+static int case_tcp_destination(void)
+{
+    kc_netl_t *interface=NULL;
+    kc_netl_options_t options={0};
+    kc_netl_endpoint_t other={"127.0.0.1",1234U};
+    test_state_t state={0};
+    int fail=0;
+    options.host="127.0.0.1";
+    options.port=test_port(KC_NETL_TCP);
+    options.protocol=KC_NETL_TCP;
+    if(!options.port||kc_netl_open(&interface,&options,test_receive,
+        NULL,test_error,&state)!=KC_NETL_OK){
+        case_result(1,"kc_netl_tcp_destination",
+            "does not reinterpret TCP addresses");return 1;
+    }
+    fail+=(kc_netl_send(interface,"x",1U,&other)!=KC_NETL_EINVAL);
+    kc_netl_close(interface);
+    case_result(fail,"kc_netl_tcp_destination",
+        "does not reinterpret TCP addresses");
+    return fail!=0;
+}
+
+/**
+ * Verify a wildcard bind is not implicitly redirected to loopback.
+ * @return Zero on success.
+ */
+static int case_tcp_wildcard(void)
+{
+    kc_netl_t *net=NULL;
+    kc_netl_options_t options={0};
+    test_state_t state={0};
+    int fail=0;
+    options.host="0.0.0.0";
+    options.port=test_port(KC_NETL_TCP);
+    options.protocol=KC_NETL_TCP;
+    if(!options.port||kc_netl_open(&net,&options,test_receive,
+        NULL,test_error,&state)!=KC_NETL_OK){
+        case_result(1,"kc_netl_tcp_wildcard",
+            "never rewrites wildcard binds to loopback");return 1;
+    }
+    fail+=(kc_netl_send(net,"x",1U,NULL)!=KC_NETL_EINVAL);
+    kc_netl_close(net);
+    case_result(fail,"kc_netl_tcp_wildcard",
+        "never rewrites wildcard binds to loopback");
+    return fail!=0;
+}
+
 #if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
 
 /**
@@ -311,14 +483,19 @@ int main(int argc,char **argv)
     if(argc!=2){fprintf(stderr,"expected test case\n");return 2;}
     if(strcmp(argv[1],"all")==0){
 #if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
-        test_case_total=4;
+        test_case_total=9;
 #else
-        test_case_total=3;
+        test_case_total=8;
 #endif
         test_case_current=0;
         fails+=case_open();total++;
         fails+=case_udp();total++;
         fails+=case_tcp();total++;
+        fails+=case_invalid_destination();total++;
+        fails+=case_udp_multidestination();total++;
+        fails+=case_udp_default_destination();total++;
+        fails+=case_tcp_destination();total++;
+        fails+=case_tcp_wildcard();total++;
 #if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
         fails+=case_netl_cli();total++;
 #endif
@@ -330,6 +507,11 @@ int main(int argc,char **argv)
     if(strcmp(argv[1],"kc_netl_open")==0)return case_open();
     if(strcmp(argv[1],"kc_netl_udp")==0)return case_udp();
     if(strcmp(argv[1],"kc_netl_tcp")==0)return case_tcp();
+    if(strcmp(argv[1],"kc_netl_invalid_destination")==0)return case_invalid_destination();
+    if(strcmp(argv[1],"kc_netl_udp_multidestination")==0)return case_udp_multidestination();
+    if(strcmp(argv[1],"kc_netl_udp_default")==0)return case_udp_default_destination();
+    if(strcmp(argv[1],"kc_netl_tcp_destination")==0)return case_tcp_destination();
+    if(strcmp(argv[1],"kc_netl_tcp_wildcard")==0)return case_tcp_wildcard();
 #if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
     if(strcmp(argv[1],"netl_cli")==0)return case_netl_cli();
 #endif
