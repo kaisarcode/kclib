@@ -534,8 +534,8 @@ static int netl_cli_read_registration(
         if(!end||(*end!='\n'&&*end!='\0')||n>65535UL)return 1;
         registration->local_port=(unsigned short)n;
     }
-    if (!netl_cli_line_valid(registration->command)&&
-        !registration->outbound)return 1;
+    if(registration->command[0]&&
+        !netl_cli_line_valid(registration->command))return 1;
     snprintf(registration->name, sizeof(registration->name), "%s", name);
     return 0;
 }
