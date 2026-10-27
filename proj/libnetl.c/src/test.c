@@ -223,6 +223,62 @@ static int case_tcp(void)
     return fail?1:0;
 }
 
+#ifndef KC_CLI_PATH
+#define KC_CLI_PATH "netl"
+#endif
+
+/**
+ * Run the netl CLI with output discarded.
+ * @param args Arguments appended after the executable.
+ * @return 0 on success, 1 on failure.
+ */
+static int netl_cli_run(const char *args) {
+    char command[4096];
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
+        KC_CLI_PATH, args);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
+        KC_CLI_PATH, args);
+#endif
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Test CLI argument handling for listener administration.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_netl_cli(void) {
+    int fail = 0;
+
+    fail += netl_cli_run("--help");
+    fail += netl_cli_run("--version");
+    fail += netl_cli_run("") == 0;
+    fail += netl_cli_run("sample invalid-endpoint") == 0;
+    fail += netl_cli_run("sample 0.0.0.0:8080 true --unknown") == 0;
+    fail += netl_cli_run("bad/name -d") == 0;
+    fail += netl_cli_run("nonexistent") == 0;
+    fail += netl_cli_run("sender 127.0.0.1:invalid -t udp") == 0;
+    fail += netl_cli_run("sender badendpoint -t udp") == 0;
+    {
+        char create[256],listed[256],remove[256];
+        unsigned short port=(unsigned short)(20000U+
+            ((unsigned)kc_netl_version()%15000U));
+        snprintf(create,sizeof(create),
+            "contract_%u 127.0.0.1:%u -t udp",
+            (unsigned)port,(unsigned)port);
+        snprintf(listed,sizeof(listed),"-l contract_%u",(unsigned)port);
+        snprintf(remove,sizeof(remove),"contract_%u -d",(unsigned)port);
+        fail += netl_cli_run(create);
+        fail += netl_cli_run(listed);
+        fail += netl_cli_run(remove);
+    }
+    printf("[netl_cli] %s\n",fail?"FAIL":"PASS");
+    return fail != 0;
+}
+#endif
+
 /**
  * Run the public contract test suite.
  * @param argc Argument count.
@@ -237,11 +293,17 @@ int main(int argc,char **argv)
         fails+=case_open();total++;
         fails+=case_udp();total++;
         fails+=case_tcp();total++;
+#if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
+        fails+=case_netl_cli();total++;
+#endif
         printf("%d passed, %d failed\n",total-fails,fails);
         return fails;
     }
     if(strcmp(argv[1],"kc_netl_open")==0)return case_open();
     if(strcmp(argv[1],"kc_netl_udp")==0)return case_udp();
     if(strcmp(argv[1],"kc_netl_tcp")==0)return case_tcp();
+#if defined(KC_CLI_PATH) && !defined(__EMSCRIPTEN__)
+    if(strcmp(argv[1],"netl_cli")==0)return case_netl_cli();
+#endif
     fprintf(stderr,"unknown test case: %s\n",argv[1]);return 2;
 }
