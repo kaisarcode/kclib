@@ -1616,6 +1616,65 @@ int kc_netl_interface_send(kc_netl_interface_t *interface,
 }
 
 /**
+ * Queue one UDP datagram for an explicit endpoint on the existing socket.
+ * The operation does not change the configured default destination.
+ * @param interface Open UDP interface.
+ * @param host Destination hostname or numeric address.
+ * @param port Destination port.
+ * @param data Datagram payload.
+ * @param size Payload size.
+ * @return Network status.
+ */
+int kc_netl_interface_send_to(kc_netl_interface_t *interface,
+    const char *host,unsigned short port,const void *data,size_t size)
+{
+    kc_netl_t *endpoint;
+    kc_netl_output_t *output;
+    struct addrinfo hints,*addresses=NULL,*item;
+    struct sockaddr_storage local_address;
+    socklen_t local_size=(socklen_t)sizeof(local_address);
+    char service[16];
+    int status=KC_NETL_ENET;
+
+    if(!interface||interface->protocol!=KC_NETL_UDP||
+        !interface->outgoing||!host||!*host||port==0||
+        (!data&&size!=0U)||size>(size_t)INT_MAX)return KC_NETL_EINVAL;
+    endpoint=interface->outgoing;
+    if(getsockname(endpoint->fd,(struct sockaddr *)&local_address,
+        &local_size)!=0)return KC_NETL_ENET;
+    memset(&hints,0,sizeof(hints));
+    hints.ai_family=local_address.ss_family;
+    hints.ai_socktype=SOCK_DGRAM;
+    snprintf(service,sizeof(service),"%u",(unsigned)port);
+    if(getaddrinfo(host,service,&hints,&addresses)!=0)return KC_NETL_ENET;
+
+    for(item=addresses;item;item=item->ai_next){
+        if(item->ai_addrlen>(socklen_t)sizeof(struct sockaddr_storage))
+            continue;
+        output=kc_netl_output_new(data,size);
+        if(!output){status=KC_NETL_ENOMEM;break;}
+        memcpy(&output->address,item->ai_addr,(size_t)item->ai_addrlen);
+        output->address_size=(socklen_t)item->ai_addrlen;
+        kc_netl_lock(endpoint);
+        if(endpoint->stop){
+            kc_netl_unlock(endpoint);
+            kc_netl_output_free(output);
+            status=KC_NETL_ECLOSED;
+            break;
+        }
+        if(endpoint->udp_out_tail)
+            endpoint->udp_out_tail->next=output;
+        else endpoint->udp_out_head=output;
+        endpoint->udp_out_tail=output;
+        kc_netl_unlock(endpoint);
+        status=KC_NETL_OK;
+        break;
+    }
+    freeaddrinfo(addresses);
+    return status;
+}
+
+/**
  * Shut down every socket owned by the interface.
  * @return void.
  */
