@@ -1089,6 +1089,220 @@ static int nets_resident_worker(const char *directory,const char *name)
 }
 
 /**
+ * Removes persistent state files for a named endpoint.
+ * @param directory State directory.
+ * @param name Endpoint ID.
+ * @return void.
+ */
+static void nets_resident_remove_state(const char *directory,const char *name)
+{
+    char path[NETS_RESIDENT_PATH_MAX];
+    if(nets_resident_path(path,sizeof(path),directory,name,".meta")==0)
+        (void)remove(path);
+    if(nets_resident_path(path,sizeof(path),directory,name,".pid")==0)
+        (void)remove(path);
+}
+
+/**
+ * Stops a resident network endpoint and removes its registration.
+ * @param directory State directory.
+ * @param name Endpoint identifier.
+ * @return Zero on success.
+ */
+static int nets_resident_delete(const char *directory,const char *name)
+{
+    long pid;
+    if(nets_resident_read_pid(directory,name,&pid)==0&&nets_resident_alive(pid)){
+        nets_resident_stop(pid);
+#ifdef _WIN32
+        Sleep(100U);
+#else
+        {
+            struct timespec delay={0,100000000L};
+            (void)nanosleep(&delay,NULL);
+        }
+#endif
+    }
+    nets_resident_remove_state(directory,name);
+    return 0;
+}
+
+/**
+ * Creates one detached resident UDP sender with its endpoint metadata.
+ * @param directory Per-user state directory.
+ * @param info Endpoint and callback configuration.
+ * @return Zero on successful process startup.
+ */
+static int nets_resident_create(const char *directory,
+    const nets_resident_info_t *info)
+{
+    long old_pid;
+    if(nets_resident_mkdir(directory)!=0)return 1;
+    if(nets_resident_read_pid(directory,info->name,&old_pid)==0&&
+        nets_resident_alive(old_pid))nets_resident_stop(old_pid);
+    if(nets_resident_write(directory,info)!=0)return 1;
+#ifdef _WIN32
+    {
+        char executable[NETS_RESIDENT_PATH_MAX],command[NETS_RESIDENT_PATH_MAX+8];
+        STARTUPINFOA startup;
+        PROCESS_INFORMATION process;
+        DWORD n=GetModuleFileNameA(NULL,executable,(DWORD)sizeof(executable));
+        if(!n||n>=sizeof(executable))goto failed;
+        if((size_t)snprintf(command,sizeof(command),"\"%s\"",executable)
+            >=sizeof(command))goto failed;
+        if(!SetEnvironmentVariableA("KC_NETS_WORKER",info->name))goto failed;
+        memset(&startup,0,sizeof(startup));
+        memset(&process,0,sizeof(process));
+        startup.cb=sizeof(startup);
+        if(!CreateProcessA(NULL,command,NULL,NULL,FALSE,
+            DETACHED_PROCESS|CREATE_NO_WINDOW,NULL,NULL,&startup,&process)){
+            (void)SetEnvironmentVariableA("KC_NETS_WORKER",NULL);
+            goto failed;
+        }
+        (void)SetEnvironmentVariableA("KC_NETS_WORKER",NULL);
+        CloseHandle(process.hThread);
+        if(nets_resident_write_pid(directory,info->name,
+            (long)process.dwProcessId)!=0){
+            TerminateProcess(process.hProcess,0);
+            CloseHandle(process.hProcess);
+            goto failed;
+        }
+        CloseHandle(process.hProcess);
+    }
+#else
+    {
+        pid_t pid=fork();
+        if(pid<0)goto failed;
+        if(pid==0){
+            (void)setsid();
+            nets_cli_stop=0;
+            _exit(nets_resident_worker(directory,info->name));
+        }
+        if(nets_resident_write_pid(directory,info->name,(long)pid)!=0){
+            (void)kill(pid,SIGTERM);
+            goto failed;
+        }
+    }
+#endif
+    return 0;
+failed:
+    nets_resident_remove_state(directory,info->name);
+    return 1;
+}
+
+/**
+ * Queues one binary stdin datagram to a live resident endpoint.
+ * @param directory State directory.
+ * @param name Endpoint ID.
+ * @param destination Optional host, or NULL to use the registered default.
+ * @param port Destination port, or zero to use the registered default.
+ * @return Zero when delivered to the resident IPC queue.
+ */
+static int nets_resident_send(const char *directory,const char *name,
+    const char *destination,unsigned short port)
+{
+    nets_resident_info_t info;
+    char path[NETS_RESIDENT_PATH_MAX],temporary[NETS_RESIDENT_PATH_MAX];
+    char final_suffix[64],temp_suffix[64];
+    unsigned long pid;
+    long worker_pid;
+    FILE *file;
+    unsigned char data[65508];
+    size_t size;
+    if(nets_resident_read(directory,name,&info)!=0||
+        nets_resident_read_pid(directory,name,&worker_pid)!=0||
+        !nets_resident_alive(worker_pid))return 1;
+    if(!destination){destination=info.host;port=info.port;}
+    if(!destination||!*destination||strchr(destination,'\n')||
+        strchr(destination,'\r')||!port)return 1;
+#ifdef _WIN32
+    pid=(unsigned long)GetCurrentProcessId();
+#else
+    pid=(unsigned long)getpid();
+#endif
+    snprintf(final_suffix,sizeof(final_suffix),".send.%lu",pid);
+    snprintf(temp_suffix,sizeof(temp_suffix),".pending.%lu",pid);
+    if(nets_resident_path(path,sizeof(path),directory,name,final_suffix)!=0||
+        nets_resident_path(temporary,sizeof(temporary),directory,name,temp_suffix)!=0)
+        return 1;
+    file=fopen(temporary,"wb");
+    if(!file)return 1;
+#ifndef _WIN32
+    (void)chmod(temporary,0600);
+#endif
+    size=fread(data,1,sizeof(data),stdin);
+    if(ferror(stdin)||size>65507U||
+        fprintf(file,"%s\n%u\n",destination,(unsigned)port)<0||
+        (size&&fwrite(data,1,size,file)!=size)||
+        fflush(file)!=0){
+        fclose(file);remove(temporary);return 1;
+    }
+    if(fclose(file)!=0||rename(temporary,path)!=0){
+        remove(temporary);return 1;
+    }
+    return 0;
+}
+
+/**
+ * Prints registered resident endpoints or one selected endpoint.
+ * @param directory State directory.
+ * @param id Optional specific endpoint.
+ * @return Zero on success.
+ */
+static int nets_resident_list(const char *directory,const char *id)
+{
+    if(id){
+        nets_resident_info_t info;
+        long pid=0;
+        if(nets_resident_read(directory,id,&info)!=0)return 1;
+        (void)nets_resident_read_pid(directory,id,&pid);
+        printf("%s\t%s:%u\tudp\t%s\n",info.name,info.host,
+            (unsigned)info.port,nets_resident_alive(pid)?"running":"stopped");
+        return 0;
+    }
+#ifdef _WIN32
+    {
+        WIN32_FIND_DATAA item;
+        HANDLE listing;
+        char pattern[NETS_RESIDENT_PATH_MAX];
+        if((size_t)snprintf(pattern,sizeof(pattern),"%s\\*.meta",directory)
+            >=sizeof(pattern))return 1;
+        listing=FindFirstFileA(pattern,&item);
+        if(listing==INVALID_HANDLE_VALUE)return 0;
+        do{
+            size_t n=strlen(item.cFileName);
+            if(n>5U&&strcmp(item.cFileName+n-5U,".meta")==0){
+                char name[NETS_RESIDENT_ID_MAX];
+                if(n-5U>=sizeof(name))continue;
+                memcpy(name,item.cFileName,n-5U);
+                name[n-5U]=0;
+                (void)nets_resident_list(directory,name);
+            }
+        }while(FindNextFileA(listing,&item));
+        FindClose(listing);
+    }
+#else
+    {
+        DIR *listing=opendir(directory);
+        struct dirent *item;
+        if(!listing)return 0;
+        while((item=readdir(listing))!=NULL){
+            size_t n=strlen(item->d_name);
+            if(n>5U&&strcmp(item->d_name+n-5U,".meta")==0){
+                char name[NETS_RESIDENT_ID_MAX];
+                if(n-5U>=sizeof(name))continue;
+                memcpy(name,item->d_name,n-5U);
+                name[n-5U]=0;
+                (void)nets_resident_list(directory,name);
+            }
+        }
+        closedir(listing);
+    }
+#endif
+    return 0;
+}
+
+/**
  * Runs metadata handling or one endpoint relay.
  * @param argc Argument count.
  * @param argv Argument vector.
