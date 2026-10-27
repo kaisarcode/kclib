@@ -967,6 +967,81 @@ static int case_kc_netl_local_udp(void)
 }
 
 /**
+ * Tests the single address-oriented TCP interface without a public role.
+ */
+static int case_kc_netl_interface_tcp(void)
+{
+    kc_netl_interface_t *interface=NULL;
+    kc_netl_t *server=NULL;
+    kc_netl_options_t options;
+    receive_state_t received,handled;
+    int fail=0;
+    state_init(&received);
+    state_init(&handled);
+    atomic_store(&handled.tcp_callback_reply,1);
+    memset(&options,0,sizeof(options));
+    options.host="127.0.0.1";
+    options.protocol=KC_NETL_TCP;
+    if(kc_netl_open(&server,&options,receive,disconnect,error,
+        &handled)!=KC_NETL_OK)return 1;
+    options.port=kc_netl_port(server);
+    fail+=expect_int("interface TCP open without connecting",KC_NETL_OK,
+        kc_netl_interface_open(&interface,&options,receive,
+            disconnect,error,&received));
+    if(interface){
+        fail+=expect_int("interface TCP send",KC_NETL_OK,
+            kc_netl_interface_send(interface,"ping",4U));
+        fail+=expect_int("interface TCP callback",0,
+            wait_atomic_at_least(&received.receive_count,1));
+        fail+=expect_true("interface TCP response",
+            received.sizes[0]==8U&&
+            memcmp(received.data[0],"callback",8U)==0);
+    }
+    kc_netl_interface_close(interface);
+    kc_netl_close(server);
+    case_result(fail,"kc_netl_interface_tcp",
+        "creates once and lazily connects TCP on first send");
+    return fail!=0;
+}
+
+/**
+ * Tests UDP send and receive through one address-based interface.
+ */
+static int case_kc_netl_interface_udp(void)
+{
+    kc_netl_interface_t *interface=NULL;
+    kc_netl_t *server=NULL;
+    kc_netl_options_t options;
+    receive_state_t client,handled;
+    int fail=0;
+    state_init(&client);
+    state_init(&handled);
+    atomic_store(&handled.udp_reply,1);
+    memset(&options,0,sizeof(options));
+    options.host="127.0.0.1";
+    options.protocol=KC_NETL_UDP;
+    if(kc_netl_open(&server,&options,receive,disconnect,error,
+        &handled)!=KC_NETL_OK)return 1;
+    options.port=kc_netl_port(server);
+    fail+=expect_int("interface UDP open",KC_NETL_OK,
+        kc_netl_interface_open(&interface,&options,receive,
+            disconnect,error,&client));
+    if(interface){
+        fail+=expect_int("interface UDP send",KC_NETL_OK,
+            kc_netl_interface_send(interface,"ping",4U));
+        fail+=expect_int("interface UDP receives",0,
+            wait_atomic_at_least(&client.receive_count,1));
+        fail+=expect_true("interface UDP response",
+            client.sizes[0]==4U&&memcmp(client.data[0],"pong",4U)==0);
+    }
+    kc_netl_interface_close(interface);
+    kc_netl_close(server);
+    case_result(fail,"kc_netl_interface_udp",
+        "uses a single persistent socket and peer receive callback");
+    return fail!=0;
+}
+
+/**
  * Exercises one persistent outgoing TCP peer against a listening socket.
  * @return Zero on success, non-zero on failure.
  */
@@ -1115,7 +1190,7 @@ static int case_all(void) {
     int result;
 
     result = 0;
-    test_case_total = 9;
+    test_case_total = 11;
     test_case_current = 0;
     run_case(&result, case_kc_netl_open);
     run_case(&result, case_kc_netl_tcp);
@@ -1123,6 +1198,8 @@ static int case_all(void) {
     run_case(&result, case_kc_netl_udp);
     run_case(&result, case_kc_netl_outbound_udp);
     run_case(&result, case_kc_netl_local_udp);
+    run_case(&result, case_kc_netl_interface_udp);
+    run_case(&result, case_kc_netl_interface_tcp);
     run_case(&result, case_kc_netl_outbound_tcp);
     run_case(&result, case_kc_netl_status);
 #ifndef __EMSCRIPTEN__
