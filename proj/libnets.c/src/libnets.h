@@ -28,10 +28,27 @@ typedef struct kc_nets kc_nets_t;
 #define KC_NETS_TCP 1
 #define KC_NETS_UDP 2
 
+/**
+ * Receives a UDP datagram and its numeric source address.
+ * @param host Source IP address (borrowed for the callback).
+ * @param port Source UDP port.
+ * @param data Borrowed datagram bytes.
+ * @param data_size Datagram byte count.
+ * @param userdata User context.
+ * @return void.
+ */
+typedef void (*kc_nets_receive_from_fn)(const char *host,
+    unsigned short port,const void *data,size_t data_size,void *userdata);
+
 typedef struct {
     const char *host;
     unsigned short port;
     int protocol;
+    /* Optional source address for the persistent UDP mapping. */
+    const char *local_host;
+    unsigned short local_port;
+    /* Optional source-aware UDP receive callback, replacing receive for UDP. */
+    kc_nets_receive_from_fn receive_from;
 } kc_nets_options_t;
 
 /**
@@ -105,6 +122,25 @@ int kc_nets_send(
     const void *data,
     size_t data_size
 );
+
+/**
+ * Queues one UDP datagram to an arbitrary destination using the same socket.
+ * @param nets Open UDP sender.
+ * @param host Destination hostname or numeric IP.
+ * @param port Destination UDP port.
+ * @param data Datagrams bytes (copied).
+ * @param data_size Datagram length.
+ * @return KC_NETS_OK or a negative status.
+ */
+int kc_nets_send_to(kc_nets_t *nets,const char *host,unsigned short port,
+    const void *data,size_t data_size);
+
+/**
+ * Reads the UDP socket's locally bound port.
+ * @param nets Open endpoint.
+ * @return Local port, or zero when unavailable.
+ */
+unsigned short kc_nets_local_port(const kc_nets_t *nets);
 
 /**
  * Closes and releases one outbound endpoint.
