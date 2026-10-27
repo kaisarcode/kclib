@@ -1588,13 +1588,30 @@ int kc_netl_open(kc_netl_interface_t **out,
  * Send using a persistent socket; a TCP connection is established lazily.
  * @return KC_NETL_OK on success, an error code otherwise.
  */
+/**
+ * Queue a UDP datagram to a supplied endpoint without changing the socket.
+ * @param interface Open interface.
+ * @param host Destination.
+ * @param port Destination port.
+ * @param data Payload bytes.
+ * @param size Payload size.
+ * @return Status code.
+ */
+static int kc_netl_send_directed(kc_netl_interface_t *interface,
+    const char *host,unsigned short port,const void *data,size_t size);
+
 int kc_netl_send(kc_netl_interface_t *interface,
-    const void *data,size_t size)
+    const void *data,size_t size,const kc_netl_endpoint_t *destination)
 {
     kc_netl_connect_options_t options;
     int result;
     const char *destination;
     if(!interface||(!data&&size))return KC_NETL_EINVAL;
+    if(destination){
+        if(interface->protocol!=KC_NETL_UDP)return KC_NETL_EINVAL;
+        return kc_netl_send_directed(interface,destination->host,
+            destination->port,data,size);
+    }
     if(interface->protocol==KC_NETL_TCP&&!interface->peer){
         if(interface->outgoing){
             kc_netl_socket_close(interface->outgoing);
@@ -1627,7 +1644,7 @@ int kc_netl_send(kc_netl_interface_t *interface,
  * @param size Payload size.
  * @return Network status.
  */
-int kc_netl_send_to(kc_netl_interface_t *interface,
+static int kc_netl_send_directed(kc_netl_interface_t *interface,
     const char *host,unsigned short port,const void *data,size_t size)
 {
     kc_netl_socket_t *endpoint;
