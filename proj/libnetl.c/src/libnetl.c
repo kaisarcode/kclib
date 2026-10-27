@@ -643,7 +643,7 @@ static void kc_netl_receive_udp(kc_netl_t *listener) {
         &address_size
     );
     if (received < 0) {
-        if (!kc_netl_would_block()) kc_netl_fail(listener, KC_NETL_ENET);
+        /* An unreachable UDP peer is not a terminal socket failure. */
         return;
     }
 
@@ -918,9 +918,7 @@ static void kc_netl_worker_run(kc_netl_t *listener) {
             if ((listener->pollfds[0].revents & POLLOUT) != 0) {
                 kc_netl_flush_udp(listener);
             }
-            if (
-                (listener->pollfds[0].revents & (POLLERR | POLLNVAL)) != 0
-            ) {
+            if ((listener->pollfds[0].revents & POLLNVAL) != 0) {
                 kc_netl_fail(listener, KC_NETL_ENET);
             }
             continue;
