@@ -1443,9 +1443,10 @@ static int netl_cli_reply(const char *dir,const char *name,
     size_t size;
     long worker;
     unsigned long process_id;
-    if(!host||!*host||strchr(host,'\n')||strchr(host,'\r')||
-        netl_cli_read_registration(dir,name,&registration)!=0||
-        registration.protocol!=KC_NETL_UDP||
+    if(netl_cli_read_registration(dir,name,&registration)!=0||
+        (!registration.outbound&&registration.protocol!=KC_NETL_UDP)||
+        (!registration.outbound&&(!host||!*host))||
+        (host&&(strchr(host,'\n')||strchr(host,'\r')))||
         netl_cli_read_pid(dir,name,&worker)!=0||
         !netl_cli_pid_alive(worker))return 1;
 #ifdef _WIN32
@@ -1468,7 +1469,7 @@ static int netl_cli_reply(const char *dir,const char *name,
 #endif
     size=fread(buffer,1,sizeof(buffer),stdin);
     if(ferror(stdin)||size>65507U||
-        fprintf(file,"%s\n%u\n",host,(unsigned)port)<0||
+        fprintf(file,"%s\n%u\n",host?host:"-",(unsigned)port)<0||
         (size&&fwrite(buffer,1,size,file)!=size)||
         fflush(file)!=0){
         fclose(file);remove(pending);return 1;
@@ -1485,7 +1486,8 @@ static int netl_cli_reply(const char *dir,const char *name,
  * @param path Completed request file.
  * @return Zero on successful handoff.
  */
-static int netl_cli_process_reply(kc_netl_t *listener,const char *path)
+static int netl_cli_process_reply(kc_netl_t *listener,
+    kc_netl_peer_t *outgoing,const char *path)
 {
     FILE *file=fopen(path,"rb");
     char host[1025],port_text[32];
@@ -1500,8 +1502,11 @@ static int netl_cli_process_reply(kc_netl_t *listener,const char *path)
             host[n-1U]=0;
             if(netl_cli_port(port_text,&port)){
                 size=fread(buffer,1,sizeof(buffer),file);
-                if(!ferror(file)&&size<=65507U&&feof(file))
-                    rc=kc_netl_reply_to(listener,host,port,buffer,size)==KC_NETL_OK?0:1;
+                if(!ferror(file)&&size<=65507U&&feof(file)){
+                    int status=outgoing?kc_netl_send(outgoing,buffer,size):
+                        kc_netl_reply_to(listener,host,port,buffer,size);
+                    rc=status==KC_NETL_OK?0:1;
+                }
             }
         }
     }
@@ -1517,7 +1522,7 @@ static int netl_cli_process_reply(kc_netl_t *listener,const char *path)
  * @return void.
  */
 static void netl_cli_drain_replies(const char *dir,const char *name,
-    kc_netl_t *listener)
+    kc_netl_t *listener,kc_netl_peer_t *outgoing)
 {
     char prefix[NETL_CLI_NAME_MAX+16];
     size_t prefix_size;
@@ -1537,7 +1542,7 @@ static void netl_cli_drain_replies(const char *dir,const char *name,
             if(strncmp(entry.cFileName,prefix,prefix_size)!=0)continue;
             if((size_t)snprintf(path,sizeof(path),"%s\\%s",dir,entry.cFileName)
                 >=sizeof(path))continue;
-            (void)netl_cli_process_reply(listener,path);
+            (void)netl_cli_process_reply(listener,outgoing,path);
             (void)remove(path);
         }while(FindNextFileA(search,&entry));
         FindClose(search);
@@ -1552,7 +1557,7 @@ static void netl_cli_drain_replies(const char *dir,const char *name,
             if(strncmp(entry->d_name,prefix,prefix_size)!=0)continue;
             if((size_t)snprintf(path,sizeof(path),"%s/%s",dir,entry->d_name)
                 >=sizeof(path))continue;
-            (void)netl_cli_process_reply(listener,path);
+            (void)netl_cli_process_reply(listener,outgoing,path);
             (void)remove(path);
         }
         closedir(directory);
