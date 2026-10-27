@@ -63,7 +63,6 @@ typedef pthread_t stun_thread_t;
 #define STUN_ATTRIBUTE_MAX 16384U
 #define STUN_RTO 500U
 
-/* Private STUN SHA-1, SHA-256, HMAC and CRC-32 primitives. */
 typedef struct {
     uint32_t state[8];
     uint64_t count;
@@ -828,9 +827,9 @@ int kc_stun_encode(const kc_stun_message_t *message,
         const kc_stun_attribute_t *a=&message->attributes[i];
         size_t padded;
         if(a->type==KC_STUN_MESSAGE_INTEGRITY||
-           a->type==KC_STUN_MESSAGE_INTEGRITY_SHA256||
-           a->type==KC_STUN_FINGERPRINT||a->size>65535U||
-           (!a->data&&a->size))return KC_STUN_EINVAL;
+            a->type==KC_STUN_MESSAGE_INTEGRITY_SHA256||
+            a->type==KC_STUN_FINGERPRINT||a->size>65535U||
+            (!a->data&&a->size))return KC_STUN_EINVAL;
         padded=(a->size+3U)&~3U;
         if(n+4U+padded>capacity||n+4U+padded>STUN_MAX_PACKET)
             return KC_STUN_EINVAL;
@@ -1402,8 +1401,8 @@ int kc_stun_client_refresh(kc_stun_client_t *c,uint64_t timeout_ms)
     for(i=0;i<original.count;i++){
         const stun_attribute_view_t *a=&original.attrs[i];
         if(a->type==KC_STUN_MESSAGE_INTEGRITY||
-           a->type==KC_STUN_MESSAGE_INTEGRITY_SHA256||
-           a->type==KC_STUN_FINGERPRINT)continue;
+            a->type==KC_STUN_MESSAGE_INTEGRITY_SHA256||
+            a->type==KC_STUN_FINGERPRINT)continue;
         if(!stun_append(next,&n,a->type,a->data,a->size))goto failed;
     }
     mode=c->negotiated_integrity?c->negotiated_integrity:c->integrity;

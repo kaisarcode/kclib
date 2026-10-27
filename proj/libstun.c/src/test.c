@@ -558,7 +558,8 @@ static void stun_test_mapped_codec(void)
 }
 
 /**
- * Exercises concurrent independent STUN transactions over the same borrowed UDP.
+ * Exercises concurrent independent STUN transactions over the same
+ * borrowed UDP.
  * @return void.
  */
 static void stun_test_shared_udp(void)
