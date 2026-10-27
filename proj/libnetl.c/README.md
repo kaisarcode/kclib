@@ -49,8 +49,8 @@ Received bytes are independent from bytes chosen for the reply.
 ## CLI
 
 ```sh
-netl servidor 5000 handler -t udp
-netl cliente -c 192.168.1.20:6000 -t udp --local-port 4000
+netl servidor 0.0.0.0:5000 handler -t udp
+netl cliente 192.168.1.20:6000 -t udp
 echo "one" | netl cliente
 echo "two" | netl cliente
 netl -l
@@ -74,3 +74,11 @@ Use `make all` for other platforms with installed toolchains.
 ## License
 
 GNU Lesser General Public License, version 3 (LGPLv3).
+
+The CLI uses one creation syntax: `netl <id> <addr:port> [command...]`.
+A wildcard address (`0.0.0.0` or `::`) binds a local listener;
+a concrete destination establishes a remote endpoint. Neither creating the
+endpoint nor specifying a callback sends data. Sending happens later by
+piping stdin to `netl <id>`; incoming data is delivered asynchronously to
+the optional callback. For a wildcard listener, an incoming peer is needed to
+identify a destination for its response.
