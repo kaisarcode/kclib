@@ -53,7 +53,7 @@ static void test_receive(kc_netl_peer_t *peer,const void *data,
     memcpy(state->data,data,size);
     state->size=size;
     state->last_port=kc_netl_peer_port(peer);
-    if(state->reply) (void)kc_netl_peer_send(peer,"pong",4U);
+    if(state->reply && size!=4U) (void)kc_netl_peer_send(peer,"pong",4U);
     atomic_fetch_add(&state->received,1);
 }
 
@@ -110,7 +110,11 @@ static unsigned short test_port(int protocol)
 {
     test_socket_t fd;
     struct sockaddr_in address;
+    #ifdef _WIN32
+    int length=(int)sizeof(address);
+    #else
     socklen_t length=(socklen_t)sizeof(address);
+    #endif
     unsigned short port=0;
     fd=socket(AF_INET,protocol==KC_NETL_TCP?SOCK_STREAM:SOCK_DGRAM,0);
 #ifdef _WIN32
