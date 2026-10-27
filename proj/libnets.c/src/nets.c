@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +32,9 @@
 #include <windows.h>
 #else
 #include <sys/select.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #endif
@@ -584,6 +588,286 @@ static int nets_cli_run(const nets_cli_options_t *options)
     if (status != KC_NETS_OK) {
         return nets_cli_error_value("network error: ", kc_nets_strerror(status));
     }
+    return 0;
+}
+
+#define NETS_RESIDENT_PATH_MAX 2048
+#define NETS_RESIDENT_ID_MAX 128
+#define NETS_RESIDENT_CMD_MAX 2048
+
+typedef struct {
+    char name[NETS_RESIDENT_ID_MAX];
+    char host[1025];
+    char local_host[1025];
+    char command[NETS_RESIDENT_CMD_MAX];
+    unsigned short port;
+    unsigned short local_port;
+} nets_resident_info_t;
+
+/**
+ * Checks a resident endpoint identifier without accepting path separators.
+ * @param id Endpoint identifier.
+ * @return 1 when valid.
+ */
+static int nets_resident_id_valid(const char *id)
+{
+    const unsigned char *p;
+    if(!id||!*id||strlen(id)>=NETS_RESIDENT_ID_MAX||
+        strcmp(id,".")==0||strcmp(id,"..")==0)return 0;
+    for(p=(const unsigned char *)id;*p;p++)
+        if(!isalnum(*p)&&*p!='.'&&*p!='_'&&*p!='-')return 0;
+    return 1;
+}
+
+/**
+ * Resolves the per-user resident endpoint directory.
+ * @param path Destination.
+ * @param capacity Path capacity.
+ * @return Zero on success.
+ */
+static int nets_resident_directory(char *path,size_t capacity)
+{
+    const char *override=getenv("KC_NETS_DIR");
+    if(override&&*override)
+        return (size_t)snprintf(path,capacity,"%s",override)<capacity?0:1;
+#ifdef _WIN32
+    {
+        char temporary[MAX_PATH];
+        DWORD n=GetTempPathA((DWORD)sizeof(temporary),temporary);
+        if(!n||n>=sizeof(temporary))return 1;
+        return (size_t)snprintf(path,capacity,"%skaisarcode\\nets.c",
+            temporary)<capacity?0:1;
+    }
+#else
+    {
+        const char *xdg=getenv("XDG_RUNTIME_DIR");
+        if(xdg&&*xdg)
+            return (size_t)snprintf(path,capacity,"%s/kaisarcode/nets.c",
+                xdg)<capacity?0:1;
+        return (size_t)snprintf(path,capacity,"/tmp/kaisarcode/nets.c-%lu",
+            (unsigned long)getuid())<capacity?0:1;
+    }
+#endif
+}
+
+/**
+ * Creates an endpoint directory using private ownership permissions.
+ * @param path Directory to create.
+ * @return Zero on success.
+ */
+static int nets_resident_mkdir(const char *path)
+{
+    char buffer[NETS_RESIDENT_PATH_MAX];
+    char *p;
+    if((size_t)snprintf(buffer,sizeof(buffer),"%s",path)>=sizeof(buffer))return 1;
+    for(p=buffer+1;*p;p++){
+#ifdef _WIN32
+        if(*p!='\\'&&*p!='/')continue;
+#else
+        if(*p!='/')continue;
+#endif
+        {
+            char old=*p;
+            *p=0;
+#ifdef _WIN32
+            if(!CreateDirectoryA(buffer,NULL)&&GetLastError()!=ERROR_ALREADY_EXISTS)
+                return 1;
+#else
+            if(mkdir(buffer,0700)!=0&&errno!=EEXIST)return 1;
+#endif
+            *p=old;
+        }
+    }
+#ifdef _WIN32
+    return CreateDirectoryA(buffer,NULL)||GetLastError()==ERROR_ALREADY_EXISTS?0:1;
+#else
+    return mkdir(buffer,0700)==0||errno==EEXIST?0:1;
+#endif
+}
+
+/**
+ * Constructs the path of one resident endpoint state file.
+ * @param path Destination.
+ * @param capacity Destination capacity.
+ * @param directory Runtime directory.
+ * @param id Validated endpoint name.
+ * @param suffix State file suffix.
+ * @return Zero on success.
+ */
+static int nets_resident_path(char *path,size_t capacity,
+    const char *directory,const char *id,const char *suffix)
+{
+#ifdef _WIN32
+    return (size_t)snprintf(path,capacity,"%s\\%s%s",directory,id,suffix)
+        <capacity?0:1;
+#else
+    return (size_t)snprintf(path,capacity,"%s/%s%s",directory,id,suffix)
+        <capacity?0:1;
+#endif
+}
+
+/**
+ * Parses a port, optionally permitting zero for ephemeral local binds.
+ * @param text Port text.
+ * @param allow_zero Whether zero is accepted.
+ * @param port Destination port.
+ * @return 1 when valid.
+ */
+static int nets_resident_port(const char *text,int allow_zero,
+    unsigned short *port)
+{
+    char *end=NULL;
+    unsigned long n;
+    if(!text||!*text||!port||*text=='-')return 0;
+    errno=0;n=strtoul(text,&end,10);
+    if(errno||!end||*end||n>65535UL||(!allow_zero&&!n))return 0;
+    *port=(unsigned short)n;
+    return 1;
+}
+
+/**
+ * Saves one resident endpoint configuration.
+ * @param directory Runtime directory.
+ * @param info Endpoint configuration.
+ * @return Zero on success.
+ */
+static int nets_resident_write(const char *directory,
+    const nets_resident_info_t *info)
+{
+    char path[NETS_RESIDENT_PATH_MAX];
+    FILE *f;
+    if(nets_resident_path(path,sizeof(path),directory,info->name,".meta"))return 1;
+    f=fopen(path,"wb");
+    if(!f)return 1;
+    if(fprintf(f,"%s\n%u\n%s\n%u\n%s\n",
+        info->host,(unsigned)info->port,info->local_host,
+        (unsigned)info->local_port,info->command)<0){
+        fclose(f);return 1;
+    }
+    if(fclose(f)!=0)return 1;
+#ifndef _WIN32
+    (void)chmod(path,0600);
+#endif
+    return 0;
+}
+
+/**
+ * Loads a resident endpoint configuration.
+ * @param directory Runtime directory.
+ * @param id Endpoint identifier.
+ * @param info Destination.
+ * @return Zero on success.
+ */
+static int nets_resident_read(const char *directory,const char *id,
+    nets_resident_info_t *info)
+{
+    char path[NETS_RESIDENT_PATH_MAX],port[32],local[32];
+    FILE *f;
+    char *fields[3];
+    size_t i;
+    if(!nets_resident_id_valid(id)||!info||
+        nets_resident_path(path,sizeof(path),directory,id,".meta"))return 1;
+    f=fopen(path,"rb");
+    if(!f)return 1;
+    memset(info,0,sizeof(*info));
+    fields[0]=info->host;fields[1]=info->local_host;fields[2]=info->command;
+    if(!fgets(info->host,sizeof(info->host),f)||
+       !fgets(port,sizeof(port),f)||
+       !fgets(info->local_host,sizeof(info->local_host),f)||
+       !fgets(local,sizeof(local),f)||
+       !fgets(info->command,sizeof(info->command),f)){
+        fclose(f);return 1;
+    }
+    fclose(f);
+    for(i=0;i<3;i++){
+        size_t length=strlen(fields[i]);
+        if(length&&fields[i][length-1U]=='\n')fields[i][length-1U]=0;
+    }
+    {
+        size_t length=strlen(port);
+        if(length&&port[length-1U]=='\n')port[length-1U]=0;
+        length=strlen(local);
+        if(length&&local[length-1U]=='\n')local[length-1U]=0;
+    }
+    if(!nets_resident_port(port,0,&info->port)||
+       !nets_resident_port(local,1,&info->local_port)||
+       !*info->host||!*info->command)return 1;
+    snprintf(info->name,sizeof(info->name),"%s",id);
+    return 0;
+}
+
+/**
+ * Reads one endpoint's resident PID.
+ * @param directory Runtime directory.
+ * @param id Endpoint identifier.
+ * @param pid Destination PID.
+ * @return Zero on success.
+ */
+static int nets_resident_read_pid(const char *directory,const char *id,long *pid)
+{
+    char path[NETS_RESIDENT_PATH_MAX];
+    FILE *f;
+    if(nets_resident_path(path,sizeof(path),directory,id,".pid"))return 1;
+    f=fopen(path,"rb");
+    if(!f)return 1;
+    if(fscanf(f,"%ld",pid)!=1||*pid<=0){fclose(f);return 1;}
+    fclose(f);
+    return 0;
+}
+
+/**
+ * Checks whether one resident process is still running.
+ * @param pid Process identifier.
+ * @return One when alive.
+ */
+static int nets_resident_alive(long pid)
+{
+#ifdef _WIN32
+    HANDLE h=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,(DWORD)pid);
+    DWORD state=0;
+    if(!h)return 0;
+    if(!GetExitCodeProcess(h,&state)){CloseHandle(h);return 0;}
+    CloseHandle(h);
+    return state==STILL_ACTIVE;
+#else
+    return pid>0&&(kill((pid_t)pid,0)==0||errno==EPERM);
+#endif
+}
+
+/**
+ * Stops a resident endpoint by PID.
+ * @param pid Resident process identifier.
+ * @return void.
+ */
+static void nets_resident_stop(long pid)
+{
+#ifdef _WIN32
+    HANDLE h=OpenProcess(PROCESS_TERMINATE,FALSE,(DWORD)pid);
+    if(h){(void)TerminateProcess(h,0);CloseHandle(h);}
+#else
+    if(pid>0)(void)kill((pid_t)pid,SIGTERM);
+#endif
+}
+
+/**
+ * Saves the process ID for one resident endpoint.
+ * @param directory Runtime directory.
+ * @param id Endpoint identifier.
+ * @param pid Process identifier.
+ * @return Zero on success.
+ */
+static int nets_resident_write_pid(const char *directory,const char *id,long pid)
+{
+    char path[NETS_RESIDENT_PATH_MAX];
+    FILE *f;
+    if(nets_resident_path(path,sizeof(path),directory,id,".pid"))return 1;
+    f=fopen(path,"wb");
+    if(!f)return 1;
+    if(fprintf(f,"%ld\n",pid)<0){fclose(f);return 1;}
+    if(fclose(f)!=0)return 1;
+#ifndef _WIN32
+    (void)chmod(path,0600);
+#endif
     return 0;
 }
 
