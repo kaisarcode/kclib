@@ -68,19 +68,19 @@ static volatile sig_atomic_t nets_cli_stop;
 static void nets_cli_help(const char *name)
 {
     printf("Usage: %s <host> <port> [options]\n", name);
-    printf("       %s <id> -s [host port]\\n",name);
-    printf("       %s <id> -d\\n",name);
-    printf("       %s -l [id]\\n",name);
+    printf("       %s <id> -s [host port]\n",name);
+    printf("       %s <id> -d\n",name);
+    printf("       %s -l [id]\n",name);
     printf("\n");
     printf("Options:\n");
     printf("  -t, --transport <type>  tcp or udp (default: tcp)\n");
     printf("  --local-host <host>     UDP source bind address\n");
     printf("  --local-port <port>     UDP source port (default: 0)\n");
-    printf("  --id <id>                Register resident UDP sender\\n");
-    printf("  --receive <cmd>          Run command for incoming datagrams\\n");
-    printf("  -s, --send               Send stdin through resident endpoint\\n");
-    printf("  -l, --list               List resident endpoints\\n");
-    printf("  -d, --delete             Remove resident endpoint\\n");
+    printf("  --id <id>                Register resident UDP sender\n");
+    printf("  --receive <cmd>          Run command for incoming datagrams\n");
+    printf("  -s, --send               Send stdin through resident endpoint\n");
+    printf("  -l, --list               List resident endpoints\n");
+    printf("  -d, --delete             Remove resident endpoint\n");
     printf("  -h, --help              Show this help\n");
     printf("  -v, --version           Show version\n");
 }
@@ -1354,7 +1354,7 @@ static int nets_resident_dispatch(int argc,char **argv)
     {
         nets_resident_info_t info;
         int transport=KC_NETS_TCP;
-        if(argc<5||!nets_resident_port(argv[2],0,&info.port))return 1;
+        if(argc<5)return 1;
         memset(&info,0,sizeof(info));
         if(!nets_resident_port(argv[2],0,&info.port)||
             !argv[1][0]||strlen(argv[1])>=sizeof(info.host))return 1;
