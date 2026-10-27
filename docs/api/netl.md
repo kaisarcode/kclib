@@ -3,6 +3,23 @@
 `libnetl` is a general-purpose TCP/UDP listener. JavaScript below is an
 **API projection**, not a binding or implementation.
 
+## Lua projection
+
+```lua
+local listener = netl.open({
+    host = "0.0.0.0",
+    port = 5000,
+    protocol = netl.UDP
+}, function(input)
+    input.peer:respond(input.data)
+end)
+
+listener:replyTo("192.168.1.20", 6000, bytes)
+listener:close()
+```
+
+As in the JS projection, receive callbacks are arguments to `open()`.
+
 ## JavaScript projection
 
 ```js
