@@ -1408,7 +1408,14 @@ static int netl_cli_serve(const char *dir, const char *name)
     options.port = registration.port;
     options.protocol = registration.protocol;
     listener = NULL;
-    if(registration.outbound){
+    if(registration.protocol==KC_NETL_TCP){
+        /* Test the local bind; address spelling never defines a role. */
+        rc=kc_netl_open(&listener,&options,netl_cli_receive,
+            netl_cli_disconnect,netl_cli_error,&state);
+    }else{
+        rc=KC_NETL_ENET;
+    }
+    if(rc!=KC_NETL_OK){
         kc_netl_connect_options_t remote;
         memset(&remote,0,sizeof(remote));
         remote.host=registration.host;
@@ -1419,9 +1426,6 @@ static int netl_cli_serve(const char *dir, const char *name)
         remote.local_port=registration.local_port;
         rc=kc_netl_connect(&listener,&state.outgoing,&remote,
             netl_cli_receive,netl_cli_disconnect,netl_cli_error,&state);
-    }else{
-        rc=kc_netl_open(&listener,&options,netl_cli_receive,
-            netl_cli_disconnect,netl_cli_error,&state);
     }
     if (rc != KC_NETL_OK) {
 #ifdef _WIN32
@@ -1437,7 +1441,7 @@ static int netl_cli_serve(const char *dir, const char *name)
     (void)signal(SIGTERM, netl_cli_signal);
 #endif
     while (!netl_cli_stop) {
-        if(registration.outbound&&!netl_cli_stop)
+        if(state.outgoing&&!netl_cli_stop)
             netl_cli_drain_sends(dir,name,state.outgoing,registration.protocol);
         netl_cli_sleep();
     }
@@ -1471,7 +1475,6 @@ static int netl_cli_send(const char *dir, const char *name)
     long worker;
     unsigned long process_id;
     if(netl_cli_read_registration(dir,name,&registration)!=0||
-        !registration.outbound||
         netl_cli_read_pid(dir,name,&worker)!=0||
         !netl_cli_pid_alive(worker))return 1;
 #ifdef _WIN32
@@ -2042,9 +2045,8 @@ int main(int argc, char **argv)
     registration.protocol=protocol;
     /* Wildcard interfaces bind locally; specific remote endpoints connect. */
     /* UDP owns one bidirectional socket regardless of destination address. */
-    registration.outbound=protocol==KC_NETL_UDP||
-        (strcmp(registration.host,"0.0.0.0")!=0&&
-         strcmp(registration.host,"::")!=0);
+    /* Every registration can later receive stdin independent of address. */
+    registration.outbound=1;
     if(command[0]){
         if(!netl_cli_line_valid(command)){
             fprintf(stderr,"netl: invalid command\n");return 1;
