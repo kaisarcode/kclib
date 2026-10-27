@@ -80,13 +80,12 @@ queues datagrams for the configured default destination. The additional
 `kc_nets_send_to(network, host, port, bytes, size)` queues a datagram to any
 destination using **that same UDP socket**, without changing the default.
 
-The existing `kc_nets_open()` and `kc_nets_options_t` remain unchanged.
-For explicit local binding and source-aware reception use `kc_nets_open_udp()`
-with `kc_nets_udp_options_t`: its `endpoint` field holds the original host,
-port and protocol, while `local_host` and `local_port` select the source
-interface and port (zero means ephemeral). `receive_from` supplies the numeric
-source host and port of each datagram and takes precedence over the optional
-legacy receive callback. Query the assigned port with `kc_nets_local_port()`.
+Use one `kc_nets_open()` call with a `kc_nets_options_t` containing `host`,
+`port`, `protocol`, and optional `local_host` and `local_port` for UDP.
+The receive callback is a separate opening argument; it receives the bytes
+and an optional source endpoint. For UDP this endpoint contains the numeric
+sender host and port; TCP passes NULL. The original `send()` behavior remains
+available. Query the local UDP port with `kc_nets_local_port()`.
 
 A UDP sender is not restricted to datagrams from the initial destination.
 The configured default host determines the address family of the socket;
