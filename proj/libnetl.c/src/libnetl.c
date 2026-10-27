@@ -1192,13 +1192,28 @@ int kc_netl_open(
 }
 
 /**
- * Creates a persistent remote TCP or UDP endpoint. TCP connects once, while
- * UDP remains unconnected so incoming datagrams retain their source identity.
+ * Creates a persistent remote TCP or UDP endpoint.
+ * TCP connects once, while UDP remains unconnected so incoming datagrams retain
+ * their source identity.
  * All sends and receives use the same descriptor until close.
+ * @param out Destination endpoint pointer.
+ * @param peer_out Destination peer pointer.
+ * @param options Connection options.
+ * @param receive Incoming byte callback.
+ * @param disconnect Optional TCP disconnect callback.
+ * @param error Optional asynchronous failure callback.
+ * @param userdata Consumer data passed to callbacks.
+ * @return KC_NETL_OK on success, otherwise a negative status.
  */
-int kc_netl_connect(kc_netl_t **out,kc_netl_peer_t **peer_out,
-    const kc_netl_connect_options_t *options,kc_netl_receive_fn receive,
-    kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata)
+int kc_netl_connect(
+    kc_netl_t **out,
+    kc_netl_peer_t **peer_out,
+    const kc_netl_connect_options_t *options,
+    kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,
+    kc_netl_error_fn error,
+    void *userdata
+)
 {
     kc_netl_t *endpoint;
     kc_netl_peer_t *peer;
@@ -1206,11 +1221,18 @@ int kc_netl_connect(kc_netl_t **out,kc_netl_peer_t **peer_out,
     kc_netl_fd_t socket_fd=KC_NETL_FD_INVALID;
     char service[16];
     int rc=KC_NETL_ENET;
-    if(!out||!peer_out)return KC_NETL_EINVAL;
-    *out=NULL;*peer_out=NULL;
-    if(!options||!options->host||!*options->host||!options->port||
-       !receive||(options->protocol!=KC_NETL_TCP&&
-       options->protocol!=KC_NETL_UDP))return KC_NETL_EINVAL;
+    if (!out || !peer_out) return KC_NETL_EINVAL;
+    *out = NULL;
+    *peer_out = NULL;
+    if (
+        !options || !options->host || !*options->host || !options->port ||
+        !receive || (
+            options->protocol != KC_NETL_TCP &&
+            options->protocol != KC_NETL_UDP
+        )
+    ) {
+        return KC_NETL_EINVAL;
+    }
     endpoint=(kc_netl_t *)calloc(1,sizeof(*endpoint));
     if(!endpoint)return KC_NETL_ENOMEM;
     endpoint->fd=KC_NETL_FD_INVALID;
@@ -1240,16 +1262,30 @@ int kc_netl_connect(kc_netl_t **out,kc_netl_peer_t **peer_out,
         int bound=0;
         socket_fd=socket(item->ai_family,item->ai_socktype,item->ai_protocol);
         if(socket_fd==KC_NETL_FD_INVALID)continue;
-        if(options->local_host||options->local_port||
-           options->protocol==KC_NETL_UDP){
-            memset(&bind_hints,0,sizeof(bind_hints));
-            bind_hints.ai_family=item->ai_family;
-            bind_hints.ai_socktype=hints.ai_socktype;
-            bind_hints.ai_flags=AI_PASSIVE;
-            snprintf(local_port,sizeof(local_port),"%u",
-                (unsigned)options->local_port);
-            if(getaddrinfo(options->local_host&&*options->local_host?
-                options->local_host:NULL,local_port,&bind_hints,&local)==0){
+        if (
+            options->local_host || options->local_port ||
+            options->protocol == KC_NETL_UDP
+        ) {
+            memset(&bind_hints, 0, sizeof(bind_hints));
+            bind_hints.ai_family = item->ai_family;
+            bind_hints.ai_socktype = hints.ai_socktype;
+            bind_hints.ai_flags = AI_PASSIVE;
+            snprintf(
+                local_port,
+                sizeof(local_port),
+                "%u",
+                (unsigned)options->local_port
+            );
+            if (
+                getaddrinfo(
+                    options->local_host && *options->local_host
+                        ? options->local_host
+                        : NULL,
+                    local_port,
+                    &bind_hints,
+                    &local
+                ) == 0
+            ) {
                 for(it=local;it;it=it->ai_next){
                     if(bind(socket_fd,it->ai_addr,
                         (socklen_t)it->ai_addrlen)==0){
@@ -1264,8 +1300,10 @@ int kc_netl_connect(kc_netl_t **out,kc_netl_peer_t **peer_out,
                 continue;
             }
         }
-        if(options->protocol==KC_NETL_TCP&&
-           connect(socket_fd,item->ai_addr,(socklen_t)item->ai_addrlen)!=0){
+        if (
+            options->protocol == KC_NETL_TCP &&
+            connect(socket_fd, item->ai_addr, (socklen_t)item->ai_addrlen) != 0
+        ) {
             KC_NETL_CLOSE(socket_fd);
             socket_fd=KC_NETL_FD_INVALID;
             continue;
@@ -1377,19 +1415,34 @@ int kc_netl_send(
     return KC_NETL_OK;
 }
 
+/**
+ * Returns the protocol of a peer.
+ * @param peer Borrowed peer.
+ * @return KC_NETL_TCP, KC_NETL_UDP, or zero.
+ */
 int kc_netl_peer_protocol(const kc_netl_peer_t *peer)
 {
-    return peer?peer->protocol:0;
+    return peer ? peer->protocol : 0;
 }
 
+/**
+ * Returns the numeric remote host of a peer.
+ * @param peer Borrowed peer.
+ * @return Numeric address or NULL.
+ */
 const char *kc_netl_peer_host(const kc_netl_peer_t *peer)
 {
-    return peer?peer->host:NULL;
+    return peer ? peer->host : NULL;
 }
 
+/**
+ * Returns the remote port of a peer.
+ * @param peer Borrowed peer.
+ * @return Port, or zero.
+ */
 unsigned short kc_netl_peer_port(const kc_netl_peer_t *peer)
 {
-    return peer?peer->port:0U;
+    return peer ? peer->port : 0U;
 }
 
 /**

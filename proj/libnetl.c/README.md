@@ -1,4 +1,4 @@
-# libnetl.c — Persistent bidirectional networking
+# libnetl.c - Persistent bidirectional networking
 
 `libnetl.c` creates, operates, and closes persistent TCP and UDP sockets.
 Inbound listeners and outbound connections use the same `peer, data` receive

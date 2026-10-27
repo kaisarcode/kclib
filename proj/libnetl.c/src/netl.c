@@ -1365,9 +1365,20 @@ static void netl_cli_cleanup(netl_cli_state_t *state)
     netl_cli_unlock(state);
 }
 
-/* The resident worker consumes queued requests using the existing peer. */
-static void netl_cli_drain_sends(const char *dir,const char *name,
-    kc_netl_peer_t *outgoing,int protocol);
+/**
+ * Drains queued outgoing send requests for one resident endpoint.
+ * @param dir Runtime directory.
+ * @param name Listener identifier.
+ * @param outgoing Outbound peer.
+ * @param protocol Protocol of the endpoint.
+ * @return void.
+ */
+static void netl_cli_drain_sends(
+    const char *dir,
+    const char *name,
+    kc_netl_peer_t *outgoing,
+    int protocol
+);
 
 /**
  * Run one resident listener.
@@ -1446,20 +1457,14 @@ static int netl_cli_serve(const char *dir, const char *name)
 }
 
 /**
- * Copies standard input to a private, complete UDP reply request file.
- * A final rename prevents the worker from observing partial binary payloads.
- * @param dir Resident listener state directory.
- * @param name Listener identifier.
- * @param host Destination host.
- * @param port Destination UDP port.
- * @return Zero when queued, otherwise failure.
- */
-/**
  * Submits stdin through private IPC to an already resident outbound endpoint.
- * The worker owns the persistent socket and each IPC file carries exactly
- * one UDP datagram or the complete TCP byte stream.
+ * The worker owns the persistent socket and each IPC file carries exactly one
+ * UDP datagram or the complete TCP byte stream.
+ * @param dir Runtime directory.
+ * @param name Listener identifier.
+ * @return Zero on success, non-zero on failure.
  */
-static int netl_cli_send(const char *dir,const char *name)
+static int netl_cli_send(const char *dir, const char *name)
 {
     char path[NETL_CLI_PATH_MAX],pending[NETL_CLI_PATH_MAX];
     char suffix[64],partial[64];
@@ -1507,9 +1512,16 @@ static int netl_cli_send(const char *dir,const char *name)
 /**
  * Delivers a complete local IPC request through the existing outbound peer.
  * UDP maps each file to one datagram, TCP queues its ordered byte stream.
+ * @param outgoing Outbound peer.
+ * @param protocol Protocol of the endpoint.
+ * @param path IPC file path.
+ * @return Zero on success, non-zero on failure.
  */
-static int netl_cli_process_send(kc_netl_peer_t *outgoing,
-    int protocol,const char *path)
+static int netl_cli_process_send(
+    kc_netl_peer_t *outgoing,
+    int protocol,
+    const char *path
+)
 {
     FILE *file=fopen(path,"rb");
     unsigned char buffer[65508];
@@ -1534,9 +1546,18 @@ static int netl_cli_process_send(kc_netl_peer_t *outgoing,
 
 /**
  * Drains complete outgoing send requests for one resident endpoint.
+ * @param dir Runtime directory.
+ * @param name Listener identifier.
+ * @param outgoing Outbound peer.
+ * @param protocol Protocol of the endpoint.
+ * @return void.
  */
-static void netl_cli_drain_sends(const char *dir,const char *name,
-    kc_netl_peer_t *outgoing,int protocol)
+static void netl_cli_drain_sends(
+    const char *dir,
+    const char *name,
+    kc_netl_peer_t *outgoing,
+    int protocol
+)
 {
     char prefix[NETL_CLI_NAME_MAX+16];
     size_t prefix_size;
@@ -1547,8 +1568,12 @@ static void netl_cli_drain_sends(const char *dir,const char *name,
         char pattern[NETL_CLI_PATH_MAX];
         WIN32_FIND_DATAA entry;
         HANDLE scan;
-        if((size_t)snprintf(pattern,sizeof(pattern),"%s\\%s*",dir,prefix)
-            >=sizeof(pattern))return;
+        if (
+            (size_t)snprintf(pattern, sizeof(pattern), "%s\\%s*", dir, prefix) >=
+            sizeof(pattern)
+        ) {
+            return;
+        }
         scan=FindFirstFileA(pattern,&entry);
         if(scan==INVALID_HANDLE_VALUE)return;
         do{
@@ -1597,14 +1622,22 @@ static void netl_cli_purge_sends(const char *dir,const char *name)
         char pattern[NETL_CLI_PATH_MAX];
         WIN32_FIND_DATAA entry;
         HANDLE scan;
-        if((size_t)snprintf(pattern,sizeof(pattern),"%s\\*",dir)>=sizeof(pattern))
+        if (
+            (size_t)snprintf(pattern, sizeof(pattern), "%s\\*", dir) >=
+            sizeof(pattern)
+        ) {
             return;
+        }
         scan=FindFirstFileA(pattern,&entry);
         if(scan==INVALID_HANDLE_VALUE)return;
         do{
             char path[NETL_CLI_PATH_MAX];
-            if(strncmp(entry.cFileName,first,a)!=0&&
-               strncmp(entry.cFileName,second,b)!=0)continue;
+            if (
+                strncmp(entry.cFileName, first, a) != 0 &&
+                strncmp(entry.cFileName, second, b) != 0
+            ) {
+                continue;
+            }
             if((size_t)snprintf(path,sizeof(path),"%s\\%s",
                 dir,entry.cFileName)>=sizeof(path))continue;
             (void)remove(path);

@@ -869,6 +869,7 @@ static int case_kc_netl_udp(void) {
  * Exercises one persistent outgoing UDP peer against a listener.
  * Both peers receive through the same callback contract and send through
  * kc_netl_send without reopening their socket.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_outbound_udp(void)
 {
@@ -923,6 +924,7 @@ static int case_kc_netl_outbound_udp(void)
 
 /**
  * Exercises one persistent outgoing TCP peer against a listening socket.
+ * @return Zero on success, non-zero on failure.
  */
 static int case_kc_netl_outbound_tcp(void)
 {
