@@ -11,6 +11,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#define KC_NETL_INTERNAL_API
 #include "libnetl.h"
 
 #include <stdatomic.h>
@@ -340,13 +341,13 @@ static void receive(kc_netl_peer_t *peer,const void *data,
         kc_netl_peer_protocol(peer) == KC_NETL_TCP &&
         atomic_load(&state->tcp_callback_reply)
     ) {
-        (void)kc_netl_send(peer, "callback", 8U);
+        (void)kc_netl_peer_send(peer, "callback", 8U);
     }
     if (
         kc_netl_peer_protocol(peer) == KC_NETL_UDP &&
         atomic_load(&state->udp_reply)
     ) {
-        (void)kc_netl_send(peer, "pong", 4U);
+        (void)kc_netl_peer_send(peer, "pong", 4U);
     }
 
     atomic_fetch_add(&state->receive_count, 1);
@@ -404,7 +405,7 @@ static DWORD WINAPI respond_thread_main(LPVOID userdata) {
     respond_job_t *job;
 
     job = (respond_job_t *)userdata;
-    job->status = kc_netl_send(job->peer, job->data, job->data_size);
+    job->status = kc_netl_peer_send(job->peer, job->data, job->data_size);
     return 0;
 }
 #else
@@ -417,7 +418,7 @@ static void *respond_thread_main(void *userdata) {
     respond_job_t *job;
 
     job = (respond_job_t *)userdata;
-    job->status = kc_netl_send(job->peer, job->data, job->data_size);
+    job->status = kc_netl_peer_send(job->peer, job->data, job->data_size);
     return NULL;
 }
 #endif
@@ -467,12 +468,12 @@ static int respond_from_thread(
  */
 static int case_kc_netl_open(void) {
     kc_netl_options_t options;
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
     receive_state_t state;
     int pending;
     int fail;
 
-    listener = (kc_netl_t *)1;
+    listener = (kc_netl_socket_t *)1;
     pending = -1;
     fail = 0;
     state_init(&state);
@@ -483,25 +484,25 @@ static int case_kc_netl_open(void) {
     fail += expect_int(
         "NULL out",
         KC_NETL_EINVAL,
-        kc_netl_open(NULL, &options, receive, disconnect, error, &state)
+        kc_netl_socket_open(NULL, &options, receive, disconnect, error, &state)
     );
     fail += expect_int(
         "NULL options",
         KC_NETL_EINVAL,
-        kc_netl_open(&listener, NULL, receive, disconnect, error, &state)
+        kc_netl_socket_open(&listener, NULL, receive, disconnect, error, &state)
     );
     fail += expect_true("failed open clears output", listener == NULL);
     fail += expect_int(
         "NULL receive",
         KC_NETL_EINVAL,
-        kc_netl_open(&listener, &options, NULL, disconnect, error, &state)
+        kc_netl_socket_open(&listener, &options, NULL, disconnect, error, &state)
     );
 
     options.protocol = 99;
     fail += expect_int(
         "invalid protocol",
         KC_NETL_EINVAL,
-        kc_netl_open(&listener, &options, receive, disconnect, error, &state)
+        kc_netl_socket_open(&listener, &options, receive, disconnect, error, &state)
     );
 
     options.protocol = KC_NETL_TCP;
@@ -509,19 +510,19 @@ static int case_kc_netl_open(void) {
     fail += expect_int(
         "invalid pending count",
         KC_NETL_EINVAL,
-        kc_netl_open(&listener, &options, receive, disconnect, error, &state)
+        kc_netl_socket_open(&listener, &options, receive, disconnect, error, &state)
     );
 
     options.max_pending_connections = NULL;
     fail += expect_int(
         "TCP open",
         KC_NETL_OK,
-        kc_netl_open(&listener, &options, receive, disconnect, error, &state)
+        kc_netl_socket_open(&listener, &options, receive, disconnect, error, &state)
     );
     fail += expect_true("listener allocated", listener != NULL);
-    fail += expect_true("ephemeral port selected", kc_netl_port(listener) != 0U);
-    kc_netl_close(listener);
-    kc_netl_close(NULL);
+    fail += expect_true("ephemeral port selected", kc_netl_socket_port(listener) != 0U);
+    kc_netl_socket_close(listener);
+    kc_netl_socket_close(NULL);
 
     case_result(
         fail,
@@ -538,7 +539,7 @@ static int case_kc_netl_open(void) {
 static int case_kc_netl_tcp(void) {
     static const unsigned char binary[] = {'x', 0, 'y'};
     kc_netl_options_t options;
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
     receive_state_t state;
     test_fd_t client_a;
     test_fd_t client_b;
@@ -559,7 +560,7 @@ static int case_kc_netl_tcp(void) {
     options.protocol = KC_NETL_TCP;
 
     if (
-        kc_netl_open(
+        kc_netl_socket_open(
             &listener,
             &options,
             receive,
@@ -571,12 +572,12 @@ static int case_kc_netl_tcp(void) {
         return 1;
     }
 
-    client_a = test_tcp_connect(kc_netl_port(listener));
-    client_b = test_tcp_connect(kc_netl_port(listener));
+    client_a = test_tcp_connect(kc_netl_socket_port(listener));
+    client_b = test_tcp_connect(kc_netl_socket_port(listener));
     if (client_a == TEST_FD_INVALID || client_b == TEST_FD_INVALID) {
         if (client_a != TEST_FD_INVALID) TEST_CLOSE(client_a);
         if (client_b != TEST_FD_INVALID) TEST_CLOSE(client_b);
-        kc_netl_close(listener);
+        kc_netl_socket_close(listener);
         return 1;
     }
 
@@ -625,12 +626,12 @@ static int case_kc_netl_tcp(void) {
         fail += expect_int(
             "first ordered response",
             KC_NETL_OK,
-            kc_netl_send(peer_a, "one", 3U)
+            kc_netl_peer_send(peer_a, "one", 3U)
         );
         fail += expect_int(
             "second ordered response",
             KC_NETL_OK,
-            kc_netl_send(peer_a, "two", 3U)
+            kc_netl_peer_send(peer_a, "two", 3U)
         );
         fail += test_socket_expect(client_a, "onetwo", 6U);
     }
@@ -648,7 +649,7 @@ static int case_kc_netl_tcp(void) {
         fail += expect_int(
             "pending close response",
             KC_NETL_OK,
-            kc_netl_send(peer_a, "bye", 3U)
+            kc_netl_peer_send(peer_a, "bye", 3U)
         );
         kc_netl_peer_close(peer_a);
         fail += test_socket_expect(client_a, "bye", 3U);
@@ -695,7 +696,7 @@ static int case_kc_netl_tcp(void) {
     );
     fail += expect_int("no listener error", 0, atomic_load(&state.error_count));
 
-    kc_netl_close(listener);
+    kc_netl_socket_close(listener);
     case_result(
         fail,
         "kc_netl_tcp",
@@ -710,7 +711,7 @@ static int case_kc_netl_tcp(void) {
  */
 static int case_kc_netl_listener_close(void) {
     kc_netl_options_t options;
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
     receive_state_t state;
     test_fd_t client;
     char byte;
@@ -726,7 +727,7 @@ static int case_kc_netl_listener_close(void) {
     options.protocol = KC_NETL_TCP;
 
     if (
-        kc_netl_open(
+        kc_netl_socket_open(
             &listener,
             &options,
             receive,
@@ -738,9 +739,9 @@ static int case_kc_netl_listener_close(void) {
         return 1;
     }
 
-    client = test_tcp_connect(kc_netl_port(listener));
+    client = test_tcp_connect(kc_netl_socket_port(listener));
     if (client == TEST_FD_INVALID) {
-        kc_netl_close(listener);
+        kc_netl_socket_close(listener);
         return 1;
     }
 
@@ -751,7 +752,7 @@ static int case_kc_netl_listener_close(void) {
         wait_atomic_at_least(&state.receive_count, 1)
     );
 
-    kc_netl_close(listener);
+    kc_netl_socket_close(listener);
     listener = NULL;
     received = recv(client, &byte, 1, 0);
     fail += expect_true("active peer socket closed", received <= 0);
@@ -772,7 +773,7 @@ static int case_kc_netl_listener_close(void) {
 static int case_kc_netl_udp(void) {
     static const unsigned char payload[] = {'p', 0, 'g'};
     kc_netl_options_t options;
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
     receive_state_t state;
     struct sockaddr_in address;
     test_fd_t client;
@@ -790,7 +791,7 @@ static int case_kc_netl_udp(void) {
     options.protocol = KC_NETL_UDP;
 
     if (
-        kc_netl_open(
+        kc_netl_socket_open(
             &listener,
             &options,
             receive,
@@ -804,14 +805,14 @@ static int case_kc_netl_udp(void) {
 
     client = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (client == TEST_FD_INVALID) {
-        kc_netl_close(listener);
+        kc_netl_socket_close(listener);
         return 1;
     }
     (void)test_socket_timeout(client);
 
     memset(&address, 0, sizeof(address));
     address.sin_family = AF_INET;
-    address.sin_port = htons(kc_netl_port(listener));
+    address.sin_port = htons(kc_netl_socket_port(listener));
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
     fail += expect_int(
@@ -856,7 +857,7 @@ static int case_kc_netl_udp(void) {
     fail += expect_int("no listener error", 0, atomic_load(&state.error_count));
 
     TEST_CLOSE(client);
-    kc_netl_close(listener);
+    kc_netl_socket_close(listener);
     case_result(
         fail,
         "kc_netl_udp",
@@ -873,7 +874,7 @@ static int case_kc_netl_udp(void) {
  */
 static int case_kc_netl_outbound_udp(void)
 {
-    kc_netl_t *listener=NULL,*outbound=NULL;
+    kc_netl_socket_t *listener=NULL,*outbound=NULL;
     kc_netl_peer_t *remote=NULL;
     kc_netl_options_t listen_options;
     kc_netl_connect_options_t connect_options;
@@ -885,26 +886,26 @@ static int case_kc_netl_outbound_udp(void)
     memset(&listen_options,0,sizeof(listen_options));
     listen_options.host="127.0.0.1";
     listen_options.protocol=KC_NETL_UDP;
-    if(kc_netl_open(&listener,&listen_options,receive,disconnect,error,
+    if(kc_netl_socket_open(&listener,&listen_options,receive,disconnect,error,
         &server)!=KC_NETL_OK)return 1;
     memset(&connect_options,0,sizeof(connect_options));
     connect_options.host="127.0.0.1";
-    connect_options.port=kc_netl_port(listener);
+    connect_options.port=kc_netl_socket_port(listener);
     connect_options.protocol=KC_NETL_UDP;
     connect_options.local_host="127.0.0.1";
     fail+=expect_int("outbound UDP open",KC_NETL_OK,
-        kc_netl_connect(&outbound,&remote,&connect_options,receive,
+        kc_netl_socket_connect(&outbound,&remote,&connect_options,receive,
             disconnect,error,&client));
     if(remote){
-        unsigned short local_port=kc_netl_port(outbound);
+        unsigned short local_port=kc_netl_socket_port(outbound);
         fail+=expect_true("UDP outgoing persistent local port",
             local_port!=0);
         fail+=expect_int("outgoing UDP first send",KC_NETL_OK,
-            kc_netl_send(remote,"a",1U));
+            kc_netl_peer_send(remote,"a",1U));
         fail+=expect_int("outgoing UDP first response",0,
             wait_atomic_at_least(&client.receive_count,1));
         fail+=expect_int("outgoing UDP second send",KC_NETL_OK,
-            kc_netl_send(remote,"b",1U));
+            kc_netl_peer_send(remote,"b",1U));
         fail+=expect_int("outgoing UDP second response",0,
             wait_atomic_at_least(&client.receive_count,2));
         fail+=expect_int("UDP source port retained",local_port,
@@ -915,8 +916,8 @@ static int case_kc_netl_outbound_udp(void)
             client.sizes[0]==4U&&
             memcmp(client.data[0],"pong",4U)==0);
     }
-    kc_netl_close(outbound);
-    kc_netl_close(listener);
+    kc_netl_socket_close(outbound);
+    kc_netl_socket_close(listener);
     case_result(fail,"kc_netl_outbound_udp",
         "uses persistent local socket for repeated bidirectional UDP");
     return fail!=0;
@@ -929,7 +930,7 @@ static int case_kc_netl_outbound_udp(void)
  */
 static int case_kc_netl_local_udp(void)
 {
-    kc_netl_t *temporary=NULL,*endpoint=NULL;
+    kc_netl_socket_t *temporary=NULL,*endpoint=NULL;
     kc_netl_peer_t *peer=NULL;
     kc_netl_options_t listener_options;
     kc_netl_connect_options_t options;
@@ -940,28 +941,28 @@ static int case_kc_netl_local_udp(void)
     memset(&listener_options,0,sizeof(listener_options));
     listener_options.host="127.0.0.1";
     listener_options.protocol=KC_NETL_UDP;
-    if(kc_netl_open(&temporary,&listener_options,receive,disconnect,error,
+    if(kc_netl_socket_open(&temporary,&listener_options,receive,disconnect,error,
         &state)!=KC_NETL_OK)return 1;
-    port=kc_netl_port(temporary);
-    kc_netl_close(temporary);
+    port=kc_netl_socket_port(temporary);
+    kc_netl_socket_close(temporary);
     memset(&options,0,sizeof(options));
     options.host="127.0.0.1";
     options.port=port;
     options.protocol=KC_NETL_UDP;
     fail+=expect_int("local UDP address opens",KC_NETL_OK,
-        kc_netl_connect(&endpoint,&peer,&options,receive,disconnect,
+        kc_netl_socket_connect(&endpoint,&peer,&options,receive,disconnect,
             error,&state));
     if(peer){
         fail+=expect_int("local UDP retains configured port",(int)port,
-            (int)kc_netl_port(endpoint));
+            (int)kc_netl_socket_port(endpoint));
         fail+=expect_int("local UDP sends from bound socket",KC_NETL_OK,
-            kc_netl_send(peer,"hi",2U));
+            kc_netl_peer_send(peer,"hi",2U));
         fail+=expect_int("local UDP receives on same interface",0,
             wait_atomic_at_least(&state.receive_count,1));
         fail+=expect_int("local UDP source is same port",(int)port,
             (int)state.ports[0]);
     }
-    kc_netl_close(endpoint);
+    kc_netl_socket_close(endpoint);
     case_result(fail,"kc_netl_local_udp",
         "sends and receives from the same concrete local UDP interface");
     return fail!=0;
@@ -973,8 +974,8 @@ static int case_kc_netl_local_udp(void)
  */
 static int case_kc_netl_interface_tcp(void)
 {
-    kc_netl_interface_t *interface=NULL;
-    kc_netl_t *server=NULL;
+    kc_netl_t *interface=NULL;
+    kc_netl_socket_t *server=NULL;
     kc_netl_options_t options;
     receive_state_t received,handled;
     int fail=0;
@@ -984,23 +985,23 @@ static int case_kc_netl_interface_tcp(void)
     memset(&options,0,sizeof(options));
     options.host="127.0.0.1";
     options.protocol=KC_NETL_TCP;
-    if(kc_netl_open(&server,&options,receive,disconnect,error,
+    if(kc_netl_socket_open(&server,&options,receive,disconnect,error,
         &handled)!=KC_NETL_OK)return 1;
-    options.port=kc_netl_port(server);
+    options.port=kc_netl_socket_port(server);
     fail+=expect_int("interface TCP open without connecting",KC_NETL_OK,
-        kc_netl_interface_open(&interface,&options,receive,
+        kc_netl_open(&interface,&options,receive,
             disconnect,error,&received));
     if(interface){
         fail+=expect_int("interface TCP send",KC_NETL_OK,
-            kc_netl_interface_send(interface,"ping",4U));
+            kc_netl_send(interface,"ping",4U));
         fail+=expect_int("interface TCP callback",0,
             wait_atomic_at_least(&received.receive_count,1));
         fail+=expect_true("interface TCP response",
             received.sizes[0]==8U&&
             memcmp(received.data[0],"callback",8U)==0);
     }
-    kc_netl_interface_close(interface);
-    kc_netl_close(server);
+    kc_netl_close(interface);
+    kc_netl_socket_close(server);
     case_result(fail,"kc_netl_interface_tcp",
         "creates once and lazily connects TCP on first send");
     return fail!=0;
@@ -1012,8 +1013,8 @@ static int case_kc_netl_interface_tcp(void)
  */
 static int case_kc_netl_interface_udp(void)
 {
-    kc_netl_interface_t *interface=NULL;
-    kc_netl_t *server=NULL;
+    kc_netl_t *interface=NULL;
+    kc_netl_socket_t *server=NULL;
     kc_netl_options_t options;
     receive_state_t client,handled;
     int fail=0;
@@ -1023,23 +1024,23 @@ static int case_kc_netl_interface_udp(void)
     memset(&options,0,sizeof(options));
     options.host="127.0.0.1";
     options.protocol=KC_NETL_UDP;
-    if(kc_netl_open(&server,&options,receive,disconnect,error,
+    if(kc_netl_socket_open(&server,&options,receive,disconnect,error,
         &handled)!=KC_NETL_OK)return 1;
-    options.port=kc_netl_port(server);
+    options.port=kc_netl_socket_port(server);
     fail+=expect_int("interface UDP open",KC_NETL_OK,
-        kc_netl_interface_open(&interface,&options,receive,
+        kc_netl_open(&interface,&options,receive,
             disconnect,error,&client));
     if(interface){
         fail+=expect_int("interface UDP send to explicit destination",
-            KC_NETL_OK,kc_netl_interface_send_to(interface,
-            "127.0.0.1",kc_netl_port(server),"ping",4U));
+            KC_NETL_OK,kc_netl_send_to(interface,
+            "127.0.0.1",kc_netl_socket_port(server),"ping",4U));
         fail+=expect_int("interface UDP receives",0,
             wait_atomic_at_least(&client.receive_count,1));
         fail+=expect_true("interface UDP response",
             client.sizes[0]==4U&&memcmp(client.data[0],"pong",4U)==0);
     }
-    kc_netl_interface_close(interface);
-    kc_netl_close(server);
+    kc_netl_close(interface);
+    kc_netl_socket_close(server);
     case_result(fail,"kc_netl_interface_udp",
         "uses a single persistent socket and peer receive callback");
     return fail!=0;
@@ -1051,7 +1052,7 @@ static int case_kc_netl_interface_udp(void)
  */
 static int case_kc_netl_outbound_tcp(void)
 {
-    kc_netl_t *listener=NULL,*outbound=NULL;
+    kc_netl_socket_t *listener=NULL,*outbound=NULL;
     kc_netl_peer_t *remote=NULL;
     kc_netl_options_t listen_options;
     kc_netl_connect_options_t connect_options;
@@ -1063,26 +1064,26 @@ static int case_kc_netl_outbound_tcp(void)
     memset(&listen_options,0,sizeof(listen_options));
     listen_options.host="127.0.0.1";
     listen_options.protocol=KC_NETL_TCP;
-    if(kc_netl_open(&listener,&listen_options,receive,disconnect,error,
+    if(kc_netl_socket_open(&listener,&listen_options,receive,disconnect,error,
         &server)!=KC_NETL_OK)return 1;
     memset(&connect_options,0,sizeof(connect_options));
     connect_options.host="127.0.0.1";
-    connect_options.port=kc_netl_port(listener);
+    connect_options.port=kc_netl_socket_port(listener);
     connect_options.protocol=KC_NETL_TCP;
     fail+=expect_int("outbound TCP connect",KC_NETL_OK,
-        kc_netl_connect(&outbound,&remote,&connect_options,receive,
+        kc_netl_socket_connect(&outbound,&remote,&connect_options,receive,
             disconnect,error,&client));
     if(remote){
         fail+=expect_int("outbound TCP send",KC_NETL_OK,
-            kc_netl_send(remote,"hello",5U));
+            kc_netl_peer_send(remote,"hello",5U));
         fail+=expect_int("outbound TCP callback response",0,
             wait_atomic_at_least(&client.receive_count,1));
         fail+=expect_true("outbound TCP response",
             client.sizes[0]==8U&&
             memcmp(client.data[0],"callback",8U)==0);
     }
-    kc_netl_close(outbound);
-    kc_netl_close(listener);
+    kc_netl_socket_close(outbound);
+    kc_netl_socket_close(listener);
     case_result(fail,"kc_netl_outbound_tcp",
         "keeps one bidirectional TCP connection open across operations");
     return fail!=0;
@@ -1116,7 +1117,7 @@ static int case_kc_netl_status(void) {
     fail += expect_int(
         "NULL peer respond",
         KC_NETL_EINVAL,
-        kc_netl_send(NULL, "x", 1U)
+        kc_netl_peer_send(NULL, "x", 1U)
     );
     (void)kc_netl_version();
 
