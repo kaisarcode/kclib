@@ -36,15 +36,6 @@ typedef struct {
     const int *max_pending_connections;
 } kc_netl_options_t;
 
-typedef struct {
-    kc_netl_peer_t *peer;
-    int protocol;
-    const char *host;
-    unsigned short port;
-    const void *data;
-    size_t data_size;
-} kc_netl_input_t;
-
 /**
  * Receives bytes from one remote peer.
  * The input and its data and host values are borrowed for the
@@ -52,7 +43,7 @@ typedef struct {
  * TCP peer identity remains stable across receives until disconnect or peer
  * close. A UDP peer represents one datagram origin and is valid only for the
  * callback duration.
- * @param input Borrowed input description.
+ * @param peer Borrowed peer description.\n * @param data Borrowed received bytes.\n * @param data_size Byte count.
  * @param userdata Consumer data supplied when opening the listener.
  * @return void.
  */
@@ -105,6 +96,29 @@ typedef void (*kc_netl_error_fn)(
 int kc_netl_open(
     kc_netl_t **out,
     const kc_netl_options_t *options,
+    kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,
+    kc_netl_error_fn error,
+    void *userdata
+);
+
+/**
+ * Opens one persistent outgoing network endpoint. The returned peer belongs to
+ * the endpoint and remains usable until closed or disconnected. Both TCP and
+ * UDP receive through the same peer,data callback as listener sockets.
+ */
+typedef struct {
+    const char *host;
+    unsigned short port;
+    int protocol;
+    const char *local_host;
+    unsigned short local_port;
+} kc_netl_connect_options_t;
+
+int kc_netl_connect(
+    kc_netl_t **out,
+    kc_netl_peer_t **peer,
+    const kc_netl_connect_options_t *options,
     kc_netl_receive_fn receive,
     kc_netl_disconnect_fn disconnect,
     kc_netl_error_fn error,
