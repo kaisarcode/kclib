@@ -1226,6 +1226,51 @@ int kc_netl_respond(
 }
 
 /**
+ * Queues a UDP response to an endpoint even after its receive callback ends.
+ * @param listener Listener owning the bound UDP socket.
+ * @param host Destination host.
+ * @param port Destination UDP port.
+ * @param data Datagram bytes.
+ * @param data_size Datagram length.
+ * @return KC_NETL_OK or a negative status.
+ */
+int kc_netl_reply_to(kc_netl_t *listener,const char *host,
+    unsigned short port,const void *data,size_t data_size)
+{
+    struct sockaddr_storage local;
+    socklen_t local_size=(socklen_t)sizeof(local);
+    struct addrinfo hints,*result,*item;
+    char service[16];
+    kc_netl_output_t *output;
+    if(!listener||listener->protocol!=KC_NETL_UDP||!host||!*host||!port||
+       (!data&&data_size)||data_size>(size_t)INT_MAX)return KC_NETL_EINVAL;
+    if(getsockname(listener->fd,(struct sockaddr *)&local,&local_size)!=0)
+        return KC_NETL_ENET;
+    memset(&hints,0,sizeof(hints));
+    hints.ai_family=local.ss_family;hints.ai_socktype=SOCK_DGRAM;
+    snprintf(service,sizeof(service),"%u",(unsigned)port);
+    if(getaddrinfo(host,service,&hints,&result)!=0)return KC_NETL_ENET;
+    item=result;
+    if(!item||item->ai_addrlen>sizeof(struct sockaddr_storage)){
+        freeaddrinfo(result);return KC_NETL_ENET;
+    }
+    output=kc_netl_output_new(data,data_size);
+    if(!output){freeaddrinfo(result);return KC_NETL_ENOMEM;}
+    memcpy(&output->address,item->ai_addr,item->ai_addrlen);
+    output->address_size=(socklen_t)item->ai_addrlen;
+    freeaddrinfo(result);
+    kc_netl_lock(listener);
+    if(listener->stop||listener->failed){
+        kc_netl_unlock(listener);kc_netl_output_free(output);return KC_NETL_ECLOSED;
+    }
+    if(listener->udp_out_tail)listener->udp_out_tail->next=output;
+    else listener->udp_out_head=output;
+    listener->udp_out_tail=output;
+    kc_netl_unlock(listener);
+    return KC_NETL_OK;
+}
+
+/**
  * Peer close.
  * @return None.
  */
