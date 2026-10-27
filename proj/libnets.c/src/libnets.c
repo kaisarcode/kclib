@@ -82,7 +82,6 @@ struct kc_nets {
     int protocol;
     int platform_ready;
     kc_nets_receive_fn receive;
-    kc_nets_receive_from_fn receive_from;
     struct sockaddr_storage default_destination;
     kc_nets_socklen_t default_destination_size;
     unsigned short local_port;
@@ -311,7 +310,6 @@ static void kc_nets_output_free(kc_nets_output_t *output) {
  */
 static int kc_nets_connect(
     const kc_nets_options_t *options,
-    const kc_nets_udp_options_t *advanced,
     kc_nets_t *nets
 ) {
     struct addrinfo hints;
@@ -339,9 +337,9 @@ static int kc_nets_connect(
             bind_hints.ai_family=item->ai_family;
             bind_hints.ai_socktype=SOCK_DGRAM;
             bind_hints.ai_flags=AI_PASSIVE;
-            snprintf(port_text,sizeof(port_text),"%u",(unsigned)(advanced?advanced->local_port:0));
-            if(getaddrinfo(advanced&&advanced->local_host&&*advanced->local_host?
-                advanced->local_host:NULL,port_text,&bind_hints,&local)!=0){
+            snprintf(port_text,sizeof(port_text),"%u",(unsigned)options->local_port);
+            if(getaddrinfo(options->local_host&&*options->local_host?
+                options->local_host:NULL,port_text,&bind_hints,&local)!=0){
                 KC_NETS_CLOSE(fd);continue;
             }
             for(it=local;it!=NULL;it=it->ai_next){
@@ -425,7 +423,8 @@ static int kc_nets_has_output(kc_nets_t *nets) {
 static void kc_nets_deliver(
     kc_nets_t *nets,
     const void *data,
-    size_t size
+    size_t size,
+    const kc_nets_endpoint_t *peer
 ) {
     kc_nets_receive_fn receive;
     void *userdata;
@@ -440,7 +439,7 @@ static void kc_nets_deliver(
     }
     kc_nets_unlock(nets);
 
-    if (receive != NULL) receive(data, size, userdata);
+    if (receive != NULL) receive(data, size, peer, userdata);
 }
 
 /**
@@ -506,7 +505,7 @@ static void kc_nets_receive_tcp(kc_nets_t *nets) {
         0
     );
     if (received > 0) {
-        kc_nets_deliver(nets, buffer, (size_t)received);
+        kc_nets_deliver(nets, buffer, (size_t)received, NULL);
         return;
     }
     if (received == 0) {
@@ -528,17 +527,18 @@ static void kc_nets_receive_udp(kc_nets_t *nets) {
     int received=(int)recvfrom(nets->fd,(char *)buffer,(int)sizeof(buffer),
         0,(struct sockaddr *)&source,&source_size);
     if(received>=0){
-        if(nets->receive_from){
-            char host[NI_MAXHOST],service[16];
-            if(getnameinfo((struct sockaddr *)&source,source_size,
-                host,(kc_nets_socklen_t)sizeof(host),
-                service,(kc_nets_socklen_t)sizeof(service),
-                NI_NUMERICHOST|NI_NUMERICSERV)!=0){
-                kc_nets_fail(nets,KC_NETS_ENET);return;
-            }
-            nets->receive_from(host,(unsigned short)strtoul(service,NULL,10),
-                buffer,(size_t)received,nets->userdata);
-        }else if(nets->receive)kc_nets_deliver(nets,buffer,(size_t)received);
+        char host[NI_MAXHOST],service[16];
+        kc_nets_endpoint_t peer;
+        if(getnameinfo((struct sockaddr *)&source,source_size,
+            host,(kc_nets_socklen_t)sizeof(host),
+            service,(kc_nets_socklen_t)sizeof(service),
+            NI_NUMERICHOST|NI_NUMERICSERV)!=0){
+            kc_nets_fail(nets,KC_NETS_ENET);
+            return;
+        }
+        peer.host=host;
+        peer.port=(unsigned short)strtoul(service,NULL,10);
+        kc_nets_deliver(nets,buffer,(size_t)received,&peer);
         return;
     }
     if(!kc_nets_would_block())kc_nets_fail(nets,KC_NETS_ENET);
@@ -857,8 +857,6 @@ static void kc_nets_worker_join(kc_nets_t *nets) {
 static int kc_nets_open_internal(
     kc_nets_t **out,
     const kc_nets_options_t *options,
-    const kc_nets_udp_options_t *advanced,
-    kc_nets_receive_from_fn receive_from,
     kc_nets_receive_fn receive,
     kc_nets_disconnect_fn disconnect,
     kc_nets_error_fn error,
@@ -878,8 +876,7 @@ static int kc_nets_open_internal(
             options->protocol != KC_NETS_TCP &&
             options->protocol != KC_NETS_UDP
         ) ||
-        (receive == NULL && receive_from == NULL) ||
-        (advanced && options->protocol != KC_NETS_UDP)
+        receive == NULL
     ) {
         return KC_NETS_EINVAL;
     }
@@ -889,7 +886,6 @@ static int kc_nets_open_internal(
     nets->fd = KC_NETS_FD_INVALID;
     nets->protocol = options->protocol;
     nets->receive = receive;
-    nets->receive_from = receive_from;
     nets->disconnect = disconnect;
     nets->error = error;
     nets->userdata = userdata;
@@ -907,7 +903,7 @@ static int kc_nets_open_internal(
     }
     nets->mutex_ready = 1;
 
-    rc = kc_nets_connect(options, advanced, nets);
+    rc = kc_nets_connect(options, nets);
     if (rc != KC_NETS_OK) {
         kc_nets_destroy(nets);
         return rc;
@@ -937,24 +933,7 @@ int kc_nets_open(kc_nets_t **out,const kc_nets_options_t *options,
     kc_nets_receive_fn receive,kc_nets_disconnect_fn disconnect,
     kc_nets_error_fn error,void *userdata)
 {
-    return kc_nets_open_internal(out,options,NULL,NULL,receive,disconnect,error,userdata);
-}
-
-/**
- * Opens a configurable UDP endpoint without altering legacy initialization.
- * @param out Endpoint handle.
- * @param options Extended UDP options.
- * @param receive Optional generic receive callback.
- * @param error Error callback.
- * @param userdata User context.
- * @return Public status.
- */
-int kc_nets_open_udp(kc_nets_t **out,const kc_nets_udp_options_t *options,
-    kc_nets_receive_from_fn receive,kc_nets_error_fn error,void *userdata)
-{
-    if(!options)return KC_NETS_EINVAL;
-    return kc_nets_open_internal(out,&options->endpoint,options,
-        receive,NULL,NULL,error,userdata);
+    return kc_nets_open_internal(out,options,receive,disconnect,error,userdata);
 }
 
 /**
@@ -974,7 +953,7 @@ int kc_nets_send(
     if (nets == NULL || (data == NULL && data_size != 0U)) {
         return KC_NETS_EINVAL;
     }
-    if (nets->protocol == KC_NETS_UDP && data_size > (size_t)INT_MAX) {
+    if (nets->protocol == KC_NETS_UDP && data_size > 65507U) {
         return KC_NETS_EINVAL;
     }
 
@@ -1012,18 +991,19 @@ int kc_nets_send(
  * @param data_size Byte count.
  * @return KC_NETS_OK or a negative status.
  */
-int kc_nets_send_to(kc_nets_t *nets,const char *host,unsigned short port,
+int kc_nets_send_to(kc_nets_t *nets,const kc_nets_endpoint_t *peer,
     const void *data,size_t data_size)
 {
     struct addrinfo hints,*result,*item;
     char service[16];
     kc_nets_output_t *output;
-    if(!nets||nets->protocol!=KC_NETS_UDP||!host||!*host||!port||
-        (!data&&data_size)||data_size>(size_t)INT_MAX)return KC_NETS_EINVAL;
+    if(!nets||nets->protocol!=KC_NETS_UDP||!peer||!peer->host||
+        !*peer->host||!peer->port||(!data&&data_size)||
+        data_size>65507U)return KC_NETS_EINVAL;
     memset(&hints,0,sizeof(hints));hints.ai_family=nets->udp_family;
     hints.ai_socktype=SOCK_DGRAM;
-    snprintf(service,sizeof(service),"%u",(unsigned)port);
-    if(getaddrinfo(host,service,&hints,&result)!=0)return KC_NETS_ENET;
+    snprintf(service,sizeof(service),"%u",(unsigned)peer->port);
+    if(getaddrinfo(peer->host,service,&hints,&result)!=0)return KC_NETS_ENET;
     item=result;
     if(!item||item->ai_addrlen>sizeof(struct sockaddr_storage)){
         freeaddrinfo(result);return KC_NETS_ENET;
