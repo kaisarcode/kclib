@@ -1211,7 +1211,7 @@ static void netl_cli_receive(kc_netl_peer_t *peer, const void *data,
     netl_cli_session_t *session;
 
     state = (netl_cli_state_t *)userdata;
-    if (!peer || !state) return;
+    if (!peer || !state || !state->command || !*state->command) return;
     if (kc_netl_peer_protocol(peer) == KC_NETL_UDP) {
         (void)netl_cli_udp_start(state, data, data_size,
             kc_netl_peer_host(peer), kc_netl_peer_port(peer));
@@ -1282,6 +1282,10 @@ static void netl_cli_disconnect(kc_netl_peer_t *peer, void *userdata)
 
     state = (netl_cli_state_t *)userdata;
     if (!state) return;
+    if(state->outgoing==peer){
+        netl_cli_stop=1;
+        return;
+    }
     netl_cli_lock(state);
     session = netl_cli_find(state, peer);
     if (!session) {
@@ -1408,7 +1412,8 @@ static int netl_cli_serve(const char *dir, const char *name)
     (void)signal(SIGTERM, netl_cli_signal);
 #endif
     while (!netl_cli_stop) {
-        if(registration.protocol==KC_NETL_UDP||registration.outbound)
+        if((registration.protocol==KC_NETL_UDP||registration.outbound)&&
+            !netl_cli_stop)
             netl_cli_drain_replies(dir,name,listener,state.outgoing);
         netl_cli_sleep();
     }
