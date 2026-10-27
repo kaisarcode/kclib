@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-typedef struct kc_netl kc_netl_t;
+typedef struct kc_netl_interface kc_netl_t;
 typedef struct kc_netl_peer kc_netl_peer_t;
 
 #define KC_NETL_OK 0
@@ -82,62 +82,61 @@ typedef void (*kc_netl_error_fn)(
 );
 
 /**
- * Owns one persistent bidirectional interface independently of TCP roles.
- * The configured address is attempted as a local bind; if it is not local,
- * it is retained as the outbound destination.
- */
-typedef struct kc_netl_interface kc_netl_interface_t;
-
-int kc_netl_interface_open(kc_netl_interface_t **out,
-    const kc_netl_options_t *options,kc_netl_receive_fn receive,
-    kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata);
-
-int kc_netl_interface_send(kc_netl_interface_t *interface,
-    const void *data,size_t size);
-
-/**
- * Queue one UDP datagram to an explicit address using the interface's
- * existing socket and local port. The configured destination is unchanged.
- * @param interface Persistent UDP interface.
- * @param host Destination address.
- * @param port Destination port.
- * @param data Payload.
- * @param size Payload size.
+ * Open an address-oriented TCP/UDP interface without selecting a role.
+ * @param out Interface handle.
+ * @param options Configured address and transport.
+ * @param receive Incoming data callback.
+ * @param disconnect Optional TCP disconnect callback.
+ * @param error Optional asynchronous error callback.
+ * @param userdata Callback context.
  * @return Status code.
  */
-int kc_netl_interface_send_to(kc_netl_interface_t *interface,
-    const char *host,unsigned short port,const void *data,size_t size);
-
-void kc_netl_interface_close(kc_netl_interface_t *interface);
-
-/**
- * Opens an operational TCP or UDP listener.
- * NULL or empty host binds all interfaces. Port zero requests an ephemeral
- * operating-system-selected port. NULL max_pending_connections uses the
- * default. Receive is required; disconnect and error are optional. Receive may
- * respond, close peers, or close the listener.
- * @param out Destination listener pointer.
- * @param options Listener options.
- * @param receive Incoming byte callback.
- * @param disconnect Optional TCP disconnect callback.
- * @param error Optional asynchronous failure callback.
- * @param userdata Consumer data passed to callbacks.
- * @return KC_NETL_OK on success, otherwise a negative status.
- */
-int kc_netl_open(
-    kc_netl_t **out,
-    const kc_netl_options_t *options,
-    kc_netl_receive_fn receive,
-    kc_netl_disconnect_fn disconnect,
-    kc_netl_error_fn error,
-    void *userdata
-);
+int kc_netl_open(kc_netl_t **out,const kc_netl_options_t *options,
+    kc_netl_receive_fn receive,kc_netl_disconnect_fn disconnect,
+    kc_netl_error_fn error,void *userdata);
 
 /**
- * Opens one persistent outgoing network endpoint. The returned peer belongs to
- * the endpoint and remains usable until closed or disconnected. Both TCP and
- * UDP receive through the same peer,data callback as listener sockets.
+ * Queue bytes for the address configured on this persistent interface.
+ * @param interface Interface handle.
+ * @param data Data bytes.
+ * @param size Byte count.
+ * @return Status code.
  */
+int kc_netl_send(kc_netl_t *interface,const void *data,size_t size);
+
+/**
+ * Queue one UDP datagram to another address using the same local socket.
+ * The interface's configured destination remains unchanged.
+ * @param interface Interface handle.
+ * @param host Destination host.
+ * @param port Destination port.
+ * @param data Datagram bytes.
+ * @param size Byte count.
+ * @return Status code.
+ */
+int kc_netl_send_to(kc_netl_t *interface,const char *host,
+    unsigned short port,const void *data,size_t size);
+
+/**
+ * Send to the peer supplied by the receive callback.
+ * For UDP the peer is valid only during the callback.
+ * @param peer Incoming peer.
+ * @param data Data bytes.
+ * @param size Byte count.
+ * @return Status code.
+ */
+int kc_netl_peer_send(kc_netl_peer_t *peer,const void *data,size_t size);
+
+/**
+ * Close an interface and release its sockets.
+ * @param interface Interface handle, or NULL.
+ */
+void kc_netl_close(kc_netl_t *interface);
+
+#ifdef KC_NETL_INTERNAL_API
+/* Private socket machinery, available solely to the project's legacy tests. */
+typedef struct kc_netl_socket kc_netl_socket_t;
+
 typedef struct {
     const char *host;
     unsigned short port;
@@ -146,33 +145,16 @@ typedef struct {
     unsigned short local_port;
 } kc_netl_connect_options_t;
 
-int kc_netl_connect(
-    kc_netl_t **out,
-    kc_netl_peer_t **peer,
-    const kc_netl_connect_options_t *options,
-    kc_netl_receive_fn receive,
-    kc_netl_disconnect_fn disconnect,
-    kc_netl_error_fn error,
-    void *userdata
-);
-
-/**
- * Sends bytes to a peer.
- * The library copies the supplied bytes before returning and absorbs transport
- * buffering, partial writes, and retries. TCP responses preserve call order.
- * Send may be called repeatedly, from receive, after receive returns, or
- * from another thread while the TCP peer remains connected. Each UDP response
- * is one datagram to the receive-local peer.
- * @param peer Destination peer.
- * @param data Bytes to copy and send.
- * @param data_size Byte count.
- * @return KC_NETL_OK on success, otherwise a negative status.
- */
-int kc_netl_send(
-    kc_netl_peer_t *peer,
-    const void *data,
-    size_t data_size
-);
+int kc_netl_socket_open(kc_netl_socket_t **out,
+    const kc_netl_options_t *options,kc_netl_receive_fn receive,
+    kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata);
+int kc_netl_socket_connect(kc_netl_socket_t **out,
+    kc_netl_peer_t **peer,const kc_netl_connect_options_t *options,
+    kc_netl_receive_fn receive,kc_netl_disconnect_fn disconnect,
+    kc_netl_error_fn error,void *userdata);
+unsigned short kc_netl_socket_port(const kc_netl_socket_t *socket);
+void kc_netl_socket_close(kc_netl_socket_t *socket);
+#endif
 
 /**
  * Returns the protocol of a peer received from a callback.
@@ -205,22 +187,6 @@ unsigned short kc_netl_peer_port(const kc_netl_peer_t *peer);
  * @return void.
  */
 void kc_netl_peer_close(kc_netl_peer_t *peer);
-
-/**
- * Returns the bound port, including an ephemeral port selected by the OS.
- * @param listener Listener, or NULL.
- * @return Bound port, or zero for an invalid listener.
- */
-unsigned short kc_netl_port(const kc_netl_t *listener);
-
-/**
- * Stops the listener, closes active TCP peers, and releases it.
- * NULL is accepted. This may also be called while netl is delivering a receive,
- * disconnect, or error callback.
- * @param listener Listener, or NULL.
- * @return void.
- */
-void kc_netl_close(kc_netl_t *listener);
 
 /**
  * Returns a static message for a public status code.
