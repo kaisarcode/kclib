@@ -144,6 +144,28 @@ int kc_netl_reply_to(kc_netl_t *listener,const char *host,
     unsigned short port,const void *data,size_t data_size);
 
 /**
+ * Returns the protocol of a peer received from a callback.
+ * @param peer Borrowed peer.
+ * @return KC_NETL_TCP, KC_NETL_UDP, or zero.
+ */
+int kc_netl_peer_protocol(const kc_netl_peer_t *peer);
+
+/**
+ * Returns the numeric remote host of a peer.
+ * The pointer remains valid only while the peer remains valid.
+ * @param peer Borrowed peer.
+ * @return Numeric address or NULL.
+ */
+const char *kc_netl_peer_host(const kc_netl_peer_t *peer);
+
+/**
+ * Returns the remote port of a peer.
+ * @param peer Borrowed peer.
+ * @return Port, or zero.
+ */
+unsigned short kc_netl_peer_port(const kc_netl_peer_t *peer);
+
+/**
  * Stops interacting with one peer.
  * For TCP, queued responses are sent in order before the peer is closed. For a
  * UDP peer this only prevents further response through that receive-local peer.
