@@ -848,6 +848,15 @@ static int case_kc_netl_udp(void) {
         fail += expect_bytes("UDP response", "pong", 4U, response, 4U);
     }
     fail += expect_int(
+        "UDP delayed reply",
+        KC_NETL_OK,
+        kc_netl_reply_to(listener,"127.0.0.1",state.ports[0],"later",5U)
+    );
+    received = recv(client,(char *)response,(int)sizeof(response),0);
+    fail += expect_int("UDP delayed reply size",5,received);
+    if(received==5)
+        fail += expect_bytes("UDP delayed reply payload","later",5U,response,5U);
+    fail += expect_int(
         "UDP has no disconnect",
         0,
         atomic_load(&state.disconnect_count)
@@ -894,6 +903,8 @@ static int case_kc_netl_status(void) {
         KC_NETL_EINVAL,
         kc_netl_respond(NULL, "x", 1U)
     );
+    fail += expect_int("NULL delayed reply",KC_NETL_EINVAL,
+        kc_netl_reply_to(NULL,"127.0.0.1",5000,"x",1U));
     (void)kc_netl_version();
 
     case_result(
@@ -940,6 +951,8 @@ static int case_netl_cli(void) {
     fail += netl_cli_run("sample 8080") == 0;
     fail += netl_cli_run("sample 8080 true --unknown") == 0;
     fail += netl_cli_run("bad/name -d") == 0;
+    fail += netl_cli_run("nonexistent -r 127.0.0.1 5000") == 0;
+    fail += netl_cli_run("nonexistent -r 127.0.0.1 invalid") == 0;
     case_result(fail, "netl_cli",
         "validates listener administration arguments and errors");
     return fail != 0;
