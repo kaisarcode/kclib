@@ -1502,10 +1502,10 @@ static int netl_cli_process_send(
     if(protocol==KC_NETL_UDP){
         size=fread(buffer,1,sizeof(buffer),file);
         if(ferror(file)||!feof(file)||size>65507U||
-            kc_netl_send(interface,buffer,size)!=KC_NETL_OK)rc=1;
+            kc_netl_send(interface,buffer,size,NULL)!=KC_NETL_OK)rc=1;
     }else{
         while((size=fread(buffer,1,sizeof(buffer),file))!=0U){
-            if(kc_netl_send(interface,buffer,size)!=KC_NETL_OK){
+            if(kc_netl_send(interface,buffer,size,NULL)!=KC_NETL_OK){
                 rc=1;break;
             }
         }
