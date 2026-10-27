@@ -44,8 +44,7 @@ index is the summary, not the contract.
 | [`stun`](https://github.com/kaisarcode/kclib/tree/master/proj/libstun.c) | Discovers live UDP mappings and serves STUN Binding requests. | Discovering an observed UDP endpoint or providing a STUN endpoint for other machines. |
 | [`punch`](https://github.com/kaisarcode/kclib/tree/master/proj/libpunch.c) | Establishes a direct UDP path using supplied remote endpoints, either on its own socket or an existing live UDP mapping. | Direct peer-to-peer UDP communication after endpoint exchange. |
 | [`rstrm`](https://github.com/kaisarcode/kclib/tree/master/proj/librstrm.c) | Provides a reliable ordered full-duplex byte stream over a caller-supplied datagram channel. | Adding stream semantics over lossy or reordered datagram transport. |
-| [`netl`](https://github.com/kaisarcode/kclib/tree/master/proj/libnetl.c) | Maintains named TCP or UDP listeners and delivers incoming traffic to consumers. | Listening and serving on the network. |
-| [`nets`](https://github.com/kaisarcode/kclib/tree/master/proj/libnets.c) | Maintains an outbound TCP or UDP endpoint and exchanges raw bytes. | Persistent raw-byte communication with a remote network destination. |
+| [`netl`](https://github.com/kaisarcode/kclib/tree/master/proj/libnetl.c) | Maintains persistent bidirectional TCP/UDP sockets with peer-level send and receive callbacks. | Opening, sending, receiving, and closing persistent network interfaces. |
 | [`dmn`](https://github.com/kaisarcode/kclib/tree/master/proj/libdmn.c) | Maintains named resident processes and exchanges data through local IPC. | Persistent subprocess with a message channel. |
 
 ## System and UI
