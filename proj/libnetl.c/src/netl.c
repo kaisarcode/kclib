@@ -1355,6 +1355,10 @@ static void netl_cli_cleanup(netl_cli_state_t *state)
     netl_cli_unlock(state);
 }
 
+/* The resident worker consumes queued requests using the existing peer. */
+static void netl_cli_drain_sends(const char *dir,const char *name,
+    kc_netl_peer_t *outgoing,int protocol);
+
 /**
  * Run one resident listener.
  * @param dir Runtime directory.
