@@ -611,16 +611,8 @@ static void kc_netl_receive_tcp(
         0
     );
     if (received > 0) {
-        kc_netl_input_t input;
-
-        memset(&input, 0, sizeof(input));
-        input.peer = peer;
-        input.protocol = KC_NETL_TCP;
-        input.host = peer->host;
-        input.port = peer->port;
-        input.data = buffer;
-        input.data_size = (size_t)received;
-        listener->receive(input.peer, input.data, input.data_size, listener->userdata);
+    
+        listener->receive(peer,buffer,(size_t)received,listener->userdata);
         return;
     }
 
@@ -637,7 +629,6 @@ static void kc_netl_receive_udp(kc_netl_t *listener) {
     struct sockaddr_storage address;
     socklen_t address_size = (socklen_t)sizeof(address);
     kc_netl_peer_t peer;
-    kc_netl_input_t input;
     int received;
 
     received = (int)recvfrom(
@@ -672,14 +663,7 @@ static void kc_netl_receive_udp(kc_netl_t *listener) {
         return;
     }
 
-    memset(&input, 0, sizeof(input));
-    input.peer = &peer;
-    input.protocol = KC_NETL_UDP;
-    input.host = peer.host;
-    input.port = peer.port;
-    input.data = buffer;
-    input.data_size = (size_t)received;
-    listener->receive(input.peer, input.data, input.data_size, listener->userdata);
+    listener->receive(&peer,buffer,(size_t)received,listener->userdata);
     peer.closed = 1;
 }
 
