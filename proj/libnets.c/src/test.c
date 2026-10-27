@@ -1028,7 +1028,7 @@ int main(void) {
 #ifdef __EMSCRIPTEN__
     test_case_total = 4;
 #else
-    test_case_total = 18;
+    test_case_total = 21;
 #endif
     test_case_current = 0;
     run_case(&result, case_validation);
@@ -1117,6 +1117,22 @@ static int case_nets_cli(void) {
     failures += nets_cli_result("resident invalid id",
         "rejects unsafe resident identifiers",
         nets_cli_run("127.0.0.1 9 -t udp --id bad/name") != 0);
+    {
+        char create[256],list[160],remove[160];
+        unsigned short port=(unsigned short)(port_base()+7U);
+        snprintf(create,sizeof(create),
+            "127.0.0.1 %u -t udp --id contract_%u --local-host 127.0.0.1",
+            (unsigned)port,(unsigned)port);
+        snprintf(list,sizeof(list),"-l contract_%u",(unsigned)port);
+        snprintf(remove,sizeof(remove),"contract_%u -d",(unsigned)port);
+        failures += nets_cli_result("resident create",
+            "registers a persistent UDP sender",nets_cli_run(create)==0);
+        failures += nets_cli_result("resident list",
+            "lists the registered UDP sender",nets_cli_run(list)==0);
+        failures += nets_cli_result("resident delete",
+            "stops and removes the resident UDP sender",
+            nets_cli_run(remove)==0);
+    }
     return failures;
 }
 #endif
