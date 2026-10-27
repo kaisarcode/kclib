@@ -11,7 +11,9 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#define KC_NETL_INTERNAL_API
 #include "libnetl.h"
+typedef kc_netl_t kc_netl_interface_t;
 
 #include <limits.h>
 #include <stdio.h>
@@ -73,7 +75,7 @@ typedef struct kc_netl_output {
 } kc_netl_output_t;
 
 struct kc_netl_peer {
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
     int protocol;
     kc_netl_fd_t fd;
     int closed;
@@ -88,7 +90,7 @@ struct kc_netl_peer {
     struct kc_netl_peer *next;
 };
 
-struct kc_netl {
+struct kc_netl_socket {
     kc_netl_fd_t fd;
     int protocol;
     int outbound;
@@ -227,7 +229,7 @@ static void kc_netl_mutex_close(kc_netl_mutex_t *mutex) {
  * Lock.
  * @return None.
  */
-static void kc_netl_lock(kc_netl_t *listener) {
+static void kc_netl_lock(kc_netl_socket_t *listener) {
 #ifdef _WIN32
     EnterCriticalSection(&listener->mutex);
 #else
@@ -239,7 +241,7 @@ static void kc_netl_lock(kc_netl_t *listener) {
  * Unlock.
  * @return None.
  */
-static void kc_netl_unlock(kc_netl_t *listener) {
+static void kc_netl_unlock(kc_netl_socket_t *listener) {
 #ifdef _WIN32
     LeaveCriticalSection(&listener->mutex);
 #else
@@ -422,7 +424,7 @@ static int kc_netl_bind(
  * Peer count.
  * @return Function result.
  */
-static size_t kc_netl_peer_count(const kc_netl_t *listener) {
+static size_t kc_netl_peer_count(const kc_netl_socket_t *listener) {
     const kc_netl_peer_t *peer;
     size_t count = 0U;
 
@@ -436,7 +438,7 @@ static size_t kc_netl_peer_count(const kc_netl_t *listener) {
  * Poll reserve.
  * @return Function result.
  */
-static int kc_netl_poll_reserve(kc_netl_t *listener, size_t count) {
+static int kc_netl_poll_reserve(kc_netl_socket_t *listener, size_t count) {
     kc_netl_pollfd_t *new_fds;
     kc_netl_peer_t **new_map;
     size_t capacity;
@@ -470,7 +472,7 @@ static int kc_netl_poll_reserve(kc_netl_t *listener, size_t count) {
  * @return None.
  */
 static void kc_netl_peer_detach(
-    kc_netl_t *listener,
+    kc_netl_socket_t *listener,
     kc_netl_peer_t *peer
 ) {
     kc_netl_peer_t **cursor = &listener->peers;
@@ -490,7 +492,7 @@ static void kc_netl_peer_detach(
  * @return None.
  */
 static void kc_netl_peer_finish(
-    kc_netl_t *listener,
+    kc_netl_socket_t *listener,
     kc_netl_peer_t *peer,
     int notify
 ) {
@@ -520,7 +522,7 @@ static void kc_netl_peer_finish(
  * Fail.
  * @return None.
  */
-static void kc_netl_fail(kc_netl_t *listener, int status) {
+static void kc_netl_fail(kc_netl_socket_t *listener, int status) {
     kc_netl_error_fn error = NULL;
     void *userdata = NULL;
 
@@ -540,7 +542,7 @@ static void kc_netl_fail(kc_netl_t *listener, int status) {
  * Accept peer.
  * @return Function result.
  */
-static int kc_netl_accept_peer(kc_netl_t *listener) {
+static int kc_netl_accept_peer(kc_netl_socket_t *listener) {
     struct sockaddr_storage address;
     socklen_t address_size = (socklen_t)sizeof(address);
     kc_netl_peer_t *peer;
@@ -601,7 +603,7 @@ static int kc_netl_accept_peer(kc_netl_t *listener) {
  * @return None.
  */
 static void kc_netl_receive_tcp(
-    kc_netl_t *listener,
+    kc_netl_socket_t *listener,
     kc_netl_peer_t *peer
 ) {
     unsigned char buffer[KC_NETL_BUFFER_SIZE];
@@ -627,7 +629,7 @@ static void kc_netl_receive_tcp(
  * Receive udp.
  * @return None.
  */
-static void kc_netl_receive_udp(kc_netl_t *listener) {
+static void kc_netl_receive_udp(kc_netl_socket_t *listener) {
     unsigned char buffer[KC_NETL_BUFFER_SIZE];
     struct sockaddr_storage address;
     socklen_t address_size = (socklen_t)sizeof(address);
@@ -674,7 +676,7 @@ static void kc_netl_receive_udp(kc_netl_t *listener) {
  * @return None.
  */
 static void kc_netl_flush_tcp(
-    kc_netl_t *listener,
+    kc_netl_socket_t *listener,
     kc_netl_peer_t *peer
 ) {
     int failed = 0;
@@ -718,7 +720,7 @@ static void kc_netl_flush_tcp(
  * Flush udp.
  * @return None.
  */
-static void kc_netl_flush_udp(kc_netl_t *listener) {
+static void kc_netl_flush_udp(kc_netl_socket_t *listener) {
     for (;;) {
         kc_netl_output_t *output;
         int sent;
@@ -766,7 +768,7 @@ static void kc_netl_flush_udp(kc_netl_t *listener) {
  * Should stop.
  * @return Function result.
  */
-static int kc_netl_should_stop(kc_netl_t *listener) {
+static int kc_netl_should_stop(kc_netl_socket_t *listener) {
     int stop;
 
     kc_netl_lock(listener);
@@ -779,7 +781,7 @@ static int kc_netl_should_stop(kc_netl_t *listener) {
  * Close requested peers.
  * @return None.
  */
-static void kc_netl_close_requested_peers(kc_netl_t *listener) {
+static void kc_netl_close_requested_peers(kc_netl_socket_t *listener) {
     for (;;) {
         kc_netl_peer_t *peer;
         kc_netl_peer_t *target = NULL;
@@ -806,13 +808,13 @@ static void kc_netl_close_requested_peers(kc_netl_t *listener) {
  * Destroy.
  * @return None.
  */
-static void kc_netl_destroy(kc_netl_t *listener);
+static void kc_netl_destroy(kc_netl_socket_t *listener);
 
 /**
  * Worker run.
  * @return None.
  */
-static void kc_netl_worker_run(kc_netl_t *listener) {
+static void kc_netl_worker_run(kc_netl_socket_t *listener) {
     while (!kc_netl_should_stop(listener)) {
         size_t count;
         size_t index;
@@ -957,7 +959,7 @@ static void kc_netl_worker_run(kc_netl_t *listener) {
  * @return Function result.
  */
 static DWORD WINAPI kc_netl_worker_entry(LPVOID arg) {
-    kc_netl_t *listener = (kc_netl_t *)arg;
+    kc_netl_socket_t *listener = (kc_netl_socket_t *)arg;
 
     kc_netl_worker_run(listener);
     if (listener->self_close) {
@@ -974,7 +976,7 @@ static DWORD WINAPI kc_netl_worker_entry(LPVOID arg) {
  * @return NULL when the worker exits.
  */
 static void *kc_netl_worker_entry(void *arg) {
-    kc_netl_t *listener = (kc_netl_t *)arg;
+    kc_netl_socket_t *listener = (kc_netl_socket_t *)arg;
 
     kc_netl_worker_run(listener);
     if (listener->self_close) {
@@ -990,7 +992,7 @@ static void *kc_netl_worker_entry(void *arg) {
  * Worker start.
  * @return Function result.
  */
-static int kc_netl_worker_start(kc_netl_t *listener) {
+static int kc_netl_worker_start(kc_netl_socket_t *listener) {
 #ifdef _WIN32
     listener->worker = CreateThread(
         NULL,
@@ -1021,7 +1023,7 @@ static int kc_netl_worker_start(kc_netl_t *listener) {
  * Worker join.
  * @return None.
  */
-static void kc_netl_worker_join(kc_netl_t *listener) {
+static void kc_netl_worker_join(kc_netl_socket_t *listener) {
     if (!listener->worker_started) return;
 #ifdef _WIN32
     WaitForSingleObject(listener->worker, INFINITE);
@@ -1037,7 +1039,7 @@ static void kc_netl_worker_join(kc_netl_t *listener) {
  * Destroy.
  * @return None.
  */
-static void kc_netl_destroy(kc_netl_t *listener) {
+static void kc_netl_destroy(kc_netl_socket_t *listener) {
     kc_netl_peer_t *peer;
 
     if (listener == NULL) return;
@@ -1082,7 +1084,7 @@ static void kc_netl_destroy(kc_netl_t *listener) {
  * @return Function result.
  */
 static int kc_netl_open_internal(
-    kc_netl_t **out,
+    kc_netl_socket_t **out,
     const kc_netl_options_t *options,
     kc_netl_receive_fn receive,
     kc_netl_disconnect_fn disconnect,
@@ -1094,7 +1096,7 @@ static int kc_netl_open_internal(
     void *cli_accept_userdata
 #endif
 ) {
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
     int rc;
 
     if (out == NULL) return KC_NETL_EINVAL;
@@ -1114,7 +1116,7 @@ static int kc_netl_open_internal(
         return KC_NETL_EINVAL;
     }
 
-    listener = (kc_netl_t *)calloc(1, sizeof(*listener));
+    listener = (kc_netl_socket_t *)calloc(1, sizeof(*listener));
     if (listener == NULL) return KC_NETL_ENOMEM;
     listener->fd = KC_NETL_FD_INVALID;
     listener->protocol = options->protocol;
@@ -1164,8 +1166,8 @@ static int kc_netl_open_internal(
  * Open.
  * @return Function result.
  */
-int kc_netl_open(
-    kc_netl_t **out,
+int kc_netl_socket_open(
+    kc_netl_socket_t **out,
     const kc_netl_options_t *options,
     kc_netl_receive_fn receive,
     kc_netl_disconnect_fn disconnect,
@@ -1201,8 +1203,8 @@ int kc_netl_open(
  * @param userdata Consumer data passed to callbacks.
  * @return KC_NETL_OK on success, otherwise a negative status.
  */
-int kc_netl_connect(
-    kc_netl_t **out,
+int kc_netl_socket_connect(
+    kc_netl_socket_t **out,
     kc_netl_peer_t **peer_out,
     const kc_netl_connect_options_t *options,
     kc_netl_receive_fn receive,
@@ -1211,7 +1213,7 @@ int kc_netl_connect(
     void *userdata
 )
 {
-    kc_netl_t *endpoint;
+    kc_netl_socket_t *endpoint;
     kc_netl_peer_t *peer;
     struct addrinfo hints,*addresses=NULL,*item;
     kc_netl_fd_t socket_fd=KC_NETL_FD_INVALID;
@@ -1229,7 +1231,7 @@ int kc_netl_connect(
     ) {
         return KC_NETL_EINVAL;
     }
-    endpoint=(kc_netl_t *)calloc(1,sizeof(*endpoint));
+    endpoint=(kc_netl_socket_t *)calloc(1,sizeof(*endpoint));
     if(!endpoint)return KC_NETL_ENOMEM;
     endpoint->fd=KC_NETL_FD_INVALID;
     endpoint->protocol=options->protocol;
@@ -1349,12 +1351,12 @@ int kc_netl_connect(
  * Respond.
  * @return Function result.
  */
-int kc_netl_send(
+int kc_netl_peer_send(
     kc_netl_peer_t *peer,
     const void *data,
     size_t data_size
 ) {
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
     kc_netl_output_t *output;
 
     if (
@@ -1437,7 +1439,7 @@ unsigned short kc_netl_peer_port(const kc_netl_peer_t *peer)
  * @return None.
  */
 void kc_netl_peer_close(kc_netl_peer_t *peer) {
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
 
     if (peer == NULL || peer->listener == NULL) return;
     listener = peer->listener;
@@ -1451,7 +1453,7 @@ void kc_netl_peer_close(kc_netl_peer_t *peer) {
  * Port.
  * @return Function result.
  */
-unsigned short kc_netl_port(const kc_netl_t *listener) {
+unsigned short kc_netl_socket_port(const kc_netl_socket_t *listener) {
     return listener != NULL ? listener->port : 0U;
 }
 
@@ -1459,7 +1461,7 @@ unsigned short kc_netl_port(const kc_netl_t *listener) {
  * Close.
  * @return None.
  */
-void kc_netl_close(kc_netl_t *listener) {
+void kc_netl_socket_close(kc_netl_socket_t *listener) {
     int from_worker = 0;
 
     if (listener == NULL) return;
@@ -1488,8 +1490,8 @@ void kc_netl_close(kc_netl_t *listener) {
  * The distinction is an implementation detail rather than a caller role.
  */
 struct kc_netl_interface {
-    kc_netl_t *listening;
-    kc_netl_t *outgoing;
+    kc_netl_socket_t *listening;
+    kc_netl_socket_t *outgoing;
     kc_netl_peer_t *peer;
     char host[1025];
     unsigned short port;
@@ -1537,7 +1539,7 @@ static void kc_netl_interface_error(int status,void *userdata)
  * Open a reusable address-oriented interface without exposing TCP roles.
  * @return KC_NETL_OK on success, an error code otherwise.
  */
-int kc_netl_interface_open(kc_netl_interface_t **out,
+int kc_netl_open(kc_netl_interface_t **out,
     const kc_netl_options_t *options,kc_netl_receive_fn receive,
     kc_netl_disconnect_fn disconnect,kc_netl_error_fn error,void *userdata)
 {
@@ -1562,7 +1564,7 @@ int kc_netl_interface_open(kc_netl_interface_t **out,
     interface->error=error;
     interface->userdata=userdata;
     if(options->protocol==KC_NETL_TCP){
-        result=kc_netl_open(&interface->listening,options,
+        result=kc_netl_socket_open(&interface->listening,options,
             kc_netl_interface_receive,kc_netl_interface_disconnect,
             kc_netl_interface_error,interface);
         (void)result;
@@ -1571,7 +1573,7 @@ int kc_netl_interface_open(kc_netl_interface_t **out,
         remote.host=interface->host;
         remote.port=interface->port;
         remote.protocol=KC_NETL_UDP;
-        result=kc_netl_connect(&interface->outgoing,&interface->peer,
+        result=kc_netl_socket_connect(&interface->outgoing,&interface->peer,
             &remote,kc_netl_interface_receive,
             kc_netl_interface_disconnect,kc_netl_interface_error,interface);
         if(result!=KC_NETL_OK){
@@ -1586,7 +1588,7 @@ int kc_netl_interface_open(kc_netl_interface_t **out,
  * Send using a persistent socket; a TCP connection is established lazily.
  * @return KC_NETL_OK on success, an error code otherwise.
  */
-int kc_netl_interface_send(kc_netl_interface_t *interface,
+int kc_netl_send(kc_netl_interface_t *interface,
     const void *data,size_t size)
 {
     kc_netl_connect_options_t options;
@@ -1595,7 +1597,7 @@ int kc_netl_interface_send(kc_netl_interface_t *interface,
     if(!interface||(!data&&size))return KC_NETL_EINVAL;
     if(interface->protocol==KC_NETL_TCP&&!interface->peer){
         if(interface->outgoing){
-            kc_netl_close(interface->outgoing);
+            kc_netl_socket_close(interface->outgoing);
             interface->outgoing=NULL;
         }
         memset(&options,0,sizeof(options));
@@ -1606,13 +1608,13 @@ int kc_netl_interface_send(kc_netl_interface_t *interface,
         options.host=destination;
         options.port=interface->port;
         options.protocol=KC_NETL_TCP;
-        result=kc_netl_connect(&interface->outgoing,&interface->peer,
+        result=kc_netl_socket_connect(&interface->outgoing,&interface->peer,
             &options,kc_netl_interface_receive,
             kc_netl_interface_disconnect,kc_netl_interface_error,interface);
         if(result!=KC_NETL_OK)return result;
     }
     if(!interface->peer)return KC_NETL_ECLOSED;
-    return kc_netl_send(interface->peer,data,size);
+    return kc_netl_peer_send(interface->peer,data,size);
 }
 
 /**
@@ -1625,10 +1627,10 @@ int kc_netl_interface_send(kc_netl_interface_t *interface,
  * @param size Payload size.
  * @return Network status.
  */
-int kc_netl_interface_send_to(kc_netl_interface_t *interface,
+int kc_netl_send_to(kc_netl_interface_t *interface,
     const char *host,unsigned short port,const void *data,size_t size)
 {
-    kc_netl_t *endpoint;
+    kc_netl_socket_t *endpoint;
     kc_netl_output_t *output;
     struct addrinfo hints,*addresses=NULL,*item;
     struct sockaddr_storage local_address;
@@ -1678,11 +1680,11 @@ int kc_netl_interface_send_to(kc_netl_interface_t *interface,
  * Shut down every socket owned by the interface.
  * @return void.
  */
-void kc_netl_interface_close(kc_netl_interface_t *interface)
+void kc_netl_close(kc_netl_interface_t *interface)
 {
     if(!interface)return;
-    kc_netl_close(interface->outgoing);
-    kc_netl_close(interface->listening);
+    kc_netl_socket_close(interface->outgoing);
+    kc_netl_socket_close(interface->listening);
     free(interface);
 }
 
@@ -1692,7 +1694,7 @@ void kc_netl_interface_close(kc_netl_interface_t *interface)
  * @return Function result.
  */
 int kc_netl_cli_open(
-    kc_netl_t **out,
+    kc_netl_socket_t **out,
     const kc_netl_options_t *options,
     kc_netl_receive_fn receive,
     kc_netl_error_fn error,
@@ -1717,7 +1719,7 @@ int kc_netl_cli_open(
  * @return Function result.
  */
 intptr_t kc_netl_cli_take_peer(kc_netl_peer_t *peer) {
-    kc_netl_t *listener;
+    kc_netl_socket_t *listener;
     kc_netl_fd_t fd;
 
     if (
