@@ -118,6 +118,9 @@ static void netl_cli_unlock(netl_cli_state_t *state)
 static void netl_cli_help(void)
 {
     printf("Usage: netl <id> <port> <command...>\n");
+    printf("       netl <id> -r <host> <port>\n");
+    printf("       netl -l [id]\n");
+    printf("       netl <id> -d\n");
     printf("\n");
     printf("Commands:\n");
     printf("  netl <id> <port> <cmd>  Register or replace a listener\n");
