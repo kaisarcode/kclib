@@ -87,3 +87,10 @@ Failed UDP datagrams do not close the persistent socket. For TCP the native
 runtime must still use different listening and connected sockets internally:
 it tries local listening first and remote connection otherwise. TCP connection
 establishment and disconnection continue to follow OS socket semantics.
+
+The native public API exposes `kc_netl_open`, `kc_netl_send`,
+`kc_netl_peer_send`, and `kc_netl_close`. An optional
+`kc_netl_endpoint_t` argument to `kc_netl_send` selects a UDP destination
+for an individual datagram; NULL uses the configured address. It does not
+alter the local bind or create another socket. A wildcard address is never
+rewritten to loopback. The low-level socket machinery is private.
