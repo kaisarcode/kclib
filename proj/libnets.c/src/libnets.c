@@ -858,6 +858,7 @@ static int kc_nets_open_internal(
     kc_nets_t **out,
     const kc_nets_options_t *options,
     const kc_nets_udp_options_t *advanced,
+    kc_nets_receive_from_fn receive_from,
     kc_nets_receive_fn receive,
     kc_nets_disconnect_fn disconnect,
     kc_nets_error_fn error,
@@ -877,7 +878,7 @@ static int kc_nets_open_internal(
             options->protocol != KC_NETS_TCP &&
             options->protocol != KC_NETS_UDP
         ) ||
-        (receive == NULL && !(advanced && advanced->receive_from)) ||
+        (receive == NULL && receive_from == NULL) ||
         (advanced && options->protocol != KC_NETS_UDP)
     ) {
         return KC_NETS_EINVAL;
@@ -888,7 +889,7 @@ static int kc_nets_open_internal(
     nets->fd = KC_NETS_FD_INVALID;
     nets->protocol = options->protocol;
     nets->receive = receive;
-    nets->receive_from = advanced?advanced->receive_from:NULL;
+    nets->receive_from = receive_from;
     nets->disconnect = disconnect;
     nets->error = error;
     nets->userdata = userdata;
@@ -936,7 +937,7 @@ int kc_nets_open(kc_nets_t **out,const kc_nets_options_t *options,
     kc_nets_receive_fn receive,kc_nets_disconnect_fn disconnect,
     kc_nets_error_fn error,void *userdata)
 {
-    return kc_nets_open_internal(out,options,NULL,receive,disconnect,error,userdata);
+    return kc_nets_open_internal(out,options,NULL,NULL,receive,disconnect,error,userdata);
 }
 
 /**
@@ -949,11 +950,11 @@ int kc_nets_open(kc_nets_t **out,const kc_nets_options_t *options,
  * @return Public status.
  */
 int kc_nets_open_udp(kc_nets_t **out,const kc_nets_udp_options_t *options,
-    kc_nets_receive_fn receive,kc_nets_error_fn error,void *userdata)
+    kc_nets_receive_from_fn receive,kc_nets_error_fn error,void *userdata)
 {
     if(!options)return KC_NETS_EINVAL;
     return kc_nets_open_internal(out,&options->endpoint,options,
-        receive,NULL,error,userdata);
+        receive,NULL,NULL,error,userdata);
 }
 
 /**
