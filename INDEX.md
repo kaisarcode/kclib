@@ -42,7 +42,6 @@ index is the summary, not the contract.
 | [`http`](https://github.com/kaisarcode/kclib/tree/master/proj/libhttp.c) | Parses and builds HTTP messages; it handles protocol, not transport. | Handling HTTP requests or responses over a socket. |
 | [`tls`](https://github.com/kaisarcode/kclib/tree/master/proj/libtls.c) | Maintains authenticated client or server TLS sessions over caller-supplied byte transport. | Adding TLS security without coupling it to a network transport. |
 | [`stun`](https://github.com/kaisarcode/kclib/tree/master/proj/libstun.c) | Discovers live UDP mappings and serves STUN Binding requests. | Discovering an observed UDP endpoint or providing a STUN endpoint for other machines. |
-| [`punch`](https://github.com/kaisarcode/kclib/tree/master/proj/libpunch.c) | Establishes a direct UDP path using supplied remote endpoints, either on its own socket or an existing live UDP mapping. | Direct peer-to-peer UDP communication after endpoint exchange. |
 | [`rstrm`](https://github.com/kaisarcode/kclib/tree/master/proj/librstrm.c) | Provides a reliable ordered full-duplex byte stream over a caller-supplied datagram channel. | Adding stream semantics over lossy or reordered datagram transport. |
 | [`netl`](https://github.com/kaisarcode/kclib/tree/master/proj/libnetl.c) | Maintains persistent bidirectional TCP/UDP sockets with peer-level send and receive callbacks. | Opening, sending, receiving, and closing persistent network interfaces. |
 | [`dmn`](https://github.com/kaisarcode/kclib/tree/master/proj/libdmn.c) | Maintains named resident processes and exchanges data through local IPC. | Persistent subprocess with a message channel. |
@@ -63,7 +62,6 @@ index is the summary, not the contract.
 
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
-| [`rdvz`](https://github.com/kaisarcode/kclib/tree/master/proj/librdvz.c) | Maintains named resident peers and symmetric direct rendezvous links across processes. | Connecting abstract participants and observing encounters without imposing transport or application roles. |
 | [`flow`](https://github.com/kaisarcode/kclib/tree/master/proj/libflow.c) | Runs branched command and child flows; branches remain independent and do not merge. | Branching or parallel execution paths. |
 | [`demo`](https://github.com/kaisarcode/kclib/tree/master/proj/libdemo.c) | Provides the reference blueprint for new libraries in the collection. | Only when creating a new primitive in the collection; not distributed. |
 
