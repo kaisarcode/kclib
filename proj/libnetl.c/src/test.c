@@ -12,6 +12,7 @@
 #include "libnetl.h"
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
 #include <winsock2.h>
