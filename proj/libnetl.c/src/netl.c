@@ -1368,7 +1368,7 @@ static void netl_cli_cleanup(netl_cli_state_t *state)
 static void netl_cli_drain_sends(
     const char *dir,
     const char *name,
-    kc_netl_peer_t *outgoing,
+    kc_netl_interface_t *interface,
     int protocol
 );
 
@@ -1489,7 +1489,7 @@ static int netl_cli_send(const char *dir, const char *name)
  * @return Zero on success, non-zero on failure.
  */
 static int netl_cli_process_send(
-    kc_netl_peer_t *outgoing,
+    kc_netl_interface_t *interface,
     int protocol,
     const char *path
 )
@@ -1526,7 +1526,7 @@ static int netl_cli_process_send(
 static void netl_cli_drain_sends(
     const char *dir,
     const char *name,
-    kc_netl_peer_t *outgoing,
+    kc_netl_interface_t *interface,
     int protocol
 )
 {
