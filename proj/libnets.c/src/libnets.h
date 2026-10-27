@@ -29,45 +29,39 @@ typedef struct kc_nets kc_nets_t;
 #define KC_NETS_UDP 2
 
 /**
- * Receives a UDP datagram and its numeric source address.
- * @param host Source IP address (borrowed for the callback).
- * @param port Source UDP port.
- * @param data Borrowed datagram bytes.
- * @param data_size Datagram byte count.
- * @param userdata User context.
- * @return void.
+ * Describes a remote network endpoint.
+ * Received UDP source addresses are numeric and borrowed for the callback.
  */
-typedef void (*kc_nets_receive_from_fn)(const char *host,
-    unsigned short port,const void *data,size_t data_size,void *userdata);
+typedef struct {
+    const char *host;
+    unsigned short port;
+} kc_nets_endpoint_t;
 
+/**
+ * Configures a persistent outbound connection. For UDP, local_host and
+ * local_port optionally select the socket's source interface and port.
+ * A zero local_port selects an ephemeral port. TCP ignores these two fields.
+ */
 typedef struct {
     const char *host;
     unsigned short port;
     int protocol;
+    const char *local_host;
+    unsigned short local_port;
 } kc_nets_options_t;
 
 /**
- * Extended UDP configuration; separate from kc_nets_options_t so existing
- * client initializers retain their ABI and initialization contract.
- */
-typedef struct {
-    kc_nets_options_t endpoint;
-    const char *local_host;
-    unsigned short local_port;
-} kc_nets_udp_options_t;
-
-/**
- * Receives bytes from one outbound network endpoint.
- * @param data Borrowed bytes valid for the callback duration.
- * @param data_size Received byte count.
- * @param userdata Consumer data supplied when opening the endpoint.
+ * Receives bytes from a persistent TCP or UDP transport.
+ * For UDP, peer identifies the datagram source and is borrowed only for the
+ * callback. For TCP, peer is NULL and data is an arbitrary stream chunk.
+ * @param data Borrowed input bytes.
+ * @param data_size Byte count.
+ * @param peer Source endpoint for UDP, NULL for TCP.
+ * @param userdata User context.
  * @return void.
  */
-typedef void (*kc_nets_receive_fn)(
-    const void *data,
-    size_t data_size,
-    void *userdata
-);
+typedef void (*kc_nets_receive_fn)(const void *data,size_t data_size,
+    const kc_nets_endpoint_t *peer,void *userdata);
 
 /**
  * Receives notification that one TCP peer disconnected.
@@ -91,7 +85,8 @@ typedef void (*kc_nets_error_fn)(int status, void *userdata);
  *
  * Host must be non-empty and port must be non-zero. Open resolves the host and
  * establishes the endpoint before returning. Receive is required. Disconnect
- * and error are optional.
+ * and error are optional. UDP may send to multiple destinations and receives
+ * each datagram with its numeric source endpoint.
  *
  * @param out Destination endpoint pointer.
  * @param options Outbound endpoint options.
@@ -109,20 +104,6 @@ int kc_nets_open(
     kc_nets_error_fn error,
     void *userdata
 );
-
-/**
- * Opens a persistent UDP sender with configurable local bind and source-aware
- * receive. The default endpoint is used by kc_nets_send; send_to may target
- * other remote endpoints without creating another socket.
- * @param out New endpoint handle.
- * @param options UDP configuration with endpoint.protocol KC_NETS_UDP.
- * @param receive Source-aware UDP receive callback, separate from options.
- * @param error Optional asynchronous error callback.
- * @param userdata User context.
- * @return KC_NETS_OK or negative status.
- */
-int kc_nets_open_udp(kc_nets_t **out,const kc_nets_udp_options_t *options,
-    kc_nets_receive_from_fn receive,kc_nets_error_fn error,void *userdata);
 
 /**
  * Sends bytes through one open endpoint.
@@ -145,13 +126,12 @@ int kc_nets_send(
 /**
  * Queues one UDP datagram to an arbitrary destination using the same socket.
  * @param nets Open UDP sender.
- * @param host Destination hostname or numeric IP.
- * @param port Destination UDP port.
- * @param data Datagrams bytes (copied).
+ * @param peer Destination UDP endpoint.
+ * @param data Datagram bytes (copied).
  * @param data_size Datagram length.
  * @return KC_NETS_OK or a negative status.
  */
-int kc_nets_send_to(kc_nets_t *nets,const char *host,unsigned short port,
+int kc_nets_send_to(kc_nets_t *nets,const kc_nets_endpoint_t *peer,
     const void *data,size_t data_size);
 
 /**
