@@ -44,6 +44,8 @@ typedef struct {
     const char *host;
     unsigned short port;
     int protocol;
+    const char *local_host;
+    unsigned short local_port;
 } nets_cli_options_t;
 
 typedef struct {
@@ -65,6 +67,8 @@ static void nets_cli_help(const char *name)
     printf("\n");
     printf("Options:\n");
     printf("  -t, --transport <type>  tcp or udp (default: tcp)\n");
+    printf("  --local-host <host>     UDP source bind address\n");
+    printf("  --local-port <port>     UDP source port (default: 0)\n");
     printf("  -h, --help              Show this help\n");
     printf("  -v, --version           Show version\n");
 }
@@ -200,6 +204,19 @@ static int nets_cli_parse(
             } else {
                 return nets_cli_error_value("invalid transport: ", value);
             }
+        } else if (strcmp(argument,"--local-host")==0) {
+            if(nets_cli_option_value(argc,argv,&index,argument,
+                &options->local_host)!=0)return 1;
+        } else if (strcmp(argument,"--local-port")==0) {
+            const char *value=NULL;
+            char *end=NULL;
+            unsigned long port;
+            if(nets_cli_option_value(argc,argv,&index,argument,&value)!=0)return 1;
+            errno=0;
+            port=strtoul(value,&end,10);
+            if(errno||!end||!*value||*end||port>65535UL)
+                return nets_cli_error_value("invalid local port: ",value);
+            options->local_port=(unsigned short)port;
         } else if (argument[0] == '-') {
             return nets_cli_error_value("unknown option: ", argument);
         } else {
@@ -221,6 +238,9 @@ static int nets_cli_parse(
         return nets_cli_error_value("invalid port: ", positionals[1]);
     }
     options->host = positionals[0];
+    if(options->protocol!=KC_NETS_UDP &&
+        (options->local_host||options->local_port))
+        return nets_cli_error("local UDP options require -t udp");
     return 0;
 }
 
@@ -475,6 +495,7 @@ static int nets_cli_run(const nets_cli_options_t *options)
 {
     unsigned char buffer[NETS_CLI_BUFFER_SIZE];
     kc_nets_options_t network_options;
+    kc_nets_udp_options_t udp_options;
     kc_nets_t *network;
     nets_cli_state_t state;
     int stdin_open;
@@ -491,14 +512,18 @@ static int nets_cli_run(const nets_cli_options_t *options)
     network_options.protocol = options->protocol;
     network = NULL;
 
-    status = kc_nets_open(
-        &network,
-        &network_options,
-        nets_cli_receive,
-        nets_cli_disconnect,
-        nets_cli_network_error,
-        &state
-    );
+    if(options->protocol==KC_NETS_UDP &&
+        (options->local_host||options->local_port)){
+        memset(&udp_options,0,sizeof(udp_options));
+        udp_options.endpoint=network_options;
+        udp_options.local_host=options->local_host;
+        udp_options.local_port=options->local_port;
+        status=kc_nets_open_udp(&network,&udp_options,nets_cli_receive,
+            nets_cli_network_error,&state);
+    }else{
+        status=kc_nets_open(&network,&network_options,nets_cli_receive,
+            nets_cli_disconnect,nets_cli_network_error,&state);
+    }
     if (status != KC_NETS_OK) {
         return nets_cli_error_value("open failed: ", kc_nets_strerror(status));
     }
