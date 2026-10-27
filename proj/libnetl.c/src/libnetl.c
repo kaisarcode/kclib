@@ -1600,8 +1600,9 @@ int kc_netl_interface_send(kc_netl_interface_t *interface,
         }
         memset(&options,0,sizeof(options));
         destination=interface->host;
-        if(strcmp(destination,"0.0.0.0")==0)destination="127.0.0.1";
-        else if(strcmp(destination,"::")==0)destination="::1";
+        /* A wildcard bind address is not a remote destination. */
+        if(strcmp(destination,"0.0.0.0")==0||
+            strcmp(destination,"::")==0)return KC_NETL_EINVAL;
         options.host=destination;
         options.port=interface->port;
         options.protocol=KC_NETL_TCP;
