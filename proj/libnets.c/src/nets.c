@@ -72,6 +72,11 @@ static void nets_cli_help(const char *name)
     printf("       %s <id> -d\n",name);
     printf("       %s -l [id]\n",name);
     printf("\n");
+    printf("Commands:\n");
+    printf("  nets <id> -s [host port]  Send stdin from a resident UDP socket\n");
+    printf("  nets <id> -d             Remove a resident endpoint\n");
+    printf("  nets -l [id]             List resident endpoints\n");
+    printf("\n");
     printf("Options:\n");
     printf("  -t, --transport <type>  tcp or udp (default: tcp)\n");
     printf("  --local-host <host>     UDP source bind address\n");
