@@ -64,11 +64,11 @@ There is no `respond()`, `sendTo()`, or `replyTo()`.
 ## CLI
 
 ```sh
-# Register a TCP or UDP listener with an external callback command:
-netl servidor 5000 handler -t udp
+# Register a TCP or UDP interface on a local wildcard address:
+netl servidor 0.0.0.0:5000 handler -t udp
 
-# Register one persistent outgoing endpoint:
-netl cliente -c 192.168.1.20:6000 -t udp --local-port 4000
+# Register one persistent endpoint for a remote destination:
+netl cliente 192.168.1.20:6000 -t udp
 
 # Send stdin without opening another socket:
 echo "message 1" | netl cliente
@@ -86,3 +86,11 @@ to the registered command's stdin; its stdout is sent to the peer.
 The CLI maintains sockets in resident processes; ordinary `netl <id>`
 invocations communicate with the registered process via private local IPC.
 IPv6 destination syntax uses brackets: `[::1]:6000`.
+
+The CLI uses one creation syntax: `netl <id> <addr:port> [command...]`.
+A wildcard address (`0.0.0.0` or `::`) binds a local listener;
+a concrete destination establishes a remote endpoint. Neither creating the
+endpoint nor specifying a callback sends data. Sending happens later by
+piping stdin to `netl <id>`; incoming data is delivered asynchronously to
+the optional callback. For a wildcard listener, an incoming peer is needed to
+identify a destination for its response.
