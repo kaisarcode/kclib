@@ -1386,6 +1386,7 @@ static int netl_cli_serve(const char *dir, const char *name)
     netl_cli_registration_t registration;
     kc_netl_options_t options;
     kc_netl_t *listener;
+    kc_netl_t *local_sender=NULL;
     netl_cli_state_t state;
     int rc;
 
@@ -1427,6 +1428,24 @@ static int netl_cli_serve(const char *dir, const char *name)
         rc=kc_netl_connect(&listener,&state.outgoing,&remote,
             netl_cli_receive,netl_cli_disconnect,netl_cli_error,&state);
     }
+    /*
+     * A locally bound TCP endpoint needs a connected socket for stdin sends.
+     * Establish it against the listening interface without exposing a role
+     * selector or changing the listener's accept behavior.
+     */
+    if(rc==KC_NETL_OK && registration.protocol==KC_NETL_TCP &&
+        !state.outgoing){
+        kc_netl_connect_options_t local;
+        memset(&local,0,sizeof(local));
+        local.host=strcmp(registration.host,"0.0.0.0")==0?
+            "127.0.0.1":strcmp(registration.host,"::")==0?
+            "::1":registration.host;
+        local.port=registration.port;
+        local.protocol=KC_NETL_TCP;
+        if(kc_netl_connect(&local_sender,&state.outgoing,&local,
+            netl_cli_receive,netl_cli_disconnect,netl_cli_error,
+            &state)!=KC_NETL_OK)state.outgoing=NULL;
+    }
     if (rc != KC_NETL_OK) {
 #ifdef _WIN32
         DeleteCriticalSection(&state.lock);
@@ -1446,6 +1465,7 @@ static int netl_cli_serve(const char *dir, const char *name)
         netl_cli_sleep();
     }
 
+    kc_netl_close(local_sender);
     kc_netl_close(listener);
     netl_cli_cleanup(&state);
 #ifdef _WIN32
