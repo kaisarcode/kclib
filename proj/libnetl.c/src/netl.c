@@ -61,7 +61,7 @@ typedef struct {
 typedef struct {
     const char *command;
     kc_netl_peer_t *outgoing;
-    kc_netl_interface_t *interface;
+    kc_netl_t *interface;
 #ifdef _WIN32
     CRITICAL_SECTION lock;
 #else
@@ -817,7 +817,7 @@ static DWORD WINAPI netl_cli_tcp_output(LPVOID arg)
         ) && amount != 0U) {
         netl_cli_lock(session->state);
         if (!session->active ||
-                kc_netl_send(session->peer, buffer, (size_t)amount) !=
+                kc_netl_peer_send(session->peer, buffer, (size_t)amount) !=
                 KC_NETL_OK) {
             netl_cli_unlock(session->state);
             break;
@@ -1049,7 +1049,7 @@ static void *netl_cli_tcp_output(void *arg)
     while ((amount = read(session->output_fd, buffer, sizeof(buffer))) > 0) {
         netl_cli_lock(session->state);
         if (!session->active ||
-                kc_netl_send(session->peer, buffer, (size_t)amount) !=
+                kc_netl_peer_send(session->peer, buffer, (size_t)amount) !=
                 KC_NETL_OK) {
             netl_cli_unlock(session->state);
             break;
@@ -1368,7 +1368,7 @@ static void netl_cli_cleanup(netl_cli_state_t *state)
 static void netl_cli_drain_sends(
     const char *dir,
     const char *name,
-    kc_netl_interface_t *interface,
+    kc_netl_t *interface,
     int protocol
 );
 
@@ -1400,7 +1400,7 @@ static int netl_cli_serve(const char *dir,const char *name)
     options.host=registration.host;
     options.port=registration.port;
     options.protocol=registration.protocol;
-    rc=kc_netl_interface_open(&state.interface,&options,
+    rc=kc_netl_open(&state.interface,&options,
         netl_cli_receive,netl_cli_disconnect,netl_cli_error,&state);
     if(rc!=KC_NETL_OK){
 #ifdef _WIN32
@@ -1418,7 +1418,7 @@ static int netl_cli_serve(const char *dir,const char *name)
         netl_cli_drain_sends(dir,name,state.interface,registration.protocol);
         netl_cli_sleep();
     }
-    kc_netl_interface_close(state.interface);
+    kc_netl_close(state.interface);
     netl_cli_cleanup(&state);
 #ifdef _WIN32
     DeleteCriticalSection(&state.lock);
@@ -1489,7 +1489,7 @@ static int netl_cli_send(const char *dir, const char *name)
  * @return Zero on success, non-zero on failure.
  */
 static int netl_cli_process_send(
-    kc_netl_interface_t *interface,
+    kc_netl_t *interface,
     int protocol,
     const char *path
 )
@@ -1502,10 +1502,10 @@ static int netl_cli_process_send(
     if(protocol==KC_NETL_UDP){
         size=fread(buffer,1,sizeof(buffer),file);
         if(ferror(file)||!feof(file)||size>65507U||
-            kc_netl_interface_send(interface,buffer,size)!=KC_NETL_OK)rc=1;
+            kc_netl_send(interface,buffer,size)!=KC_NETL_OK)rc=1;
     }else{
         while((size=fread(buffer,1,sizeof(buffer),file))!=0U){
-            if(kc_netl_interface_send(interface,buffer,size)!=KC_NETL_OK){
+            if(kc_netl_send(interface,buffer,size)!=KC_NETL_OK){
                 rc=1;break;
             }
         }
@@ -1526,7 +1526,7 @@ static int netl_cli_process_send(
 static void netl_cli_drain_sends(
     const char *dir,
     const char *name,
-    kc_netl_interface_t *interface,
+    kc_netl_t *interface,
     int protocol
 )
 {
