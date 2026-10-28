@@ -661,29 +661,6 @@ project_manifests_current() {
     return 0
 }
 
-# Publish a compact project-name index for "kc list all".
-# The inventory contains names only: each project's manifest stays independent.
-# Derive it from the actual published project directories, including projects
-# from other repositories when KCDIST_DIR designates a shared distribution.
-write_project_index() {
-    local listing project_manifest project_name
-    listing=$(mktemp "$DIST_DIR/.projects.XXXXXXXX") || return 1
-    for project_manifest in "$DIST_DIR"/*/manifest.json; do
-        [ -f "$project_manifest" ] || continue
-        project_name=$(basename "$(dirname "$project_manifest")")
-        case "$project_name" in
-            ""|.|..|*[!A-Za-z0-9._-]*) continue ;;
-        esac
-        printf '%s\n' "$project_name"
-    done | LC_ALL=C sort -u > "$listing"
-    if [ -f "$DIST_DIR/projects.txt" ] &&
-        cmp -s "$listing" "$DIST_DIR/projects.txt"; then
-        rm -f "$listing"
-    else
-        mv -f "$listing" "$DIST_DIR/projects.txt"
-    fi
-}
-
 # Dispatches one project distribution or all project distributions.
 # @param target Logical capability name or all.
 # @return 0 on success.
@@ -734,7 +711,6 @@ main() {
         else
             echo "Done. No distribution changes."
         fi
-        write_project_index
         return 0
     fi
 
@@ -769,7 +745,6 @@ main() {
     else
         echo "Done. No distribution changes."
     fi
-    write_project_index
 }
 
 main "$@"
