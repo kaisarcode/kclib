@@ -15,5 +15,6 @@ int kc_packages_install(const char *name, const char *platform, const char *arch
 int kc_packages_update(const char *name, const char *platform, const char *arch);
 int kc_packages_remove(const char *name, const char *platform, const char *arch);
 int kc_packages_each(const char *platform, const char *arch, int update);
+int kc_packages_list_all(void);
 
 #endif
