@@ -7,6 +7,351 @@
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
+/* NativeBridge.exec: generic allowlisted process execution, not a shell. */
+#ifndef _WIN32
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#endif
+#include "libwvw.h"
+#include "parson.h"
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#if defined(_WIN32)
+#include <windows.h>
+#include <io.h>
+#else
+#include <pthread.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <unistd.h>
+extern char **environ;
+#endif
+
+#define KC_WVW_EXEC_MAX_ARGS 64
+#define KC_WVW_EXEC_MAX_OUTPUT 48000
+
+typedef struct kc_wvw_exec_job {
+    kc_wvw_t *ctx;
+    char *id;
+    char *path;
+    char **argv;
+    size_t argc;
+    char *response;
+} kc_wvw_exec_job_t;
+
+static void kc_wvw_exec_retain(kc_wvw_t *ctx);
+static void kc_wvw_exec_release(kc_wvw_t *ctx);
+static void kc_wvw_exec_deliver(kc_wvw_exec_job_t *job);
+
+static char *kc_wvw_exec_copy(const char *value) {
+    size_t length;
+    char *copy;
+    if (!value) return NULL;
+    length = strlen(value) + 1;
+    copy = malloc(length);
+    if (copy) memcpy(copy, value, length);
+    return copy;
+}
+
+static void kc_wvw_exec_job_free(kc_wvw_exec_job_t *job) {
+    size_t i;
+    if (!job) return;
+    for (i = 0; i < job->argc; i++) free(job->argv[i]);
+    free(job->argv);
+    free(job->id);
+    free(job->path);
+    free(job->response);
+    free(job);
+}
+
+/* Responses follow the same Promise contract as the Android NativeBridge:
+ * successful processes resolve with merged output, failures reject with
+ * code/message and, for a nonzero exit, exitCode and output. */
+static char *kc_wvw_exec_reply(const char *id, int success, const char *code,
+    const char *message, int exit_code, const char *output) {
+    JSON_Value *root = json_value_init_object();
+    JSON_Value *error = NULL;
+    JSON_Object *obj;
+    char *serialized = NULL;
+    if (!root) return NULL;
+    obj = json_value_get_object(root);
+    if (json_object_set_string(obj, "id", id) != JSONSuccess ||
+        json_object_set_boolean(obj, "ok", success) != JSONSuccess)
+        goto done;
+    if (success) {
+        if (json_object_set_string(obj, "result", output ? output : "") != JSONSuccess)
+            goto done;
+    } else {
+        error = json_value_init_object();
+        if (!error) goto done;
+        if (json_object_set_string(json_value_get_object(error), "code", code) != JSONSuccess ||
+            json_object_set_string(json_value_get_object(error), "message", message) != JSONSuccess)
+            goto done;
+        if (output) {
+            if (json_object_set_number(json_value_get_object(error),
+                    "exitCode", exit_code) != JSONSuccess ||
+                json_object_set_string(json_value_get_object(error),
+                    "output", output) != JSONSuccess) goto done;
+        }
+        if (json_object_set_value(obj, "error", error) != JSONSuccess)
+            goto done;
+        error = NULL;
+    }
+    serialized = json_serialize_to_string(root);
+done:
+    json_value_free(error);
+    json_value_free(root);
+    return serialized;
+}
+
+#if defined(_WIN32)
+static wchar_t *kc_wvw_exec_wide(const char *text) {
+    int length;
+    wchar_t *wide;
+    length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, NULL, 0);
+    if (length <= 0) return NULL;
+    wide = malloc((size_t)length * sizeof(*wide));
+    if (!wide || !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+            text, -1, wide, length)) {
+        free(wide);
+        return NULL;
+    }
+    return wide;
+}
+
+static int kc_wvw_exec_quote(wchar_t *line, size_t cap, size_t *used,
+    const wchar_t *arg) {
+    size_t i = 0, slashes;
+    if (*used >= cap - 2) return 1;
+    line[(*used)++] = L'"';
+    while (arg[i]) {
+        slashes = 0;
+        while (arg[i] == L'\\') { i++; slashes++; }
+        if (arg[i] == L'"' || !arg[i]) {
+            size_t n = slashes * 2 + (arg[i] == L'"');
+            if (n >= cap - *used - 1) return 1;
+            while (n--) line[(*used)++] = L'\\';
+            if (!arg[i]) break;
+            line[(*used)++] = L'"';
+            i++;
+        } else {
+            if (slashes >= cap - *used - 2) return 1;
+            while (slashes--) line[(*used)++] = L'\\';
+            line[(*used)++] = arg[i++];
+        }
+    }
+    line[(*used)++] = L'"';
+    line[*used] = 0;
+    return 0;
+}
+
+static int kc_wvw_exec_process(const kc_wvw_exec_job_t *job, FILE *stream,
+    int *exit_code) {
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION process;
+    SECURITY_ATTRIBUTES attributes = {sizeof(attributes), NULL, TRUE};
+    HANDLE output = NULL, input = INVALID_HANDLE_VALUE;
+    HANDLE current = GetCurrentProcess(), thread;
+    wchar_t *path = NULL, *command = NULL;
+    size_t used = 0, cap = 32768, i;
+    DWORD status;
+    int result = 1;
+    (void)thread;
+    memset(&startup, 0, sizeof(startup));
+    memset(&process, 0, sizeof(process));
+    path = kc_wvw_exec_wide(job->path);
+    command = calloc(cap, sizeof(*command));
+    if (!path || !command) goto done;
+    /* The first argument identifies the executable; CreateProcessW additionally
+     * pins its actual path so command-line metacharacters cannot select one. */
+    for (i = 0; i < job->argc; i++) {
+        wchar_t *arg = kc_wvw_exec_wide(i ? job->argv[i] : job->path);
+        int failed;
+        if (!arg) goto done;
+        if (i) {
+            if (used + 1 >= cap) { free(arg); goto done; }
+            command[used++] = L' ';
+        }
+        failed = kc_wvw_exec_quote(command, cap, &used, arg);
+        free(arg);
+        if (failed) goto done;
+    }
+    if (!DuplicateHandle(current, (HANDLE)_get_osfhandle(_fileno(stream)),
+            current, &output, 0, TRUE, DUPLICATE_SAME_ACCESS)) goto done;
+    input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &attributes, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (input == INVALID_HANDLE_VALUE) goto done;
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = input;
+    startup.hStdOutput = output;
+    startup.hStdError = output;
+    if (!CreateProcessW(path, command, NULL, NULL, TRUE, CREATE_NO_WINDOW,
+            NULL, NULL, &startup, &process)) goto done;
+    WaitForSingleObject(process.hProcess, INFINITE);
+    if (GetExitCodeProcess(process.hProcess, &status)) {
+        *exit_code = (int)status;
+        result = 0;
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+done:
+    if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
+    if (output) CloseHandle(output);
+    free(path);
+    free(command);
+    return result;
+}
+#else
+static int kc_wvw_exec_process(const kc_wvw_exec_job_t *job, FILE *stream,
+    int *exit_code) {
+    posix_spawn_file_actions_t actions;
+    pid_t pid;
+    int rc, status;
+    if (posix_spawn_file_actions_init(&actions)) return 1;
+    rc = posix_spawn_file_actions_adddup2(&actions, fileno(stream), STDOUT_FILENO);
+    if (!rc) rc = posix_spawn_file_actions_adddup2(&actions,
+        fileno(stream), STDERR_FILENO);
+    if (!rc) rc = posix_spawn_file_actions_addopen(&actions,
+        STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    if (!rc) rc = posix_spawn(&pid, job->path, &actions,
+        NULL, job->argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (rc) return 1;
+    do { rc = waitpid(pid, &status, 0); }
+    while (rc < 0 && errno == EINTR);
+    if (rc != pid) return 1;
+    *exit_code = WIFEXITED(status) ? WEXITSTATUS(status) :
+        WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
+    return 0;
+}
+#endif
+
+static void kc_wvw_exec_run(kc_wvw_exec_job_t *job) {
+    FILE *stream = tmpfile();
+    char output[KC_WVW_EXEC_MAX_OUTPUT + 1];
+    int exit_code = -1, failed = 1, truncated = 0;
+    size_t length = 0;
+    if (stream) {
+        failed = kc_wvw_exec_process(job, stream, &exit_code);
+        if (!failed && !fseek(stream, 0, SEEK_SET)) {
+            length = fread(output, 1, KC_WVW_EXEC_MAX_OUTPUT, stream);
+            if (ferror(stream)) failed = 1;
+            else truncated = fgetc(stream) != EOF;
+        } else if (!failed) failed = 1;
+        fclose(stream);
+    }
+    output[length] = '\0';
+    if (failed)
+        job->response = kc_wvw_exec_reply(job->id, 0, "EXEC_FAILED",
+            "Executable could not be started or its output could not be read.", -1, NULL);
+    else if (truncated)
+        job->response = kc_wvw_exec_reply(job->id, 0, "OUTPUT_TOO_LARGE",
+            "Executable output exceeded the bridge limit.", -1, NULL);
+    else if (exit_code)
+        job->response = kc_wvw_exec_reply(job->id, 0, "EXEC_FAILED",
+            "Executable exited unsuccessfully.", exit_code, output);
+    else
+        job->response = kc_wvw_exec_reply(job->id, 1, NULL, NULL, 0, output);
+    if (!job->response || strlen(job->response) > 65536) {
+        free(job->response);
+        job->response = kc_wvw_exec_reply(job->id, 0, "OUTPUT_TOO_LARGE",
+            "Executable output could not fit in a bridge response.", -1, NULL);
+    }
+    kc_wvw_exec_deliver(job);
+}
+
+#if defined(_WIN32)
+static DWORD WINAPI kc_wvw_exec_worker(LPVOID data) {
+    kc_wvw_exec_run((kc_wvw_exec_job_t *)data);
+    return 0;
+}
+#else
+static void *kc_wvw_exec_worker(void *data) {
+    kc_wvw_exec_run((kc_wvw_exec_job_t *)data);
+    return NULL;
+}
+#endif
+
+/* Return NULL only if an asynchronous execution has been started. */
+static char *kc_wvw_exec_start(kc_wvw_t *ctx, const char *id,
+    const char *params, char *const *names, char *const *paths,
+    size_t registered) {
+    JSON_Value *input = json_parse_string(params);
+    JSON_Array *args = json_value_get_array(input);
+    size_t count = args ? json_array_get_count(args) : 0, i;
+    kc_wvw_exec_job_t *job = NULL;
+    char *reply = NULL;
+    const char *path = NULL, *requested;
+    if (!count || count > KC_WVW_EXEC_MAX_ARGS) {
+        reply = kc_wvw_exec_reply(id, 0, "INVALID_ARGUMENT",
+            "exec expects a nonempty string array.", -1, NULL);
+        goto done;
+    }
+    for (i = 0; i < count; i++) {
+        const char *text = json_array_get_string(args, i);
+        if (!text || strlen(text) > 4096 || !text[0] && i == 0) {
+            reply = kc_wvw_exec_reply(id, 0, "INVALID_ARGUMENT",
+                "exec arguments must be strings.", -1, NULL);
+            goto done;
+        }
+    }
+    requested = json_array_get_string(args, 0);
+    for (i = 0; i < registered; i++) {
+        if (!strcmp(requested, names[i])) { path = paths[i]; break; }
+    }
+    if (!path) {
+        reply = kc_wvw_exec_reply(id, 0, "EXEC_NOT_EXPOSED",
+            "Executable was not registered by the host.", -1, NULL);
+        goto done;
+    }
+    job = calloc(1, sizeof(*job));
+    if (!job) goto start_failed;
+    job->ctx = ctx;
+    job->id = kc_wvw_exec_copy(id);
+    job->path = kc_wvw_exec_copy(path);
+    job->argv = calloc(count + 1, sizeof(*job->argv));
+    if (!job->id || !job->path || !job->argv) goto start_failed;
+    job->argc = count;
+    for (i = 0; i < count; i++) {
+        job->argv[i] = kc_wvw_exec_copy(i ? json_array_get_string(args, i) : path);
+        if (!job->argv[i]) goto start_failed;
+    }
+    kc_wvw_exec_retain(ctx);
+#if defined(_WIN32)
+    {
+        HANDLE thread = CreateThread(NULL, 0, kc_wvw_exec_worker, job, 0, NULL);
+        if (!thread) {
+            kc_wvw_exec_release(ctx);
+            goto start_failed;
+        }
+        CloseHandle(thread);
+    }
+#else
+    {
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, kc_wvw_exec_worker, job)) {
+            kc_wvw_exec_release(ctx);
+            goto start_failed;
+        }
+        pthread_detach(thread);
+    }
+#endif
+    job = NULL;
+    goto done;
+start_failed:
+    reply = kc_wvw_exec_reply(id, 0, "EXEC_FAILED",
+        "Cannot start an executable worker.", -1, NULL);
+done:
+    kc_wvw_exec_job_free(job);
+    json_value_free(input);
+    return reply;
+}
+
 #ifdef _WIN32
 
 #define CINTERFACE
@@ -3160,6 +3505,14 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
 
+    if (!strcmp(method, "exec")) {
+        response = kc_wvw_exec_start(ctx, id, params,
+            ctx->bridge.exec_names, ctx->bridge.exec_paths,
+            ctx->bridge.exec_count);
+        free(id); free(method); free(params);
+        return response; /* NULL means the worker will reply asynchronously. */
+    }
+
     if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
         error = kc_wvw_bridge_error_object("METHOD_NOT_FOUND", "Bridge method is not allowed.");
         response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
@@ -4448,6 +4801,14 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         }
         free(id); free(method); free(params); free(result);
         return response;
+    }
+
+    if (!strcmp(method, "exec")) {
+        response = kc_wvw_exec_start(ctx, id, params,
+            ctx->bridge.exec_names, ctx->bridge.exec_paths,
+            ctx->bridge.exec_count);
+        free(id); free(method); free(params);
+        return response; /* NULL means the worker will reply asynchronously. */
     }
 
     if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
