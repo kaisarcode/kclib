@@ -600,7 +600,7 @@ generate_manifest() {
                 rm -f "$manifest_file"
                 return 1
             }
-            readme_sha=$(write_dist_readme "$name" | compute_sha256 -) || {
+            readme_sha=$(write_dist_readme "$project_dir" | compute_sha256 -) || {
                 rm -f "$manifest_file"
                 return 1
             }
@@ -654,7 +654,7 @@ project_manifests_current() {
     if [ -z "${KCDIST_DIR:-}" ]; then
         [ ! -f "$DIST_DIR/manifest.json" ] || return 1
     fi
-    for project_dir in "$PROJ_DIR"/lib*.c/; do
+    for project_dir in "$PROJ_DIR"/*/; do
         is_project "$project_dir" || continue
         project_dir="${project_dir%/}"
         project_name=$(basename "$project_dir")
@@ -697,7 +697,7 @@ main() {
     if [ "$target" = "all" ]; then
         changed="$stale_changed"
 
-        for project_dir in "$PROJ_DIR"/lib*.c/; do
+        for project_dir in "$PROJ_DIR"/*/; do
             is_project "$project_dir" || continue
 
             status=0
