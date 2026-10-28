@@ -54,8 +54,12 @@ capability_name() {
     local project_name="$1"
     local stem
 
-    stem="${project_name%.c}"
-    printf '%s\n' "${stem#lib}"
+    if [[ "$project_name" == lib*.c ]]; then
+        stem="${project_name%.c}"
+        printf '%s\n' "${stem#lib}"
+    else
+        printf '%s\n' "$project_name"
+    fi
 }
 
 # Checks whether a project is excluded from distribution.
@@ -91,7 +95,8 @@ is_project() {
     local project_name
 
     [ -d "$project_path" ] || return 1
-    [ -f "$project_path/CMakeLists.txt" ] || return 1
+    [ -f "$project_path/Makefile" ] || return 1
+    [ -f "$project_path/manifest.json" ] || return 1
 
     project_name=$(basename "$project_path")
     if is_excluded "$project_name"; then
@@ -110,6 +115,11 @@ resolve_project() {
     local name="$2"
     local project_dir
 
+    project_dir="$proj_dir/$name"
+    if is_project "$project_dir"; then
+        printf '%s\n' "$project_dir"
+        return 0
+    fi
     project_dir="$proj_dir/lib$name.c"
     if is_project "$project_dir"; then
         printf '%s\n' "$project_dir"
@@ -155,9 +165,14 @@ compute_license_sha256() {
 # @param name Project capability name without the lib prefix.
 # @return 0 on success.
 write_dist_readme() {
-    local name="$1"
-
-    printf '# lib%s.c\n\nAuthor: Kaisarcode\nWebsite: https://kaisarcode.com/\n' "$name"
+    local project_dir="$1"
+    local name
+    name=$(capability_name "$(basename "$project_dir")")
+    if [[ "$(basename "$project_dir")" == lib*.c ]]; then
+        printf '# lib%s.c\n\nAuthor: Kaisarcode\nWebsite: https://kaisarcode.com/\n' "$name"
+    else
+        cat "$project_dir/README.md"
+    fi
 }
 
 # Maps a built target to its published platform/architecture directory.
@@ -186,7 +201,8 @@ load_manifest_state() {
     MANIFEST_README_SHA=()
     MANIFEST_COUNT=()
     local -a manifests=()
-    for manifest in "$DIST_DIR"/lib*.c/manifest.json; do
+    for manifest in "$DIST_DIR"/*/manifest.json; do
+        [ -f "$PROJ_DIR/$(basename "$(dirname "$manifest")")/Makefile" ] || continue
         [ -f "$manifest" ] || continue
         manifests+=("$manifest")
     done
@@ -266,7 +282,7 @@ dist_target_is_current() {
         echo "run ./scripts/build.sh $name" >&2
         return 2
     fi
-    if [ ! -f "$header" ]; then
+    if [[ "$project_name" == lib*.c ]] && [ ! -f "$header" ]; then
         echo "error: public header not found: $header" >&2
         return 2
     fi
@@ -281,11 +297,13 @@ dist_target_is_current() {
     license_sha=$(compute_license_sha256 "$project_dir") || return 2
     [ "${MANIFEST_LICENSE_SHA["$prefix"]:-}" = "$license_sha" ] || return 1
 
-    readme_sha=$(write_dist_readme "$name" | compute_sha256 -) || return 2
+    readme_sha=$(write_dist_readme "$project_dir" | compute_sha256 -) || return 2
     [ "${MANIFEST_README_SHA["$prefix"]:-}" = "$readme_sha" ] || return 1
 
-    actual_sha=$(compute_sha256 "$header") || return 2
-    [ "${MANIFEST_SHA["$prefix/lib$name.h"]:-}" = "$actual_sha" ] || return 1
+    if [ -f "$header" ]; then
+        actual_sha=$(compute_sha256 "$header") || return 2
+        [ "${MANIFEST_SHA["$prefix/lib$name.h"]:-}" = "$actual_sha" ] || return 1
+    fi
 
     count=0
     for file in "$dist_target"/*; do
@@ -315,7 +333,7 @@ sync_target() {
     name=$(capability_name "$project_name")
     header="$project_dir/src/lib$name.h"
     dist_target=$(dist_target_path "$project_dir" "$target_dir")
-    if [ ! -f "$header" ]; then
+    if [[ "$project_name" == lib*.c ]] && [ ! -f "$header" ]; then
         echo "error: public header not found: $header" >&2
         return 1
     fi
@@ -365,15 +383,17 @@ sync_target() {
         return 1
     fi
 
-    if ! cp "$header" "$staging/lib$name.h"; then
-        rm -rf "$staging"
-        return 1
+    if [ -f "$header" ]; then
+        if ! cp "$header" "$staging/lib$name.h"; then
+            rm -rf "$staging"
+            return 1
+        fi
+        actual_sha=$(compute_sha256 "$staging/lib$name.h") || {
+            rm -rf "$staging"
+            return 1
+        }
+        printf '%s  lib%s.h\n' "$actual_sha" "$name" >> "$staging/SHA256SUMS"
     fi
-    actual_sha=$(compute_sha256 "$staging/lib$name.h") || {
-        rm -rf "$staging"
-        return 1
-    }
-    printf '%s  lib%s.h\n' "$actual_sha" "$name" >> "$staging/SHA256SUMS"
 
     for file in LICENSE COPYING; do
         [ -f "$project_dir/$file" ] || continue
@@ -388,7 +408,7 @@ sync_target() {
         printf '%s  %s\n' "$actual_sha" "$file" >> "$staging/SHA256SUMS"
     done
 
-    if ! write_dist_readme "$name" > "$staging/README.md"; then
+    if ! write_dist_readme "$project_dir" > "$staging/README.md"; then
         rm -rf "$staging"
         return 1
     fi
@@ -506,7 +526,7 @@ prune_stale_projects() {
     # A shared distribution may contain projects owned by other repositories.
     [ -z "${KCDIST_DIR:-}" ] || return 0
     changed=0
-    for project_dist in "$DIST_DIR"/lib*.c/; do
+    for project_dist in "$DIST_DIR"/*/; do
         [ -d "$project_dist" ] || continue
         project_name=$(basename "$project_dist")
         source_project="$PROJ_DIR/$project_name"
@@ -532,7 +552,7 @@ generate_manifest() {
     local updated_at first_file metadata_sha
 
     updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-    for project_dir in "$PROJ_DIR"/lib*.c/; do
+    for project_dir in "$PROJ_DIR"/*/; do
         is_project "$project_dir" || continue
         project_dir="${project_dir%/}"
         project_name=$(basename "$project_dir")
