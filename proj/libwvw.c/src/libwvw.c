@@ -370,6 +370,7 @@ done:
 #include <windows.h>
 
 #define KC_WVW_CLOSE_MESSAGE (WM_APP + 1)
+#define KC_WVW_EXEC_MESSAGE (WM_APP + 3)
 #define KC_WVW_BRIDGE_MAX_MESSAGE 65536
 
 typedef HRESULT (STDAPICALLTYPE *kc_wvw_create_environment_fn)(PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions *, ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *);
@@ -473,6 +474,7 @@ typedef struct {
 struct kc_wvw {
     kc_wvw_config_t opts;
     volatile LONG ref_count;
+    volatile LONG exec_closing;
     int running, closing, com_initialized, started, free_on_exit;
     DWORD worker_id;
     HANDLE thread, ready;
@@ -503,6 +505,29 @@ static void kc_wvw_context_destroy(kc_wvw_t *ctx);
 static void kc_wvw_config_free(kc_wvw_config_t *config);
 static void kc_wvw_set_error(kc_wvw_t *ctx, const char *fmt, ...);
 static int kc_wvw_set_icon_impl(kc_wvw_t *ctx, const char *icon);
+
+/* A worker holds a reference until its response is consumed or discarded. */
+static void kc_wvw_exec_retain(kc_wvw_t *ctx) {
+    kc_wvw_context_add_ref(ctx);
+}
+static void kc_wvw_exec_release(kc_wvw_t *ctx) {
+    kc_wvw_context_release(ctx);
+}
+static void kc_wvw_exec_finish(kc_wvw_exec_job_t *job) {
+    kc_wvw_t *ctx = job->ctx;
+    if (!InterlockedCompareExchange(&ctx->exec_closing, 0, 0) &&
+        job->response) kc_wvw_bridge_post_json(ctx, job->response);
+    kc_wvw_exec_job_free(job);
+    kc_wvw_exec_release(ctx);
+}
+static void kc_wvw_exec_deliver(kc_wvw_exec_job_t *job) {
+    kc_wvw_t *ctx = job->ctx;
+    if (!InterlockedCompareExchange(&ctx->exec_closing, 0, 0) &&
+        ctx->hwnd && PostMessageW(ctx->hwnd, KC_WVW_EXEC_MESSAGE,
+            0, (LPARAM)job)) return;
+    kc_wvw_exec_job_free(job);
+    kc_wvw_exec_release(ctx);
+}
 
 /**
  * Retains one context while an asynchronous operation may use it.
@@ -2252,6 +2277,7 @@ static void kc_wvw_request_close(kc_wvw_t *ctx) {
     }
 
     ctx->closing = 1; ctx->running = 0;
+    InterlockedExchange(&ctx->exec_closing, 1);
     if (ctx->hwnd && IsWindow(ctx->hwnd)) DestroyWindow(ctx->hwnd);
     PostQuitMessage(0);
 }
@@ -2332,6 +2358,19 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
     case KC_WVW_CLOSE_MESSAGE:
         kc_wvw_request_close(ctx);
         return 0;
+    case KC_WVW_EXEC_MESSAGE:
+        if (lparam) kc_wvw_exec_finish((kc_wvw_exec_job_t *)lparam);
+        return 0;
+    case WM_NCDESTROY: {
+        MSG pending;
+        if (ctx) InterlockedExchange(&ctx->exec_closing, 1);
+        while (PeekMessageW(&pending, hwnd, KC_WVW_EXEC_MESSAGE,
+                KC_WVW_EXEC_MESSAGE, PM_REMOVE)) {
+            if (pending.lParam)
+                kc_wvw_exec_finish((kc_wvw_exec_job_t *)pending.lParam);
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
     case (WM_APP + 2): {
         kc_wvw_op_t *op = (kc_wvw_op_t *)lparam;
         if (op) op->result = kc_wvw_execute_op(ctx, op);
