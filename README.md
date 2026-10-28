@@ -4,8 +4,8 @@
 KaisarCode ecosystem. Each project provides one concrete capability through an
 independent reusable C library.
 
-All kclib projects are developed together in this monorepo under
-`proj/libNAME.c/` directories.
+All reusable kclibs are developed under `proj/libNAME.c/` directories.
+Independent native tools also live in `proj/` with their own project names.
 
 It is not a framework or a monolithic library. Every kclib is independent: no
 kclib depends on another kclib. Capabilities compose outside the libraries
@@ -41,6 +41,18 @@ app and agent instructions read from the same file.
 Each project directory contains detailed documentation in
 `proj/libNAME.c/README.md`. That README defines the actual behavior, API,
 build, and constraints of its project.
+
+## Standalone tools
+
+The repository also contains independent applications such as
+[`kc`](proj/kc/). This is a native executable, **not a kclib**, and is
+not required by any kclib. Each project defines its own build and test
+contracts through its `Makefile`; repository scripts discover projects
+from those files rather than from a hardcoded `libNAME.c` naming rule.
+
+`kc` combines package management (`install`, `update`, `remove`,
+`list`, `info`) and generic dispatch of installed project CLIs.
+Its standalone project metadata is in `proj/kc/manifest.json`.
 
 ## Common form
 
@@ -209,9 +221,9 @@ Publish every kclib (omitting `all` is equivalent) or one project:
 ```
 
 By default, each repository distributes into its own local `dist/` directory.
-To publish `kclib` and `kcapp` together, export the same `KCDIST_DIR`
-before running either repository's `scripts/dist.sh`. Both use identical
-per-project metadata and artifact manifest schemas, without a root inventory.
+`KCDIST_DIR` selects a shared distribution destination for every project,
+including native tools such as `kc`. All projects use their own
+metadata and artifact manifest, without a root inventory.
 For example:
 
 ```sh
