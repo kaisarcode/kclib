@@ -1,0 +1,8 @@
+{
+  "name": "kc",
+  "description": "Installs and updates KaisarCode projects and dispatches their native command-line interfaces.",
+  "author": "KaisarCode",
+  "license": "GPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kcapp/tree/slave/proj/kc"
+}
