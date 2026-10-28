@@ -44,7 +44,11 @@ resolve_project() {
     local proj_dir="$1"
     local name="$2"
 
-    if [ -d "$proj_dir/lib$name.c" ]; then
+    if [ -f "$proj_dir/$name/Makefile" ]; then
+        printf '%s\n' "$proj_dir/$name"
+        return 0
+    fi
+    if [ -f "$proj_dir/lib$name.c/Makefile" ]; then
         printf '%s\n' "$proj_dir/lib$name.c"
         return 0
     fi
@@ -266,8 +270,8 @@ main() {
     if [ "$target" = "all" ]; then
         project_dirs=()
         step_count=0
-        for project_dir in "$proj_dir"/lib*.c; do
-            [ -d "$project_dir" ] || continue
+        for project_dir in "$proj_dir"/*; do
+            [ -f "$project_dir/Makefile" ] || continue
             project_dirs+=("$project_dir")
             steps=$(count_test_steps "$project_dir")
             step_count=$((step_count + steps))
