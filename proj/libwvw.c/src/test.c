@@ -7,7 +7,8 @@
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
-#ifndef _WIN32
+/* Cocoa uses Darwin BSD typedefs; strict POSIX mode hides them. */
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
 #endif
 
