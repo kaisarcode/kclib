@@ -1,4 +1,4 @@
-# libnetl — Public API projection
+# libnetl - Public API projection
 
 `libnetl` manages persistent, bidirectional TCP and UDP sockets. The snippets
 below are **conceptual projections** of the native C API, not JavaScript or Lua
@@ -80,13 +80,13 @@ CLI callers do not select between them.
 ## C contract
 
 - `kc_netl_open(out, options, receive, disconnect, error, userdata)` opens
-  a persistent TCP or UDP listener.
+    a persistent TCP or UDP listener.
 - `kc_netl_connect(out, peer, options, receive, disconnect, error, userdata)`
-  creates one persistent outgoing endpoint.
+    creates one persistent outgoing endpoint.
 - `kc_netl_send(peer, bytes, size)` sends or replies using that peer's
-  existing socket.
+    existing socket.
 - `kc_netl_peer_host(peer)`, `kc_netl_peer_port(peer)`, and
-  `kc_netl_peer_protocol(peer)` describe the remote endpoint.
+    `kc_netl_peer_protocol(peer)` describe the remote endpoint.
 - `kc_netl_close(instance)` ends a persistent instance.
 
 There is no `respond()`, `sendTo()`, or `replyTo()`.
