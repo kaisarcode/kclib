@@ -8,10 +8,9 @@
  */
 
 /* NativeBridge.exec: generic allowlisted process execution, not a shell. */
-#ifndef _WIN32
-#ifndef _POSIX_C_SOURCE
+/* Cocoa uses Darwin BSD typedefs; strict POSIX mode hides them. */
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
-#endif
 #endif
 #include "libwvw.h"
 #include "parson.h"
