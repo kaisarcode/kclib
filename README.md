@@ -208,6 +208,21 @@ Publish every kclib (omitting `all` is equivalent) or one project:
 ./scripts/dist.sh demo
 ```
 
+By default, each repository distributes into its own local `dist/` directory.
+To publish `kclib` and `kcapp` together, export the same `KCDIST_DIR`
+before running either repository's `scripts/dist.sh`. Both use identical
+per-project metadata and artifact manifest schemas, without a root inventory.
+For example:
+
+```sh
+export KCDIST_DIR="$HOME/kaisarcode-dist"
+./scripts/dist.sh all
+```
+
+The matching public distribution root is `https://kaisarcode.com/dist`.
+When `KCDIST_DIR` is set, the script never prunes projects owned by other
+repositories.
+
 The code is primarily C11.
 
 Each project declares its requirements and supported targets in its own README
