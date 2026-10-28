@@ -65,6 +65,12 @@ index is the summary, not the contract.
 | [`flow`](https://github.com/kaisarcode/kclib/tree/master/proj/libflow.c) | Runs branched command and child flows; branches remain independent and do not merge. | Branching or parallel execution paths. |
 | [`demo`](https://github.com/kaisarcode/kclib/tree/master/proj/libdemo.c) | Provides the reference blueprint for new libraries in the collection. | Only when creating a new primitive in the collection; not distributed. |
 
+## Standalone tools (not kclibs)
+
+| Project | Purpose | Use when |
+| :--- | :--- | :--- |
+| [`kc`](proj/kc/) | Portable native package manager and generic CLI launcher; reads individual project manifests, installs verified artifacts and dispatches installed commands. | Installing, updating, inspecting or executing KaisarCode project CLIs. |
+
 ## Utilities
 
 Support tools that are not full kclibs: no runner interface, not part of the standard distribution contract.
