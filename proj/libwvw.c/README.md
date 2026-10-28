@@ -29,6 +29,19 @@ if (kc_wvw_open(&window, &options) == KC_WVW_OK) {
 The URL is required. Omitted size values default to 1280x720 and omitted
 boolean options are false.
 
+## Execute registered desktop programs
+
+Applications can register the filesystem paths of allowed executables with
+`kc_wvw_set_executables()`. JavaScript then calls
+`await NativeBridge.exec(["name", "arg1", "arg2"])`. Calls execute without
+shell interpretation in a worker thread; a successful process resolves to
+merged stdout and stderr, while a nonzero exit rejects with an error carrying
+its exit code and captured output. This feature is generic: no executable
+needs to be a kclib or a KaisarCode program.
+
+See the [native bridge guide](doc/native-bridge.md) for the full contract,
+origin restrictions, limits and error handling.
+
 ## Requirements
 
 Linux builds require GTK 3, WebKitGTK 4.1, and `pkg-config`. Windows execution
