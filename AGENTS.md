@@ -21,6 +21,16 @@ buildable, usable, and distributable. Composition between capabilities belongs
 in consumers, applications, processes, or explicit higher-level tooling rather
 than through kclib-to-kclib dependencies.
 
+## Independent tools
+
+Not every project in this repository is a kclib. Projects such as `proj/kc`
+are standalone executables with their own `Makefile`, source, tests and
+manifest. They are not to be treated as libraries or coupled as dependencies
+of any kclib. Repository-wide `scripts/build.sh`, `scripts/test.sh` and
+`scripts/dist.sh` discover projects by their own `Makefile`, rather than
+requiring a kclib naming convention. Standalone executables do not need a
+library C API or a public library header.
+
 ## Source control
 
 Use the existing `devel` branch for normal development work.
