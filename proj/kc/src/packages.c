@@ -1392,4 +1392,3 @@ int kc_packages_each(const char *platform, const char *arch, int update) {
     if (total == 0 && failures == 0) puts("No installed projects");
     return failures ? 1 : 0;
 }
-
