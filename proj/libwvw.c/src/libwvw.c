@@ -46,6 +46,11 @@ static void kc_wvw_exec_retain(kc_wvw_t *ctx);
 static void kc_wvw_exec_release(kc_wvw_t *ctx);
 static void kc_wvw_exec_deliver(kc_wvw_exec_job_t *job);
 
+/**
+ * Copy one execution string.
+ * @param value Source string.
+ * @return Owned copy, or NULL.
+ */
 static char *kc_wvw_exec_copy(const char *value) {
     size_t length;
     char *copy;
@@ -56,6 +61,11 @@ static char *kc_wvw_exec_copy(const char *value) {
     return copy;
 }
 
+/**
+ * Release one execution job.
+ * @param job Execution job, or NULL.
+ * @return void
+ */
 static void kc_wvw_exec_job_free(kc_wvw_exec_job_t *job) {
     size_t i;
     if (!job) return;
@@ -67,9 +77,16 @@ static void kc_wvw_exec_job_free(kc_wvw_exec_job_t *job) {
     free(job);
 }
 
-/* Responses follow the same Promise contract as the Android NativeBridge:
- * successful processes resolve with merged output, failures reject with
- * code/message and, for a nonzero exit, exitCode and output. */
+/**
+ * Build one NativeBridge execution response.
+ * @param id Request identifier.
+ * @param success Non-zero for a successful process.
+ * @param code Error code when execution fails.
+ * @param message Error message when execution fails.
+ * @param exit_code Process exit status.
+ * @param output Captured process output.
+ * @return Owned serialized response, or NULL on allocation failure.
+ */
 static char *kc_wvw_exec_reply(const char *id, int success, const char *code,
     const char *message, int exit_code, const char *output) {
     JSON_Value *root = json_value_init_object();
@@ -108,6 +125,11 @@ done:
 }
 
 #if defined(_WIN32)
+/**
+ * Convert one UTF-8 string to UTF-16.
+ * @param text UTF-8 string.
+ * @return Owned UTF-16 string, or NULL.
+ */
 static wchar_t *kc_wvw_exec_wide(const char *text) {
     int length;
     wchar_t *wide;
@@ -122,6 +144,14 @@ static wchar_t *kc_wvw_exec_wide(const char *text) {
     return wide;
 }
 
+/**
+ * Append one Windows command-line argument.
+ * @param line Destination command line.
+ * @param cap Destination capacity.
+ * @param used Current destination length.
+ * @param arg Argument to quote.
+ * @return Zero on success, otherwise one.
+ */
 static int kc_wvw_exec_quote(wchar_t *line, size_t cap, size_t *used,
     const wchar_t *arg) {
     size_t i = 0, slashes;
@@ -148,6 +178,13 @@ static int kc_wvw_exec_quote(wchar_t *line, size_t cap, size_t *used,
     return 0;
 }
 
+/**
+ * Execute one Windows process with merged output.
+ * @param job Execution job.
+ * @param stream Destination output stream.
+ * @param exit_code Destination process exit status.
+ * @return Zero on success, otherwise one.
+ */
 static int kc_wvw_exec_process(const kc_wvw_exec_job_t *job, FILE *stream,
     int *exit_code) {
     STARTUPINFOW startup;
@@ -164,8 +201,6 @@ static int kc_wvw_exec_process(const kc_wvw_exec_job_t *job, FILE *stream,
     path = kc_wvw_exec_wide(job->path);
     command = calloc(cap, sizeof(*command));
     if (!path || !command) goto done;
-    /* The first argument identifies the executable; CreateProcessW additionally
-     * pins its actual path so command-line metacharacters cannot select one. */
     for (i = 0; i < job->argc; i++) {
         wchar_t *arg = kc_wvw_exec_wide(i ? job->argv[i] : job->path);
         int failed;
@@ -205,6 +240,13 @@ done:
     return result;
 }
 #else
+/**
+ * Execute one POSIX process with merged output.
+ * @param job Execution job.
+ * @param stream Destination output stream.
+ * @param exit_code Destination process exit status.
+ * @return Zero on success, otherwise one.
+ */
 static int kc_wvw_exec_process(const kc_wvw_exec_job_t *job, FILE *stream,
     int *exit_code) {
     posix_spawn_file_actions_t actions;
@@ -229,6 +271,11 @@ static int kc_wvw_exec_process(const kc_wvw_exec_job_t *job, FILE *stream,
 }
 #endif
 
+/**
+ * Run one execution job and prepare its bridge response.
+ * @param job Execution job.
+ * @return void
+ */
 static void kc_wvw_exec_run(kc_wvw_exec_job_t *job) {
     FILE *stream = tmpfile();
     char output[KC_WVW_EXEC_MAX_OUTPUT + 1];
@@ -267,18 +314,37 @@ static void kc_wvw_exec_run(kc_wvw_exec_job_t *job) {
 }
 
 #if defined(_WIN32)
+/**
+ * Run one Windows execution worker.
+ * @param data Execution job.
+ * @return Worker status.
+ */
 static DWORD WINAPI kc_wvw_exec_worker(LPVOID data) {
     kc_wvw_exec_run((kc_wvw_exec_job_t *)data);
     return 0;
 }
 #else
+/**
+ * Run one POSIX execution worker.
+ * @param data Execution job.
+ * @return Worker result.
+ */
 static void *kc_wvw_exec_worker(void *data) {
     kc_wvw_exec_run((kc_wvw_exec_job_t *)data);
     return NULL;
 }
 #endif
 
-/* Return NULL only if an asynchronous execution has been started. */
+/**
+ * Start one allowlisted asynchronous execution.
+ * @param ctx Window context.
+ * @param id Bridge request identifier.
+ * @param params Serialized argument array.
+ * @param names Registered executable names.
+ * @param paths Registered executable paths.
+ * @param registered Registered executable count.
+ * @return Response payload, or NULL after starting a worker.
+ */
 static char *kc_wvw_exec_start(kc_wvw_t *ctx, const char *id,
     const char *params, char *const *names, char *const *paths,
     size_t registered) {
@@ -508,13 +574,29 @@ static void kc_wvw_config_free(kc_wvw_config_t *config);
 static void kc_wvw_set_error(kc_wvw_t *ctx, const char *fmt, ...);
 static int kc_wvw_set_icon_impl(kc_wvw_t *ctx, const char *icon);
 
-/* A worker holds a reference until its response is consumed or discarded. */
+/**
+ * Retain one context for an asynchronous execution.
+ * @param ctx Window context.
+ * @return void
+ */
 static void kc_wvw_exec_retain(kc_wvw_t *ctx) {
     kc_wvw_context_add_ref(ctx);
 }
+
+/**
+ * Release one asynchronous execution reference.
+ * @param ctx Window context.
+ * @return void
+ */
 static void kc_wvw_exec_release(kc_wvw_t *ctx) {
     kc_wvw_context_release(ctx);
 }
+
+/**
+ * Complete one Windows execution on the UI thread.
+ * @param job Execution job.
+ * @return void
+ */
 static void kc_wvw_exec_finish(kc_wvw_exec_job_t *job) {
     kc_wvw_t *ctx = job->ctx;
     if (!InterlockedCompareExchange(&ctx->exec_closing, 0, 0) &&
@@ -522,6 +604,12 @@ static void kc_wvw_exec_finish(kc_wvw_exec_job_t *job) {
     kc_wvw_exec_job_free(job);
     kc_wvw_exec_release(ctx);
 }
+
+/**
+ * Deliver one Windows execution response.
+ * @param job Execution job.
+ * @return void
+ */
 static void kc_wvw_exec_deliver(kc_wvw_exec_job_t *job) {
     kc_wvw_t *ctx = job->ctx;
     if (!InterlockedCompareExchange(&ctx->exec_closing, 0, 0) &&
@@ -1714,7 +1802,7 @@ static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge, const
         return NULL;
     }
 
-    if (kc_wvw_text_buf_append(&buf, "(function(){if(window.NativeBridge){return;}var __kcWvwPending={};var __kcWvwSeq=0;var __kcWvwPage=String(Date.now())+String(Math.random()).slice(2);function __kcWvwReceive(msg){if(msg&&typeof msg.id==='string'){var p=__kcWvwPending[msg.id];if(p){delete __kcWvwPending[msg.id];if(msg.ok){p.resolve(msg.result!==undefined?msg.result:{ok:true});}else{var data=msg.error||{code:'INTERNAL_ERROR',message:'Bridge error'};var err=new Error(data.message||'Bridge error');Object.keys(data).forEach(function(k){if(k!=='message'){err[k]=data[k];}});p.reject(err);}}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
+    if (kc_wvw_text_buf_append(&buf, "(function(){var __kcWvwPending={};var __kcWvwSeq=0;var __kcWvwPage=String(Date.now())+String(Math.random()).slice(2);function __kcWvwReceive(msg){if(msg&&typeof msg.id==='string'){var p=__kcWvwPending[msg.id];if(p){delete __kcWvwPending[msg.id];if(msg.ok){p.resolve(msg.result!==undefined?msg.result:{ok:true});}else{var data=msg.error||{code:'INTERNAL_ERROR',message:'Bridge error'};var err=new Error(data.message||'Bridge error');Object.keys(data).forEach(function(k){if(k!=='message'){err[k]=data[k];}});p.reject(err);}}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, KC_WVW_BRIDGE_EVENT_NAME) != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, "',{detail:msg}));}window.__kcWvwReceive=__kcWvwReceive;window.NativeBridge={};function __kcWvwSend(method,params){return new Promise(function(resolve,reject){var id=__kcWvwPage+':'+String(++__kcWvwSeq);__kcWvwPending[id]={resolve:resolve,reject:reject};(") != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, sender_expr) != KC_WVW_OK ||
@@ -2895,6 +2983,12 @@ static int kc_wvw_set_bridge_methods_impl(kc_wvw_t *ctx, const kc_wvw_bridge_opt
         return KC_WVW_ERROR;
     }
 
+    bridge.exec_paths = ctx->bridge.exec_paths;
+    bridge.exec_names = ctx->bridge.exec_names;
+    bridge.exec_count = ctx->bridge.exec_count;
+    ctx->bridge.exec_paths = NULL;
+    ctx->bridge.exec_names = NULL;
+    ctx->bridge.exec_count = 0;
     kc_wvw_bridge_state_free(&ctx->bridge);
     ctx->bridge = bridge;
     if (ctx->webview) {
@@ -3550,7 +3644,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
             ctx->bridge.exec_names, ctx->bridge.exec_paths,
             ctx->bridge.exec_count);
         free(id); free(method); free(params);
-        return response; /* NULL means the worker will reply asynchronously. */
+        return response;
     }
 
     if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
@@ -3708,18 +3802,32 @@ struct kc_wvw {
 
 #endif
 
-/* The asynchronous completions call the backend's bridge sender. */
 static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
 
-/* Exec workers retain their native context until the UI has handled output. */
+/**
+ * Retain one context for an asynchronous execution.
+ * @param ctx Window context.
+ * @return void
+ */
 static void kc_wvw_exec_retain(kc_wvw_t *ctx) {
     __atomic_add_fetch(&ctx->exec_refs, 1, __ATOMIC_SEQ_CST);
 }
+
+/**
+ * Release one asynchronous execution reference.
+ * @param ctx Window context.
+ * @return void
+ */
 static void kc_wvw_exec_release(kc_wvw_t *ctx) {
     if (__atomic_sub_fetch(&ctx->exec_refs, 1, __ATOMIC_SEQ_CST) == 0)
         free(ctx);
 }
 #if defined(__APPLE__)
+/**
+ * Complete one macOS execution on the UI thread.
+ * @param data Execution job.
+ * @return void
+ */
 static void kc_wvw_exec_macos_complete(void *data) {
     kc_wvw_exec_job_t *job = data;
     kc_wvw_t *ctx = job->ctx;
@@ -3728,10 +3836,21 @@ static void kc_wvw_exec_macos_complete(void *data) {
     kc_wvw_exec_job_free(job);
     kc_wvw_exec_release(ctx);
 }
+
+/**
+ * Schedule one macOS execution response.
+ * @param job Execution job.
+ * @return void
+ */
 static void kc_wvw_exec_deliver(kc_wvw_exec_job_t *job) {
     dispatch_async_f(dispatch_get_main_queue(), job, kc_wvw_exec_macos_complete);
 }
 #else
+/**
+ * Complete one Linux execution on the UI thread.
+ * @param data Execution job.
+ * @return G_SOURCE_REMOVE after completion.
+ */
 static gboolean kc_wvw_exec_linux_complete(gpointer data) {
     kc_wvw_exec_job_t *job = data;
     kc_wvw_t *ctx = job->ctx;
@@ -3741,6 +3860,12 @@ static gboolean kc_wvw_exec_linux_complete(gpointer data) {
     kc_wvw_exec_release(ctx);
     return G_SOURCE_REMOVE;
 }
+
+/**
+ * Schedule one Linux execution response.
+ * @param job Execution job.
+ * @return void
+ */
 static void kc_wvw_exec_deliver(kc_wvw_exec_job_t *job) {
     g_main_context_invoke(job->ctx->context, kc_wvw_exec_linux_complete, job);
 }
@@ -4412,7 +4537,7 @@ static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge) {
         return NULL;
     }
 
-    if (kc_wvw_text_buf_append(&buf, "(function(){if(window.NativeBridge){return;}var __kcWvwPending={};var __kcWvwSeq=0;var __kcWvwPage=String(Date.now())+String(Math.random()).slice(2);function __kcWvwReceive(msg){if(msg&&typeof msg.id==='string'){var p=__kcWvwPending[msg.id];if(p){delete __kcWvwPending[msg.id];if(msg.ok){p.resolve(msg.result!==undefined?msg.result:{ok:true});}else{var data=msg.error||{code:'INTERNAL_ERROR',message:'Bridge error'};var err=new Error(data.message||'Bridge error');Object.keys(data).forEach(function(k){if(k!=='message'){err[k]=data[k];}});p.reject(err);}}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
+    if (kc_wvw_text_buf_append(&buf, "(function(){var __kcWvwPending={};var __kcWvwSeq=0;var __kcWvwPage=String(Date.now())+String(Math.random()).slice(2);function __kcWvwReceive(msg){if(msg&&typeof msg.id==='string'){var p=__kcWvwPending[msg.id];if(p){delete __kcWvwPending[msg.id];if(msg.ok){p.resolve(msg.result!==undefined?msg.result:{ok:true});}else{var data=msg.error||{code:'INTERNAL_ERROR',message:'Bridge error'};var err=new Error(data.message||'Bridge error');Object.keys(data).forEach(function(k){if(k!=='message'){err[k]=data[k];}});p.reject(err);}}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, KC_WVW_BRIDGE_EVENT_NAME) != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, "',{detail:msg}));}window.__kcWvwReceive=__kcWvwReceive;window.NativeBridge={};function __kcWvwSend(method,params){return new Promise(function(resolve,reject){var id=__kcWvwPage+':'+String(++__kcWvwSeq);__kcWvwPending[id]={resolve:resolve,reject:reject};window.webkit.messageHandlers.kc_wvw_native.postMessage(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));});}window.NativeBridge.exec=function(args){return __kcWvwSend('exec',args);};window.NativeBridge.Window={};window.NativeBridge.Window.minimize=function(){return __kcWvwSend('Window.minimize');};window.NativeBridge.Window.maximize=function(){return __kcWvwSend('Window.maximize');};window.NativeBridge.Window.restore=function(){return __kcWvwSend('Window.restore');};window.NativeBridge.Window.close=function(){return __kcWvwSend('Window.close');};window.NativeBridge.Window.setTitle=function(title){return __kcWvwSend('Window.setTitle',{title:title});};window.NativeBridge.Window.setSize=function(width,height){return __kcWvwSend('Window.setSize',{width:width,height:height});};window.NativeBridge.Window.getState=function(){return __kcWvwSend('Window.getState');};") != KC_WVW_OK) {
         free(buf.data);
@@ -4889,7 +5014,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
             ctx->bridge.exec_names, ctx->bridge.exec_paths,
             ctx->bridge.exec_count);
         free(id); free(method); free(params);
-        return response; /* NULL means the worker will reply asynchronously. */
+        return response;
     }
 
     if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
@@ -5269,6 +5394,12 @@ static int kc_wvw_set_bridge_methods_impl(kc_wvw_t *ctx, const kc_wvw_bridge_opt
         return KC_WVW_ERROR;
     }
 
+    bridge.exec_paths = ctx->bridge.exec_paths;
+    bridge.exec_names = ctx->bridge.exec_names;
+    bridge.exec_count = ctx->bridge.exec_count;
+    ctx->bridge.exec_paths = NULL;
+    ctx->bridge.exec_names = NULL;
+    ctx->bridge.exec_count = 0;
     kc_wvw_bridge_state_free(&ctx->bridge);
     ctx->bridge = bridge;
     return kc_wvw_macos_install_bridge(ctx);
@@ -5966,9 +6097,13 @@ static int kc_wvw_linux_install_bridge(kc_wvw_t *ctx) {
     }
 
     webkit_user_content_manager_unregister_script_message_handler(manager, "kc_wvw_native");
+    g_signal_handlers_disconnect_by_func(manager,
+        G_CALLBACK(kc_wvw_linux_bridge_message), ctx);
     webkit_user_content_manager_register_script_message_handler(manager, "kc_wvw_native");
     g_signal_connect(manager, "script-message-received::kc_wvw_native", G_CALLBACK(kc_wvw_linux_bridge_message), ctx);
     webkit_user_content_manager_add_script(manager, webkit_user_script_new(script, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL));
+    g_signal_handlers_disconnect_by_func(ctx->web_view,
+        G_CALLBACK(kc_wvw_linux_bridge_policy), ctx);
     g_signal_connect(ctx->web_view, "decide-policy", G_CALLBACK(kc_wvw_linux_bridge_policy), ctx);
     free(script);
     return KC_WVW_OK;
@@ -6295,6 +6430,12 @@ static int kc_wvw_set_bridge_methods_impl(kc_wvw_t *ctx, const kc_wvw_bridge_opt
         return KC_WVW_ERROR;
     }
 
+    bridge.exec_paths = ctx->bridge.exec_paths;
+    bridge.exec_names = ctx->bridge.exec_names;
+    bridge.exec_count = ctx->bridge.exec_count;
+    ctx->bridge.exec_paths = NULL;
+    ctx->bridge.exec_names = NULL;
+    ctx->bridge.exec_count = 0;
     kc_wvw_bridge_state_free(&ctx->bridge);
     ctx->bridge = bridge;
     return kc_wvw_linux_install_bridge(ctx);
