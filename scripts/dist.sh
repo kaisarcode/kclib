@@ -201,7 +201,7 @@ load_manifest_state() {
     MANIFEST_README_SHA=()
     MANIFEST_COUNT=()
     local -a manifests=()
-    for manifest in "$DIST_DIR"/*/manifest.json; do
+    for manifest in "$@"; do
         [ -f "$PROJ_DIR/$(basename "$(dirname "$manifest")")/Makefile" ] || continue
         [ -f "$manifest" ] || continue
         manifests+=("$manifest")
@@ -552,7 +552,7 @@ generate_manifest() {
     local updated_at first_file metadata_sha
 
     updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-    for project_dir in "$PROJ_DIR"/*/; do
+    for project_dir in "$@"; do
         is_project "$project_dir" || continue
         project_dir="${project_dir%/}"
         project_name=$(basename "$project_dir")
@@ -641,20 +641,13 @@ MANIFEST_ENTRY
         mv -f "$manifest_file" "$project_dist/manifest.json" || return 1
     done
 
-    # The root inventory is no longer used by consumers.
-    if [ -z "${KCDIST_DIR:-}" ]; then
-        rm -f "$DIST_DIR/manifest.json"
-    fi
 }
 
 # Detects projects with files published but no per-project manifest.
 # @return 0 when every published kclib has its own manifest.
 project_manifests_current() {
     local project_dir project_name metadata_sha manifest
-    if [ -z "${KCDIST_DIR:-}" ]; then
-        [ ! -f "$DIST_DIR/manifest.json" ] || return 1
-    fi
-    for project_dir in "$PROJ_DIR"/*/; do
+    for project_dir in "$@"; do
         is_project "$project_dir" || continue
         project_dir="${project_dir%/}"
         project_name=$(basename "$project_dir")
@@ -686,15 +679,17 @@ main() {
     }
 
     mkdir -p "$DIST_DIR"
-    remove_legacy_metadata
-    load_manifest_state
-
-    stale_changed=0
-    if ! prune_stale_projects; then
-        stale_changed=1
-    fi
 
     if [ "$target" = "all" ]; then
+        remove_legacy_metadata
+        if [ -z "${KCDIST_DIR:-}" ]; then
+            rm -f "$DIST_DIR/manifest.json"
+        fi
+        load_manifest_state "$DIST_DIR"/*/manifest.json
+        stale_changed=0
+        if ! prune_stale_projects; then
+            stale_changed=1
+        fi
         changed="$stale_changed"
 
         for project_dir in "$PROJ_DIR"/*/; do
@@ -709,9 +704,9 @@ main() {
             esac
         done
 
-        if [ "$changed" -eq 1 ] || ! project_manifests_current; then
+        if [ "$changed" -eq 1 ] || ! project_manifests_current "$PROJ_DIR"/*/; then
             echo "Generating project manifests..."
-            generate_manifest
+            generate_manifest "$PROJ_DIR"/*/
             echo "Done. Project distributions updated in $DIST_DIR/."
         else
             echo "Done. No distribution changes."
@@ -732,17 +727,19 @@ main() {
         exit 1
     }
 
+    load_manifest_state "$DIST_DIR/$(basename "$project_dir")/manifest.json"
+
     status=0
     package_project "$project_dir" || status=$?
     case "$status" in
         0) changed=1 ;;
-        1) changed="$stale_changed" ;;
+        1) changed=0 ;;
         *) exit "$status" ;;
     esac
 
-    if [ "$changed" -eq 1 ] || ! project_manifests_current; then
-        echo "Generating project manifests..."
-        generate_manifest
+    if [ "$changed" -eq 1 ] || ! project_manifests_current "$project_dir"; then
+        echo "Generating project manifest for $(basename "$project_dir")..."
+        generate_manifest "$project_dir"
         echo "Done. Distribution updated in" \
             "$DIST_DIR/$(basename "$project_dir")/."
     else
