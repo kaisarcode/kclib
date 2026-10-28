@@ -1,0 +1,8 @@
+{
+  "name": "libngram",
+  "description": "Generates n-grams and can run a command for every span.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kclib/tree/master/proj/libngram.c"
+}

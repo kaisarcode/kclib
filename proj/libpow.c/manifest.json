@@ -1,0 +1,8 @@
+{
+  "name": "libpow",
+  "description": "Creates, solves, and verifies portable proof-of-work challenge entities with SHA-256 by default and explicit HashWX support.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kclib/tree/master/proj/libpow.c"
+}

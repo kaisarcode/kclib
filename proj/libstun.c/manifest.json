@@ -1,0 +1,8 @@
+{
+  "name": "libstun",
+  "description": "Discovers live UDP mappings and serves STUN Binding requests.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kclib/tree/master/proj/libstun.c"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "libdmn",
+  "description": "Maintains named resident processes and exchanges data through local IPC.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kclib/tree/master/proj/libdmn.c"
+}

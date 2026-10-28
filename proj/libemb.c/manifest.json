@@ -1,0 +1,8 @@
+{
+  "name": "libemb",
+  "description": "Converts text into embedding vectors with a local model.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kclib/tree/master/proj/libemb.c"
+}

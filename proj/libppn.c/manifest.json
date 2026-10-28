@@ -1,0 +1,8 @@
+{
+  "name": "libppn",
+  "description": "Displays native popup notifications through the operating system.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kclib/tree/master/proj/libppn.c"
+}
