@@ -42,18 +42,48 @@ for dynamically evaluating untrusted input.
 
 ## Executables
 
-Native executable access is opt-in.
+Native executable access is opt-in. An application registers arbitrary
+desktop executable paths, not KaisarCode-specific commands, using
+`kc_wvw_set_executables()`. The executable is identified to JavaScript by
+its basename. Duplicate basenames are rejected, even when paths differ.
 
-Register allowed executable paths with `kc_wvw_set_executables()`. WebView
-content addresses an executable by its registered basename through
-`NativeBridge.exec(args)`.
-
-```js
-const result = await NativeBridge.exec(["foo", "..."]);
+```c
+const char *paths[] = {"/usr/bin/git", "/usr/bin/printf"};
+kc_wvw_exec_options_t execs = {paths, 2};
+kc_wvw_set_executables(window, &execs);
 ```
 
-Do not expose a general shell. Register only executables that are part of the
-application's intended capability set.
+The paths are chosen by the host program; the WebView cannot select another
+filesystem path or look up a program from `PATH`.
+
+```js
+try {
+    const output = await NativeBridge.exec(["git", "--version"]);
+    console.log(output);
+} catch (error) {
+    console.error(error.code, error.message);
+}
+```
+
+The call is asynchronous. It runs the exact registered native executable
+directly in a worker thread without a shell, preserving each array element
+as one process argument. Standard output and standard error are merged into
+the resolved string for a zero exit code. A nonzero exit rejects with an
+`Error` containing `code: "EXEC_FAILED"`, `exitCode`, and `output`.
+Unregistered basenames reject with `EXEC_NOT_EXPOSED`; invalid arrays reject
+with `INVALID_ARGUMENT`. An execution that cannot start rejects with
+`EXEC_FAILED`. The implementation limits each call to 64 arguments and
+48,000 bytes of captured output; oversized output rejects with
+`OUTPUT_TOO_LARGE`.
+
+Results from earlier document instances cannot satisfy promises created
+by a newly loaded page. Closing the host discards pending UI replies; it
+does not turn the child into a daemon or guarantee termination of an already
+running process.
+
+No shell is registered implicitly. Applications must expose only binaries
+whose capabilities they intentionally trust, even if they live elsewhere on
+the desktop system.
 
 ## Window state
 
