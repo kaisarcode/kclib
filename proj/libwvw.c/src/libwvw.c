@@ -3575,6 +3575,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
 #include <objc/runtime.h>
+#include <dispatch/dispatch.h>
 #else
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
@@ -3679,6 +3680,7 @@ struct kc_wvw {
     void *ns_nav_delegate;
     void *ns_window_delegate;
     kc_wvw_bridge_state_t bridge;
+    volatile int exec_refs, exec_closing;
     char error[256];
 };
 
@@ -3698,9 +3700,45 @@ struct kc_wvw {
     WebKitWebView *web_view;
     WebKitWebContext *web_context;
     kc_wvw_bridge_state_t bridge;
+    volatile int exec_refs, exec_closing;
     char error[256];
 };
 
+#endif
+
+/* Exec workers retain their native context until the UI has handled output. */
+static void kc_wvw_exec_retain(kc_wvw_t *ctx) {
+    __atomic_add_fetch(&ctx->exec_refs, 1, __ATOMIC_SEQ_CST);
+}
+static void kc_wvw_exec_release(kc_wvw_t *ctx) {
+    if (__atomic_sub_fetch(&ctx->exec_refs, 1, __ATOMIC_SEQ_CST) == 0)
+        free(ctx);
+}
+#if defined(__APPLE__)
+static void kc_wvw_exec_macos_complete(void *data) {
+    kc_wvw_exec_job_t *job = data;
+    kc_wvw_t *ctx = job->ctx;
+    if (!__atomic_load_n(&ctx->exec_closing, __ATOMIC_SEQ_CST) &&
+        job->response) kc_wvw_bridge_post_json(ctx, job->response);
+    kc_wvw_exec_job_free(job);
+    kc_wvw_exec_release(ctx);
+}
+static void kc_wvw_exec_deliver(kc_wvw_exec_job_t *job) {
+    dispatch_async_f(dispatch_get_main_queue(), job, kc_wvw_exec_macos_complete);
+}
+#else
+static gboolean kc_wvw_exec_linux_complete(gpointer data) {
+    kc_wvw_exec_job_t *job = data;
+    kc_wvw_t *ctx = job->ctx;
+    if (!__atomic_load_n(&ctx->exec_closing, __ATOMIC_SEQ_CST) &&
+        job->response) kc_wvw_bridge_post_json(ctx, job->response);
+    kc_wvw_exec_job_free(job);
+    kc_wvw_exec_release(ctx);
+    return G_SOURCE_REMOVE;
+}
+static void kc_wvw_exec_deliver(kc_wvw_exec_job_t *job) {
+    g_main_context_invoke(job->ctx->context, kc_wvw_exec_linux_complete, job);
+}
 #endif
 
 static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridge, const char *url);
@@ -5060,7 +5098,7 @@ static int kc_wvw_dispatch_op(kc_wvw_t *ctx,kc_wvw_op_t *op){if(!ctx||!op||ctx->
  */
 int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){
     kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options||![NSThread isMainThread])return KC_WVW_ERROR;
-    ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;*out=ctx;
+    ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;ctx->exec_refs=1;*out=ctx;
     if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);*out=NULL;return KC_WVW_ERROR;}
     ctx->bridge.enabled=1;ctx->bridge.allow_file=ctx->opts.allow_file;ctx->bridge.allow_data=ctx->opts.allow_data;ctx->bridge.allow_localhost=ctx->opts.allow_localhost;
     if(kc_wvw_macos_create_window(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");return KC_WVW_ERROR;}return KC_WVW_OK;
@@ -5627,7 +5665,7 @@ static int kc_wvw_get_state_impl(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
  * @param ctx Window context, or NULL.
  * @return None.
  */
-void kc_wvw_close(kc_wvw_t *ctx){if(!ctx)return;if(ctx->ns_webview){@autoreleasepool{WKWebView *webView=(__bridge WKWebView *)ctx->ns_webview;[[webView configuration].userContentController removeScriptMessageHandlerForName:@"kc_wvw_native"];[webView setNavigationDelegate:nil];}}if(ctx->ns_window){@autoreleasepool{NSWindow *window=(__bridge NSWindow *)ctx->ns_window;[window setDelegate:nil];[window close];}CFRelease(ctx->ns_window);ctx->ns_window=NULL;}if(ctx->ns_script_handler){CFRelease(ctx->ns_script_handler);ctx->ns_script_handler=NULL;}if(ctx->ns_nav_delegate){CFRelease(ctx->ns_nav_delegate);ctx->ns_nav_delegate=NULL;}if(ctx->ns_window_delegate){CFRelease(ctx->ns_window_delegate);ctx->ns_window_delegate=NULL;}if(ctx->ns_webview){CFRelease(ctx->ns_webview);ctx->ns_webview=NULL;}kc_wvw_bridge_state_free(&ctx->bridge);kc_wvw_config_free(&ctx->opts);free(ctx);}
+void kc_wvw_close(kc_wvw_t *ctx){if(!ctx)return;__atomic_store_n(&ctx->exec_closing,1,__ATOMIC_SEQ_CST);if(ctx->ns_webview){@autoreleasepool{WKWebView *webView=(__bridge WKWebView *)ctx->ns_webview;[[webView configuration].userContentController removeScriptMessageHandlerForName:@"kc_wvw_native"];[webView setNavigationDelegate:nil];}}if(ctx->ns_window){@autoreleasepool{NSWindow *window=(__bridge NSWindow *)ctx->ns_window;[window setDelegate:nil];[window close];}CFRelease(ctx->ns_window);ctx->ns_window=NULL;}if(ctx->ns_script_handler){CFRelease(ctx->ns_script_handler);ctx->ns_script_handler=NULL;}if(ctx->ns_nav_delegate){CFRelease(ctx->ns_nav_delegate);ctx->ns_nav_delegate=NULL;}if(ctx->ns_window_delegate){CFRelease(ctx->ns_window_delegate);ctx->ns_window_delegate=NULL;}if(ctx->ns_webview){CFRelease(ctx->ns_webview);ctx->ns_webview=NULL;}kc_wvw_bridge_state_free(&ctx->bridge);kc_wvw_config_free(&ctx->opts);kc_wvw_exec_release(ctx);}
 
 #else
 
@@ -6159,7 +6197,7 @@ static int kc_wvw_linux_open_dispatch(kc_wvw_t *ctx){kc_wvw_linux_init_t call;GS
  * @param options Initial options.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
-int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options)return KC_WVW_ERROR;ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);return KC_WVW_ERROR;}ctx->bridge.enabled=1;ctx->bridge.allow_file=ctx->opts.allow_file;ctx->bridge.allow_data=ctx->opts.allow_data;ctx->bridge.allow_localhost=ctx->opts.allow_localhost;g_mutex_init(&ctx->mutex);g_cond_init(&ctx->cond);if(kc_wvw_linux_service()!=KC_WVW_OK){kc_wvw_set_error(ctx,"GTK initialization failed");*out=ctx;return KC_WVW_ERROR;}ctx->context=kc_wvw_gtk_context;ctx->thread=kc_wvw_gtk_thread;*out=ctx;if(kc_wvw_linux_open_dispatch(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");return KC_WVW_ERROR;}ctx->running=1;return KC_WVW_OK;}
+int kc_wvw_open(kc_wvw_t **out,const kc_wvw_options_t *options){kc_wvw_t *ctx;if(out)*out=NULL;if(!out||!options)return KC_WVW_ERROR;ctx=(kc_wvw_t *)calloc(1,sizeof(*ctx));if(!ctx)return KC_WVW_ERROR;ctx->exec_refs=1;if(kc_wvw_config_copy(&ctx->opts,options)!=KC_WVW_OK){free(ctx);return KC_WVW_ERROR;}ctx->bridge.enabled=1;ctx->bridge.allow_file=ctx->opts.allow_file;ctx->bridge.allow_data=ctx->opts.allow_data;ctx->bridge.allow_localhost=ctx->opts.allow_localhost;g_mutex_init(&ctx->mutex);g_cond_init(&ctx->cond);if(kc_wvw_linux_service()!=KC_WVW_OK){kc_wvw_set_error(ctx,"GTK initialization failed");*out=ctx;return KC_WVW_ERROR;}ctx->context=kc_wvw_gtk_context;ctx->thread=kc_wvw_gtk_thread;*out=ctx;if(kc_wvw_linux_open_dispatch(ctx)!=KC_WVW_OK){kc_wvw_set_error(ctx,"window creation failed");return KC_WVW_ERROR;}ctx->running=1;return KC_WVW_OK;}
 
 /**
  * Close the WebView and release its public lifetime.
@@ -6170,6 +6208,7 @@ void kc_wvw_close(kc_wvw_t *ctx) {
     kc_wvw_op_t op = {0};
 
     if (!ctx) return;
+    __atomic_store_n(&ctx->exec_closing, 1, __ATOMIC_SEQ_CST);
     if (!ctx->closed) {
         op.kind = KC_WVW_OP_CLOSE;
         (void)kc_wvw_dispatch_op(ctx, &op);
@@ -6183,7 +6222,7 @@ void kc_wvw_close(kc_wvw_t *ctx) {
     kc_wvw_config_free(&ctx->opts);
     g_cond_clear(&ctx->cond);
     g_mutex_clear(&ctx->mutex);
-    free(ctx);
+    kc_wvw_exec_release(ctx);
 }
 
 /**
