@@ -1392,3 +1392,68 @@ int kc_packages_each(const char *platform, const char *arch, int update) {
     if (total == 0 && failures == 0) puts("No installed projects");
     return failures ? 1 : 0;
 }
+
+/**
+ * List projects advertised by the selected distribution root.
+ * The published projects.txt contains only project directory names; package
+ * metadata and file ownership remain in each project's own manifest.
+ * @return 0 on success, 1 if the index is absent or invalid.
+ */
+int kc_packages_list_all(void) {
+    const char *source = kc_source();
+    char temporary[KC_PATH_SIZE];
+    char line[256];
+    FILE *input;
+    int count = 0, failed = 0;
+    if (kc_info_temp(temporary)) {
+        fputs("kc: cannot create temporary project listing\n", stderr);
+        return 1;
+    }
+    if (kc_fetch(source, "projects.txt", temporary)) {
+        fprintf(stderr, "kc: cannot fetch projects.txt from %s\n", source);
+        remove(temporary);
+        return 1;
+    }
+    input = fopen(temporary, "rb");
+    if (!input) {
+        remove(temporary);
+        return 1;
+    }
+    while (fgets(line, sizeof(line), input)) {
+        size_t length = strlen(line);
+        if (length && line[length - 1] == '\n')
+            line[--length] = '\0';
+        else if (!feof(input)) {
+            failed = 1;
+            break;
+        }
+        if (length && line[length - 1] == '\r')
+            line[--length] = '\0';
+        if (!length || length >= 128 || !kc_safe_filename(line)) {
+            failed = 1;
+            break;
+        }
+        /* Match the names printed by "kc list" for installed libraries. */
+        if (length > 2 && !strcmp(line + length - 2, ".c")) {
+            if (length < 6 || strncmp(line, "lib", 3)) {
+                failed = 1;
+                break;
+            }
+            line[length - 2] = '\0';
+        } else if (strchr(line, '.')) {
+            failed = 1;
+            break;
+        }
+        puts(line);
+        count++;
+    }
+    if (ferror(input)) failed = 1;
+    if (fclose(input)) failed = 1;
+    remove(temporary);
+    if (failed) {
+        fputs("kc: invalid projects.txt in distribution\n", stderr);
+        return 1;
+    }
+    if (!count) puts("No published projects");
+    return 0;
+}
