@@ -36,6 +36,7 @@ static void kc_help(void) {
     printf("  kc update [name]   Update one or all projects\n");
     printf("  kc remove <name>   Remove an installed project\n");
     printf("  kc list            List installed projects\n");
+    printf("  kc list all        List all published projects\n");
     printf("  kc info <name>     Show project metadata and installation\n");
     printf("  kc <name> [args]   Execute an installed CLI\n");
     printf("\n");
@@ -198,7 +199,8 @@ static int kc_package_command(int argc, char **argv) {
     if (argc > 3 || argc < 2 ||
         (argc == 2 && strcmp(command, "list") &&
             strcmp(command, "update")) ||
-        (argc == 3 && !strcmp(command, "list"))) {
+        (argc == 3 && !strcmp(command, "list") &&
+            strcmp(argv[2], "all"))) {
         kc_help();
         return 2;
     }
@@ -207,7 +209,8 @@ static int kc_package_command(int argc, char **argv) {
         return 1;
     }
     if (!strcmp(command, "list"))
-        return kc_packages_each(platform, arch, 0);
+        return argc == 3 ? kc_packages_list_all() :
+            kc_packages_each(platform, arch, 0);
     if (!strcmp(command, "update"))
         return argc == 2 ? kc_packages_each(platform, arch, 1) :
             kc_packages_update(argv[2], platform, arch);
