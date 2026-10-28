@@ -185,8 +185,12 @@ load_manifest_state() {
     MANIFEST_LICENSE_SHA=()
     MANIFEST_README_SHA=()
     MANIFEST_COUNT=()
-    manifest="$DIST_DIR/manifest.json"
-    [ -f "$manifest" ] || return 0
+    local -a manifests=()
+    for manifest in "$DIST_DIR"/lib*.c/manifest.json; do
+        [ -f "$manifest" ] || continue
+        manifests+=("$manifest")
+    done
+    [ "${#manifests[@]}" -gt 0 ] || return 0
 
     while IFS=$'\t' read -r sha build_sha license_sha readme_sha path; do
         [ -n "$sha" ] || continue
@@ -231,7 +235,7 @@ load_manifest_state() {
                 license_sha = ""
                 readme_sha = ""
             }
-        ' "$manifest"
+        ' "${manifests[@]}"
     )
 }
 
@@ -515,25 +519,17 @@ prune_stale_projects() {
     return "$changed"
 }
 
-# Builds a manifest entry for every independently downloadable file.
-# @return 0 on success.
+# Builds one published manifest for each independent kclib.
+# The source manifest supplies stable GUI-facing metadata; artifact entries
+# are generated from the actual published files and their checksums.
+# @return 0 when all per-project manifests have been written.
 generate_manifest() {
-    local manifest_file first_project first_file updated_at
-    local project_dir project_name project_dist name target_dir dist_target
-    local relative platform arch checksum build_sha license_sha readme_sha
-    local file filename file_sha filesize
+    local project_dir project_name project_dist metadata_file manifest_file
+    local name target_dir dist_target relative platform arch checksum
+    local build_sha license_sha readme_sha file filename file_sha filesize
+    local updated_at first_file
 
-    manifest_file=$(mktemp "$DIST_DIR/.manifest.XXXXXXXX") || return 1
-    first_project=true
     updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-
-    {
-        echo "{"
-        printf '  "updated_at": "%s",\n' "$updated_at"
-        echo "  \"timestamp\": $(date -u +%s),"
-        echo '  "projects": {'
-    } > "$manifest_file"
-
     for project_dir in "$PROJ_DIR"/lib*.c/; do
         is_project "$project_dir" || continue
         project_dir="${project_dir%/}"
@@ -542,14 +538,23 @@ generate_manifest() {
         project_dist="$DIST_DIR/$project_name"
         [ -d "$project_dist" ] || continue
 
-        if [ "$first_project" = true ]; then
-            first_project=false
-        else
-            echo "," >> "$manifest_file"
+        metadata_file="$project_dir/manifest.json"
+        if [ ! -f "$metadata_file" ]; then
+            echo "error: project metadata not found: $metadata_file" >&2
+            return 1
         fi
-        echo "    \"$project_name\": [" >> "$manifest_file"
-        first_file=true
 
+        manifest_file=$(mktemp "$project_dist/.manifest.XXXXXXXX") || return 1
+        {
+            printf '{\n  "metadata": '
+            cat "$metadata_file"
+            printf ',\n'
+            printf '  "updated_at": "%s",\n' "$updated_at"
+            printf '  "timestamp": %s,\n' "$(date -u +%s)"
+            printf '  "artifacts": [\n'
+        } > "$manifest_file"
+
+        first_file=true
         for target_dir in "$project_dir"/bin/*/*; do
             [ -d "$target_dir" ] || continue
             relative="${target_dir#"$project_dir/bin/"}"
@@ -594,26 +599,40 @@ generate_manifest() {
                     echo "," >> "$manifest_file"
                 fi
                 cat <<MANIFEST_ENTRY >> "$manifest_file"
-      {
-        "arch": "$arch",
-        "platform": "$platform",
-        "file": "$filename",
-        "size_bytes": $filesize,
-        "sha256": "$file_sha",
-        "build_sha256": "$build_sha",
-        "license_sha256": "$license_sha",
-        "readme_sha256": "$readme_sha",
-        "path": "$project_name/$relative/$filename"
-      }
+    {
+      "arch": "$arch",
+      "platform": "$platform",
+      "file": "$filename",
+      "size_bytes": $filesize,
+      "sha256": "$file_sha",
+      "build_sha256": "$build_sha",
+      "license_sha256": "$license_sha",
+      "readme_sha256": "$readme_sha",
+      "path": "$project_name/$relative/$filename"
+    }
 MANIFEST_ENTRY
             done
         done
-
-        printf '\n    ]' >> "$manifest_file"
+        printf '\n  ]\n}\n' >> "$manifest_file"
+        mv -f "$manifest_file" "$project_dist/manifest.json" || return 1
     done
 
-    printf '\n  }\n}\n' >> "$manifest_file"
-    mv -f "$manifest_file" "$DIST_DIR/manifest.json"
+    # The root inventory is no longer used by consumers.
+    rm -f "$DIST_DIR/manifest.json"
+}
+
+# Detects projects with files published but no per-project manifest.
+# @return 0 when every published kclib has its own manifest.
+project_manifests_current() {
+    local project_dir project_name
+    [ ! -f "$DIST_DIR/manifest.json" ] || return 1
+    for project_dir in "$PROJ_DIR"/lib*.c/; do
+        is_project "$project_dir" || continue
+        project_name=$(basename "$project_dir")
+        [ -d "$DIST_DIR/$project_name" ] || continue
+        [ -f "$DIST_DIR/$project_name/manifest.json" ] || return 1
+    done
+    return 0
 }
 
 # Dispatches one project distribution or all project distributions.
@@ -657,10 +676,10 @@ main() {
             esac
         done
 
-        if [ "$changed" -eq 1 ] || [ ! -f "$DIST_DIR/manifest.json" ]; then
-            echo "Generating manifest.json..."
+        if [ "$changed" -eq 1 ] || ! project_manifests_current; then
+            echo "Generating project manifests..."
             generate_manifest
-            echo "Done. Distribution updated in $DIST_DIR/."
+            echo "Done. Project distributions updated in $DIST_DIR/."
         else
             echo "Done. No distribution changes."
         fi
@@ -688,8 +707,8 @@ main() {
         *) exit "$status" ;;
     esac
 
-    if [ "$changed" -eq 1 ] || [ ! -f "$DIST_DIR/manifest.json" ]; then
-        echo "Generating manifest.json..."
+    if [ "$changed" -eq 1 ] || ! project_manifests_current; then
+        echo "Generating project manifests..."
         generate_manifest
         echo "Done. Distribution updated in" \
             "$DIST_DIR/$(basename "$project_dir")/."
