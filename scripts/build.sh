@@ -44,7 +44,11 @@ resolve_project() {
     local proj_dir="$1"
     local name="$2"
 
-    if [ -d "$proj_dir/lib$name.c" ]; then
+    if [ -f "$proj_dir/$name/Makefile" ]; then
+        printf '%s\n' "$proj_dir/$name"
+        return 0
+    fi
+    if [ -f "$proj_dir/lib$name.c/Makefile" ]; then
         printf '%s\n' "$proj_dir/lib$name.c"
         return 0
     fi
@@ -59,8 +63,12 @@ capability_name() {
     local project_name="$1"
     local stem
 
-    stem="${project_name%.c}"
-    printf '%s\n' "${stem#lib}"
+    if [[ "$project_name" == lib*.c ]]; then
+        stem="${project_name%.c}"
+        printf '%s\n' "${stem#lib}"
+    else
+        printf '%s\n' "$project_name"
+    fi
 }
 
 # Computes the SHA-256 digest of one file.
@@ -397,8 +405,8 @@ main() {
         project_dirs=()
         project_steps=()
         step_count=0
-        for project_dir in "$proj_dir"/lib*.c; do
-            [ -d "$project_dir" ] || continue
+        for project_dir in "$proj_dir"/*; do
+            [ -f "$project_dir/Makefile" ] || continue
             steps=$(count_build_steps "$project_dir")
             project_dirs+=("$project_dir")
             project_steps+=("$steps")
