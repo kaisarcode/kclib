@@ -527,7 +527,7 @@ generate_manifest() {
     local project_dir project_name project_dist metadata_file manifest_file
     local name target_dir dist_target relative platform arch checksum
     local build_sha license_sha readme_sha file filename file_sha filesize
-    local updated_at first_file
+    local updated_at first_file metadata_sha
 
     updated_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
     for project_dir in "$PROJ_DIR"/lib*.c/; do
@@ -543,12 +543,14 @@ generate_manifest() {
             echo "error: project metadata not found: $metadata_file" >&2
             return 1
         fi
+        metadata_sha=$(compute_sha256 "$metadata_file") || return 1
 
         manifest_file=$(mktemp "$project_dist/.manifest.XXXXXXXX") || return 1
         {
             printf '{\n  "metadata": '
             cat "$metadata_file"
             printf ',\n'
+            printf '  "metadata_sha256": "%s",\n' "$metadata_sha"
             printf '  "updated_at": "%s",\n' "$updated_at"
             printf '  "timestamp": %s,\n' "$(date -u +%s)"
             printf '  "artifacts": [\n'
@@ -624,13 +626,18 @@ MANIFEST_ENTRY
 # Detects projects with files published but no per-project manifest.
 # @return 0 when every published kclib has its own manifest.
 project_manifests_current() {
-    local project_dir project_name
+    local project_dir project_name metadata_sha manifest
     [ ! -f "$DIST_DIR/manifest.json" ] || return 1
     for project_dir in "$PROJ_DIR"/lib*.c/; do
         is_project "$project_dir" || continue
+        project_dir="${project_dir%/}"
         project_name=$(basename "$project_dir")
         [ -d "$DIST_DIR/$project_name" ] || continue
-        [ -f "$DIST_DIR/$project_name/manifest.json" ] || return 1
+        manifest="$DIST_DIR/$project_name/manifest.json"
+        [ -f "$manifest" ] || return 1
+        metadata_sha=$(compute_sha256 "$project_dir/manifest.json") || return 1
+        grep -Fq "\"metadata_sha256\": \"$metadata_sha\"" "$manifest" ||
+            return 1
     done
     return 0
 }
