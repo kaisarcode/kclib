@@ -115,8 +115,12 @@ int kc_wvw_set_bridge_methods(
 );
 
 /**
- * Set the executable paths available to NativeBridge.exec.
- * Each path is exposed by its basename and is copied by the library.
+ * Register arbitrary native desktop executables for NativeBridge.exec(args).
+ * Each registered path is copied, exposed by its basename, and executed
+ * directly without a shell; callers cannot select unregistered paths.
+ * Duplicate basenames are rejected. The JavaScript Promise resolves to
+ * combined stdout/stderr on exit code 0, or rejects with code, message,
+ * exitCode, and output for a nonzero exit. Execution runs on worker threads.
  * @param wvw WebView handle.
  * @param options Executable whitelist, or an empty whitelist.
  * @return KC_WVW_OK on success, or KC_WVW_ERROR on failure.
