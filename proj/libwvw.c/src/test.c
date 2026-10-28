@@ -19,11 +19,18 @@
 #else
 #include <sys/wait.h>
 #include <unistd.h>
+#include <time.h>
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 #endif
 
 static int current;
 static int total;
 static int failures;
+
+static const char *kc_wvw_test_self;
+static volatile int kc_wvw_exec_test_state;
 
 #ifndef __EMSCRIPTEN__
 static int case_wvw_cli(void);
@@ -222,6 +229,111 @@ static void case_kc_wvw_bridge(void) {
 }
 
 /**
+ * Report completion from a WebView script which exercised NativeBridge.exec.
+ * @return KC_WVW_OK.
+ */
+static int kc_wvw_exec_test_callback(kc_wvw_t *wvw, const char *method,
+    const char *params_json, const char **response, void *userdata) {
+    (void)wvw;
+    (void)userdata;
+    if (!strcmp(method, "execResult")) {
+        __atomic_store_n(&kc_wvw_exec_test_state,
+            strstr(params_json, "\"passed\":true") ? 1 : -1,
+            __ATOMIC_SEQ_CST);
+    }
+    *response = "{\"ok\":true}";
+    return KC_WVW_OK;
+}
+
+/**
+ * Exercise process output, argument preservation, failure exit status and
+ * executable allowlisting through the real JavaScript promise bridge.
+ * @return None.
+ */
+static void case_kc_wvw_exec(void) {
+    kc_wvw_t *wvw = NULL;
+    char *initial_url = NULL;
+    char *exec_url = NULL;
+    char path[2048], uri[2200];
+    const char *methods[] = {"execResult"};
+    const char *paths[] = {kc_wvw_test_self};
+    kc_wvw_bridge_options_t bridge = {0};
+    kc_wvw_exec_options_t executables = {paths, 1};
+    FILE *file;
+    int ok = 1, count;
+#ifdef _WIN32
+    char directory[MAX_PATH];
+    size_t i;
+    if (!GetTempPathA(sizeof(directory), directory)) ok = 0;
+    if (ok) snprintf(path, sizeof(path), "%swvw_exec_test.html", directory);
+    for (i = 0; ok && path[i]; i++)
+        if (path[i] == '\\') path[i] = '/';
+    if (ok) snprintf(uri, sizeof(uri), "file:///%s", path);
+#else
+    snprintf(path, sizeof(path), "/tmp/wvw_exec_test.html");
+    snprintf(uri, sizeof(uri), "file://%s", path);
+#endif
+    if (ok) {
+        file = fopen(path, "w");
+        if (!file) ok = 0;
+        else {
+            fputs("<html><body><script>"
+                "window.addEventListener('DOMContentLoaded',async function(){"
+                "var passed=false;"
+                "try{"
+#ifdef _WIN32
+                "var name='wvw_contract_test.exe';"
+#else
+                "var name='wvw_contract_test';"
+#endif
+                "var output=await NativeBridge.exec([name,'--exec-probe','hello world']);"
+                "var failed=false;var blocked=false;"
+                "try{await NativeBridge.exec([name,'--exec-fail']);}"
+                "catch(e){failed=e.code==='EXEC_FAILED'&&e.exitCode===17&&"
+                "e.output.indexOf('WVW FAIL')>=0;}"
+                "try{await NativeBridge.exec(['not-exposed']);}"
+                "catch(e){blocked=e.code==='EXEC_NOT_EXPOSED';}"
+                "passed=output.indexOf('WVW PROBE:hello world')>=0&&failed&&blocked;"
+                "}catch(e){}"
+                "await NativeBridge.execResult({passed:passed});"
+                "});"
+                "</script></body></html>", file);
+            if (fclose(file)) ok = 0;
+        }
+    }
+    if (ok) ok = open_test(&wvw, &initial_url, NULL, NULL);
+    if (ok) {
+        bridge.methods = methods;
+        bridge.method_count = 1;
+        bridge.callback = kc_wvw_exec_test_callback;
+        kc_wvw_exec_test_state = 0;
+        ok = kc_wvw_set_executables(wvw, &executables) == KC_WVW_OK &&
+            kc_wvw_set_bridge_methods(wvw, &bridge) == KC_WVW_OK &&
+            kc_wvw_navigate(wvw, uri) == KC_WVW_OK;
+    }
+    for (count = 0; ok && count < 200 &&
+        __atomic_load_n(&kc_wvw_exec_test_state, __ATOMIC_SEQ_CST) == 0; count++) {
+#ifdef _WIN32
+        Sleep(50);
+#elif defined(__APPLE__)
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+#else
+        struct timespec delay = {0, 50000000L};
+        nanosleep(&delay, NULL);
+#endif
+    }
+    if (ok) ok = __atomic_load_n(&kc_wvw_exec_test_state,
+        __ATOMIC_SEQ_CST) == 1;
+    kc_wvw_close(wvw);
+    free(initial_url);
+    free(exec_url);
+    if (ok) remove(path);
+    result("kc_wvw_exec",
+        "executes only registered binaries asynchronously with output and errors",
+        ok);
+}
+
+/**
  * Test show, hide, and visibility query behavior.
  * @return None.
  */
@@ -383,12 +495,15 @@ static void run_all(void) {
 #ifdef __EMSCRIPTEN__
     total = 10;
 #else
-    total = 11;
+    total = 12;
 #endif
     case_kc_wvw_version();
     case_kc_wvw_open();
     case_kc_wvw_navigation();
     case_kc_wvw_bridge();
+#ifndef __EMSCRIPTEN__
+    case_kc_wvw_exec();
+#endif
     case_kc_wvw_visibility();
     case_kc_wvw_actions();
     case_kc_wvw_title();
@@ -488,6 +603,15 @@ static int case_wvw_cli(void) {
  * @return Process status code.
  */
 int main(int argc, char **argv) {
+    if (argc >= 2 && !strcmp(argv[1], "--exec-probe")) {
+        printf("WVW PROBE:%s\n", argc > 2 ? argv[2] : "");
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "--exec-fail")) {
+        fputs("WVW FAIL\n", stderr);
+        return 17;
+    }
+    kc_wvw_test_self = argv[0];
     if (argc == 1 || !strcmp(argv[1], "all")) {
         run_all();
         return failures ? 1 : 0;
