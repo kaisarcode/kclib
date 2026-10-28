@@ -7,6 +7,10 @@
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "libwvw.h"
 
 #include <stdint.h>
@@ -29,8 +33,10 @@ static int current;
 static int total;
 static int failures;
 
+#ifndef __EMSCRIPTEN__
 static const char *kc_wvw_test_self;
 static volatile int kc_wvw_exec_test_state;
+#endif
 
 #ifndef __EMSCRIPTEN__
 static int case_wvw_cli(void);
@@ -228,6 +234,7 @@ static void case_kc_wvw_bridge(void) {
         ok);
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Report completion from a WebView script which exercised NativeBridge.exec.
  * @return KC_WVW_OK.
@@ -253,7 +260,6 @@ static int kc_wvw_exec_test_callback(kc_wvw_t *wvw, const char *method,
 static void case_kc_wvw_exec(void) {
     kc_wvw_t *wvw = NULL;
     char *initial_url = NULL;
-    char *exec_url = NULL;
     char path[2048], uri[2200];
     const char *methods[] = {"execResult"};
     const char *paths[] = {kc_wvw_test_self};
@@ -316,7 +322,7 @@ static void case_kc_wvw_exec(void) {
 #ifdef _WIN32
         Sleep(50);
 #elif defined(__APPLE__)
-        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, 0);
 #else
         struct timespec delay = {0, 50000000L};
         nanosleep(&delay, NULL);
@@ -326,12 +332,12 @@ static void case_kc_wvw_exec(void) {
         __ATOMIC_SEQ_CST) == 1;
     kc_wvw_close(wvw);
     free(initial_url);
-    free(exec_url);
     if (ok) remove(path);
     result("kc_wvw_exec",
         "executes only registered binaries asynchronously with output and errors",
         ok);
 }
+#endif
 
 /**
  * Test show, hide, and visibility query behavior.
