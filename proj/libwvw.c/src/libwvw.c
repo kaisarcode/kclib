@@ -155,12 +155,11 @@ static int kc_wvw_exec_process(const kc_wvw_exec_job_t *job, FILE *stream,
     PROCESS_INFORMATION process;
     SECURITY_ATTRIBUTES attributes = {sizeof(attributes), NULL, TRUE};
     HANDLE output = NULL, input = INVALID_HANDLE_VALUE;
-    HANDLE current = GetCurrentProcess(), thread;
+    HANDLE current = GetCurrentProcess();
     wchar_t *path = NULL, *command = NULL;
     size_t used = 0, cap = 32768, i;
     DWORD status;
     int result = 1;
-    (void)thread;
     memset(&startup, 0, sizeof(startup));
     memset(&process, 0, sizeof(process));
     path = kc_wvw_exec_wide(job->path);
@@ -294,7 +293,7 @@ static char *kc_wvw_exec_start(kc_wvw_t *ctx, const char *id,
     }
     for (i = 0; i < count; i++) {
         const char *text = json_array_get_string(args, i);
-        if (!text || strlen(text) > 4096 || !text[0] && i == 0) {
+        if (!text || strlen(text) > 4096 || (!text[0] && i == 0)) {
             reply = kc_wvw_exec_reply(id, 0, "INVALID_ARGUMENT",
                 "exec arguments must be strings.", -1, NULL);
             goto done;
