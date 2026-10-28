@@ -3706,6 +3706,9 @@ struct kc_wvw {
 
 #endif
 
+/* The asynchronous completions call the backend's bridge sender. */
+static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
+
 /* Exec workers retain their native context until the UI has handled output. */
 static void kc_wvw_exec_retain(kc_wvw_t *ctx) {
     __atomic_add_fetch(&ctx->exec_refs, 1, __ATOMIC_SEQ_CST);
