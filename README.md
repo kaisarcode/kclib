@@ -190,10 +190,15 @@ for example `dist/libdemo.c/linux/x86_64/libdemo.so`. Each target
 directory contains its compiled artifacts, public header, `LICENSE` or
 `COPYING` when provided, a generated minimal `README.md` (project name,
 author and website), and `SHA256SUMS` covering the published files.
-The distribution manifest (`dist/manifest.json`) records each file's
-download path, size, SHA-256 hash, build checksum, license checksum,
-and README checksum. Changes to binaries, headers, licensing files,
-or README content republish only affected targets, without ZIP archives.
+Every kclib owns a source `proj/libNAME.c/manifest.json` with stable,
+machine-readable metadata (name, description, author, license, website and
+repository). `scripts/dist.sh` publishes a per-library
+`dist/libNAME.c/manifest.json`, including that metadata plus the list of
+available target artifacts, their paths, sizes, SHA-256 hashes, build
+checksums, license checksums, and README checksums. There is no root
+distribution manifest. Changes to source metadata republish the affected
+manifest; changes to binaries, headers, licensing files or README content
+republish the affected targets. No ZIP archives are required.
 
 Publish every kclib (omitting `all` is equivalent) or one project:
 
