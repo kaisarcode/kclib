@@ -33,7 +33,7 @@ resolve_script_dir() {
 SCRIPT_DIR=$(resolve_script_dir)
 ROOT_DIR=$(dirname "$SCRIPT_DIR")
 PROJ_DIR="$ROOT_DIR/proj"
-DIST_DIR="$ROOT_DIR/dist"
+DIST_DIR="${KCDIST_DIR:-$ROOT_DIR/dist}"
 readonly EXCLUDED_PROJECTS=("liblibr.c")
 declare -A MANIFEST_SHA=()
 declare -A MANIFEST_BUILD_SHA=()
@@ -503,6 +503,8 @@ package_project() {
 prune_stale_projects() {
     local project_dist project_name source_project changed
 
+    # A shared distribution may contain projects owned by other repositories.
+    [ -z "${KCDIST_DIR:-}" ] || return 0
     changed=0
     for project_dist in "$DIST_DIR"/lib*.c/; do
         [ -d "$project_dist" ] || continue
@@ -620,14 +622,18 @@ MANIFEST_ENTRY
     done
 
     # The root inventory is no longer used by consumers.
-    rm -f "$DIST_DIR/manifest.json"
+    if [ -z "${KCDIST_DIR:-}" ]; then
+        rm -f "$DIST_DIR/manifest.json"
+    fi
 }
 
 # Detects projects with files published but no per-project manifest.
 # @return 0 when every published kclib has its own manifest.
 project_manifests_current() {
     local project_dir project_name metadata_sha manifest
-    [ ! -f "$DIST_DIR/manifest.json" ] || return 1
+    if [ -z "${KCDIST_DIR:-}" ]; then
+        [ ! -f "$DIST_DIR/manifest.json" ] || return 1
+    fi
     for project_dir in "$PROJ_DIR"/lib*.c/; do
         is_project "$project_dir" || continue
         project_dir="${project_dir%/}"
