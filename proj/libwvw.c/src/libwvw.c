@@ -251,10 +251,13 @@ static void kc_wvw_exec_run(kc_wvw_exec_job_t *job) {
     else if (truncated)
         job->response = kc_wvw_exec_reply(job->id, 0, "OUTPUT_TOO_LARGE",
             "Executable output exceeded the bridge limit.", -1, NULL);
-    else if (exit_code)
+    else if (exit_code) {
+        char message[80];
+        snprintf(message, sizeof(message), "Process exited with code %d",
+            exit_code);
         job->response = kc_wvw_exec_reply(job->id, 0, "EXEC_FAILED",
-            "Executable exited unsuccessfully.", exit_code, output);
-    else
+            message, exit_code, output);
+    } else
         job->response = kc_wvw_exec_reply(job->id, 1, NULL, NULL, 0, output);
     if (!job->response || strlen(job->response) > 65536) {
         free(job->response);
