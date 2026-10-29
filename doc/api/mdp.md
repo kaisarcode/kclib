@@ -34,4 +34,4 @@ await document.close();
 
 ## Next step
 
-Continue with [menu](menu.md).
+Return to the [API index](readme.md).

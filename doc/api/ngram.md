@@ -48,4 +48,4 @@ const status = await ngram.traverse(
 
 ## Next step
 
-Continue with [pact](pact.md).
+Return to the [API index](readme.md).

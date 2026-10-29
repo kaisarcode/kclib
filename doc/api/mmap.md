@@ -36,4 +36,4 @@ Binary values are `Uint8Array`. `version()` remains a namespace function.
 
 ## Next step
 
-Continue with [netl](netl.md).
+Return to the [API index](readme.md).

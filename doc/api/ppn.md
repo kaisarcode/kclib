@@ -32,4 +32,4 @@ notification mechanism. `version()` remains a namespace function.
 
 ## Next step
 
-Continue with [rstrm](rstrm.md).
+Return to the [API index](readme.md).

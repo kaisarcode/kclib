@@ -40,4 +40,4 @@ await menu.delete("myapp");
 
 ## Next step
 
-Continue with [min](min.md).
+Return to the [API index](readme.md).

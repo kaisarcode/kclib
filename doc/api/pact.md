@@ -51,4 +51,4 @@ For JavaScript, multi-value operations are projected as named objects when that 
 
 ## Next step
 
-Continue with [pow](pow.md).
+Return to the [API index](readme.md).
