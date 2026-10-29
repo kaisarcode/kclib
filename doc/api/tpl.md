@@ -43,3 +43,7 @@ await template.close();
 ```
 
 Native render-buffer cleanup is internal. `version()` remains a namespace function.
+
+## Next step
+
+Continue with [tpm](tpm.md).

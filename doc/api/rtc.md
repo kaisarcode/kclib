@@ -33,3 +33,7 @@ await peer.close();
 ```
 
 `strerror(status)` and `version()` remain namespace functions.
+
+## Next step
+
+Continue with [stun](stun.md).

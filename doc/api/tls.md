@@ -62,3 +62,7 @@ await session.close();
 ```
 
 `strerror(status)` and `version()` remain namespace functions.
+
+## Next step
+
+Continue with [tpl](tpl.md).

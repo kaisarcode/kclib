@@ -29,3 +29,7 @@ await profile.close();
 ```
 
 `version()` remains a namespace function.
+
+## Next step
+
+Continue with [tray](tray.md).

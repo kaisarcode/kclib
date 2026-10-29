@@ -67,3 +67,7 @@ await tray.close();
 ```
 
 `version()` remains a namespace function.
+
+## Next step
+
+Continue with [wch](wch.md).

@@ -155,3 +155,7 @@ await index.close();
 ```
 
 `strerror(status)` and `version()` remain namespace functions.
+
+## Next step
+
+Continue with [rstrm](rstrm.md).

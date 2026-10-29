@@ -69,3 +69,7 @@ await wch.delete("source");
 ```
 
 A not-found state remains distinguishable from generic failure where applicable. `version()` remains a namespace function.
+
+## Next step
+
+Continue with [wvw](wvw.md).

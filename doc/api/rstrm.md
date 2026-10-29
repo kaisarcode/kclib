@@ -68,3 +68,7 @@ peer's graceful write shutdown after all preceding bytes have been delivered.
 `close()` releases the local stream immediately.
 
 `strerror(status)` and `version()` remain namespace functions.
+
+## Next step
+
+Continue with [rtc](rtc.md).

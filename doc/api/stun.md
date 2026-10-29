@@ -93,3 +93,7 @@ JavaScript. Native STUN statuses become ordinary binding errors, except where a
 higher-level protocol needs to inspect a returned STUN error (such as `487`).
 
 Use `stun.version()` to query the linked build version.
+
+## Next step
+
+Continue with [tls](tls.md).

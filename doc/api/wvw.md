@@ -134,3 +134,7 @@ await window.close();
 ```
 
 `version()` remains a namespace function.
+
+## Next step
+
+Continue with [Advanced documentation](../advanced/index.md).
