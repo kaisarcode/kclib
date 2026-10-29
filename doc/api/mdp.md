@@ -31,3 +31,7 @@ await document.close();
 ```
 
 `version()` is a namespace function.
+
+## Next step
+
+Continue with [menu](menu.md).

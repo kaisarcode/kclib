@@ -31,3 +31,7 @@ const version = await init.version();
 ```
 
 Returned native allocations are projected as ordinary objects and arrays.
+
+## Next step
+
+Continue with [lng](lng.md).

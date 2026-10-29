@@ -53,3 +53,7 @@ await index.close();
 ```
 
 Public status constants and `strerror(status)` may remain available for callers that need explicit status inspection.
+
+## Next step
+
+Continue with [http](http.md).

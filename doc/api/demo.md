@@ -17,3 +17,7 @@ const version = await demo.version();
 ```
 
 `greet(name)` returns `"Hello <name>!"`. Native allocation cleanup is internal.
+
+## Next step
+
+Continue with [dmn](dmn.md).

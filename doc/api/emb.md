@@ -21,3 +21,7 @@ const version = await emb.version();
 ```
 
 The vector may be represented as a JavaScript numeric array or an equivalent floating-point typed array. Native output allocation is hidden.
+
+## Next step
+
+Continue with [flow](flow.md).
