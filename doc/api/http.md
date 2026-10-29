@@ -57,7 +57,3 @@ const responseBytes = await http.response({
 ```
 
 One `write()` may emit zero, one, or multiple parsed messages. `strerror(status)` and `version()` remain namespace functions.
-
-## Next step
-
-Continue with [init](init.md).

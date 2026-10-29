@@ -33,7 +33,3 @@ for (const result of results) {
 ```
 
 `version()` remains available as a namespace function.
-
-## Next step
-
-Continue with [mdp](mdp.md).

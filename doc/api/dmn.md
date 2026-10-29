@@ -55,7 +55,3 @@ await dmn.delete("worker");
 ```
 
 List entries are objects of the form `{ name }`. A not-found result should remain distinguishable from a generic failure where relevant.
-
-## Next step
-
-Continue with [emb](emb.md).

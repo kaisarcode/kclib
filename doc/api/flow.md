@@ -49,7 +49,3 @@ await template.close();
 ```
 
 Successful output is returned as bytes; native ownership is internal.
-
-## Next step
-
-Continue with [hnsw](hnsw.md).
