@@ -36,4 +36,6 @@ Every project owns its public API, requirements, and build instructions in its o
 
 ## License
 
-The repository infrastructure and root tooling are licensed under the **GNU General Public License version 3 (GPLv3)**. Each independent library retains its own license, normally **GNU Lesser General Public License version 3 (LGPLv3)**. Consult each project's license for its actual terms.
+[![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+kclib is distributed under the **GNU General Public License version 3 (GPLv3)** for its repository infrastructure and root tooling. Each nested project retains its own license, as documented in that project's README and license file.
