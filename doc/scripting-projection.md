@@ -71,7 +71,7 @@ projects naturally as:
 { host: "127.0.0.1", port: 8080, protocol: netl.TCP }
 ```
 
-For the actual API of each library, consult its project README and public header. The [project catalog](../INDEX.md) lists the available projects.
+For the actual API of each library, consult its project README and public header. The [project catalog](catalog.md) lists the available projects.
 
 ## Next step
 

@@ -23,13 +23,13 @@ make
 make test
 ```
 
-Every project owns its public API, requirements, and build instructions in its own README and headers.
+Find the right capability in the **[Project catalog](doc/catalog.md)**. Each package links to its own README and public interface.
 
 ## Documentation
 
-- [Getting started](doc/getting-started.md) - choose a capability and build your first project.
+- **[Project catalog](doc/catalog.md)** - browse every available capability and open its project README.
+- [Getting started](doc/getting-started.md) - build and test your first project.
 - [Build and distribution](doc/build.md) - repository-wide build, test, and distribution commands.
-- [Project catalog](INDEX.md) - the authoritative inventory of current libraries and standalone tools.
 - [Scripting projection](doc/scripting-projection.md) - how C capabilities map to Lua and JavaScript.
 - [Advanced documentation](doc/advanced/index.md) - repository architecture, project conventions, and maintenance.
 

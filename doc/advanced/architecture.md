@@ -1,6 +1,6 @@
 # Repository architecture
 
-kclib collects independently reusable capabilities. This page documents the repository's organization, design constraints, and project conventions. For the current inventory, consult [INDEX.md](../../INDEX.md).
+kclib collects independently reusable capabilities. This page documents the repository's organization, design constraints, and project conventions. For the current inventory, consult [Project catalog](../catalog.md).
 
 ## Principles
 
@@ -23,7 +23,7 @@ kclib collects independently reusable capabilities. This page documents the repo
 ## Catalog
 
 The complete inventory of the collection - name, purpose, and when to use it -
-lives in [INDEX.md](../../INDEX.md). It is the single source of truth for the catalog;
+lives in [Project catalog](../catalog.md). It is the single source of truth for the catalog;
 app and agent instructions read from the same file.
 
 Each project directory contains detailed documentation in
@@ -115,7 +115,7 @@ supported behavior.
 kclib/
 |-- AGENTS.md
 |-- README.md
-|-- INDEX.md
+|-- Project catalog
 |-- proj/
 |   `-- libNAME.c/
 |-- scripts/

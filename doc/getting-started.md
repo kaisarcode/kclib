@@ -1,6 +1,6 @@
 # Getting started
 
-Choose a library from the [project catalog](../INDEX.md), then build and test it using its own project instructions. This example uses the reference demo library.
+Choose a library from the [project catalog](catalog.md), then build and test it using its own project instructions. This example uses the reference demo library.
 
 ## Build a project
 

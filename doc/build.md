@@ -104,4 +104,4 @@ and Makefile.
 
 ## Next step
 
-Continue with [Scripting projection](scripting-projection.md).
+Continue with [Project catalog](catalog.md).
