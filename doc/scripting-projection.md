@@ -72,3 +72,7 @@ projects naturally as:
 ```
 
 The per-library references under `docs/api/` define the canonical Lua and JavaScript shape for each current kclib.
+
+## Next step
+
+Continue with [API projections](api/readme.md).

@@ -130,4 +130,4 @@ project build artifacts and is intentionally excluded from source control.
 
 ## Next step
 
-Continue with [Advanced documentation](index.md).
+Continue with [Project README](../../README.md).
