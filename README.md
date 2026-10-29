@@ -31,7 +31,6 @@ Every project owns its public API, requirements, and build instructions in its o
 - [Build and distribution](doc/build.md) - repository-wide build, test, and distribution commands.
 - [Project catalog](INDEX.md) - the authoritative inventory of current libraries and standalone tools.
 - [Scripting projection](doc/scripting-projection.md) - how C capabilities map to Lua and JavaScript.
-- [API projections](doc/api/readme.md) - conceptual API examples, including historical references.
 - [Advanced documentation](doc/advanced/index.md) - repository architecture, project conventions, and maintenance.
 
 ## License

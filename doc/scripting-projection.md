@@ -71,8 +71,8 @@ projects naturally as:
 { host: "127.0.0.1", port: 8080, protocol: netl.TCP }
 ```
 
-The per-library references under `docs/api/` define the canonical Lua and JavaScript shape for each current kclib.
+For the actual API of each library, consult its project README and public header. The [project catalog](../INDEX.md) lists the available projects.
 
 ## Next step
 
-Continue with [API projections](api/readme.md).
+Continue with [Advanced documentation](advanced/index.md).
