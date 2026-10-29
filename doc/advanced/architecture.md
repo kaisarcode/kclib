@@ -23,7 +23,7 @@ kclib collects independently reusable capabilities. This page documents the repo
 ## Catalog
 
 The complete inventory of the collection - name, purpose, and when to use it -
-lives in [INDEX.md](INDEX.md). It is the single source of truth for the catalog;
+lives in [INDEX.md](../../INDEX.md). It is the single source of truth for the catalog;
 app and agent instructions read from the same file.
 
 Each project directory contains detailed documentation in
@@ -33,7 +33,7 @@ build, and constraints of its project.
 ## Standalone tools
 
 The repository also contains independent applications such as
-[`kc`](proj/kc/). This is a native executable, **not a kclib**, and is
+[`kc`](../../proj/kc/). This is a native executable, **not a kclib**, and is
 not required by any kclib. Each project defines its own build and test
 contracts through its `Makefile`; repository scripts discover projects
 from those files rather than from a hardcoded `libNAME.c` naming rule.
