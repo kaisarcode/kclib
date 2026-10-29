@@ -53,3 +53,7 @@ await index.close();
 ```
 
 Public status constants and `strerror(status)` may remain available for callers that need explicit status inspection.
+
+## Next step
+
+Return to the [API index](readme.md).

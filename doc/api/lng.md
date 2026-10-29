@@ -33,3 +33,7 @@ for (const result of results) {
 ```
 
 `version()` remains available as a namespace function.
+
+## Next step
+
+Return to the [API index](readme.md).

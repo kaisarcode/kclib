@@ -55,3 +55,7 @@ await dmn.delete("worker");
 ```
 
 List entries are objects of the form `{ name }`. A not-found result should remain distinguishable from a generic failure where relevant.
+
+## Next step
+
+Return to the [API index](readme.md).
