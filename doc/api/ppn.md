@@ -29,3 +29,7 @@ await ppn.show({
 
 `show()` completes when the notification has been accepted by the native
 notification mechanism. `version()` remains a namespace function.
+
+## Next step
+
+Continue with [punch](punch.md).

@@ -136,3 +136,7 @@ The native public API exposes `kc_netl_open`, `kc_netl_send`,
 for an individual datagram; NULL uses the configured address. It does not
 alter the local bind or create another socket. A wildcard address is never
 rewritten to loopback. The low-level socket machinery is private.
+
+## Next step
+
+Continue with [ngram](ngram.md).

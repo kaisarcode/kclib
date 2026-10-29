@@ -45,3 +45,7 @@ const status = await ngram.traverse(
 ```
 
 `version()` remains a namespace function.
+
+## Next step
+
+Continue with [pact](pact.md).

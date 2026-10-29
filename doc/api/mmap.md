@@ -33,3 +33,7 @@ await value.close();
 ```
 
 Binary values are `Uint8Array`. `version()` remains a namespace function.
+
+## Next step
+
+Continue with [netl](netl.md).

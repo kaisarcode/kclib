@@ -23,3 +23,7 @@ const text = await min.txt(source);
 ```
 
 Native output allocation is internal. `version()` remains available.
+
+## Next step
+
+Continue with [mmap](mmap.md).

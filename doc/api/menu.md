@@ -37,3 +37,7 @@ await menu.delete("myapp");
 ```
 
 `version()` remains available as a namespace function.
+
+## Next step
+
+Continue with [min](min.md).

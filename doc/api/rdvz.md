@@ -82,3 +82,7 @@ The CLI additionally supports a persistent executable command associated
 with each named peer. It receives the other peer's identifier whenever
 that peer gains a direct relation. No network connection, message transport,
 hierarchy or separate application event system is implied.
+
+## Next step
+
+Continue with [redp2p](redp2p.md).

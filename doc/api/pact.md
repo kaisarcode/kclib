@@ -48,3 +48,7 @@ await store.close();
 ```
 
 For JavaScript, multi-value operations are projected as named objects when that is clearer than positional arrays. Binary values are `Uint8Array`. `version()` remains a namespace function.
+
+## Next step
+
+Continue with [pow](pow.md).

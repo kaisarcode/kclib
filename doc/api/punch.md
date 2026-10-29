@@ -96,3 +96,7 @@ Peer endpoint discovery and exchange remain outside PUNCH. The application
 supplies remote endpoints and PUNCH attempts a direct UDP path using them.
 
 `strerror(status)` and `version()` remain namespace functions.
+
+## Next step
+
+Continue with [rdvz](rdvz.md).

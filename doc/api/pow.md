@@ -28,3 +28,7 @@ const valid = await pow.verify(challenge, solution);
 ```
 
 Binary values are `Uint8Array`. `version()` remains a namespace function.
+
+## Next step
+
+Continue with [ppn](ppn.md).
