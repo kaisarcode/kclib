@@ -32,4 +32,4 @@ notification mechanism. `version()` remains a namespace function.
 
 ## Next step
 
-Continue with [punch](punch.md).
+Continue with [rstrm](rstrm.md).

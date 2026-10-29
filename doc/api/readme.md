@@ -31,15 +31,6 @@ These pages illustrate JavaScript and Lua views of native capabilities. They are
 - [wch](wch.md)
 - [wvw](wvw.md)
 
-## Historical references
-
-The following projections are retained as historical documentation; these names are **not** current projects in the catalog.
-
-- [punch](punch.md)
-- [rdvz](rdvz.md)
-- [redp2p](redp2p.md)
-- [rtc](rtc.md)
-
 ## Next step
 
 Continue with [b64](b64.md).

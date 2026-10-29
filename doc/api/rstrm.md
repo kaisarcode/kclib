@@ -71,4 +71,4 @@ peer's graceful write shutdown after all preceding bytes have been delivered.
 
 ## Next step
 
-Continue with [rtc](rtc.md).
+Continue with [stun](stun.md).
