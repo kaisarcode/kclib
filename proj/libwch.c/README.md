@@ -44,9 +44,9 @@ make test
 Use `make all` for the configured cross-platform targets when their required
 toolchains are installed.
 
-## Status
+## Notice
 
-This is beta software tested primarily on Debian x86_64. No guarantees are
+No guarantees are
 provided regarding stability or future support. You may test, use, and modify it.
 
 Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
