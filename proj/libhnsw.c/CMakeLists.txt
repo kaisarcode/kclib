@@ -142,7 +142,7 @@ if(HNSW_BUILD_TESTS)
 endif()
 
 
-if(TARGET hnsw_shared AND NOT EMSCRIPTEN AND
+if(TARGET hnsw_static AND NOT EMSCRIPTEN AND
     NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(hnsw_cli src/hnsw.c)
     set_target_properties(hnsw_cli PROPERTIES
@@ -150,7 +150,7 @@ if(TARGET hnsw_shared AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(hnsw_cli PRIVATE src)
-    target_link_libraries(hnsw_cli PRIVATE hnsw_shared)
+    target_link_libraries(hnsw_cli PRIVATE hnsw_static
     if(APPLE)
         set_target_properties(hnsw_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

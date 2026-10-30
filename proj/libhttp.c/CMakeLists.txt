@@ -62,7 +62,7 @@ if(NOT HTTP_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     endif()
 endif()
 
-if(TARGET http_shared AND NOT EMSCRIPTEN AND
+if(TARGET http_static AND NOT EMSCRIPTEN AND
     NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(http_cli src/http.c)
     set_target_properties(http_cli PROPERTIES
@@ -70,7 +70,7 @@ if(TARGET http_shared AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(http_cli PRIVATE src)
-    target_link_libraries(http_cli PRIVATE http_shared)
+    target_link_libraries(http_cli PRIVATE http_static
     if(APPLE)
         set_target_properties(http_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
