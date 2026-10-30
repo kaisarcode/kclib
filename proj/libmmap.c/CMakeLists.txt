@@ -107,7 +107,7 @@ if(MMAP_BUILD_TESTS)
     endif()
 endif()
 # Build the command-line frontend against the shared library.
-if(TARGET mmap_shared AND NOT EMSCRIPTEN AND
+if(TARGET mmap_static AND NOT EMSCRIPTEN AND
     NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(mmap_cli src/mmap.c)
     set_target_properties(mmap_cli PROPERTIES
@@ -115,7 +115,7 @@ if(TARGET mmap_shared AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(mmap_cli PRIVATE src)
-    target_link_libraries(mmap_cli PRIVATE mmap_shared)
+    target_link_libraries(mmap_cli PRIVATE mmap_static
     if(APPLE)
         set_target_properties(mmap_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

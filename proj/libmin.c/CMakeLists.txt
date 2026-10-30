@@ -110,7 +110,7 @@ if(MIN_BUILD_TESTS)
 endif()
 
 # Build the command-line frontend against the shared library.
-if(TARGET min_shared AND NOT EMSCRIPTEN AND
+if(TARGET min_static AND NOT EMSCRIPTEN AND
     NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(min_cli src/min.c)
     set_target_properties(min_cli PROPERTIES
@@ -118,7 +118,7 @@ if(TARGET min_shared AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(min_cli PRIVATE src)
-    target_link_libraries(min_cli PRIVATE min_shared)
+    target_link_libraries(min_cli PRIVATE min_static
     if(APPLE)
         set_target_properties(min_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

@@ -121,7 +121,7 @@ if(PACT_BUILD_TESTS)
 
 endif()
 # Build the command-line frontend against the shared library.
-if(TARGET pact_shared AND NOT EMSCRIPTEN AND
+if(TARGET pact_static AND NOT EMSCRIPTEN AND
     NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(pact_cli src/pact.c)
     set_target_properties(pact_cli PROPERTIES
@@ -129,7 +129,7 @@ if(TARGET pact_shared AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(pact_cli PRIVATE src)
-    target_link_libraries(pact_cli PRIVATE pact_shared)
+    target_link_libraries(pact_cli PRIVATE pact_static
     if(APPLE)
         set_target_properties(pact_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

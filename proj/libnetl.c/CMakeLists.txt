@@ -104,7 +104,7 @@ if(NETL_BUILD_TESTS)
 
 endif()
 # Build the command-line frontend against the shared library.
-if(TARGET netl_shared AND NOT EMSCRIPTEN AND
+if(TARGET netl_static AND NOT EMSCRIPTEN AND
     NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(netl_cli src/netl.c)
     set_target_properties(netl_cli PROPERTIES
@@ -112,7 +112,7 @@ if(TARGET netl_shared AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(netl_cli PRIVATE src)
-    target_link_libraries(netl_cli PRIVATE netl_shared)
+    target_link_libraries(netl_cli PRIVATE netl_static
     if(APPLE)
         set_target_properties(netl_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
