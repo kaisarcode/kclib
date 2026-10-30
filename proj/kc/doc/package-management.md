@@ -32,7 +32,6 @@ All tests live in `src/test.c` and produce one numbered `[PASS]` series and
 one final summary. All build outputs
 are placed under `bin/<platform>/<arch>/`.
 
-
 ## Next step
 
 Return to the [project README](../README.md).
