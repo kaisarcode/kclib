@@ -112,7 +112,7 @@ if(TARGET netl_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(netl_cli PRIVATE src)
-    target_link_libraries(netl_cli PRIVATE netl_static
+    target_link_libraries(netl_cli PRIVATE netl_static)
     if(APPLE)
         set_target_properties(netl_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

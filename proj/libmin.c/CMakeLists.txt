@@ -118,7 +118,7 @@ if(TARGET min_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(min_cli PRIVATE src)
-    target_link_libraries(min_cli PRIVATE min_static
+    target_link_libraries(min_cli PRIVATE min_static)
     if(APPLE)
         set_target_properties(min_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

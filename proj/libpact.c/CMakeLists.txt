@@ -129,7 +129,7 @@ if(TARGET pact_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(pact_cli PRIVATE src)
-    target_link_libraries(pact_cli PRIVATE pact_static
+    target_link_libraries(pact_cli PRIVATE pact_static)
     if(APPLE)
         set_target_properties(pact_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

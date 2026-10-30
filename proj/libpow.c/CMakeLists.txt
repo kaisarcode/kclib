@@ -181,7 +181,7 @@ if(TARGET pow_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(pow_cli PRIVATE src)
-    target_link_libraries(pow_cli PRIVATE pow_static
+    target_link_libraries(pow_cli PRIVATE pow_static)
     if(APPLE)
         set_target_properties(pow_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

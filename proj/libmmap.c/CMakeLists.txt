@@ -115,7 +115,7 @@ if(TARGET mmap_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(mmap_cli PRIVATE src)
-    target_link_libraries(mmap_cli PRIVATE mmap_static
+    target_link_libraries(mmap_cli PRIVATE mmap_static)
     if(APPLE)
         set_target_properties(mmap_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

@@ -79,7 +79,7 @@ if(TARGET rstrm_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(rstrm_cli PRIVATE src)
-    target_link_libraries(rstrm_cli PRIVATE rstrm_static
+    target_link_libraries(rstrm_cli PRIVATE rstrm_static)
     if(WIN32)
         target_link_libraries(rstrm_cli PRIVATE ws2_32)
     endif()

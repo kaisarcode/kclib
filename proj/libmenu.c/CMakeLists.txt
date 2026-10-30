@@ -100,7 +100,7 @@ if(TARGET menu_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(menu_cli PRIVATE src)
-    target_link_libraries(menu_cli PRIVATE menu_static
+    target_link_libraries(menu_cli PRIVATE menu_static)
     if(APPLE)
         set_target_properties(menu_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
