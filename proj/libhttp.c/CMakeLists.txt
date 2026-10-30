@@ -58,6 +58,7 @@ if(NOT HTTP_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
     target_include_directories(http_shared PRIVATE src)
 
     if(UNIX AND NOT ANDROID AND NOT APPLE)
+        target_link_libraries(http_static m)
         target_link_libraries(http_shared m)
     endif()
 endif()
