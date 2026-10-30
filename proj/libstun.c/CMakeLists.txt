@@ -88,14 +88,14 @@ if(STUN_BUILD_TESTS)
             $<TARGET_FILE_DIR:stun_contract_test>)
 endif()
 
-if(TARGET stun_shared AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(TARGET stun_static AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(stun_cli src/stun.c)
     set_target_properties(stun_cli PROPERTIES
         OUTPUT_NAME "stun"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(stun_cli PRIVATE src)
-    target_link_libraries(stun_cli PRIVATE stun_shared)
+    target_link_libraries(stun_cli PRIVATE stun_static
     if(APPLE)
         set_target_properties(stun_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
