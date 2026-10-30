@@ -53,7 +53,7 @@ This project is distributed under the **GNU Lesser General Public License versio
 
 ## Command-line interface
 
-The `b64` executable is built from `src/b64.c` and dynamically links to
-the shared library in the same `bin/PLATFORM/ARCH/` directory. Use `make`
+The `b64` executable is built from `src/b64.c` and links against the project's static archive (`libb64.a`) and does not require
+`libb64.so` or `libb64.dll` to run. Use `make`
 to build the library and CLI, and `make test` to test both. No separate
 `kccli` checkout or `KCLIB_DIR` variable is needed.
