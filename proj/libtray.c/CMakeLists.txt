@@ -156,7 +156,7 @@ if(TARGET tray_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(tray_cli PRIVATE src)
-    target_link_libraries(tray_cli PRIVATE tray_static
+    target_link_libraries(tray_cli PRIVATE tray_static)
     if(APPLE)
         set_source_files_properties(src/tray.c PROPERTIES LANGUAGE OBJC)
         target_link_libraries(tray_cli PRIVATE "-framework Cocoa")

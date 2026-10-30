@@ -112,7 +112,7 @@ if(TARGET tpl_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(tpl_cli PRIVATE src)
-    target_link_libraries(tpl_cli PRIVATE tpl_static
+    target_link_libraries(tpl_cli PRIVATE tpl_static)
     if(APPLE)
         set_target_properties(tpl_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

@@ -95,7 +95,7 @@ if(TARGET stun_static AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(stun_cli PRIVATE src)
-    target_link_libraries(stun_cli PRIVATE stun_static
+    target_link_libraries(stun_cli PRIVATE stun_static)
     if(APPLE)
         set_target_properties(stun_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

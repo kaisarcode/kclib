@@ -159,7 +159,7 @@ if(TARGET wvw_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(wvw_cli PRIVATE src)
-    target_link_libraries(wvw_cli PRIVATE wvw_static
+    target_link_libraries(wvw_cli PRIVATE wvw_static)
     if(APPLE)
         set_target_properties(wvw_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

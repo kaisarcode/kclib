@@ -107,7 +107,7 @@ if(TARGET wch_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(wch_cli PRIVATE src)
-    target_link_libraries(wch_cli PRIVATE wch_static
+    target_link_libraries(wch_cli PRIVATE wch_static)
     if(APPLE)
         set_target_properties(wch_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
