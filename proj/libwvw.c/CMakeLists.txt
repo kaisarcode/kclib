@@ -161,6 +161,11 @@ if(TARGET wvw_static AND NOT EMSCRIPTEN AND
     target_include_directories(wvw_cli PRIVATE src)
     target_link_libraries(wvw_cli PRIVATE wvw_static)
     if(APPLE)
+        target_link_libraries(wvw_cli PRIVATE
+            "-framework WebKit"
+            "-framework Cocoa"
+            "-framework Foundation"
+        )
         set_target_properties(wvw_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
             INSTALL_RPATH "@loader_path"
