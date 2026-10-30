@@ -98,7 +98,7 @@ if(TARGET dmn_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(dmn_cli PRIVATE src)
-    target_link_libraries(dmn_cli PRIVATE dmn_static
+    target_link_libraries(dmn_cli PRIVATE dmn_static)
     if(APPLE)
         set_target_properties(dmn_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

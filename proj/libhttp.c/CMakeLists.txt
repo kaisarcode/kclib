@@ -70,7 +70,7 @@ if(TARGET http_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(http_cli PRIVATE src)
-    target_link_libraries(http_cli PRIVATE http_static
+    target_link_libraries(http_cli PRIVATE http_static)
     if(APPLE)
         set_target_properties(http_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

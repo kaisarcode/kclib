@@ -306,7 +306,7 @@ if(TARGET emb_static AND NOT EMSCRIPTEN AND
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(emb_cli PRIVATE src)
-    target_link_libraries(emb_cli PRIVATE emb_static
+    target_link_libraries(emb_cli PRIVATE emb_static)
     if(APPLE)
         set_target_properties(emb_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE

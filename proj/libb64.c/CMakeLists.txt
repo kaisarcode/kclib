@@ -115,7 +115,7 @@ if(TARGET b64_static AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
     )
     target_include_directories(b64_cli PRIVATE src)
-    target_link_libraries(b64_cli PRIVATE b64_static
+    target_link_libraries(b64_cli PRIVATE b64_static)
     if(APPLE)
         set_target_properties(b64_cli PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path")
