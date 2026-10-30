@@ -50,6 +50,26 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_mdp_open,_kc_mdp_html,_kc_mdp_ansi,_kc_mdp_body,_kc_mdp_meta,_kc_mdp_close,_kc_mdp_version
     )
+
+    add_library(mdp_wasm_static STATIC ${MDP_SOURCES})
+    set_target_properties(mdp_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "mdp"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(mdp_wasm_static PRIVATE src)
+
+    add_library(mdp_wasm_shared SHARED ${MDP_SOURCES})
+    set_target_properties(mdp_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "mdp"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(mdp_wasm_shared PRIVATE src)
+    target_link_options(mdp_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT MDP_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)

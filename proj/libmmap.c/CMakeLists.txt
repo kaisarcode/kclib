@@ -47,6 +47,26 @@ if(EMSCRIPTEN)
         -sSTACK_SIZE=4194304
         -sEXPORTED_FUNCTIONS=_kc_mmap_open,_kc_mmap_get,_kc_mmap_set,_kc_mmap_save,_kc_mmap_del,_kc_mmap_close,_kc_mmap_version
     )
+
+    add_library(mmap_wasm_static STATIC ${MMAP_SOURCES})
+    set_target_properties(mmap_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "mmap"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(mmap_wasm_static PRIVATE src)
+
+    add_library(mmap_wasm_shared SHARED ${MMAP_SOURCES})
+    set_target_properties(mmap_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "mmap"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(mmap_wasm_shared PRIVATE src)
+    target_link_options(mmap_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT EMSCRIPTEN AND NOT MMAP_TEST_EXTERNAL_ARTIFACTS)

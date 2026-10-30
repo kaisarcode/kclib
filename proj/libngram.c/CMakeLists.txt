@@ -45,6 +45,26 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_ngram_traverse,_kc_ngram_version
     )
+
+    add_library(ngram_wasm_static STATIC ${NGRAM_SOURCES})
+    set_target_properties(ngram_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "ngram"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(ngram_wasm_static PRIVATE src)
+
+    add_library(ngram_wasm_shared SHARED ${NGRAM_SOURCES})
+    set_target_properties(ngram_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "ngram"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(ngram_wasm_shared PRIVATE src)
+    target_link_options(ngram_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT NGRAM_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)

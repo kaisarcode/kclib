@@ -429,6 +429,8 @@ define wasm_target
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DMMAP_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libmmap.wasm $(BIN_DIR)/wasm/wasm32/libmmap.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libmmap.a $(BIN_DIR)/wasm/wasm32/libmmap.a
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libmmap.so $(BIN_DIR)/wasm/wasm32/libmmap.so
 	@echo "OK wasm/wasm32"
 endef
 

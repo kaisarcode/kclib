@@ -46,6 +46,26 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_min_css,_kc_min_js,_kc_min_html,_kc_min_txt,_kc_min_free,_kc_min_version
     )
+
+    add_library(min_wasm_static STATIC ${MIN_SOURCES})
+    set_target_properties(min_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "min"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(min_wasm_static PRIVATE src)
+
+    add_library(min_wasm_shared SHARED ${MIN_SOURCES})
+    set_target_properties(min_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "min"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(min_wasm_shared PRIVATE src)
+    target_link_options(min_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT MIN_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)

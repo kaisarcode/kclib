@@ -404,6 +404,8 @@ define wasm_target
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,$(CMAKE) -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DKC_TPM_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libtpm.wasm $(BIN_DIR)/wasm/wasm32/libtpm.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libtpm.a $(BIN_DIR)/wasm/wasm32/libtpm.a
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libtpm.so $(BIN_DIR)/wasm/wasm32/libtpm.so
 	@echo "OK wasm/wasm32"
 endef
 

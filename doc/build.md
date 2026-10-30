@@ -58,7 +58,12 @@ make test
 Projects normally use Make over CMake and Ninja. A local build creates artifacts
 under `bin/{platform}/{arch}/`; exact multiarch targets depend on the project.
 For example, `make linux/x86_64` builds to `proj/libdemo.c/bin/linux/x86_64/`,
-while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Distribution
+while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Libraries supporting
+Emscripten publish `libNAME.wasm`, `libNAME.a`, and `libNAME.so` for that
+target. The `.a` archive contains Emscripten object files for static linking;
+the `.so` is an Emscripten side module for a consumer built with
+`-sMAIN_MODULE`, not a native system shared library. Existing JavaScript
+loaders, where provided, are retained. Distribution
 publishes individual files under `dist/libNAME.c/{platform}/{arch}/`,
 for example `dist/libdemo.c/linux/x86_64/libdemo.so`. Each target
 directory contains its compiled artifacts, public header, `LICENSE` or

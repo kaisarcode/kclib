@@ -48,6 +48,26 @@ if(EMSCRIPTEN)
         -sSTACK_SIZE=4194304
         -sEXPORTED_FUNCTIONS=_kc_tpl_open,_kc_tpl_render,_kc_tpl_error,_kc_tpl_free,_kc_tpl_close,_kc_tpl_version
     )
+
+    add_library(tpl_wasm_static STATIC ${TPL_SOURCES})
+    set_target_properties(tpl_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "tpl"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(tpl_wasm_static PRIVATE src)
+
+    add_library(tpl_wasm_shared SHARED ${TPL_SOURCES})
+    set_target_properties(tpl_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "tpl"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(tpl_wasm_shared PRIVATE src)
+    target_link_options(tpl_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT EMSCRIPTEN)

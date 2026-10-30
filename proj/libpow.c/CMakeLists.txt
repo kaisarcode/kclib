@@ -99,6 +99,34 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_pow_challenge,_kc_pow_solve,_kc_pow_verify,_kc_pow_size,_kc_pow_free,_kc_pow_version
     )
+
+    add_library(pow_wasm_static STATIC ${POW_CORE_SOURCES})
+    set_target_properties(pow_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "pow"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(pow_wasm_static PRIVATE ${POW_INCLUDE_DIRS})
+    target_compile_definitions(pow_wasm_static PRIVATE
+        HASHWX_STATIC
+        KC_POW_ENABLE_HASHWX=$<BOOL:${POW_ENABLE_HASHWX}>
+    )
+
+    add_library(pow_wasm_shared SHARED ${POW_CORE_SOURCES})
+    set_target_properties(pow_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "pow"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(pow_wasm_shared PRIVATE ${POW_INCLUDE_DIRS})
+    target_compile_definitions(pow_wasm_shared PRIVATE
+        HASHWX_STATIC
+        KC_POW_ENABLE_HASHWX=$<BOOL:${POW_ENABLE_HASHWX}>
+    )
+    target_link_options(pow_wasm_shared PRIVATE -sSIDE_MODULE=1)
 elseif(NOT POW_TEST_EXTERNAL_ARTIFACTS)
     add_library(pow_static STATIC ${POW_CORE_SOURCES})
     set_target_properties(pow_static PROPERTIES

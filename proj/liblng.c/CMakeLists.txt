@@ -46,6 +46,26 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_lng_detect,_kc_lng_free,_kc_lng_version
     )
+
+    add_library(lng_wasm_static STATIC ${LNG_SOURCES})
+    set_target_properties(lng_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "lng"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(lng_wasm_static PRIVATE src)
+
+    add_library(lng_wasm_shared SHARED ${LNG_SOURCES})
+    set_target_properties(lng_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "lng"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(lng_wasm_shared PRIVATE src)
+    target_link_options(lng_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT EMSCRIPTEN)

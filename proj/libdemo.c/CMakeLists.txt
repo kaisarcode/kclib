@@ -51,6 +51,26 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_demo_greet,_kc_demo_free,_kc_demo_version
     )
+
+    add_library(demo_wasm_static STATIC ${DEMO_CORE_SOURCES})
+    set_target_properties(demo_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "demo"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(demo_wasm_static PRIVATE src)
+
+    add_library(demo_wasm_shared SHARED ${DEMO_CORE_SOURCES})
+    set_target_properties(demo_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "demo"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(demo_wasm_shared PRIVATE src)
+    target_link_options(demo_wasm_shared PRIVATE -sSIDE_MODULE=1)
 elseif(NOT DEMO_TEST_EXTERNAL_ARTIFACTS)
     add_library(demo_static STATIC ${DEMO_CORE_SOURCES})
     set_target_properties(demo_static PROPERTIES OUTPUT_NAME "demo")

@@ -186,6 +186,26 @@ if(EMSCRIPTEN)
         -sSTACK_SIZE=1048576
         -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_dimension,_kc_emb_embed,_kc_emb_free
     )
+
+    add_library(emb_wasm_static STATIC ${LIB_SOURCES} ${MODEL_EMBED_SOURCES})
+    set_target_properties(emb_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "emb"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(emb_wasm_static PRIVATE src lib/ggml/include lib/ggml/src lib/ggml/src/ggml-cpu)
+
+    add_library(emb_wasm_shared SHARED ${LIB_SOURCES} ${MODEL_EMBED_SOURCES})
+    set_target_properties(emb_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "emb"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(emb_wasm_shared PRIVATE src lib/ggml/include lib/ggml/src lib/ggml/src/ggml-cpu)
+    target_link_options(emb_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 ## Library targets

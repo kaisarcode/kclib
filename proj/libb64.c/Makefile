@@ -404,6 +404,8 @@ define wasm_target
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,true)
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libb64.wasm $(BIN_DIR)/wasm/wasm32/libb64.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libb64.a $(BIN_DIR)/wasm/wasm32/libb64.a
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libb64.so $(BIN_DIR)/wasm/wasm32/libb64.so
 	@echo "OK wasm/wasm32"
 endef
 

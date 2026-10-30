@@ -48,6 +48,26 @@ if(EMSCRIPTEN)
         -sSTACK_SIZE=1048576
         -sEXPORTED_FUNCTIONS=_kc_tpm_open,_kc_tpm_score,_kc_tpm_close,_kc_tpm_version
     )
+
+    add_library(tpm_wasm_static STATIC ${TPM_SOURCES})
+    set_target_properties(tpm_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "tpm"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(tpm_wasm_static PRIVATE src)
+
+    add_library(tpm_wasm_shared SHARED ${TPM_SOURCES})
+    set_target_properties(tpm_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "tpm"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(tpm_wasm_shared PRIVATE src)
+    target_link_options(tpm_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT TPM_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)

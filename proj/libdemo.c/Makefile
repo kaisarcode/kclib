@@ -396,6 +396,8 @@ define wasm_target
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,)
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libdemo.wasm $(BIN_DIR)/wasm/wasm32/libdemo.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libdemo.a $(BIN_DIR)/wasm/wasm32/libdemo.a
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libdemo.so $(BIN_DIR)/wasm/wasm32/libdemo.so
 	@echo "OK wasm/wasm32"
 endef
 

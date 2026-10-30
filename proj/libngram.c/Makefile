@@ -406,6 +406,8 @@ define wasm_target
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,wasm_log=$$(mktemp); if ! $(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DKC_NGRAM_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > "$$wasm_log" 2>&1; then cat "$$wasm_log"; rm -f "$$wasm_log"; exit 1; fi; rm -f "$$wasm_log")
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libngram.wasm $(BIN_DIR)/wasm/wasm32/libngram.wasm
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libngram.a $(BIN_DIR)/wasm/wasm32/libngram.a
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libngram.so $(BIN_DIR)/wasm/wasm32/libngram.so
 	@echo "OK wasm/wasm32"
 endef
 

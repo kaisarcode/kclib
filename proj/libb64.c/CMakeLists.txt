@@ -50,6 +50,26 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_b64_version,_kc_b64_encode,_kc_b64_decode,_kc_b64_free
     )
+
+    add_library(b64_wasm_static STATIC ${B64_CORE_SOURCES})
+    set_target_properties(b64_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "b64"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(b64_wasm_static PRIVATE src)
+
+    add_library(b64_wasm_shared SHARED ${B64_CORE_SOURCES})
+    set_target_properties(b64_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "b64"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(b64_wasm_shared PRIVATE src)
+    target_link_options(b64_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT B64_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)

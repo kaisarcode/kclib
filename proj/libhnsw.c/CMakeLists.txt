@@ -49,6 +49,26 @@ if(EMSCRIPTEN)
         -sSTANDALONE_WASM=1
         -sEXPORTED_FUNCTIONS=_kc_hnsw_open,_kc_hnsw_close,_kc_hnsw_add,_kc_hnsw_build,_kc_hnsw_search,_kc_hnsw_free,_kc_hnsw_dimension,_kc_hnsw_metric,_kc_hnsw_count,_kc_hnsw_strerror,_kc_hnsw_version
     )
+
+    add_library(hnsw_wasm_static STATIC ${LIB_SOURCES})
+    set_target_properties(hnsw_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "hnsw"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(hnsw_wasm_static PRIVATE src)
+
+    add_library(hnsw_wasm_shared SHARED ${LIB_SOURCES})
+    set_target_properties(hnsw_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "hnsw"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(hnsw_wasm_shared PRIVATE src)
+    target_link_options(hnsw_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT EMSCRIPTEN)

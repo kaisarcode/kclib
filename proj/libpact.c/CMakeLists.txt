@@ -58,6 +58,26 @@ if(EMSCRIPTEN)
         -sEXPORTED_FUNCTIONS=_kc_pact_init,_kc_pact_invite,_kc_pact_join,_kc_pact_confirm,_kc_pact_seal,_kc_pact_size,_kc_pact_unseal,_kc_pact_revoke,_kc_pact_close,_kc_pact_free,_kc_pact_version
         ${PACT_WASM_MEMORY_FLAGS}
     )
+
+    add_library(pact_wasm_static STATIC ${PACT_SOURCES})
+    set_target_properties(pact_wasm_static PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "pact"
+        POSITION_INDEPENDENT_CODE ON
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(pact_wasm_static PRIVATE src lib/monocypher)
+
+    add_library(pact_wasm_shared SHARED ${PACT_SOURCES})
+    set_target_properties(pact_wasm_shared PROPERTIES
+        PREFIX "lib"
+        OUTPUT_NAME "pact"
+        SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out"
+    )
+    target_include_directories(pact_wasm_shared PRIVATE src lib/monocypher)
+    target_link_options(pact_wasm_shared PRIVATE -sSIDE_MODULE=1)
 endif()
 
 if(NOT PACT_TEST_EXTERNAL_ARTIFACTS AND NOT EMSCRIPTEN)
