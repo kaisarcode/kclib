@@ -168,7 +168,7 @@ define macos_target
 	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
 	cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
-	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache"; then \
+	if [ -f "$$cache" ] && ( ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache" || ! grep -Fq '$(CURDIR)/$(BIN_DIR)/macos/$(1)' "$$cache" ); then \
 		rm -f "$$cache" && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
 	fi && \
 	if [ ! -f "$$cache" ]; then \

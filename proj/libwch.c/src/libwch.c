@@ -2201,7 +2201,7 @@ static int kc_wch_module_path(char *out, size_t cap) {
  * @param show Unused show mode.
  * @return None.
  */
-__declspec(dllexport) void CALLBACK kc_wch_internal_serve_entry(
+void CALLBACK kc_wch_internal_serve_entry(
     HWND window,
     HINSTANCE instance,
     LPSTR command_line,
