@@ -926,6 +926,115 @@ static int case_bm25_cli(void) {
 }
 #endif
 
+typedef struct {
+    size_t terms;
+    size_t postings;
+    size_t tokens;
+    size_t first_ordinal;
+    int saw_cafe;
+    int saw_ano;
+} kc_bm25_visit_test_t;
+
+/**
+ * Inspect normalized tokens from the shared lexical analyzer.
+ * @param token Normalized borrowed token.
+ * @param userdata Test observations.
+ * @return Zero to continue.
+ */
+static int kc_bm25_test_token(const char *token, void *userdata)
+{
+    kc_bm25_visit_test_t *state = (kc_bm25_visit_test_t *)userdata;
+
+    state->tokens++;
+    state->saw_cafe |= strcmp(token, "cafe") == 0;
+    state->saw_ano |= strcmp(token, "ano") == 0;
+    return 0;
+}
+
+/**
+ * Inspect distinct vocabulary terms and document frequency.
+ * @param word Normalized indexed term.
+ * @param count Number of matching documents.
+ * @param userdata Test observations.
+ * @return Zero to continue.
+ */
+static int kc_bm25_test_word(const char *word, size_t count, void *userdata)
+{
+    kc_bm25_visit_test_t *state = (kc_bm25_visit_test_t *)userdata;
+
+    state->terms++;
+    if (strcmp(word, "cafe") == 0) {
+        state->saw_cafe = 1;
+        if (count != 2) return 1;
+    }
+    return 0;
+}
+
+/**
+ * Inspect normalized postings using zero-based document identity.
+ * @param ordinal Indexed document ordinal.
+ * @param frequency Occurrences within that document.
+ * @param userdata Test observations.
+ * @return Zero to continue.
+ */
+static int kc_bm25_test_posting(size_t ordinal, size_t frequency,
+    void *userdata)
+{
+    kc_bm25_visit_test_t *state = (kc_bm25_visit_test_t *)userdata;
+
+    if (state->postings == 0) state->first_ordinal = ordinal;
+    state->postings++;
+    return frequency == 0;
+}
+
+/**
+ * Verify normalized tokens, distinct vocabulary and postings on import.
+ * @return Zero when traversal agrees with the saved index.
+ */
+static int case_bm25_vocabulary(void)
+{
+    kc_bm25_t *index = NULL, *opened = NULL;
+    kc_bm25_visit_test_t state = {0};
+    kc_bm25_options_t options;
+    void *data = NULL;
+    size_t size = 0;
+    int folding = 1, fail = 0;
+
+    options.fold_accents = &folding;
+    fail += expect(kc_bm25_open(&index, &options) == KC_BM25_OK);
+    if (index != NULL) {
+        fail += expect(kc_bm25_add(index, "one", "Café año") == KC_BM25_OK);
+        fail += expect(kc_bm25_add(index, "two", "cafe warning") == KC_BM25_OK);
+        fail += expect(kc_bm25_build(index) == KC_BM25_OK);
+        fail += expect(kc_bm25_export(index, &data, &size) == KC_BM25_OK);
+    }
+    if (data != NULL)
+        fail += expect(kc_bm25_import(&opened, data, size) == KC_BM25_OK);
+    if (opened != NULL) {
+        fail += expect(kc_bm25_tokens(opened, "CAFÉ AÑO",
+            kc_bm25_test_token, &state) == KC_BM25_OK);
+        fail += expect(state.tokens == 2 && state.saw_cafe && state.saw_ano);
+        state.saw_cafe = 0;
+        fail += expect(kc_bm25_vocabulary(opened,
+            kc_bm25_test_word, &state) == KC_BM25_OK);
+        fail += expect(state.saw_cafe && state.terms >= 3);
+        fail += expect(kc_bm25_postings(opened, "cafe",
+            kc_bm25_test_posting, &state) == KC_BM25_OK);
+        fail += expect(state.postings == 2 && state.first_ordinal == 0);
+        fail += expect(kc_bm25_postings(opened, "absent",
+            kc_bm25_test_posting, &state) == KC_BM25_OK);
+        fail += expect(state.postings == 2);
+        fail += expect(kc_bm25_tokens(opened, "\xC3\x28",
+            kc_bm25_test_token, &state) == KC_BM25_EUTF8);
+    }
+    kc_bm25_free(data);
+    kc_bm25_close(opened);
+    kc_bm25_close(index);
+    case_result(fail, "bm25_vocabulary",
+        "shares Unicode normalization and sorted postings with consumers");
+    return fail != 0;
+}
+
 /**
  * Execute all platform-applicable library cases.
  * @return Number of failed cases.
@@ -934,9 +1043,9 @@ static int case_all(void) {
     int failures = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 10;
-#else
     test_case_total = 11;
+#else
+    test_case_total = 12;
 #endif
     test_case_current = 0;
     failures += run_case(case_bm25_scoring);
@@ -949,6 +1058,7 @@ static int case_all(void) {
     failures += run_case(case_bm25_file_contract);
     failures += run_case(case_bm25_metadata);
     failures += run_case(case_bm25_memory);
+    failures += run_case(case_bm25_vocabulary);
 #ifndef __EMSCRIPTEN__
     failures += run_case(case_bm25_cli);
 #endif
@@ -982,6 +1092,8 @@ int main(int argc, char **argv) {
         callback = case_bm25_metadata;
     else if (strcmp(argv[1], "bm25_memory") == 0)
         callback = case_bm25_memory;
+    else if (strcmp(argv[1], "bm25_vocabulary") == 0)
+        callback = case_bm25_vocabulary;
 #ifndef __EMSCRIPTEN__
     else if (strcmp(argv[1], "bm25_cli") == 0) callback = case_bm25_cli;
 #endif
