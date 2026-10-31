@@ -73,7 +73,7 @@ if(EMSCRIPTEN)
     target_link_options(leven_wasm_shared PRIVATE -sSIDE_MODULE=1)
 elseif(NOT LEVEN_TEST_EXTERNAL_ARTIFACTS)
     add_library(leven_static STATIC ${LEVEN_CORE_SOURCES})
-    set_target_properties(leven_static PROPERTIES OUTPUT_NAME "leven")
+    set_target_properties(leven_static PROPERTIES OUTPUT_NAME "leven" POSITION_INDEPENDENT_CODE ON)
     target_include_directories(leven_static PRIVATE src)
 
     add_library(leven_shared SHARED ${LEVEN_CORE_SOURCES})
