@@ -53,6 +53,22 @@ index to remove combining marks from normalized terms. The selected mode is
 preserved in saved indexes. Language-specific stemming, synonyms, and query
 expansion are not applied.
 
+## Normalized vocabulary
+
+The same Unicode analyzer used for indexing and search is available to
+composing libraries through `kc_bm25_tokens()`. It visits normalized tokens
+with the index's saved accent-folding policy.
+
+`kc_bm25_vocabulary()` visits each distinct normalized term and its document
+frequency. `kc_bm25_postings()` visits the ordered document ordinals and
+frequencies associated with one normalized term. These operations work on both
+built and imported indexes; returned strings are borrowed for the callbacks.
+Nonzero visitor returns stop traversal with `KC_BM25_EABORT`.
+
+This exposes lexical data without requiring clients to copy Unicode folding
+rules or duplicate the inverted index. Search policy and spelling correction
+remain the responsibility of the consumer.
+
 ## CLI
 
 Build a portable index from tab-separated ID/text records:
