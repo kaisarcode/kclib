@@ -802,7 +802,7 @@ static int case_bm25_cli(void) {
     fail += expect(fclose(file) == 0);
 
     fail += expect(bm25_cli_execute("--help", output) == 0);
-    file = fopen(output, "rb");
+    file = fopen(output, "r");
     if (file != NULL) {
         size_t length = fread(help, 1, sizeof(help) - 1, file);
         char *newline;
@@ -817,7 +817,7 @@ static int case_bm25_cli(void) {
         fail += expect(fclose(file) == 0);
     } else fail++;
     fail += expect(bm25_cli_execute("-h", output) == 0);
-    file = fopen(output, "rb");
+    file = fopen(output, "r");
     if (file != NULL) {
         size_t length = fread(line, 1, sizeof(line) - 1, file);
 
@@ -827,7 +827,7 @@ static int case_bm25_cli(void) {
         fail += expect(fclose(file) == 0);
     } else fail++;
     fail += expect(bm25_cli_execute("--version", output) == 0);
-    file = fopen(output, "rb");
+    file = fopen(output, "r");
     if (file != NULL) {
         char *end = NULL;
 
@@ -839,7 +839,7 @@ static int case_bm25_cli(void) {
         fail += expect(fclose(file) == 0);
     } else fail++;
     fail += expect(bm25_cli_execute("-v", output) == 0);
-    file = fopen(output, "rb");
+    file = fopen(output, "r");
     if (file != NULL) {
         char *end = NULL;
 
@@ -855,7 +855,7 @@ static int case_bm25_cli(void) {
         "build bm25-cli.bin -i bm25-fixture.tsv", output) == 0);
     fail += expect(bm25_cli_execute(
         "search bm25-cli.bin authentication", output) == 0);
-    file = fopen(output, "rb");
+    file = fopen(output, "r");
     if (file != NULL) {
         if (fgets(line, sizeof(line), file) != NULL) {
             int parsed = sscanf(line,
@@ -876,7 +876,7 @@ static int case_bm25_cli(void) {
 
     fail += expect(bm25_cli_execute(
         "search bm25-cli.bin authentication --limit 0", output) == 0);
-    file = fopen(output, "rb");
+    file = fopen(output, "r");
     if (file != NULL) {
         fail += expect(fgetc(file) == EOF);
         fclose(file);
@@ -888,7 +888,7 @@ static int case_bm25_cli(void) {
     fail += expect(bm25_cli_execute(
         "search bm25-cli.bin cafe --limit 1 --k1 1.2 --b 0.75",
         output) == 0);
-    file = fopen(output, "rb");
+    file = fopen(output, "r");
     if (file != NULL) {
         if (fgets(line, sizeof(line), file) != NULL) {
             fail += expect(strncmp(line, "2\tcafe\t", 7) == 0);
