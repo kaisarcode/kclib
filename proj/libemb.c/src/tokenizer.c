@@ -5819,7 +5819,6 @@ static int is_chinese(uint32_t cp) {
         (cp >= 0x2F800 && cp <= 0x2FA1F);
 }
 
-/* Invalid UTF-8 is consumed one byte at a time and discarded as U+FFFD. */
 /**
  * Decode one UTF-8 sequence, consuming malformed bytes safely.
  * @param text UTF-8 text.
@@ -5900,7 +5899,6 @@ static size_t encode_utf8(uint32_t cp, char *out) {
  */
 static void fold_unicode(uint32_t cp, uint32_t temp[3],
     const uint32_t **values, size_t *count) {
-    /* Canonical Hangul decomposition (Unicode UAX #15). */
     if (cp >= 0xAC00 && cp <= 0xD7A3) {
         uint32_t index = cp - 0xAC00;
         uint32_t trailing = index % 28;
@@ -5991,8 +5989,6 @@ static void word_flush(word_buffer_t *word, int *tokens, int capacity,
             const char *prefix = start == 0 ? "\xE2\x96\x81" : "##";
             size_t prefix_len = start == 0 ? 3 : 2;
             size_t n = word->offsets[end] - word->offsets[start];
-            /* GGUF BERT vocabularies may encode word starts as ▁word;
-             * WordPiece vocabularies use word and ##continuation. */
             memcpy(candidate, prefix, prefix_len);
             memcpy(candidate + prefix_len, word->bytes + word->offsets[start], n);
             candidate[prefix_len + n] = '\0';
@@ -6074,7 +6070,6 @@ void kc_emb_wordpiece_tokenize(const char *input, int *tokens, int capacity,
     len = strlen(input);
     word_init(&word);
     while (cursor < len && *count < capacity - 1) {
-        /* BERT never splits its registered special tokens. */
         if (input[cursor] == '[') {
             static const char *const special[] = {
                 "[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"

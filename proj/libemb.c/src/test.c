@@ -38,7 +38,6 @@ void kc_emb_wordpiece_tokenize(
     int *count
 );
 
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -542,7 +541,7 @@ static int case_emb_tokenizer(void) {
             errors++;
         }
     }
-    { /* Length limit always leaves room for SEP. */
+    {
         int actual[4] = {0};
         int count = -1;
         kc_emb_wordpiece_tokenize("hello world foo", actual, 4,
@@ -552,7 +551,7 @@ static int case_emb_tokenizer(void) {
         printf("[%s] tokenizer_truncation\n", failed ? "FAIL" : "PASS");
         errors += failed;
     }
-    { /* GGUF BERT word-start tokens and WordPiece continuations. */
+    {
         int tokens[16] = {0}, count = -1;
         const int expected[] = {1, 106, 101, 102, 107, 2};
         kc_emb_wordpiece_tokenize("¿Cómo café?", tokens, 16, 1, 2, 0,
@@ -563,7 +562,7 @@ static int case_emb_tokenizer(void) {
         printf("[%s] tokenizer_gguf_word_starts\n", failed ? "FAIL" : "PASS");
         errors += failed;
     }
-    { /* GGUF word start plus ## continuation. */
+    {
         int tokens[16] = {0}, count = -1;
         kc_emb_wordpiece_tokenize("unaffable", tokens, 16, 1, 2, 0,
             kc_test_gguf_lookup, NULL, &count);

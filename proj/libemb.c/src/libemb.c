@@ -41,7 +41,6 @@ void kc_emb_wordpiece_tokenize(
     int *count
 );
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -469,12 +468,18 @@ failure:
     return NULL;
 }
 
-/** Token lookup through the model's embedded vocabulary. */
+/**
+ * Look up a token through the model's embedded vocabulary.
+ * @return Token identifier.
+ */
 static int kc_emb_token_lookup(void *context, const char *token) {
     return find_token((kc_emb_ctx_t *)context, token);
 }
 
-/** BERT uncased normalization and WordPiece segmentation. */
+/**
+ * Tokenize text with BERT normalization and WordPiece segmentation.
+ * @return void
+ */
 static void wordpiece_tokenize(kc_emb_ctx_t *ectx, const char *input, int *tokens, int *n_tokens) {
     kc_emb_wordpiece_tokenize(input, tokens, ectx->n_ctx,
         ectx->cls_token_id, ectx->sep_token_id, ectx->unk_token_id,
