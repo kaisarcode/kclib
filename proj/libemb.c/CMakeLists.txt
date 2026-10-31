@@ -263,9 +263,6 @@ endif()
 
 if(EMB_BUILD_TESTS)
     enable_testing()
-    add_executable(emb_tokenizer_test src/tokenizer_test.c src/tokenizer.c)
-    target_include_directories(emb_tokenizer_test PRIVATE src)
-
     if(EMSCRIPTEN)
         add_executable(emb_contract_test src/test.c ${LIB_SOURCES} ${MODEL_EMBED_SOURCES})
         target_include_directories(emb_contract_test PRIVATE src lib/ggml/include lib/ggml/src lib/ggml/src/ggml-cpu)
@@ -292,7 +289,7 @@ if(EMB_BUILD_TESTS)
             set(EMB_TEST_SHARED_TARGET emb_test_shared)
         endif()
 
-        add_executable(emb_contract_test src/test.c)
+        add_executable(emb_contract_test src/test.c src/tokenizer.c)
         target_include_directories(emb_contract_test PRIVATE src)
         target_link_libraries(emb_contract_test PRIVATE ${EMB_TEST_SHARED_TARGET})
         if(DEFINED EMB_CLI_PATH)

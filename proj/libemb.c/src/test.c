@@ -13,6 +13,32 @@
 
 #include "libemb.h"
 
+/**
+ * Tokenize UTF-8 text using a caller-provided vocabulary.
+ * @param input Input text.
+ * @param tokens Output token IDs.
+ * @param capacity Output capacity.
+ * @param cls_id Classification token ID.
+ * @param sep_id Separator token ID.
+ * @param unk_id Unknown-word token ID.
+ * @param lookup Vocabulary token lookup.
+ * @param context Vocabulary lookup context.
+ * @param count Receives the token count.
+ * @return None.
+ */
+void kc_emb_wordpiece_tokenize(
+    const char *input,
+    int *tokens,
+    int capacity,
+    int cls_id,
+    int sep_id,
+    int unk_id,
+    int (*lookup)(void *context, const char *token),
+    void *context,
+    int *count
+);
+
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -430,6 +456,127 @@ static int case_emb_cli(void) {
 }
 #endif
 
+/** Tokenizer fixture with expected token IDs. */
+typedef struct {
+    const char *text;
+    int expected[16];
+    int count;
+} kc_tokenizer_case_t;
+
+static const char *kc_test_vocab[] = {
+    "[UNK]", "[CLS]", "[SEP]", "¡", "hola", ",", "caneria", "!",
+    "¿", "como", "evitar", "que", "alguien", "entre", "?",
+    "cafe", "nino", "hello", "world", "un", "##aff", "##able",
+    "中", "文", "long", "##er", "-", "a", "b", "x", "foo", "[MASK]"
+};
+
+/**
+ * Resolve one token from the WordPiece fixture.
+ * @param ctx Unused fixture context.
+ * @param value Token to find.
+ * @return Token ID, or -1 when absent.
+ */
+static int kc_test_token_lookup(void *ctx, const char *value) {
+    (void)ctx;
+    for (size_t i = 0; i < sizeof(kc_test_vocab) / sizeof(kc_test_vocab[0]); i++)
+        if (strcmp(kc_test_vocab[i], value) == 0) return (int)i;
+    return -1;
+}
+
+static const char *kc_test_gguf_vocab[] = {
+    "▁hola", "▁como", "▁cafe", "▁un", "##aff", "##able", "¿", "?"
+};
+
+/**
+ * Resolve one token from the GGUF-style fixture.
+ * @param ctx Unused fixture context.
+ * @param value Token to find.
+ * @return Token ID, or -1 when absent.
+ */
+static int kc_test_gguf_lookup(void *ctx, const char *value) {
+    (void)ctx;
+    for (size_t i = 0; i < sizeof(kc_test_gguf_vocab) / sizeof(kc_test_gguf_vocab[0]); i++)
+        if (strcmp(kc_test_gguf_vocab[i], value) == 0) return (int)(100 + i);
+    return -1;
+}
+
+/**
+ * Verify Unicode normalization, WordPiece segmentation, and limits.
+ * @return 0 if every tokenizer regression test passes, otherwise 1.
+ */
+static int case_emb_tokenizer(void) {
+    const kc_tokenizer_case_t cases[] = {
+        {"¡Hola, CAÑERÍA!", {1, 3, 4, 5, 6, 7, 2}, 7},
+        {"¿Cómo evitar que alguien entre?", {1, 8, 9, 10, 11, 12, 13, 14, 2}, 9},
+        {"CAFE\xCC\x81 niño café", {1, 15, 16, 15, 2}, 5},
+        {"HELLO\tWorld!", {1, 17, 18, 7, 2}, 5},
+        {"unaffable", {1, 19, 20, 21, 2}, 5},
+        {"中文", {1, 22, 23, 2}, 4},
+        {"hello\xE2\x80\x87world", {1, 17, 18, 2}, 4},
+        {"a😀b", {1, 0, 2}, 3},
+        {"foo-bar", {1, 30, 26, 0, 2}, 5},
+        {"longer", {1, 24, 25, 2}, 4},
+        {"longering", {1, 0, 2}, 3},
+        {"", {1, 2}, 2},
+        {"[MASK] hello", {1, 31, 17, 2}, 4},
+    };
+    int errors = 0;
+    for (size_t t = 0; t < sizeof(cases) / sizeof(cases[0]); t++) {
+        int count = -1, actual[512] = {0};
+        kc_emb_wordpiece_tokenize(cases[t].text, actual, 512, 1, 2, 0,
+            kc_test_token_lookup, NULL, &count);
+        int failed = count != cases[t].count;
+        if (!failed) {
+            for (int j = 0; j < count; j++) {
+                if (actual[j] != cases[t].expected[j]) { failed = 1; break; }
+            }
+        }
+        printf("[%s] tokenizer_%02zu: %s\n", failed ? "FAIL" : "PASS", t + 1,
+            cases[t].text);
+        if (failed) {
+            printf("  expected:");
+            for (int j = 0; j < cases[t].count; j++) printf(" %d", cases[t].expected[j]);
+            printf("\n  received:");
+            for (int j = 0; j < count; j++) printf(" %d", actual[j]);
+            putchar('\n');
+            errors++;
+        }
+    }
+    { /* Length limit always leaves room for SEP. */
+        int actual[4] = {0};
+        int count = -1;
+        kc_emb_wordpiece_tokenize("hello world foo", actual, 4,
+            1, 2, 0, kc_test_token_lookup, NULL, &count);
+        int failed = count != 4 || actual[0] != 1 ||
+            actual[1] != 17 || actual[2] != 18 || actual[3] != 2;
+        printf("[%s] tokenizer_truncation\n", failed ? "FAIL" : "PASS");
+        errors += failed;
+    }
+    { /* GGUF BERT word-start tokens and WordPiece continuations. */
+        int tokens[16] = {0}, count = -1;
+        const int expected[] = {1, 106, 101, 102, 107, 2};
+        kc_emb_wordpiece_tokenize("¿Cómo café?", tokens, 16, 1, 2, 0,
+            kc_test_gguf_lookup, NULL, &count);
+        int failed = count != 6;
+        for (int i = 0; !failed && i < 6; i++)
+            if (tokens[i] != expected[i]) failed = 1;
+        printf("[%s] tokenizer_gguf_word_starts\n", failed ? "FAIL" : "PASS");
+        errors += failed;
+    }
+    { /* GGUF word start plus ## continuation. */
+        int tokens[16] = {0}, count = -1;
+        kc_emb_wordpiece_tokenize("unaffable", tokens, 16, 1, 2, 0,
+            kc_test_gguf_lookup, NULL, &count);
+        int failed = count != 5 || tokens[0] != 1 || tokens[1] != 103 ||
+            tokens[2] != 104 || tokens[3] != 105 || tokens[4] != 2;
+        printf("[%s] tokenizer_gguf_continuations\n", failed ? "FAIL" : "PASS");
+        errors += failed;
+    }
+    case_result(errors, "emb_tokenizer",
+        "normalizes Unicode and segments both WordPiece vocabularies");
+    return errors ? 1 : 0;
+}
+
 /**
  * Runs all reusable and platform-applicable test cases.
  * @return 0 on success, nonzero on failure.
@@ -437,13 +584,18 @@ static int case_emb_cli(void) {
 static int case_all(void) {
     int rc = 0;
 
+#ifdef __EMSCRIPTEN__
     test_case_total = 6;
+#else
+    test_case_total = 7;
+#endif
     test_case_current = 0;
     run_case(&rc, case_kc_emb_version);
     run_case(&rc, case_kc_emb_dimension);
     run_case(&rc, case_kc_emb_embed);
     run_case(&rc, case_kc_emb_contract);
     run_case(&rc, case_kc_emb_determinism);
+    run_case(&rc, case_emb_tokenizer);
 #ifndef __EMSCRIPTEN__
     run_case(&rc, case_emb_cli);
 #endif
@@ -487,6 +639,11 @@ int main(int argc, char **argv) {
         test_case_total = 1;
         test_case_current = 1;
         return case_kc_emb_determinism();
+    }
+    if (strcmp(argv[1], "emb_tokenizer") == 0) {
+        test_case_total = 1;
+        test_case_current = 1;
+        return case_emb_tokenizer();
     }
 #ifndef __EMSCRIPTEN__
     if (strcmp(argv[1], "emb_cli") == 0) {

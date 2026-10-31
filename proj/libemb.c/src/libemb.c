@@ -16,7 +16,31 @@
 #include <unistd.h>
 #endif
 #include "libemb.h"
-#include "tokenizer.h"
+/**
+ * Tokenize UTF-8 text using a caller-provided vocabulary.
+ * @param input Input text.
+ * @param tokens Output token IDs.
+ * @param capacity Output capacity.
+ * @param cls_id Classification token ID.
+ * @param sep_id Separator token ID.
+ * @param unk_id Unknown-word token ID.
+ * @param lookup Vocabulary token lookup.
+ * @param context Vocabulary lookup context.
+ * @param count Receives the token count.
+ * @return None.
+ */
+void kc_emb_wordpiece_tokenize(
+    const char *input,
+    int *tokens,
+    int capacity,
+    int cls_id,
+    int sep_id,
+    int unk_id,
+    int (*lookup)(void *context, const char *token),
+    void *context,
+    int *count
+);
+
 
 #include <stdio.h>
 #include <stdlib.h>

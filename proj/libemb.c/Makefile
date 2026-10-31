@@ -484,7 +484,7 @@ test:
 				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test-wine --target emb_contract_test emb_tokenizer_test || exit 1; \
+		cmake --build $(BUILD_DIR)/test-wine --target emb_contract_test || exit 1; \
 		for dll in \
 			"$$($(WINE_X86_64_CC) -print-file-name=libgcc_s_seh-1.dll)" \
 			"$$($(WINE_X86_64_CXX) -print-file-name=libstdc++-6.dll)" \
@@ -495,7 +495,6 @@ test:
 			fi; \
 		done; \
 		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/emb_contract_test.exe all || exit 1; \
-		EGL_LOG_LEVEL=fatal WINEDEBUG=-all $(WINE) $(BUILD_DIR)/test-wine/emb_tokenizer_test.exe; \
 	elif [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
 		if ! command -v $(WASM_EMCMAKE) >/dev/null 2>&1 || ! command -v $(WASM_EMCC) >/dev/null 2>&1; then \
 			echo "Missing Emscripten SDK toolchain: $(WASM_EMCMAKE)/$(WASM_EMCC)" >&2; \
@@ -513,14 +512,13 @@ test:
 				-DEMB_BUILD_VERSION=$(BUILD_VERSION) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test-wasm --target emb_contract_test emb_tokenizer_test || exit 1; \
+		cmake --build $(BUILD_DIR)/test-wasm --target emb_contract_test || exit 1; \
 		if [ -n "$(EMSDK_NODE)" ]; then node="$(EMSDK_NODE)"; else node="$(WASM_NODE)"; fi; \
 		if ! command -v "$$node" >/dev/null 2>&1; then \
 			echo "Missing Emscripten test runtime: $$node" >&2; \
 			exit 1; \
 		fi; \
 		"$$node" $(BUILD_DIR)/test-wasm/emb_contract_test.js all || exit 1; \
-		"$$node" $(BUILD_DIR)/test-wasm/emb_tokenizer_test.js; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
@@ -541,9 +539,8 @@ test:
 				$(NATIVE_IMPORT_LIBRARY) \
 				-G Ninja -Wno-dev > /dev/null; \
 		fi; \
-		cmake --build $(BUILD_DIR)/test --target emb_contract_test emb_tokenizer_test || exit 1; \
+		cmake --build $(BUILD_DIR)/test --target emb_contract_test || exit 1; \
 		$(BUILD_DIR)/test/emb_contract_test all || exit 1; \
-		$(BUILD_DIR)/test/emb_tokenizer_test; \
 	fi
 
 wine:
