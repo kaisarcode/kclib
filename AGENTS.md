@@ -87,6 +87,24 @@ uniformity, and never reproduce obsolete or nonconforming code when current
 repository standards supersede it. Do not introduce new file names, helpers,
 formats, flags, or APIs simply because they are familiar from other projects.
 
+## Naming
+
+Use the shortest precise name that identifies an element in its context.
+Add a qualifier only to distinguish real alternatives that would otherwise
+be ambiguous. Do not invent a distinction just to justify an adjective.
+If there is only one set of options, call it `Options`, not
+`Common options`. Avoid gratuitous qualifiers such as `general`,
+`common`, `available`, `main`, `default`, or `internal` when
+they do not distinguish anything.
+
+This applies everywhere: filenames, directories, types, identifiers,
+functions, API names, commands, flags, parameters, configuration keys,
+test names, help and output labels, documentation headings, navigation,
+UI components and visible prose. Prefer an established plain name
+over a longer invented one. A qualifier is correct when it expresses
+an actual, necessary distinction; otherwise omit it. Do not use
+unrelated renames as incidental cleanup.
+
 ## Mandatory KCS and project-wide consistency
 
 KCS is a binding authoring standard for every new or modified source,
