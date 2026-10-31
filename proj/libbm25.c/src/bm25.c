@@ -21,10 +21,10 @@
  */
 static void bm25_usage(void) {
     puts("Usage: bm25 <command> [arguments]\n"
-         "  build <index> [-i file] [--fold-accents]\n"
-         "  search <index> <query> [-l limit] [--k1 value] [--b value]\n"
-         "  -h, --help       Show this help\n"
-         "  --version        Show the build version");
+        "  build <index> [-i file] [--fold-accents]\n"
+        "  search <index> <query> [-l limit] [--k1 value] [--b value]\n"
+        "  -h, --help       Show this help\n"
+        "  --version        Show the build version");
 }
 
 /**
