@@ -26,6 +26,7 @@ typedef struct kc_bm25 kc_bm25_t;
 #define KC_BM25_EIO -4
 #define KC_BM25_EFORMAT -5
 #define KC_BM25_EUTF8 -6
+#define KC_BM25_EABORT -7
 
 typedef struct {
     const int *fold_accents;
@@ -92,6 +93,50 @@ int kc_bm25_search(
     kc_bm25_result_t **out_results,
     size_t *out_count
 );
+
+/**
+ * Visit normalized tokens using the same Unicode analyzer as this index.
+ * Token strings are borrowed for the callback duration. Returning nonzero
+ * aborts traversal with KC_BM25_EABORT.
+ * @param index Built or imported index determining accent normalization.
+ * @param text UTF-8 source text.
+ * @param visit Required token callback.
+ * @param userdata Forwarded to the callback.
+ * @return KC_BM25_OK, KC_BM25_EABORT, or an error code.
+ */
+typedef int (*kc_bm25_token_fn)(const char *token, void *userdata);
+
+int kc_bm25_tokens(const kc_bm25_t *index, const char *text,
+    kc_bm25_token_fn visit, void *userdata);
+
+/**
+ * Visit each distinct normalized vocabulary term and its document frequency.
+ * Strings remain borrowed and valid for the callback duration.
+ * @param term Distinct normalized word.
+ * @param document_count Number of indexed associations containing the term.
+ * @param userdata Caller context.
+ * @return Zero to continue, nonzero to abort.
+ */
+typedef int (*kc_bm25_word_fn)(const char *term, size_t document_count,
+    void *userdata);
+
+int kc_bm25_vocabulary(const kc_bm25_t *index,
+    kc_bm25_word_fn visit, void *userdata);
+
+/**
+ * Visit distinct document ordinals containing one normalized vocabulary term.
+ * The term must already use the index's normalization; the supplied string
+ * is not normalized again. Frequency counts occurrences within each document.
+ * @param ordinal Zero-based insertion ordinal.
+ * @param frequency Occurrences of this term in the document.
+ * @param userdata Caller context.
+ * @return Zero to continue, nonzero to abort.
+ */
+typedef int (*kc_bm25_posting_fn)(size_t ordinal, size_t frequency,
+    void *userdata);
+
+int kc_bm25_postings(const kc_bm25_t *index, const char *term,
+    kc_bm25_posting_fn visit, void *userdata);
 
 /**
  * Export a built index as a self-contained, portable binary memory value.
