@@ -1,0 +1,8 @@
+{
+  "name": "libbm25",
+  "description": "Indexes UTF-8 text and retrieves documents with Okapi BM25 lexical ranking.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kclib/tree/slave/proj/libbm25.c"
+}

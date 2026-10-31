@@ -13,6 +13,7 @@ index is the summary, not the contract.
 | [`mdp`](../proj/libmdp.c/README.md) | Separates Markdown frontmatter and body and renders a small subset as HTML. | Reading or serving Markdown, or needing frontmatter metadata. |
 | [`tpl`](../proj/libtpl.c/README.md) | Renders templates with variables, includes, blocks, conditions, and iteration. | Generating output from templates (HTML, configs, reports). |
 | [`min`](../proj/libmin.c/README.md) | Conservatively minifies CSS, JavaScript, and HTML. | Emitting web assets that should be compact. |
+| [`bm25`](../proj/libbm25.c/README.md) | Indexes text and ranks matching documents with Okapi BM25. | Lexical search over standalone text corpora. |
 | [`ngram`](../proj/libngram.c/README.md) | Generates n-grams and can run a command for every span. | Sliding windows over text or per-span processing. |
 | [`lng`](../proj/liblng.c/README.md) | Detects text language through built-in profiles. | Identifying the language of input text. |
 | [`tpm`](../proj/libtpm.c/README.md) | Compares text with an n-gram profile and returns similarity from 0 to 1. | Classifying text or measuring text similarity. |
