@@ -87,6 +87,62 @@ uniformity, and never reproduce obsolete or nonconforming code when current
 repository standards supersede it. Do not introduce new file names, helpers,
 formats, flags, or APIs simply because they are familiar from other projects.
 
+## Mandatory KCS and project-wide consistency
+
+KCS is a binding authoring standard for every new or modified source,
+documentation, test, build, and project artifact. Repository precedents are
+mandatory references for conventions that the normative KCS rules do not spell
+out. Neither is a suggestion or a later cleanup task. Read the authoritative
+current KCS rules and representative compliant kclibs before writing; apply
+them from the first line and correct known violations before delivery. If an
+older example conflicts with KCS, KCS takes priority.
+
+Consistency applies to **every observable and structural detail**, not only
+the test logic:
+
+* **Test presentation:** reproduce the established
+  `[current/total] [PASS|FAIL] case_name: description` case lines and
+  `N passed, M failed` aggregate summary, with truthful totals, meaningful
+  case names, and a failing process status on errors. Inspect actual
+  `src/test.c` precedents and their dispatch/output before creating a test
+  runner; do not invent an alternative reporting format.
+* **CLI:** match existing conventions for `Usage:` formatting, sections,
+  spacing and alignment, help/version flags, positional arguments, option
+  naming and value types, defaults, stdin/file precedence, error messages,
+  output structure, and exit codes. Copy the nearest equivalent interface
+  pattern, adjusting only genuinely capability-specific details.
+* **C APIs:** follow existing public-header layout, identifier and type
+  naming, function signatures, option representation, error/status handling,
+  defaults, return values, memory ownership, and lifecycle semantics for
+  equivalent operations. Keep the JavaScript/Lua projection consistent with
+  the native public contract.
+* **Source and comments:** use the exact KaisarCode file-header template,
+  required DocBlocks and metadata (including appropriate parameter/return
+  descriptions), established whitespace, indentation, identifier style,
+  and KCS comment restrictions. Ordinary explanatory inline or block comments
+  are not a substitute for DocBlocks; do not add non-DocBlock commentary
+  outside the standard file header when KCS forbids it.
+* **Files and project size:** follow established naming rules, including
+  **no underscores in filenames**, and use the smallest coherent set of files
+  comparable to kclibs of similar complexity. The normal C project has one
+  `src/test.c`; do not split tests, tokenizers, helpers, lookup tables, or
+  other internals into extra files just for organization. Additional files
+  require an actual responsibility or platform need and a relevant precedent.
+  Complexity determines the appropriate relative file count, not a universal
+  fixed number.
+* **Documentation and packaging:** copy the existing README and
+  project-local documentation structure, heading conventions, Markdown
+  formatting, navigation, file and page naming, manifests, license files,
+  build targets, and distribution layout. Use the current comparable project
+  as the example; do not invent a new documentation template or relocate
+  user-facing material without a reason.
+
+For each task, identify the closest applicable examples separately for source
+and API, CLI/help, tests/output, build, and documentation. These may be
+different kclibs. Reuse established conventions exactly where the concept
+matches. Do not weaken an existing standard into a vague preference for
+"similar" or "consistent" code.
+
 ## Public API philosophy
 
 A kclib public API must express the user's intent and the capability being
@@ -418,9 +474,9 @@ those capabilities actually exist; do not invent requirements for other projects
 Keep tests deterministic, isolated, and self-contained, with no dependency on
 public network services or unrelated infrastructure. Follow the existing
 single `src/test.c` convention for ordinary kclibs; do not create auxiliary
-test files without a concrete capability-specific precedent. Use meaningful
-named PASS/FAIL cases, accurate per-case and aggregate failure accounting,
-and a nonzero exit status whenever an assertion fails. A test that can pass
+test files without a concrete capability-specific precedent. Use the canonical indexed PASS/FAIL case-line format and aggregate summary
+specified above, accurate per-case and aggregate failure accounting, and
+a nonzero exit status whenever an assertion fails. A test that can pass
 despite incorrect behavior must be strengthened before delivery.
 
 Update and review the tests with the feature itself. Run the applicable
