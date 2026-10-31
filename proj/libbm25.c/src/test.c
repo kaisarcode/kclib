@@ -774,6 +774,19 @@ static int case_bm25_cli(void) {
     const char *index = "bm25-cli.bin";
     const char *output = "bm25-output.tsv";
     char line[8192];
+    char help[8192] = {0};
+    const char *help_body =
+        "\nCommands:\n"
+        "  build <index>           Build an index from TSV associations\n"
+        "  search <index> <query>  Search indexed associations\n"
+        "\nOptions:\n"
+        "  -i, --input <file>      Read associations from file (default: stdin)\n"
+        "      --fold-accents      Remove accents during indexing\n"
+        "  -l, --limit <N>         Maximum results (default: 10)\n"
+        "      --k1 <N>            Term frequency saturation (default: 1.2)\n"
+        "      --b <N>             Document length normalization (default: 0.75)\n"
+        "  -h, --help              Show this help\n"
+        "  -v, --version           Show version\n";
     char id[128] = {0};
     char content[256] = {0};
     size_t ordinal = 99;
@@ -791,10 +804,27 @@ static int case_bm25_cli(void) {
     fail += expect(bm25_cli_execute("--help", output) == 0);
     file = fopen(output, "rb");
     if (file != NULL) {
-        if (fgets(line, sizeof(line), file) != NULL)
-            fail += expect(strncmp(line, "Usage: bm25", 11) == 0);
-        else fail++;
-        fclose(file);
+        size_t length = fread(help, 1, sizeof(help) - 1, file);
+        char *newline;
+
+        help[length] = '\0';
+        newline = strchr(help, '\n');
+        fail += expect(ferror(file) == 0);
+        fail += expect(strncmp(help, "Usage: ", 7) == 0);
+        fail += expect(strstr(help, " <command> <index> [options]\n") != NULL);
+        fail += expect(newline != NULL &&
+            strcmp(newline + 1, help_body) == 0);
+        fail += expect(fclose(file) == 0);
+    } else fail++;
+    fail += expect(bm25_cli_execute("-h", output) == 0);
+    file = fopen(output, "rb");
+    if (file != NULL) {
+        size_t length = fread(line, 1, sizeof(line) - 1, file);
+
+        line[length] = '\0';
+        fail += expect(ferror(file) == 0);
+        fail += expect(strcmp(line, help) == 0);
+        fail += expect(fclose(file) == 0);
     } else fail++;
     fail += expect(bm25_cli_execute("--version", output) == 0);
     file = fopen(output, "rb");
@@ -806,7 +836,19 @@ static int case_bm25_cli(void) {
             fail += expect(end != line && (*end == '\n' ||
                 *end == '\r' || *end == '\0'));
         } else fail++;
-        fclose(file);
+        fail += expect(fclose(file) == 0);
+    } else fail++;
+    fail += expect(bm25_cli_execute("-v", output) == 0);
+    file = fopen(output, "rb");
+    if (file != NULL) {
+        char *end = NULL;
+
+        if (fgets(line, sizeof(line), file) != NULL) {
+            strtoull(line, &end, 10);
+            fail += expect(end != line && (*end == '\n' ||
+                *end == '\r' || *end == '\0'));
+        } else fail++;
+        fail += expect(fclose(file) == 0);
     } else fail++;
 
     fail += expect(bm25_cli_execute(

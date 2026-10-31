@@ -16,15 +16,26 @@
 #include <string.h>
 
 /**
- * Print CLI usage.
+ * Prints public CLI usage.
+ * @param name Program executable name.
  * @return None.
  */
-static void bm25_usage(void) {
-    puts("Usage: bm25 <command> [arguments]\n"
-        "  build <index> [-i file] [--fold-accents]\n"
-        "  search <index> <query> [-l limit] [--k1 value] [--b value]\n"
-        "  -h, --help       Show this help\n"
-        "  --version        Show the build version");
+static void bm25_cli_usage(const char *name)
+{
+    printf("Usage: %s <command> <index> [options]\n", name);
+    printf("\n");
+    printf("Commands:\n");
+    printf("  build <index>           Build an index from TSV associations\n");
+    printf("  search <index> <query>  Search indexed associations\n");
+    printf("\n");
+    printf("Options:\n");
+    printf("  -i, --input <file>      Read associations from file (default: stdin)\n");
+    printf("      --fold-accents      Remove accents during indexing\n");
+    printf("  -l, --limit <N>         Maximum results (default: 10)\n");
+    printf("      --k1 <N>            Term frequency saturation (default: 1.2)\n");
+    printf("      --b <N>             Document length normalization (default: 0.75)\n");
+    printf("  -h, --help              Show this help\n");
+    printf("  -v, --version           Show version\n");
 }
 
 /**
@@ -253,10 +264,12 @@ int main(int argc, char **argv) {
     if (argc == 2 && (strcmp(argv[1], "-h") == 0 ||
         strcmp(argv[1], "--help") == 0))
     {
-        bm25_usage();
+        bm25_cli_usage(argv[0]);
         return 0;
     }
-    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+    if (argc == 2 && (strcmp(argv[1], "-v") == 0 ||
+        strcmp(argv[1], "--version") == 0))
+    {
         printf("%llu\n", (unsigned long long)kc_bm25_version());
         return 0;
     }
@@ -268,7 +281,7 @@ int main(int argc, char **argv) {
 
     if (status != 0) {
         fputs("bm25: invalid command or arguments\n", stderr);
-        bm25_usage();
+        bm25_cli_usage(argv[0]);
     }
     return status;
 }
