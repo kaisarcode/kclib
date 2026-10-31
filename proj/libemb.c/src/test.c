@@ -255,7 +255,9 @@ static int case_kc_emb_determinism(void) {
     float *a = NULL;
     float *b = NULL;
     float *c = NULL;
-    size_t ca = 0, cb = 0, cc = 0;
+    float *spanish_a = NULL;
+    float *spanish_b = NULL;
+    size_t ca = 0, cb = 0, cc = 0, spanish_ca = 0, spanish_cb = 0;
     int fail = 0;
 
     fail += expect_int("first embed OK", KC_EMB_OK,
@@ -264,9 +266,16 @@ static int case_kc_emb_determinism(void) {
         kc_emb_embed("The quick brown fox", &b, &cb));
     fail += expect_int("different embed OK", KC_EMB_OK,
         kc_emb_embed("incident response runbook", &c, &cc));
+    fail += expect_int("spanish computer embed OK", KC_EMB_OK,
+        kc_emb_embed("Un servicio técnico diagnostica computadoras lentas.",
+            &spanish_a, &spanish_ca));
+    fail += expect_int("spanish veterinarian embed OK", KC_EMB_OK,
+        kc_emb_embed("Un veterinario atiende animales domésticos enfermos.",
+            &spanish_b, &spanish_cb));
     fail += expect_true("all counts fixed",
         ca == EMB_EXPECTED_DIM && cb == EMB_EXPECTED_DIM &&
-        cc == EMB_EXPECTED_DIM);
+        cc == EMB_EXPECTED_DIM && spanish_ca == EMB_EXPECTED_DIM &&
+        spanish_cb == EMB_EXPECTED_DIM);
 
     if (a && b && ca == cb) {
         fail += expect_vectors_close("same text deterministic",
@@ -280,9 +289,18 @@ static int case_kc_emb_determinism(void) {
         fail += expect_true("distinct vectors available", 0);
     }
 
+    if (spanish_a && spanish_b && spanish_ca == spanish_cb) {
+        fail += expect_vectors_distinct("unrelated spanish texts differ",
+            spanish_a, spanish_b, spanish_ca);
+    } else {
+        fail += expect_true("spanish vectors available", 0);
+    }
+
     kc_emb_free(a);
     kc_emb_free(b);
     kc_emb_free(c);
+    kc_emb_free(spanish_a);
+    kc_emb_free(spanish_b);
     case_result(fail, "kc_emb_determinism",
         "keeps fixed-model output deterministic and input-sensitive");
     return fail == 0 ? 0 : 1;

@@ -23,6 +23,17 @@ static int lookup(void *ctx, const char *value) {
     return -1;
 }
 
+static const char *gguf_vocab[] = {
+    "▁hola", "▁como", "▁cafe", "▁un", "##aff", "##able", "¿", "?"
+};
+
+static int gguf_lookup(void *ctx, const char *value) {
+    (void)ctx;
+    for (size_t i = 0; i < sizeof(gguf_vocab) / sizeof(gguf_vocab[0]); i++)
+        if (strcmp(gguf_vocab[i], value) == 0) return (int)(100 + i);
+    return -1;
+}
+
 int main(void) {
     const test_case_t cases[] = {
         {"¡Hola, CAÑERÍA!", {1, 3, 4, 5, 6, 7, 2}, 7},
@@ -69,6 +80,26 @@ int main(void) {
         int failed = count != 4 || actual[0] != 1 ||
             actual[1] != 17 || actual[2] != 18 || actual[3] != 2;
         printf("[%s] tokenizer_truncation\n", failed ? "FAIL" : "PASS");
+        errors += failed;
+    }
+    { /* GGUF BERT word-start tokens and WordPiece continuations. */
+        int tokens[16] = {0}, count = -1;
+        const int expected[] = {1, 106, 101, 102, 107, 2};
+        kc_emb_wordpiece_tokenize("¿Cómo café?", tokens, 16, 1, 2, 0,
+            gguf_lookup, NULL, &count);
+        int failed = count != 6;
+        for (int i = 0; !failed && i < 6; i++)
+            if (tokens[i] != expected[i]) failed = 1;
+        printf("[%s] tokenizer_gguf_word_starts\n", failed ? "FAIL" : "PASS");
+        errors += failed;
+    }
+    { /* GGUF word start plus ## continuation. */
+        int tokens[16] = {0}, count = -1;
+        kc_emb_wordpiece_tokenize("unaffable", tokens, 16, 1, 2, 0,
+            gguf_lookup, NULL, &count);
+        int failed = count != 5 || tokens[0] != 1 || tokens[1] != 103 ||
+            tokens[2] != 104 || tokens[3] != 105 || tokens[4] != 2;
+        printf("[%s] tokenizer_gguf_continuations\n", failed ? "FAIL" : "PASS");
         errors += failed;
     }
     return errors ? 1 : 0;

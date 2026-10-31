@@ -180,13 +180,21 @@ static void word_flush(word_buffer_t *word, int *tokens, int capacity,
         int found = -1;
         size_t match_end = start;
         for (size_t end = word->chars; end > start; end--) {
-            char candidate[KC_WORDPIECE_MAX_BYTES + 3];
+            char candidate[KC_WORDPIECE_MAX_BYTES + 4];
+            const char *prefix = start == 0 ? "\xE2\x96\x81" : "##";
+            size_t prefix_len = start == 0 ? 3 : 2;
             size_t n = word->offsets[end] - word->offsets[start];
-            size_t offset = start > 0 ? 2 : 0;
-            if (offset != 0) memcpy(candidate, "##", 2);
-            memcpy(candidate + offset, word->bytes + word->offsets[start], n);
-            candidate[offset + n] = '\0';
+            /* GGUF BERT vocabularies may encode word starts as ▁word;
+             * WordPiece vocabularies use word and ##continuation. */
+            memcpy(candidate, prefix, prefix_len);
+            memcpy(candidate + prefix_len, word->bytes + word->offsets[start], n);
+            candidate[prefix_len + n] = '\0';
             found = lookup(context, candidate);
+            if (found < 0) {
+                memcpy(candidate, word->bytes + word->offsets[start], n);
+                candidate[n] = '\0';
+                found = lookup(context, candidate);
+            }
             if (found >= 0) {
                 match_end = end;
                 break;
