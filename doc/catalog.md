@@ -15,7 +15,7 @@ index is the summary, not the contract.
 | [`min`](../proj/libmin.c/README.md) | Conservatively minifies CSS, JavaScript, and HTML. | Emitting web assets that should be compact. |
 | [`bm25`](../proj/libbm25.c/README.md) | Indexes text and ranks matching documents with Okapi BM25. | Lexical search over standalone text corpora. |
 | [`ngram`](../proj/libngram.c/README.md) | Generates n-grams and can run a command for every span. | Sliding windows over text or per-span processing. |
-| [`lng`](../proj/liblng.c/README.md) | Detects text language through built-in profiles. | Identifying the language of input text. |
+| [`leven`](../proj/libleven.c/README.md) | Computes bounded Unicode Levenshtein edit distance. | Comparing strings with insertions, deletions, or substitutions. |\n| [`lng`](../proj/liblng.c/README.md) | Detects text language through built-in profiles. | Identifying the language of input text. |
 | [`tpm`](../proj/libtpm.c/README.md) | Compares text with an n-gram profile and returns similarity from 0 to 1. | Classifying text or measuring text similarity. |
 
 ## Local AI and vectors
