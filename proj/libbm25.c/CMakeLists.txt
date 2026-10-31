@@ -80,7 +80,7 @@ if(EMSCRIPTEN)
     target_link_options(bm25_wasm_shared PRIVATE -sSIDE_MODULE=1)
 elseif(NOT BM25_TEST_EXTERNAL_ARTIFACTS)
     add_library(bm25_static STATIC ${BM25_CORE_SOURCES})
-    set_target_properties(bm25_static PROPERTIES OUTPUT_NAME "bm25")
+    set_target_properties(bm25_static PROPERTIES OUTPUT_NAME "bm25" POSITION_INDEPENDENT_CODE ON)
     target_include_directories(bm25_static PRIVATE src)
 
     add_library(bm25_shared SHARED ${BM25_CORE_SOURCES})
