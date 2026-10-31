@@ -519,8 +519,8 @@ test:
 			echo "Missing Emscripten test runtime: $$node" >&2; \
 			exit 1; \
 		fi; \
-		"$node" $(BUILD_DIR)/test-wasm/emb_contract_test.js all || exit 1; \
-		"$node" $(BUILD_DIR)/test-wasm/emb_tokenizer_test.js; \
+		"$$node" $(BUILD_DIR)/test-wasm/emb_contract_test.js all || exit 1; \
+		"$$node" $(BUILD_DIR)/test-wasm/emb_tokenizer_test.js; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
