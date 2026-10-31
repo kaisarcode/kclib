@@ -42,7 +42,7 @@ static void case_result(int failed, const char *name, const char *detail) {
  */
 static int run_case(case_fn callback) {
     test_case_current++;
-    return callback();
+    return callback() != 0;
 }
 
 /**
@@ -106,7 +106,7 @@ static int case_bm25_scoring(void) {
     fail |= expect(kc_bm25_search(index, "brown", NULL,
         &results, &count) == KC_BM25_OK);
     fail |= expect(count == 2);
-    if (count == 2) {
+    if (count == 2 && results != NULL) {
         fail |= expect(results[0].ordinal == 1 && results[1].ordinal == 0);
         fail |= expect(strcmp(results[0].id, "repeat") == 0 &&
             strcmp(results[1].id, "repeat") == 0);
@@ -121,7 +121,7 @@ static int case_bm25_scoring(void) {
     fail |= expect(kc_bm25_search(index, "brown brown", &options,
         &results, &count) == KC_BM25_OK);
     fail |= expect(count == 2);
-    if (count == 2) {
+    if (count == 2 && results != NULL) {
         fail |= expect(results[0].ordinal == 0 && results[1].ordinal == 1);
         fail |= expect_score(results[0].score, idf);
         fail |= expect_score(results[1].score, idf);
@@ -133,7 +133,7 @@ static int case_bm25_scoring(void) {
     fail |= expect(kc_bm25_search(index, "brown", &options,
         &results, &count) == KC_BM25_OK);
     fail |= expect(count == 2);
-    if (count == 2) {
+    if (count == 2 && results != NULL) {
         fail |= expect_score(results[0].score, idf * 4.4 / 3.2);
         fail |= expect_score(results[1].score, idf);
     }
@@ -197,7 +197,8 @@ static int case_bm25_contract(void) {
     fail |= expect(kc_bm25_search(index, "network", NULL,
         &results, &count) == KC_BM25_OK);
     fail |= expect(count == 1);
-    if (count == 1) fail |= expect(results[0].ordinal == 1);
+    if (count == 1 && results != NULL)
+        fail |= expect(results[0].ordinal == 1);
     kc_bm25_free(results);
     kc_bm25_close(index);
     kc_bm25_close(NULL);
@@ -227,9 +228,13 @@ static int case_bm25_unicode(void) {
     fail |= expect(kc_bm25_search(index, "cafe\xCC\x81", NULL,
         &results, &count) == KC_BM25_OK);
     fail |= expect(count == 1 && results != NULL);
-    if (count == 1) fail |= expect(strcmp(results[0].id, "cafe") == 0);
+    if (count == 1 && results != NULL)
+        fail |= expect(strcmp(results[0].id, "cafe") == 0);
     kc_bm25_free(results);
     results = NULL;
+    fail |= expect(kc_bm25_search(index, "cafe", NULL,
+        &results, &count) == KC_BM25_OK);
+    fail |= expect(results == NULL && count == 0);
     fail |= expect(kc_bm25_search(index, "año", NULL,
         &results, &count) == KC_BM25_OK);
     fail |= expect(count == 1 && results != NULL);
@@ -243,6 +248,15 @@ static int case_bm25_unicode(void) {
     fail |= expect(kc_bm25_search(index, "IPv6", NULL,
         &results, &count) == KC_BM25_OK);
     fail |= expect(count == 1 && results != NULL);
+    if (count == 1 && results != NULL)
+        fail |= expect(strcmp(results[0].id, "ano") == 0);
+    kc_bm25_free(results);
+    results = NULL;
+    fail |= expect(kc_bm25_search(index, "中文指南", NULL,
+        &results, &count) == KC_BM25_OK);
+    fail |= expect(count == 1 && results != NULL);
+    if (count == 1 && results != NULL)
+        fail |= expect(strcmp(results[0].id, "cn") == 0);
     kc_bm25_free(results);
     kc_bm25_close(index);
 
@@ -254,7 +268,9 @@ static int case_bm25_unicode(void) {
     fail |= expect(kc_bm25_build(index) == KC_BM25_OK);
     fail |= expect(kc_bm25_search(index, "cafe ano", NULL,
         &results, &count) == KC_BM25_OK);
-    fail |= expect(count == 1);
+    fail |= expect(count == 1 && results != NULL);
+    if (count == 1 && results != NULL)
+        fail |= expect(strcmp(results[0].id, "cafe") == 0);
     kc_bm25_free(results);
     kc_bm25_close(index);
     case_result(fail, "bm25_unicode",
@@ -283,10 +299,21 @@ static int case_bm25_persistence(void) {
     if (loaded != NULL) {
         fail |= expect(kc_bm25_count(loaded) == 3);
         fail |= expect(kc_bm25_add(loaded, "bad", "text") == KC_BM25_ESTATE);
+        fail |= expect(kc_bm25_build(loaded) == KC_BM25_ESTATE);
+        fail |= expect(kc_bm25_count(loaded) == kc_bm25_count(index));
         fail |= expect(kc_bm25_search(loaded, "brown", NULL,
             &results, &count) == KC_BM25_OK);
         fail |= expect(count == 2);
-        if (count == 2) fail |= expect(results[0].ordinal == 1);
+        if (count == 2 && results != NULL) {
+            double idf = log1p(1.5 / 2.5);
+            double expected = idf * 4.4 / 3.2;
+
+            fail |= expect(results[0].ordinal == 1);
+            fail |= expect(strcmp(results[0].content,
+                "brown brown dog") == 0);
+            fail |= expect_score(results[0].score, expected);
+            fail |= expect(results[1].ordinal == 0);
+        }
         kc_bm25_free(results);
     }
     a = fopen(first, "rb");
@@ -303,6 +330,30 @@ static int case_bm25_persistence(void) {
     if (b != NULL) fclose(b);
     kc_bm25_close(loaded);
     loaded = NULL;
+    {
+        kc_bm25_t *empty = NULL;
+        kc_bm25_t *restored = NULL;
+        kc_bm25_result_t *none = NULL;
+        size_t none_count = 99;
+
+        fail |= expect(kc_bm25_open(&empty, NULL) == KC_BM25_OK);
+        if (empty != NULL) {
+            fail |= expect(kc_bm25_build(empty) == KC_BM25_OK);
+            fail |= expect(kc_bm25_save(empty, second) == KC_BM25_OK);
+            fail |= expect(kc_bm25_load(&restored, second) == KC_BM25_OK);
+            if (restored != NULL) {
+                fail |= expect(kc_bm25_count(restored) == 0);
+                fail |= expect(kc_bm25_search(restored, "anything", NULL,
+                    &none, &none_count) == KC_BM25_OK);
+                fail |= expect(none == NULL && none_count == 0);
+                fail |= expect(kc_bm25_add(restored, "x", "y") ==
+                    KC_BM25_ESTATE);
+                kc_bm25_free(none);
+                kc_bm25_close(restored);
+            }
+            kc_bm25_close(empty);
+        }
+    }
     a = fopen(second, "r+b");
     if (a != NULL) {
         fputc('X', a);
@@ -346,7 +397,8 @@ static int case_bm25_corpus(void) {
         fail |= expect(kc_bm25_search(index, "distinctive", NULL,
             &results, &count) == KC_BM25_OK);
         fail |= expect(count == 1);
-        if (count == 1) fail |= expect(results[0].ordinal == 613);
+        if (count == 1 && results != NULL)
+            fail |= expect(results[0].ordinal == 613);
     }
     kc_bm25_free(results);
     kc_bm25_close(index);
@@ -355,53 +407,404 @@ static int case_bm25_corpus(void) {
     return fail;
 }
 
+
+/**
+ * Validate search limits, multi-term queries, and parameter boundaries.
+ * @return Zero when the search-options contract holds, otherwise one.
+ */
+static int case_bm25_options(void) {
+    kc_bm25_t *index = reference_index();
+    kc_bm25_result_t *results = (kc_bm25_result_t *)1;
+    kc_bm25_search_options_t options = {0};
+    size_t count = 99;
+    size_t limit = 1;
+    double k1 = 1.2;
+    double b = 0.75;
+    int fail = 0;
+
+    if (index == NULL) {
+        case_result(1, "bm25_options", "validates search options and matching");
+        return 1;
+    }
+    options.limit = &limit;
+    options.k1 = &k1;
+    options.b = &b;
+    fail += expect(kc_bm25_search(index, "brown fox", &options,
+        &results, &count) == KC_BM25_OK);
+    fail += expect(count == 1 && results != NULL);
+    if (count == 1 && results != NULL) {
+        fail += expect(results[0].ordinal == 0);
+        fail += expect(strcmp(results[0].content, "the quick brown fox") == 0);
+        fail += expect(isfinite(results[0].score) && results[0].score > 0);
+    }
+    kc_bm25_free(results);
+    results = NULL;
+    limit = 100;
+    fail += expect(kc_bm25_search(index, "brown fox", &options,
+        &results, &count) == KC_BM25_OK);
+    fail += expect(count == 3 && results != NULL);
+    if (count == 3 && results != NULL) {
+        fail += expect(results[0].ordinal == 0);
+        fail += expect(results[0].score >= results[1].score);
+        fail += expect(results[1].score >= results[2].score);
+    }
+    kc_bm25_free(results);
+    results = NULL;
+    fail += expect(kc_bm25_search(index, "nonexistent", &options,
+        &results, &count) == KC_BM25_OK);
+    fail += expect(results == NULL && count == 0);
+    fail += expect(kc_bm25_search(index, "!?...", &options,
+        &results, &count) == KC_BM25_OK);
+    fail += expect(results == NULL && count == 0);
+
+    k1 = -0.1;
+    results = (kc_bm25_result_t *)1;
+    count = 99;
+    fail += expect(kc_bm25_search(index, "brown", &options,
+        &results, &count) == KC_BM25_EINVAL);
+    fail += expect(results == NULL && count == 0);
+    k1 = NAN;
+    fail += expect(kc_bm25_search(index, "brown", &options,
+        &results, &count) == KC_BM25_EINVAL);
+    k1 = INFINITY;
+    fail += expect(kc_bm25_search(index, "brown", &options,
+        &results, &count) == KC_BM25_EINVAL);
+    k1 = 1.2;
+    b = -0.1;
+    fail += expect(kc_bm25_search(index, "brown", &options,
+        &results, &count) == KC_BM25_EINVAL);
+    b = 1.1;
+    fail += expect(kc_bm25_search(index, "brown", &options,
+        &results, &count) == KC_BM25_EINVAL);
+    b = NAN;
+    fail += expect(kc_bm25_search(index, "brown", &options,
+        &results, &count) == KC_BM25_EINVAL);
+    b = 0.75;
+    limit = 0;
+    fail += expect(kc_bm25_search(index, "brown", &options,
+        &results, &count) == KC_BM25_OK);
+    fail += expect(results == NULL && count == 0);
+
+    fail += expect(kc_bm25_search(NULL, "brown", NULL,
+        &results, &count) == KC_BM25_EINVAL);
+    fail += expect(results == NULL && count == 0);
+    fail += expect(kc_bm25_search(index, NULL, NULL,
+        &results, &count) == KC_BM25_EINVAL);
+    fail += expect(results == NULL && count == 0);
+    fail += expect(kc_bm25_search(index, "brown", NULL,
+        NULL, &count) == KC_BM25_EINVAL);
+    fail += expect(count == 0);
+    fail += expect(kc_bm25_search(index, "brown", NULL,
+        &results, NULL) == KC_BM25_EINVAL);
+    fail += expect(results == NULL);
+    kc_bm25_close(index);
+    case_result(fail, "bm25_options",
+        "validates multi-term ranking, empty matches, limits and bad parameters");
+    return fail != 0;
+}
+
+/**
+ * Verify stable top-K ordering with repeated public IDs and equal scores.
+ * @return Zero if all tie-breaking and top-K cases pass, otherwise one.
+ */
+static int case_bm25_topk(void) {
+    kc_bm25_t *index = NULL;
+    kc_bm25_result_t *results = NULL;
+    kc_bm25_search_options_t options = {0};
+    size_t limit = 7, count = 0;
+    int fail = 0;
+
+    if (kc_bm25_open(&index, NULL) != KC_BM25_OK) return 1;
+    for (size_t i = 0; i < 128; i++) {
+        if (kc_bm25_add(index, "same-id", "shared common term") != KC_BM25_OK) {
+            fail++;
+            break;
+        }
+    }
+    if (!fail) fail += expect(kc_bm25_build(index) == KC_BM25_OK);
+    options.limit = &limit;
+    if (!fail) {
+        fail += expect(kc_bm25_search(index, "shared", &options,
+            &results, &count) == KC_BM25_OK);
+        fail += expect(count == 7 && results != NULL);
+        if (count == 7 && results != NULL) {
+            for (size_t i = 0; i < count; i++) {
+                fail += expect(results[i].ordinal == i);
+                fail += expect(strcmp(results[i].id, "same-id") == 0);
+                fail += expect(strcmp(results[i].content,
+                    "shared common term") == 0);
+                fail += expect(isfinite(results[i].score) &&
+                    results[i].score > 0);
+            }
+        }
+        kc_bm25_free(results);
+        results = NULL;
+        limit = 128;
+        fail += expect(kc_bm25_search(index, "shared", &options,
+            &results, &count) == KC_BM25_OK);
+        fail += expect(count == 128 && results != NULL);
+        if (count == 128 && results != NULL) {
+            for (size_t i = 0; i < count; i++)
+                fail += expect(results[i].ordinal == i);
+        }
+    }
+    kc_bm25_free(results);
+    kc_bm25_close(index);
+    case_result(fail, "bm25_topk",
+        "returns deterministic top-K results for distinct records sharing IDs");
+    return fail != 0;
+}
+
+/**
+ * Replace a single byte in an existing index file.
+ * @param path Index path.
+ * @param offset Byte offset to modify.
+ * @param value Replacement byte.
+ * @return Zero on successful modification, otherwise one.
+ */
+static int bm25_patch_byte(const char *path, long offset, int value) {
+    FILE *file = fopen(path, "r+b");
+    int failed = 1;
+
+    if (file == NULL) return 1;
+    if (fseek(file, offset, SEEK_SET) == 0 &&
+        fputc(value, file) != EOF && fflush(file) == 0)
+        failed = 0;
+    if (fclose(file) != 0) failed = 1;
+    return failed;
+}
+
+/**
+ * Reject invalid serialized index headers and truncated records.
+ * @return Zero when all invalid files are rejected, otherwise one.
+ */
+static int case_bm25_file_contract(void) {
+    const char *path = "bm25-invalid.bin";
+    kc_bm25_t *index = reference_index();
+    kc_bm25_t *loaded = NULL;
+    int fail = 0;
+    const struct {
+        long offset;
+        int value;
+    } changes[] = {
+        {0, 'X'},
+        {8, 0},
+        {12, 0},
+        {16, 2},
+        {24, 255},
+        {56, 0}
+    };
+
+    if (index == NULL) return 1;
+    fail += expect(kc_bm25_load(NULL, path) == KC_BM25_EINVAL);
+    fail += expect(kc_bm25_load(&loaded, NULL) == KC_BM25_EINVAL);
+    fail += expect(loaded == NULL);
+    fail += expect(kc_bm25_load(&loaded, "bm25-file-not-found.bin")
+        == KC_BM25_EIO);
+    fail += expect(loaded == NULL);
+
+    for (size_t i = 0; i < sizeof(changes) / sizeof(changes[0]); i++) {
+        kc_bm25_t *bad = (kc_bm25_t *)1;
+
+        if (kc_bm25_save(index, path) != KC_BM25_OK ||
+            bm25_patch_byte(path, changes[i].offset, changes[i].value) != 0)
+        {
+            fail++;
+            continue;
+        }
+        fail += expect(kc_bm25_load(&bad, path) == KC_BM25_EFORMAT);
+        fail += expect(bad == NULL);
+        if (bad != NULL && bad != (kc_bm25_t *)1) kc_bm25_close(bad);
+    }
+    {
+        FILE *file = fopen(path, "wb");
+
+        if (file != NULL) {
+            fail += expect(fwrite("KCBM25", 1, 6, file) == 6);
+            fail += expect(fclose(file) == 0);
+            fail += expect(kc_bm25_load(&loaded, path) == KC_BM25_EFORMAT);
+            fail += expect(loaded == NULL);
+        } else fail++;
+    }
+    remove(path);
+    kc_bm25_close(index);
+    case_result(fail, "bm25_file_contract",
+        "rejects missing files, corrupt headers, invalid lengths and truncation");
+    return fail != 0;
+}
+
+/**
+ * Verify metadata accessors, status messages and build timestamp.
+ * @return Zero on success, otherwise one.
+ */
+static int case_bm25_metadata(void) {
+    kc_bm25_t *index = NULL;
+    int fail = 0;
+
+    fail += expect(kc_bm25_count(NULL) == 0);
+    fail += expect(kc_bm25_fold_accents(NULL) == 0);
+    fail += expect(kc_bm25_strerror(KC_BM25_OK) != NULL);
+    fail += expect(kc_bm25_strerror(KC_BM25_EINVAL) != NULL);
+    fail += expect(kc_bm25_strerror(KC_BM25_ENOMEM) != NULL);
+    fail += expect(kc_bm25_strerror(KC_BM25_ESTATE) != NULL);
+    fail += expect(kc_bm25_strerror(KC_BM25_EIO) != NULL);
+    fail += expect(kc_bm25_strerror(KC_BM25_EFORMAT) != NULL);
+    fail += expect(kc_bm25_strerror(KC_BM25_EUTF8) != NULL);
+    fail += expect(kc_bm25_strerror(-999) != NULL);
+    fail += expect(kc_bm25_open(&index, NULL) == KC_BM25_OK);
+    if (index != NULL) {
+        fail += expect(kc_bm25_count(index) == 0);
+        fail += expect(kc_bm25_fold_accents(index) == 0);
+        kc_bm25_close(index);
+    }
+    {
+        uint64_t version = kc_bm25_version();
+        fail += expect(kc_bm25_version() == version);
+    }
+    kc_bm25_free(NULL);
+    case_result(fail, "bm25_metadata",
+        "exposes stable metadata, status messages and null-safe cleanup");
+    return fail != 0;
+}
+
 #ifndef __EMSCRIPTEN__
 /**
- * Exercise the CLI help, version, TSV build, and persisted search commands.
- * @return Test failure count.
+ * Execute the native CLI with its output redirected to a fixture.
+ * @param arguments Command-line arguments.
+ * @param output File receiving stdout and stderr.
+ * @return Zero on a successful command, otherwise one.
+ */
+static int bm25_cli_execute(const char *arguments, const char *output) {
+    char command[8192];
+    int length;
+
+#ifdef _WIN32
+    length = snprintf(command, sizeof(command),
+        "\"\"%s\" %s > %s 2>&1\"", KC_CLI_PATH, arguments, output);
+#else
+    length = snprintf(command, sizeof(command),
+        "\"%s\" %s > %s 2>&1", KC_CLI_PATH, arguments, output);
+#endif
+    if (length < 0 || (size_t)length >= sizeof(command)) return 1;
+    return system(command) == 0 ? 0 : 1;
+}
+
+/**
+ * Verify public CLI help, input formats, ranked output and rejected options.
+ * @return Zero on successful CLI contract validation, otherwise one.
  */
 static int case_bm25_cli(void) {
     const char *fixture = "bm25-fixture.tsv";
     const char *index = "bm25-cli.bin";
     const char *output = "bm25-output.tsv";
-    char command[8192];
     char line[8192];
+    char id[128] = {0};
+    char content[256] = {0};
+    size_t ordinal = 99;
+    double score = 0;
     FILE *file;
     int fail = 0;
 
     file = fopen(fixture, "wb");
     if (file == NULL) return 1;
-    fail |= expect(fputs("x\tPeer authentication\n", file) >= 0);
-    fail |= expect(fputs("x\tNetwork transport\n", file) >= 0);
-    fclose(file);
+    fail += expect(fputs("x\tPeer authentication\n", file) >= 0);
+    fail += expect(fputs("x\tNetwork transport\n", file) >= 0);
+    fail += expect(fputs("cafe\tCafé con leche\n", file) >= 0);
+    fail += expect(fclose(file) == 0);
 
-    snprintf(command, sizeof(command), "\"%s\" --help > %s",
-        KC_CLI_PATH, output);
-    fail |= expect(system(command) == 0);
-    snprintf(command, sizeof(command), "\"%s\" --version > %s",
-        KC_CLI_PATH, output);
-    fail |= expect(system(command) == 0);
-    snprintf(command, sizeof(command),
-        "\"%s\" build %s -i %s", KC_CLI_PATH, index, fixture);
-    fail |= expect(system(command) == 0);
-    snprintf(command, sizeof(command),
-        "\"%s\" search %s authentication > %s",
-        KC_CLI_PATH, index, output);
-    fail |= expect(system(command) == 0);
+    fail += expect(bm25_cli_execute("--help", output) == 0);
     file = fopen(output, "rb");
     if (file != NULL) {
-        fail |= expect(fgets(line, sizeof(line), file) != NULL);
-        if (!fail) fail |= expect(strncmp(line,
-            "0\tx\t", 4) == 0);
+        if (fgets(line, sizeof(line), file) != NULL)
+            fail += expect(strncmp(line, "Usage: bm25", 11) == 0);
+        else fail++;
         fclose(file);
-    } else fail = 1;
+    } else fail++;
+    fail += expect(bm25_cli_execute("--version", output) == 0);
+    file = fopen(output, "rb");
+    if (file != NULL) {
+        char *end = NULL;
+
+        if (fgets(line, sizeof(line), file) != NULL) {
+            strtoull(line, &end, 10);
+            fail += expect(end != line && (*end == '\n' ||
+                *end == '\r' || *end == '\0'));
+        } else fail++;
+        fclose(file);
+    } else fail++;
+
+    fail += expect(bm25_cli_execute(
+        "build bm25-cli.bin -i bm25-fixture.tsv", output) == 0);
+    fail += expect(bm25_cli_execute(
+        "search bm25-cli.bin authentication", output) == 0);
+    file = fopen(output, "rb");
+    if (file != NULL) {
+        if (fgets(line, sizeof(line), file) != NULL) {
+            int parsed = sscanf(line,
+                "%zu\t%127[^\t]\t%lf\t%255[^\r\n]",
+                &ordinal, id, &score, content);
+
+            fail += expect(parsed == 4);
+            if (parsed == 4) {
+                fail += expect(ordinal == 0);
+                fail += expect(strcmp(id, "x") == 0);
+                fail += expect(strcmp(content, "Peer authentication") == 0);
+                fail += expect(isfinite(score) && score > 0);
+            }
+            fail += expect(fgets(line, sizeof(line), file) == NULL);
+        } else fail++;
+        fclose(file);
+    } else fail++;
+
+    fail += expect(bm25_cli_execute(
+        "search bm25-cli.bin authentication --limit 0", output) == 0);
+    file = fopen(output, "rb");
+    if (file != NULL) {
+        fail += expect(fgetc(file) == EOF);
+        fclose(file);
+    } else fail++;
+
+    fail += expect(bm25_cli_execute(
+        "build bm25-cli.bin --fold-accents < bm25-fixture.tsv",
+        output) == 0);
+    fail += expect(bm25_cli_execute(
+        "search bm25-cli.bin cafe --limit 1 --k1 1.2 --b 0.75",
+        output) == 0);
+    file = fopen(output, "rb");
+    if (file != NULL) {
+        if (fgets(line, sizeof(line), file) != NULL) {
+            fail += expect(strncmp(line, "2\tcafe\t", 7) == 0);
+        } else fail++;
+        fclose(file);
+    } else fail++;
+
+    fail += expect(bm25_cli_execute(
+        "search bm25-cli.bin cafe --k1 -0.1", output) != 0);
+    fail += expect(bm25_cli_execute(
+        "search bm25-cli.bin cafe --b 1.1", output) != 0);
+    fail += expect(bm25_cli_execute(
+        "search bm25-cli.bin cafe --limit invalid", output) != 0);
+    fail += expect(bm25_cli_execute(
+        "search bm25-cli.bin cafe --unknown", output) != 0);
+    fail += expect(bm25_cli_execute(
+        "search bm25-file-not-found.bin cafe", output) != 0);
+    fail += expect(bm25_cli_execute(
+        "build bm25-cli.bin -i bm25-file-not-found.tsv", output) != 0);
+
+    file = fopen(fixture, "wb");
+    if (file != NULL) {
+        fail += expect(fputs("not-a-tab-delimited-line\n", file) >= 0);
+        fail += expect(fclose(file) == 0);
+        fail += expect(bm25_cli_execute(
+            "build bm25-cli.bin -i bm25-fixture.tsv", output) != 0);
+    } else fail++;
 
     remove(fixture);
     remove(index);
     remove(output);
     case_result(fail, "bm25_cli",
-        "builds from TSV and searches from the standalone command");
-    return fail;
+        "tests TSV and stdin input, output fields, options, and invalid commands");
+    return fail != 0;
 }
 #endif
 
@@ -413,9 +816,9 @@ static int case_all(void) {
     int failures = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 5;
+    test_case_total = 9;
 #else
-    test_case_total = 6;
+    test_case_total = 10;
 #endif
     test_case_current = 0;
     failures += run_case(case_bm25_scoring);
@@ -423,11 +826,15 @@ static int case_all(void) {
     failures += run_case(case_bm25_unicode);
     failures += run_case(case_bm25_persistence);
     failures += run_case(case_bm25_corpus);
+    failures += run_case(case_bm25_options);
+    failures += run_case(case_bm25_topk);
+    failures += run_case(case_bm25_file_contract);
+    failures += run_case(case_bm25_metadata);
 #ifndef __EMSCRIPTEN__
     failures += run_case(case_bm25_cli);
 #endif
-    printf("%d passed, %d failed\n", test_case_total - (failures != 0),
-        failures != 0);
+    printf("%d passed, %d failed\n", test_case_total - failures,
+        failures);
     return failures != 0;
 }
 
@@ -448,6 +855,12 @@ int main(int argc, char **argv) {
     else if (strcmp(argv[1], "bm25_persistence") == 0)
         callback = case_bm25_persistence;
     else if (strcmp(argv[1], "bm25_corpus") == 0) callback = case_bm25_corpus;
+    else if (strcmp(argv[1], "bm25_options") == 0) callback = case_bm25_options;
+    else if (strcmp(argv[1], "bm25_topk") == 0) callback = case_bm25_topk;
+    else if (strcmp(argv[1], "bm25_file_contract") == 0)
+        callback = case_bm25_file_contract;
+    else if (strcmp(argv[1], "bm25_metadata") == 0)
+        callback = case_bm25_metadata;
 #ifndef __EMSCRIPTEN__
     else if (strcmp(argv[1], "bm25_cli") == 0) callback = case_bm25_cli;
 #endif
