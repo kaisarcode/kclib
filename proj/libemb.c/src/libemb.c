@@ -16,6 +16,7 @@
 #include <unistd.h>
 #endif
 #include "libemb.h"
+#include "tokenizer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,24 +131,6 @@ typedef struct {
     char *norm_input;
     size_t norm_input_size;
 } kc_emb_ctx_t;
-
-/**
- * Check if a character is ASCII whitespace.
- * @param c Input character.
- * @return 1 if whitespace, 0 otherwise.
- */
-static int kc_isspace(int c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
-/**
- * Convert an ASCII character to lowercase.
- * @param c Input character.
- * @return Lowercase character.
- */
-static int kc_tolower(int c) {
-    return (c >= 'A' && c <= 'Z') ? (c + 32) : c;
-}
 
 /**
  * Count available CPU threads for local inference.
@@ -462,103 +445,16 @@ failure:
     return NULL;
 }
 
-/**
- * Tokenize input text using WordPiece segmentation.
- * @param ectx Inference context pointer.
- * @param input Input text.
- * @param tokens Output token ID array.
- * @param n_tokens Output token count.
- * @return No return value.
- */
+/** Token lookup through the model's embedded vocabulary. */
+static int kc_emb_token_lookup(void *context, const char *token) {
+    return find_token((kc_emb_ctx_t *)context, token);
+}
+
+/** BERT uncased normalization and WordPiece segmentation. */
 static void wordpiece_tokenize(kc_emb_ctx_t *ectx, const char *input, int *tokens, int *n_tokens) {
-    size_t i = 0;
-    size_t len = strlen(input);
-    const char *space_prefix = "\xe2\x96\x81";
-
-    *n_tokens = 0;
-    if (*n_tokens < ectx->n_ctx) {
-        tokens[(*n_tokens)++] = ectx->cls_token_id;
-    }
-
-    while (i < len && *n_tokens < ectx->n_ctx - 1) {
-        while (i < len && kc_isspace((uint8_t)input[i])) i++;
-        if (i == len) break;
-
-        size_t word_start = i;
-        while (i < len && !kc_isspace((uint8_t)input[i])) i++;
-        size_t word_len = i - word_start;
-
-        size_t start = 0;
-        while (start < word_len && *n_tokens < ectx->n_ctx - 1) {
-            int best_id = -1;
-            size_t best_len = 0;
-
-            for (size_t end = word_len; end > start; end--) {
-                char buf[128];
-                size_t blen = 0;
-                int found = 0;
-
-                if (start == 0) {
-                    memcpy(buf, space_prefix, 3);
-                    blen = 3;
-                    if (blen + (end - start) < sizeof(buf)) {
-                        for (size_t k = start; k < end; k++) {
-                            buf[blen++] = (char)kc_tolower((uint8_t)input[word_start + k]);
-                        }
-                        buf[blen] = '\0';
-                        best_id = find_token(ectx, buf);
-                        if (best_id >= 0) {
-                            found = 1;
-                        }
-                    }
-                }
-
-                if (!found && start > 0) {
-                    memcpy(buf, "##", 2);
-                    blen = 2;
-                    if (blen + (end - start) < sizeof(buf)) {
-                        for (size_t k = start; k < end; k++) {
-                            buf[blen++] = (char)kc_tolower((uint8_t)input[word_start + k]);
-                        }
-                        buf[blen] = '\0';
-                        best_id = find_token(ectx, buf);
-                        if (best_id >= 0) {
-                            found = 1;
-                        }
-                    }
-                }
-
-                if (!found) {
-                    blen = 0;
-                    if (blen + (end - start) < sizeof(buf)) {
-                        for (size_t k = start; k < end; k++) {
-                            buf[blen++] = (char)kc_tolower((uint8_t)input[word_start + k]);
-                        }
-                        buf[blen] = '\0';
-                        best_id = find_token(ectx, buf);
-                        if (best_id >= 0) {
-                            found = 1;
-                        }
-                    }
-                }
-
-                if (found) {
-                    best_len = end - start;
-                    break;
-                }
-            }
-
-            if (best_id != -1) {
-                tokens[(*n_tokens)++] = best_id;
-                start += best_len;
-            } else {
-                if (*n_tokens < ectx->n_ctx) tokens[(*n_tokens)++] = ectx->unk_token_id;
-                start++; 
-            }
-        }
-    }
-
-    if (*n_tokens < ectx->n_ctx) tokens[(*n_tokens)++] = ectx->sep_token_id;
+    kc_emb_wordpiece_tokenize(input, tokens, ectx->n_ctx,
+        ectx->cls_token_id, ectx->sep_token_id, ectx->unk_token_id,
+        kc_emb_token_lookup, ectx, n_tokens);
 }
 
 /**

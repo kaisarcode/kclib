@@ -34,7 +34,10 @@ the [FlagEmbedding project](https://github.com/FlagOpen/FlagEmbedding). The
 upstream model is distributed under the MIT License.
 
 The local GGUF model is linked into project artifacts and is not downloaded at
-runtime.
+runtime. Text is tokenized with the model's uncased BERT WordPiece rules,
+including Unicode normalization, accent stripping, and punctuation splitting.
+Existing indexes built with older embeddings must be regenerated after updating
+the library.
 
 ## Build
 

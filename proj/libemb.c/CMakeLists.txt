@@ -170,7 +170,7 @@ set_source_files_properties("${MODEL_S}" PROPERTIES
 
 set(MODEL_EMBED_SOURCES "${MODEL_S}")
 
-set(LIB_SOURCES src/libemb.c ${GGML_SOURCES})
+set(LIB_SOURCES src/libemb.c src/tokenizer.c ${GGML_SOURCES})
 
 if(EMSCRIPTEN)
     add_executable(emb_wasm ${LIB_SOURCES} ${MODEL_EMBED_SOURCES})
@@ -263,6 +263,8 @@ endif()
 
 if(EMB_BUILD_TESTS)
     enable_testing()
+    add_executable(emb_tokenizer_test src/tokenizer_test.c src/tokenizer.c)
+    target_include_directories(emb_tokenizer_test PRIVATE src)
 
     if(EMSCRIPTEN)
         add_executable(emb_contract_test src/test.c ${LIB_SOURCES} ${MODEL_EMBED_SOURCES})
