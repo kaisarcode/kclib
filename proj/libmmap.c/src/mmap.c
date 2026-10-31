@@ -35,7 +35,7 @@ static void mmap_cli_usage(const char *name)
     printf("set options:\n");
     printf("  -i, --input <path>   Input file; use '-' for stdin (default: -)\n");
     printf("\n");
-    printf("Common options:\n");
+    printf("Options:\n");
     printf("  -h, --help           Show this help\n");
     printf("  -v, --version        Show version\n");
 }
