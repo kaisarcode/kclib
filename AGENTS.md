@@ -534,10 +534,24 @@ differs.
 
 When modifying existing code:
 
-*  preserve compatibility;
+*  do not reopen settled APIs or formats without an explicit requirement;
 *  avoid introducing new inconsistencies;
 *  adopt current family conventions when relevant and low-risk;
 *  leave harmless historical variation alone.
+
+## Latest-only development contract
+
+Kclibs are developed toward one final interface and data representation. During
+implementation, change APIs, internal layouts, and binary formats as needed to
+reach the correct behavior and pass substantive tests. Once a capability is
+validated and consolidated, treat its interface and format as settled rather
+than repeatedly redesigning them.
+
+Do not implement backward compatibility, legacy readers or writers, migration
+paths, versioned binary-format branches, compatibility wrappers, or parallel
+old/new API behavior unless explicitly requested. There is one current
+contract, not a family of supported historical variants. A build timestamp
+or CLI `--version` is independent of binary-format compatibility.
 
 ## Final rule
 

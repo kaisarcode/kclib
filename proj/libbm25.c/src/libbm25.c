@@ -19,8 +19,6 @@
 #define KC_BM25_BUILD_VERSION 0
 #endif
 
-#define KC_BM25_FORMAT 1U
-#define KC_BM25_ANALYZER 1U
 #define KC_BM25_DEFAULT_LIMIT 10U
 
 typedef struct {
@@ -5669,164 +5667,206 @@ static uint64_t kc_bm25_read64(const unsigned char *in) {
     return value;
 }
 
-/**
- * Write a length-delimited byte buffer to an output stream.
- * @param file Open output stream.
- * @param data Source bytes.
- * @param size Number of bytes to write.
- * @return KC_BM25_OK or KC_BM25_EIO.
- */
-static int kc_bm25_write(FILE *file, const void *data, size_t size) {
-    return size == 0 || fwrite(data, 1, size, file) == size
-        ? KC_BM25_OK : KC_BM25_EIO;
-}
+typedef struct {
+    unsigned char *cursor;
+    size_t remaining;
+} kc_bm25_writer_t;
+
+typedef struct {
+    const unsigned char *cursor;
+    size_t remaining;
+} kc_bm25_reader_t;
 
 /**
- * Read bytes within a validated file boundary.
- * @param file Open input stream.
- * @param remaining Bytes left in the file, decremented on success.
- * @param data Destination buffer.
- * @param size Bytes to read.
+ * Write bytes within an allocated serialization buffer.
+ * @param writer Output buffer and remaining space.
+ * @param data Source bytes.
+ * @param count Number of bytes.
  * @return KC_BM25_OK or KC_BM25_EFORMAT.
  */
-static int kc_bm25_read(FILE *file, uint64_t *remaining,
-    void *data, size_t size)
+static int kc_bm25_memwrite(kc_bm25_writer_t *writer,
+    const void *data, size_t count)
 {
-    if ((uint64_t)size > *remaining) return KC_BM25_EFORMAT;
-    if (size > 0 && fread(data, 1, size, file) != size)
-        return KC_BM25_EFORMAT;
-    *remaining -= size;
+    if (count > writer->remaining) return KC_BM25_EFORMAT;
+    if (count > 0) memcpy(writer->cursor, data, count);
+    writer->cursor += count;
+    writer->remaining -= count;
     return KC_BM25_OK;
 }
 
 /**
- * Save a built index to a portable, versioned binary file.
+ * Read bytes without exceeding the supplied serialization slice.
+ * @param reader Input bytes and remaining length.
+ * @param dest Destination buffer.
+ * @param count Number of bytes.
+ * @return KC_BM25_OK or KC_BM25_EFORMAT.
+ */
+static int kc_bm25_memread(kc_bm25_reader_t *reader,
+    void *dest, size_t count)
+{
+    if (count > reader->remaining) return KC_BM25_EFORMAT;
+    if (count > 0) memcpy(dest, reader->cursor, count);
+    reader->cursor += count;
+    reader->remaining -= count;
+    return KC_BM25_OK;
+}
+
+/**
+ * Add a serialization field length with overflow protection.
+ * @param total Current length, updated after success.
+ * @param extra Additional byte count.
+ * @return KC_BM25_OK or KC_BM25_ENOMEM.
+ */
+static int kc_bm25_size_add(size_t *total, size_t extra)
+{
+    if (extra > SIZE_MAX - *total) return KC_BM25_ENOMEM;
+    *total += extra;
+    return KC_BM25_OK;
+}
+
+/**
+ * Export a built index to an owned portable binary byte buffer.
  * @param index Built index.
- * @param path Destination path.
+ * @param out Receives the allocated bytes.
+ * @param out_size Receives the exact byte count.
  * @return KC_BM25_OK or an error status.
  */
-int kc_bm25_save(const kc_bm25_t *index, const char *path) {
-    unsigned char head[56] = {0};
+int kc_bm25_export(const kc_bm25_t *index,
+    void **out, size_t *out_size)
+{
+    unsigned char header[44] = {0};
     unsigned char data[24];
-    FILE *file;
-    int status;
+    unsigned char *bytes;
+    kc_bm25_writer_t writer;
+    size_t size = sizeof(header);
+    int status = KC_BM25_OK;
 
-    if (index == NULL || path == NULL || path[0] == '\0')
+    if (out != NULL) *out = NULL;
+    if (out_size != NULL) *out_size = 0;
+    if (index == NULL || out == NULL || out_size == NULL)
         return KC_BM25_EINVAL;
     if (!index->built) return KC_BM25_ESTATE;
-    file = fopen(path, "wb");
-    if (file == NULL) return KC_BM25_EIO;
+    for (size_t i = 0; i < index->document_count; i++) {
+        const kc_bm25_document_t *document = &index->documents[i];
 
-    memcpy(head, "KCBM25\0", 8);
-    kc_bm25_write32(head + 8, KC_BM25_FORMAT);
-    kc_bm25_write32(head + 12, KC_BM25_ANALYZER);
-    kc_bm25_write32(head + 16, (uint32_t)index->fold_accents);
-    kc_bm25_write64(head + 24, (uint64_t)index->document_count);
-    kc_bm25_write64(head + 32, (uint64_t)index->term_count);
-    kc_bm25_write64(head + 40, (uint64_t)index->posting_count);
-    kc_bm25_write64(head + 48, index->total_tokens);
-    status = kc_bm25_write(file, head, sizeof(head));
+        if ((status = kc_bm25_size_add(&size, 24)) != KC_BM25_OK ||
+            (status = kc_bm25_size_add(&size, strlen(document->id))) != KC_BM25_OK ||
+            (status = kc_bm25_size_add(&size, strlen(document->content))) != KC_BM25_OK)
+            return status;
+    }
+    for (size_t i = 0; i < index->term_count; i++) {
+        if ((status = kc_bm25_size_add(&size, 24)) != KC_BM25_OK ||
+            (status = kc_bm25_size_add(&size, strlen(index->terms[i].value))) != KC_BM25_OK)
+            return status;
+    }
+    if (index->posting_count > (SIZE_MAX - size) / 8)
+        return KC_BM25_ENOMEM;
+    size += index->posting_count * 8;
 
+    bytes = (unsigned char *)malloc(size);
+    if (bytes == NULL) return KC_BM25_ENOMEM;
+    writer.cursor = bytes;
+    writer.remaining = size;
+
+    memcpy(header, "KCBM25\0", 8);
+    kc_bm25_write32(header + 8, (uint32_t)index->fold_accents);
+    kc_bm25_write64(header + 12, (uint64_t)index->document_count);
+    kc_bm25_write64(header + 20, (uint64_t)index->term_count);
+    kc_bm25_write64(header + 28, (uint64_t)index->posting_count);
+    kc_bm25_write64(header + 36, index->total_tokens);
+    status = kc_bm25_memwrite(&writer, header, sizeof(header));
     for (size_t i = 0; status == KC_BM25_OK &&
         i < index->document_count; i++)
     {
-        const kc_bm25_document_t *doc = &index->documents[i];
-        size_t id_size = strlen(doc->id);
-        size_t content_size = strlen(doc->content);
+        const kc_bm25_document_t *document = &index->documents[i];
+        size_t id_len = strlen(document->id);
+        size_t text_len = strlen(document->content);
 
-        kc_bm25_write64(data, (uint64_t)id_size);
-        kc_bm25_write64(data + 8, (uint64_t)content_size);
-        kc_bm25_write64(data + 16, (uint64_t)doc->length);
-        status = kc_bm25_write(file, data, 24);
+        kc_bm25_write64(data, (uint64_t)id_len);
+        kc_bm25_write64(data + 8, (uint64_t)text_len);
+        kc_bm25_write64(data + 16, (uint64_t)document->length);
+        status = kc_bm25_memwrite(&writer, data, 24);
         if (status == KC_BM25_OK)
-            status = kc_bm25_write(file, doc->id, id_size);
+            status = kc_bm25_memwrite(&writer, document->id, id_len);
         if (status == KC_BM25_OK)
-            status = kc_bm25_write(file, doc->content, content_size);
+            status = kc_bm25_memwrite(&writer, document->content, text_len);
     }
-    for (size_t i = 0; status == KC_BM25_OK &&
-        i < index->term_count; i++)
-    {
+    for (size_t i = 0; status == KC_BM25_OK && i < index->term_count; i++) {
         const kc_bm25_term_t *term = &index->terms[i];
-        size_t length = strlen(term->value);
+        size_t len = strlen(term->value);
 
-        kc_bm25_write64(data, (uint64_t)length);
+        kc_bm25_write64(data, (uint64_t)len);
         kc_bm25_write64(data + 8, (uint64_t)term->start);
         kc_bm25_write64(data + 16, (uint64_t)term->count);
-        status = kc_bm25_write(file, data, 24);
+        status = kc_bm25_memwrite(&writer, data, 24);
         if (status == KC_BM25_OK)
-            status = kc_bm25_write(file, term->value, length);
+            status = kc_bm25_memwrite(&writer, term->value, len);
     }
     for (size_t i = 0; status == KC_BM25_OK &&
         i < index->posting_count; i++)
     {
         kc_bm25_write32(data, index->postings[i].ordinal);
         kc_bm25_write32(data + 4, index->postings[i].frequency);
-        status = kc_bm25_write(file, data, 8);
+        status = kc_bm25_memwrite(&writer, data, 8);
     }
-    if (fclose(file) != 0) status = KC_BM25_EIO;
-    return status;
+    if (status != KC_BM25_OK || writer.remaining != 0) {
+        free(bytes);
+        return status == KC_BM25_OK ? KC_BM25_EFORMAT : status;
+    }
+    *out = bytes;
+    *out_size = size;
+    return KC_BM25_OK;
 }
 
 /**
- * Read an index from a portable binary file and validate its structure.
- * @param out Receives the loaded index.
- * @param path Source file path.
+ * Import a portable index directly from an immutable memory slice.
+ * Source bytes need remain valid only for the duration of this call.
+ * @param out Receives the loaded read-only index.
+ * @param data Serialized index bytes.
+ * @param size Length of the memory slice.
  * @return KC_BM25_OK or an error status.
  */
-int kc_bm25_load(kc_bm25_t **out, const char *path) {
-    unsigned char head[56];
-    unsigned char data[24];
-    FILE *file = NULL;
+int kc_bm25_import(kc_bm25_t **out, const void *data, size_t size)
+{
+    unsigned char head[44], item[24];
+    kc_bm25_reader_t reader = {(const unsigned char *)data, size};
     kc_bm25_t *index = NULL;
-    uint64_t remaining, docs, terms, postings, total, lengths_total = 0;
+    uint64_t docs, terms, postings, total, lengths_total = 0;
     uint64_t *lengths = NULL;
     uint64_t offset = 0;
-    long size;
     int status = KC_BM25_EFORMAT;
     int accents;
 
     if (out == NULL) return KC_BM25_EINVAL;
     *out = NULL;
-    if (path == NULL || path[0] == '\0') return KC_BM25_EINVAL;
-    file = fopen(path, "rb");
-    if (file == NULL) return KC_BM25_EIO;
-    if (fseek(file, 0, SEEK_END) != 0 || (size = ftell(file)) < 0 ||
-        fseek(file, 0, SEEK_SET) != 0) {
-        status = KC_BM25_EIO;
+    if (data == NULL) return KC_BM25_EINVAL;
+    if (kc_bm25_memread(&reader, head, sizeof(head)) != KC_BM25_OK)
         goto failed;
-    }
-    remaining = (uint64_t)size;
-    if (kc_bm25_read(file, &remaining, head, sizeof(head)) != KC_BM25_OK)
-        goto failed;
-    if (memcmp(head, "KCBM25\0", 8) != 0 ||
-        kc_bm25_read32(head + 8) != KC_BM25_FORMAT ||
-        kc_bm25_read32(head + 12) != KC_BM25_ANALYZER ||
-        kc_bm25_read32(head + 20) != 0)
-        goto failed;
+    if (memcmp(head, "KCBM25\0", 8) != 0) goto failed;
 
-    accents = (int)kc_bm25_read32(head + 16);
-    docs = kc_bm25_read64(head + 24);
-    terms = kc_bm25_read64(head + 32);
-    postings = kc_bm25_read64(head + 40);
-    total = kc_bm25_read64(head + 48);
+    accents = (int)kc_bm25_read32(head + 8);
+    docs = kc_bm25_read64(head + 12);
+    terms = kc_bm25_read64(head + 20);
+    postings = kc_bm25_read64(head + 28);
+    total = kc_bm25_read64(head + 36);
     if ((accents != 0 && accents != 1) || docs > UINT32_MAX ||
         docs > SIZE_MAX / sizeof(kc_bm25_document_t) ||
         terms > SIZE_MAX / sizeof(kc_bm25_term_t) ||
         postings > SIZE_MAX / sizeof(kc_bm25_posting_t) ||
-        docs > remaining / 24 ||
-        terms > remaining / 24 ||
-        postings > remaining / 8 ||
+        docs > reader.remaining / 24 ||
+        terms > reader.remaining / 24 ||
+        postings > reader.remaining / 8 ||
         (docs == 0 && (terms != 0 || postings != 0 || total != 0)) ||
-        (postings < terms))
+        postings < terms)
         goto failed;
-
     {
-        kc_bm25_options_t opts = {&accents};
-        status = kc_bm25_open(&index, &opts);
+        kc_bm25_options_t options = {&accents};
+
+        status = kc_bm25_open(&index, &options);
         if (status != KC_BM25_OK) goto failed;
     }
     status = KC_BM25_EFORMAT;
-    if (docs > 0) {
+    if (docs != 0) {
         index->documents = (kc_bm25_document_t *)calloc((size_t)docs,
             sizeof(*index->documents));
         lengths = (uint64_t *)calloc((size_t)docs, sizeof(*lengths));
@@ -5837,45 +5877,46 @@ int kc_bm25_load(kc_bm25_t **out, const char *path) {
         index->document_capacity = (size_t)docs;
     }
     for (uint64_t i = 0; i < docs; i++) {
-        uint64_t id_size, content_size, document_len;
+        uint64_t id_len, text_len, length;
         kc_bm25_document_t *document = &index->documents[i];
 
-        if (kc_bm25_read(file, &remaining, data, 24) != KC_BM25_OK)
+        if (kc_bm25_memread(&reader, item, 24) != KC_BM25_OK)
             goto failed;
-        id_size = kc_bm25_read64(data);
-        content_size = kc_bm25_read64(data + 8);
-        document_len = kc_bm25_read64(data + 16);
-        if (id_size == 0 || id_size >= SIZE_MAX ||
-            content_size >= SIZE_MAX || document_len > UINT32_MAX ||
-            id_size > remaining || content_size > remaining - id_size ||
-            document_len > total - lengths_total)
+        id_len = kc_bm25_read64(item);
+        text_len = kc_bm25_read64(item + 8);
+        length = kc_bm25_read64(item + 16);
+        if (id_len == 0 || id_len >= SIZE_MAX || text_len >= SIZE_MAX ||
+            length > UINT32_MAX || id_len > reader.remaining ||
+            text_len > reader.remaining - id_len ||
+            length > total - lengths_total)
             goto failed;
+
         index->document_count++;
-        document->id = (char *)malloc((size_t)id_size + 1);
-        document->content = (char *)malloc((size_t)content_size + 1);
+        document->id = (char *)malloc((size_t)id_len + 1);
+        document->content = (char *)malloc((size_t)text_len + 1);
         if (document->id == NULL || document->content == NULL) {
             status = KC_BM25_ENOMEM;
             goto failed;
         }
-        if (kc_bm25_read(file, &remaining, document->id,
-            (size_t)id_size) != KC_BM25_OK ||
-            kc_bm25_read(file, &remaining, document->content,
-            (size_t)content_size) != KC_BM25_OK)
+        if (kc_bm25_memread(&reader, document->id,
+            (size_t)id_len) != KC_BM25_OK ||
+            kc_bm25_memread(&reader, document->content,
+            (size_t)text_len) != KC_BM25_OK)
             goto failed;
-        if (memchr(document->id, 0, (size_t)id_size) != NULL ||
-            memchr(document->content, 0, (size_t)content_size) != NULL)
+        if (memchr(document->id, 0, (size_t)id_len) != NULL ||
+            memchr(document->content, 0, (size_t)text_len) != NULL)
             goto failed;
-        document->id[id_size] = '\0';
-        document->content[content_size] = '\0';
+        document->id[id_len] = '\0';
+        document->content[text_len] = '\0';
         if (kc_bm25_validate_utf8(document->id) != KC_BM25_OK ||
             kc_bm25_validate_utf8(document->content) != KC_BM25_OK)
             goto failed;
-        document->length = (uint32_t)document_len;
-        lengths_total += document_len;
+        document->length = (uint32_t)length;
+        lengths_total += length;
     }
     if (lengths_total != total) goto failed;
 
-    if (terms > 0) {
+    if (terms != 0) {
         index->terms = (kc_bm25_term_t *)calloc((size_t)terms,
             sizeof(*index->terms));
         if (index->terms == NULL) {
@@ -5887,22 +5928,23 @@ int kc_bm25_load(kc_bm25_t **out, const char *path) {
         uint64_t length, start, count;
         kc_bm25_term_t *term = &index->terms[i];
 
-        if (kc_bm25_read(file, &remaining, data, 24) != KC_BM25_OK)
+        if (kc_bm25_memread(&reader, item, 24) != KC_BM25_OK)
             goto failed;
-        length = kc_bm25_read64(data);
-        start = kc_bm25_read64(data + 8);
-        count = kc_bm25_read64(data + 16);
-        if (length == 0 || length >= SIZE_MAX || length > remaining ||
+        length = kc_bm25_read64(item);
+        start = kc_bm25_read64(item + 8);
+        count = kc_bm25_read64(item + 16);
+        if (length == 0 || length >= SIZE_MAX || length > reader.remaining ||
             start != offset || count == 0 || count > docs ||
             count > postings - offset)
             goto failed;
+
         index->term_count++;
         term->value = (char *)malloc((size_t)length + 1);
         if (term->value == NULL) {
             status = KC_BM25_ENOMEM;
             goto failed;
         }
-        if (kc_bm25_read(file, &remaining, term->value,
+        if (kc_bm25_memread(&reader, term->value,
             (size_t)length) != KC_BM25_OK)
             goto failed;
         if (memchr(term->value, 0, (size_t)length) != NULL)
@@ -5917,7 +5959,7 @@ int kc_bm25_load(kc_bm25_t **out, const char *path) {
     }
     if (offset != postings) goto failed;
 
-    if (postings > 0) {
+    if (postings != 0) {
         index->postings = (kc_bm25_posting_t *)calloc((size_t)postings,
             sizeof(*index->postings));
         if (index->postings == NULL) {
@@ -5930,26 +5972,27 @@ int kc_bm25_load(kc_bm25_t **out, const char *path) {
         uint32_t previous = 0;
 
         for (size_t j = 0; j < term->count; j++) {
-            kc_bm25_posting_t *post = &index->postings[term->start + j];
+            kc_bm25_posting_t *posting = &index->postings[term->start + j];
 
-            if (kc_bm25_read(file, &remaining, data, 8) != KC_BM25_OK)
+            if (kc_bm25_memread(&reader, item, 8) != KC_BM25_OK)
                 goto failed;
-            post->ordinal = kc_bm25_read32(data);
-            post->frequency = kc_bm25_read32(data + 4);
-            if (post->ordinal >= docs || post->frequency == 0 ||
-                (j != 0 && post->ordinal <= previous) ||
-                lengths[post->ordinal] + post->frequency >
-                index->documents[post->ordinal].length)
+            posting->ordinal = kc_bm25_read32(item);
+            posting->frequency = kc_bm25_read32(item + 4);
+            if (posting->ordinal >= docs || posting->frequency == 0 ||
+                (j != 0 && posting->ordinal <= previous) ||
+                lengths[posting->ordinal] + posting->frequency >
+                index->documents[posting->ordinal].length)
                 goto failed;
-            lengths[post->ordinal] += post->frequency;
-            previous = post->ordinal;
+            lengths[posting->ordinal] += posting->frequency;
+            previous = posting->ordinal;
             index->posting_count++;
         }
     }
-    if (remaining != 0) goto failed;
-    for (size_t i = 0; i < index->document_count; i++)
-        if (lengths[i] != index->documents[i].length) goto failed;
-
+    if (reader.remaining != 0) goto failed;
+    for (size_t i = 0; i < index->document_count; i++) {
+        if (lengths[i] != index->documents[i].length)
+            goto failed;
+    }
     index->total_tokens = total;
     index->built = 1;
     index->read_only = 1;
@@ -5960,7 +6003,78 @@ int kc_bm25_load(kc_bm25_t **out, const char *path) {
 failed:
     free(lengths);
     kc_bm25_close(index);
-    fclose(file);
+    return status;
+}
+
+/**
+ * Persist an exported index to a binary file.
+ * @param index Index to save.
+ * @param path Destination path.
+ * @return KC_BM25_OK or an error status.
+ */
+int kc_bm25_save(const kc_bm25_t *index, const char *path)
+{
+    void *buffer = NULL;
+    size_t size = 0;
+    FILE *file;
+    int status;
+
+    if (index == NULL || path == NULL || path[0] == '\0')
+        return KC_BM25_EINVAL;
+    status = kc_bm25_export(index, &buffer, &size);
+    if (status != KC_BM25_OK) return status;
+    file = fopen(path, "wb");
+    if (file == NULL) {
+        kc_bm25_free(buffer);
+        return KC_BM25_EIO;
+    }
+    status = fwrite(buffer, 1, size, file) == size ?
+        KC_BM25_OK : KC_BM25_EIO;
+    if (fclose(file) != 0) status = KC_BM25_EIO;
+    kc_bm25_free(buffer);
+    return status;
+}
+
+/**
+ * Load a binary index file through the same memory-import contract.
+ * @param out Receives the loaded index.
+ * @param path Source index path.
+ * @return KC_BM25_OK or an error status.
+ */
+int kc_bm25_load(kc_bm25_t **out, const char *path)
+{
+    unsigned char *buffer = NULL;
+    FILE *file;
+    long length;
+    int status;
+
+    if (out == NULL) return KC_BM25_EINVAL;
+    *out = NULL;
+    if (path == NULL || path[0] == '\0') return KC_BM25_EINVAL;
+    file = fopen(path, "rb");
+    if (file == NULL) return KC_BM25_EIO;
+    if (fseek(file, 0, SEEK_END) != 0 ||
+        (length = ftell(file)) < 0 ||
+        fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return KC_BM25_EIO;
+    }
+    buffer = (unsigned char *)malloc(length == 0 ? 1 : (size_t)length);
+    if (buffer == NULL) {
+        fclose(file);
+        return KC_BM25_ENOMEM;
+    }
+    if (fread(buffer, 1, (size_t)length, file) != (size_t)length) {
+        free(buffer);
+        fclose(file);
+        return KC_BM25_EIO;
+    }
+    if (fclose(file) != 0) {
+        free(buffer);
+        return KC_BM25_EIO;
+    }
+    status = kc_bm25_import(out, buffer, (size_t)length);
+    free(buffer);
     return status;
 }
 

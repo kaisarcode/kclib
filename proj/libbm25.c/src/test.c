@@ -587,11 +587,11 @@ static int case_bm25_file_contract(void) {
         int value;
     } changes[] = {
         {0, 'X'},
-        {8, 0},
-        {12, 0},
-        {16, 2},
-        {24, 255},
-        {56, 0}
+        {8, 2},
+        {12, 255},
+        {20, 255},
+        {28, 255},
+        {44, 0}
     };
 
     if (index == NULL) return 1;
@@ -663,6 +663,83 @@ static int case_bm25_metadata(void) {
     kc_bm25_free(NULL);
     case_result(fail, "bm25_metadata",
         "exposes stable metadata, status messages and null-safe cleanup");
+    return fail != 0;
+}
+
+/**
+ * Verify memory export/import, identical ranking, and corrupt payload handling.
+ * @return Zero when the memory persistence contracts hold, otherwise one.
+ */
+static int case_bm25_memory(void) {
+    kc_bm25_t *source = reference_index();
+    kc_bm25_t *imported = NULL;
+    kc_bm25_result_t *before = NULL;
+    kc_bm25_result_t *after = NULL;
+    void *bytes = NULL, *another = NULL;
+    size_t size = 0, another_size = 0;
+    size_t count_before = 0, count_after = 0;
+    int fail = 0;
+
+    if (source == NULL) {
+        case_result(1, "bm25_memory", "imports and exports portable index buffers");
+        return 1;
+    }
+    fail += expect(kc_bm25_export(source, NULL, &size) == KC_BM25_EINVAL);
+    fail += expect(kc_bm25_export(source, &bytes, NULL) == KC_BM25_EINVAL);
+    fail += expect(kc_bm25_export(source, &bytes, &size) == KC_BM25_OK);
+    fail += expect(bytes != NULL && size >= 44);
+    if (bytes != NULL && size >= 44) {
+        fail += expect(kc_bm25_import(&imported, bytes, size) == KC_BM25_OK);
+        fail += expect(imported != NULL);
+        if (imported != NULL) {
+            fail += expect(kc_bm25_count(imported) == kc_bm25_count(source));
+            fail += expect(kc_bm25_add(imported, "later", "word") == KC_BM25_ESTATE);
+            fail += expect(kc_bm25_build(imported) == KC_BM25_ESTATE);
+            fail += expect(kc_bm25_search(source, "brown", NULL,
+                &before, &count_before) == KC_BM25_OK);
+            fail += expect(kc_bm25_search(imported, "brown", NULL,
+                &after, &count_after) == KC_BM25_OK);
+            fail += expect(count_before == 2 && count_after == 2);
+            if (before != NULL && after != NULL &&
+                count_before == count_after) {
+                for (size_t i = 0; i < count_before; i++) {
+                    fail += expect(before[i].ordinal == after[i].ordinal);
+                    fail += expect(strcmp(before[i].id, after[i].id) == 0);
+                    fail += expect(strcmp(before[i].content,
+                        after[i].content) == 0);
+                    fail += expect_score(before[i].score, after[i].score);
+                }
+            }
+            fail += expect(kc_bm25_export(imported,
+                &another, &another_size) == KC_BM25_OK);
+            fail += expect(another_size == size);
+            if (another != NULL && another_size == size)
+                fail += expect(memcmp(bytes, another, size) == 0);
+        }
+        {
+            kc_bm25_t *rejected = NULL;
+
+            fail += expect(kc_bm25_import(&rejected, bytes, size - 1)
+                == KC_BM25_EFORMAT);
+            fail += expect(rejected == NULL);
+            fail += expect(kc_bm25_import(&rejected, bytes, 0)
+                == KC_BM25_EFORMAT);
+            fail += expect(rejected == NULL);
+            ((unsigned char *)bytes)[0] ^= 1;
+            fail += expect(kc_bm25_import(&rejected, bytes, size)
+                == KC_BM25_EFORMAT);
+            fail += expect(rejected == NULL);
+            ((unsigned char *)bytes)[0] ^= 1;
+        }
+    }
+    kc_bm25_free(before);
+    kc_bm25_free(after);
+    kc_bm25_free(another);
+    kc_bm25_free(bytes);
+    kc_bm25_close(imported);
+    kc_bm25_close(source);
+    case_result(fail, "bm25_memory",
+        "round-trips stable buffers and rejects truncated or corrupt data");
     return fail != 0;
 }
 
@@ -815,9 +892,9 @@ static int case_all(void) {
     int failures = 0;
 
 #ifdef __EMSCRIPTEN__
-    test_case_total = 9;
-#else
     test_case_total = 10;
+#else
+    test_case_total = 11;
 #endif
     test_case_current = 0;
     failures += run_case(case_bm25_scoring);
@@ -829,6 +906,7 @@ static int case_all(void) {
     failures += run_case(case_bm25_topk);
     failures += run_case(case_bm25_file_contract);
     failures += run_case(case_bm25_metadata);
+    failures += run_case(case_bm25_memory);
 #ifndef __EMSCRIPTEN__
     failures += run_case(case_bm25_cli);
 #endif
@@ -860,6 +938,8 @@ int main(int argc, char **argv) {
         callback = case_bm25_file_contract;
     else if (strcmp(argv[1], "bm25_metadata") == 0)
         callback = case_bm25_metadata;
+    else if (strcmp(argv[1], "bm25_memory") == 0)
+        callback = case_bm25_memory;
 #ifndef __EMSCRIPTEN__
     else if (strcmp(argv[1], "bm25_cli") == 0) callback = case_bm25_cli;
 #endif

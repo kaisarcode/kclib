@@ -94,6 +94,35 @@ int kc_bm25_search(
 );
 
 /**
+ * Export a built index as a self-contained, portable binary memory value.
+ * The byte buffer is caller-owned and released with kc_bm25_free().
+ * @param index Built index.
+ * @param out Receives allocated serialized bytes.
+ * @param out_size Receives the number of bytes.
+ * @return KC_BM25_OK or an error status.
+ */
+int kc_bm25_export(
+    const kc_bm25_t *index,
+    void **out,
+    size_t *out_size
+);
+
+/**
+ * Load a read-only index from a bounded, immutable memory value.
+ * This call copies the necessary data; the source buffer may be released
+ * immediately after a successful import. No document re-tokenization occurs.
+ * @param out Receives the read-only index.
+ * @param data Serialized index bytes.
+ * @param size Exact byte length.
+ * @return KC_BM25_OK or an error status.
+ */
+int kc_bm25_import(
+    kc_bm25_t **out,
+    const void *data,
+    size_t size
+);
+
+/**
  * Save one built index to a portable binary file.
  * The destination is overwritten directly; replacement is not atomic.
  * @param index Built index.

@@ -34,7 +34,10 @@ if (kc_bm25_open(&index, NULL) == KC_BM25_OK) {
 ```
 
 A saved index can be opened with `kc_bm25_load()` and searched without
-rebuilding. Loaded indexes are read-only. Search results include the source
+rebuilding. `kc_bm25_export()` and `kc_bm25_import()` offer the same
+portable representation in an owned memory buffer, allowing applications
+to embed BM25 data inside a larger file without temporary files.
+Loaded indexes are read-only. Search results include the source
 text, public ID, insertion ordinal, and a nonnegative ranking score.
 
 ## Search options

@@ -56,7 +56,7 @@ if(EMSCRIPTEN)
     target_link_options(libbm25_wasm PRIVATE
         --no-entry
         -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_bm25_open,_kc_bm25_add,_kc_bm25_build,_kc_bm25_search,_kc_bm25_save,_kc_bm25_load,_kc_bm25_count,_kc_bm25_fold_accents,_kc_bm25_free,_kc_bm25_close,_kc_bm25_strerror,_kc_bm25_version
+        -sEXPORTED_FUNCTIONS=_kc_bm25_open,_kc_bm25_add,_kc_bm25_build,_kc_bm25_search,_kc_bm25_export,_kc_bm25_import,_kc_bm25_save,_kc_bm25_load,_kc_bm25_count,_kc_bm25_fold_accents,_kc_bm25_free,_kc_bm25_close,_kc_bm25_strerror,_kc_bm25_version
     )
 
     add_library(bm25_wasm_static STATIC ${BM25_CORE_SOURCES})
