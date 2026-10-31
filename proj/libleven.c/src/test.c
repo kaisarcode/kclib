@@ -158,7 +158,7 @@ static int check_cli(const char *arguments, int expected_zero)
     int result;
 
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "\"\\"%s\\" %s > NUL 2>&1\"",
+    snprintf(command, sizeof(command), "\"\"%s\" %s > NUL 2>&1\"",
         KC_CLI_PATH, arguments);
 #else
     snprintf(command, sizeof(command), "\"%s\" %s > /dev/null 2>&1",
@@ -166,6 +166,44 @@ static int check_cli(const char *arguments, int expected_zero)
 #endif
     result = system(command);
     return (result == 0) != expected_zero;
+}
+
+/**
+ * Execute the CLI and compare its exact output.
+ * @param arguments Quoted CLI arguments.
+ * @param expected Expected output, including newline.
+ * @return 0 on matching successful invocation, 1 otherwise.
+ */
+static int check_cli_output(const char *arguments, const char *expected)
+{
+    const char *path = "leven-cli-output.txt";
+    char command[1024], buffer[256];
+    size_t count;
+    FILE *file;
+    int status;
+
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "\"\"%s\" %s > %s 2>NUL\"",
+        KC_CLI_PATH, arguments, path);
+#else
+    snprintf(command, sizeof(command), "\"%s\" %s > %s 2>/dev/null",
+        KC_CLI_PATH, arguments, path);
+#endif
+    status = system(command);
+    if (status != 0) {
+        remove(path);
+        return 1;
+    }
+    file = fopen(path, "rb");
+    if (file == NULL) {
+        remove(path);
+        return 1;
+    }
+    count = fread(buffer, 1, sizeof(buffer) - 1, file);
+    fclose(file);
+    remove(path);
+    buffer[count] = '\0';
+    return strcmp(buffer, expected) != 0;
 }
 
 /**
@@ -179,6 +217,11 @@ static int case_cli(void)
     fail += check_cli("--help", 1);
     fail += check_cli("--version", 1);
     fail += check_cli("kitten sitting", 1);
+#ifdef _WIN32
+    fail += check_cli_output("kitten sitting", "3\r\n");
+#else
+    fail += check_cli_output("kitten sitting", "3\n");
+#endif
     fail += check_cli("kitten sitting --max 3", 1);
     fail += check_cli("kitten sitting --max 2", 0);
     fail += check_cli("kitten sitting --max -1", 0);
