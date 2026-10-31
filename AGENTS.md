@@ -61,6 +61,32 @@ same concept -> same convention
 different concept -> capability-specific design
 ```
 
+## Existing project precedents
+
+Before implementing, refactoring, or extending a project, read the current
+source, public header, README, CLI, build configuration, and tests of one or
+more comparable kclibs in this repository. Select precedents by the concrete
+operation and interface being designed, not only by the project's name or
+directory shape. Check the actual implementation; do not infer conventions
+from memory, general C habits, or a template alone.
+
+Follow established patterns for public API names and values, option structs
+and default semantics, argument types, validation, error codes, ownership,
+lifecycle, and scripting projections. For CLIs, follow comparable command
+syntax, help and version output, flags, positional arguments, input precedence,
+stdin and file handling, result formats, diagnostics, and exit statuses.
+Follow the same conventions for source file organization, KCS headers and
+DocBlocks, test layout and output, cross-compilation, packaging, and
+documentation.
+
+For each new behavior, identify the closest concrete precedent before writing
+code. Preserve the same contract when the concept is equivalent; introduce a
+different shape only when the capability genuinely requires it, and keep that
+difference minimal and intentional. Never copy unrelated behavior merely for
+uniformity, and never reproduce obsolete or nonconforming code when current
+repository standards supersede it. Do not introduce new file names, helpers,
+formats, flags, or APIs simply because they are familiar from other projects.
+
 ## Public API philosophy
 
 A kclib public API must express the user's intent and the capability being
@@ -362,11 +388,51 @@ solely for symmetry.
 Share code only when it removes meaningful repeated complexity or inconsistent
 behavior.
 
-## Tests and documentation
+## Test quality
 
 Use the project's existing test model and test shipped behavior.
 
+Treat test quality as part of every implementation, bug fix, and API change, not
+as optional follow-up QA. Before writing tests, inspect the strongest comparable
+current kclib test suites and match their rigor while adapting the scope to the
+capability's actual complexity and risk. A small stateless primitive and a
+persistent index, network listener, or concurrent runtime do not require the same
+cases. Do not pad a suite with superficial assertions to reach a case count.
+
+Tests must prove externally observable behavior through the public API and
+shipped CLI. Assert the actual returned values, ordering, scores, identities,
+content, side effects, and error codes wherever those are part of the contract;
+a successful status or nonzero result count alone is not sufficient. For
+numerical algorithms, check independently established expected results with
+explicit tolerances instead of reproducing the implementation's logic in tests.
+
+Cover applicable normal use, defaults and explicit options, boundary and empty
+inputs, invalid arguments, malformed data, repeated identifiers, state
+transitions, resource ownership, and cleanup. If a capability persists data,
+verify round trips, compatibility checks, truncated or corrupt inputs, and
+failure recovery. If it provides a CLI, verify help, actual input and output
+formats, stdin/file modes where supported, exit codes, and invalid commands.
+Test concurrency, asynchronous behavior, or platform-specific contracts when
+those capabilities actually exist; do not invent requirements for other projects.
+
+Keep tests deterministic, isolated, and self-contained, with no dependency on
+public network services or unrelated infrastructure. Follow the existing
+single `src/test.c` convention for ordinary kclibs; do not create auxiliary
+test files without a concrete capability-specific precedent. Use meaningful
+named PASS/FAIL cases, accurate per-case and aggregate failure accounting,
+and a nonzero exit status whenever an assertion fails. A test that can pass
+despite incorrect behavior must be strengthened before delivery.
+
+Update and review the tests with the feature itself. Run the applicable
+project-local tests when execution is available, investigate failures, and
+report which targets were actually run. Never describe unwritten, unexecuted,
+or failing tests as passed. Cross-platform or exhaustive validation should be
+proportional to the change and explicit task, but authoring thorough contract
+tests is mandatory from the beginning.
+
 Do not expose private internals or redesign production code solely for tests.
+
+## Documentation
 
 Keep README organization recognizably consistent with other kclibs, but document
 only actual project behavior.
