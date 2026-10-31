@@ -407,7 +407,6 @@ static int case_bm25_corpus(void) {
     return fail;
 }
 
-
 /**
  * Validate search limits, multi-term queries, and parameter boundaries.
  * @return Zero when the search-options contract holds, otherwise one.

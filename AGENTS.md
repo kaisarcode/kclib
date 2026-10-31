@@ -101,41 +101,41 @@ Consistency applies to **every observable and structural detail**, not only
 the test logic:
 
 * **Test presentation:** reproduce the established
-  `[current/total] [PASS|FAIL] case_name: description` case lines and
-  `N passed, M failed` aggregate summary, with truthful totals, meaningful
-  case names, and a failing process status on errors. Inspect actual
-  `src/test.c` precedents and their dispatch/output before creating a test
-  runner; do not invent an alternative reporting format.
+    `[current/total] [PASS|FAIL] case_name: description` case lines and
+    `N passed, M failed` aggregate summary, with truthful totals, meaningful
+    case names, and a failing process status on errors. Inspect actual
+    `src/test.c` precedents and their dispatch/output before creating a test
+    runner; do not invent an alternative reporting format.
 * **CLI:** match existing conventions for `Usage:` formatting, sections,
-  spacing and alignment, help/version flags, positional arguments, option
-  naming and value types, defaults, stdin/file precedence, error messages,
-  output structure, and exit codes. Copy the nearest equivalent interface
-  pattern, adjusting only genuinely capability-specific details.
+    spacing and alignment, help/version flags, positional arguments, option
+    naming and value types, defaults, stdin/file precedence, error messages,
+    output structure, and exit codes. Copy the nearest equivalent interface
+    pattern, adjusting only genuinely capability-specific details.
 * **C APIs:** follow existing public-header layout, identifier and type
-  naming, function signatures, option representation, error/status handling,
-  defaults, return values, memory ownership, and lifecycle semantics for
-  equivalent operations. Keep the JavaScript/Lua projection consistent with
-  the native public contract.
+    naming, function signatures, option representation, error/status handling,
+    defaults, return values, memory ownership, and lifecycle semantics for
+    equivalent operations. Keep the JavaScript/Lua projection consistent with
+    the native public contract.
 * **Source and comments:** use the exact KaisarCode file-header template,
-  required DocBlocks and metadata (including appropriate parameter/return
-  descriptions), established whitespace, indentation, identifier style,
-  and KCS comment restrictions. Ordinary explanatory inline or block comments
-  are not a substitute for DocBlocks; do not add non-DocBlock commentary
-  outside the standard file header when KCS forbids it.
+    required DocBlocks and metadata (including appropriate parameter/return
+    descriptions), established whitespace, indentation, identifier style,
+    and KCS comment restrictions. Ordinary explanatory inline or block comments
+    are not a substitute for DocBlocks; do not add non-DocBlock commentary
+    outside the standard file header when KCS forbids it.
 * **Files and project size:** follow established naming rules, including
-  **no underscores in filenames**, and use the smallest coherent set of files
-  comparable to kclibs of similar complexity. The normal C project has one
-  `src/test.c`; do not split tests, tokenizers, helpers, lookup tables, or
-  other internals into extra files just for organization. Additional files
-  require an actual responsibility or platform need and a relevant precedent.
-  Complexity determines the appropriate relative file count, not a universal
-  fixed number.
+    **no underscores in filenames**, and use the smallest coherent set of files
+    comparable to kclibs of similar complexity. The normal C project has one
+    `src/test.c`; do not split tests, tokenizers, helpers, lookup tables, or
+    other internals into extra files just for organization. Additional files
+    require an actual responsibility or platform need and a relevant precedent.
+    Complexity determines the appropriate relative file count, not a universal
+    fixed number.
 * **Documentation and packaging:** copy the existing README and
-  project-local documentation structure, heading conventions, Markdown
-  formatting, navigation, file and page naming, manifests, license files,
-  build targets, and distribution layout. Use the current comparable project
-  as the example; do not invent a new documentation template or relocate
-  user-facing material without a reason.
+    project-local documentation structure, heading conventions, Markdown
+    formatting, navigation, file and page naming, manifests, license files,
+    build targets, and distribution layout. Use the current comparable project
+    as the example; do not invent a new documentation template or relocate
+    user-facing material without a reason.
 
 For each task, identify the closest applicable examples separately for source
 and API, CLI/help, tests/output, build, and documentation. These may be
