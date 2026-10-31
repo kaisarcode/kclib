@@ -5391,6 +5391,93 @@ static const kc_bm25_term_t *kc_bm25_find(const kc_bm25_t *index,
     return NULL;
 }
 
+typedef struct {
+    kc_bm25_token_fn visit;
+    void *userdata;
+} kc_bm25_token_context_t;
+
+/**
+ * Adapt token callbacks to the private Unicode analyzer.
+ * @param context Visitor and its context.
+ * @param token Borrowed normalized token.
+ * @return KC_BM25_OK or KC_BM25_EABORT.
+ */
+static int kc_bm25_token_visit(void *context, const char *token)
+{
+    kc_bm25_token_context_t *adapter =
+        (kc_bm25_token_context_t *)context;
+
+    return adapter->visit(token, adapter->userdata) == 0 ?
+        KC_BM25_OK : KC_BM25_EABORT;
+}
+
+/**
+ * Traverse normalized text tokens according to the index's analyzer.
+ * @param index Built or imported index.
+ * @param text UTF-8 input.
+ * @param visit Required visitor.
+ * @param userdata Context forwarded unchanged.
+ * @return KC_BM25_OK or an error code.
+ */
+int kc_bm25_tokens(const kc_bm25_t *index, const char *text,
+    kc_bm25_token_fn visit, void *userdata)
+{
+    kc_bm25_token_context_t context = {visit, userdata};
+
+    if (index == NULL || !index->built || text == NULL || visit == NULL)
+        return KC_BM25_EINVAL;
+    return kc_bm25_analyze(text, index->fold_accents,
+        kc_bm25_token_visit, &context);
+}
+
+/**
+ * Visit the unique normalized vocabulary, without copying term storage.
+ * @param index Built or imported index.
+ * @param visit Term callback.
+ * @param userdata Caller data.
+ * @return KC_BM25_OK or KC_BM25_EABORT.
+ */
+int kc_bm25_vocabulary(const kc_bm25_t *index,
+    kc_bm25_word_fn visit, void *userdata)
+{
+    if (index == NULL || !index->built || visit == NULL)
+        return KC_BM25_EINVAL;
+
+    for (size_t i = 0; i < index->term_count; i++) {
+        if (visit(index->terms[i].value, index->terms[i].count,
+            userdata) != 0) return KC_BM25_EABORT;
+    }
+    return KC_BM25_OK;
+}
+
+/**
+ * Visit document postings for a previously normalized vocabulary term.
+ * @param index Built or imported index.
+ * @param term Normalized term.
+ * @param visit Posting visitor.
+ * @param userdata Caller context.
+ * @return KC_BM25_OK or KC_BM25_EABORT.
+ */
+int kc_bm25_postings(const kc_bm25_t *index, const char *term,
+    kc_bm25_posting_fn visit, void *userdata)
+{
+    const kc_bm25_term_t *entry;
+
+    if (index == NULL || !index->built || term == NULL || visit == NULL)
+        return KC_BM25_EINVAL;
+    entry = kc_bm25_find(index, term);
+    if (entry == NULL) return KC_BM25_OK;
+
+    for (size_t i = 0; i < entry->count; i++) {
+        const kc_bm25_posting_t *posting =
+            &index->postings[entry->start + i];
+
+        if (visit(posting->ordinal, posting->frequency,
+            userdata) != 0) return KC_BM25_EABORT;
+    }
+    return KC_BM25_OK;
+}
+
 /**
  * Insert one ordinal and score into a sparse candidate map.
  * @param table Map allocation.
@@ -6135,6 +6222,7 @@ const char *kc_bm25_strerror(int status) {
         case KC_BM25_EIO: return "File I/O failed";
         case KC_BM25_EFORMAT: return "Invalid or incompatible index file";
         case KC_BM25_EUTF8: return "Malformed UTF-8 text";
+        case KC_BM25_EABORT: return "Traversal stopped by callback";
         default: return "Unknown BM25 error";
     }
 }
