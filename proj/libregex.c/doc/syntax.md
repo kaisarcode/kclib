@@ -80,9 +80,9 @@ The native API returns byte ranges, not allocated capture strings. Capture zero 
 
 ## Limits and performance
 
-The implementation bounds patterns to 4096 bytes, their parsed syntax tree to 512 nodes, captures to 16 groups, matching work to 100000 evaluation steps, and recursion depth to 4096. Complex patterns can return `KC_REGEX_ELIMIT` instead of a match result.
+The implementation bounds patterns to 4096 bytes, their parsed syntax tree to 512 nodes, captures to 16 groups and matching work to 100000 evaluation steps per operation. Backtracking uses a temporary, dynamically allocated work stack rather than native call-stack recursion. Complex patterns can return `KC_REGEX_ELIMIT` instead of a match result.
 
-Matching uses bounded backtracking, **not** a Thompson NFA or a linear-time engine. Consequently, complex nested repetitions can still be expensive before reaching the work limit. The limits are safeguards, not a guarantee of predictable latency for arbitrary untrusted expressions.
+Matching uses bounded iterative backtracking, **not** a Thompson NFA or a linear-time engine. Consequently, complex nested repetitions can still be expensive before reaching the work limit. The limits are safeguards, not a guarantee of predictable latency for arbitrary untrusted expressions.
 
 The code is currently an initial implementation. These syntax claims describe its intended public contract and require test validation, especially for complex nested groups, capture ordering, invalid patterns and performance.
 
