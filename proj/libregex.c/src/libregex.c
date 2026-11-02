@@ -53,14 +53,30 @@ typedef struct {
     size_t end[KC_REGEX_CAPTURES];
 } kc_regex_state_t;
 
-typedef struct kc_regex_cont_t {
-    const struct kc_regex_cont_t *parent;
+typedef struct {
     const kc_regex_node_t *node;
+    size_t parent;
     size_t group;
     size_t repeat_count;
     size_t repeat_pos;
     int type;
 } kc_regex_cont_t;
+
+typedef struct {
+    const kc_regex_node_t *node;
+    kc_regex_state_t state;
+    size_t cont;
+    int type;
+} kc_regex_job_t;
+
+typedef struct {
+    kc_regex_job_t *jobs;
+    size_t job_count;
+    size_t job_capacity;
+    kc_regex_cont_t *frames;
+    size_t frame_count;
+    size_t frame_capacity;
+} kc_regex_work_t;
 
 /**
  * Release one compiled pattern tree recursively.
@@ -307,161 +323,234 @@ static kc_regex_node_t *kc_regex_compile(const char *pattern, size_t *groups)
 }
 
 /**
- * Advance a match into its next continuation.
- * @param cont Pending sequence, group or repetition.
- * @param path Canonical request path.
- * @param state Current capture state.
- * @param result Receives completed match state.
- * @param steps Shared bounded work counter.
- * @param depth Current recursion depth.
- * @return Nonzero when the full path matched.
+ * Store a backtracking task in an explicitly allocated work stack.
+ * The work limit bounds both matching and queued alternatives.
+ * @param work Mutable matching workspace.
+ * @param node Node to evaluate, or NULL for continuation.
+ * @param cont Continuation index or SIZE_MAX.
+ * @param state Current captures and input position.
+ * @param type Zero evaluates a node, one advances a continuation.
+ * @return Success, allocation error or work limit.
  */
-static int kc_regex_advance(const kc_regex_cont_t *cont, const char *path,
-    kc_regex_state_t state, kc_regex_state_t *result,
-    size_t *steps, size_t depth);
-
-/**
- * Evaluate one compiled node with bounded backtracking.
- * @param node Current expression node.
- * @param cont Remaining pattern continuation.
- * @param path Canonical request path.
- * @param state Current position and captures.
- * @param result Receives complete match.
- * @param steps Shared work counter.
- * @param depth Recursion depth.
- * @return Nonzero for a complete path match.
- */
-static int kc_regex_match_node(const kc_regex_node_t *node,
-    const kc_regex_cont_t *cont, const char *path,
-    kc_regex_state_t state, kc_regex_state_t *result,
-    size_t *steps, size_t depth)
+static int kc_regex_schedule(kc_regex_work_t *work,
+    const kc_regex_node_t *node, size_t cont,
+    kc_regex_state_t state, int type)
 {
-    kc_regex_cont_t next;
+    kc_regex_job_t *jobs;
+    size_t capacity;
 
-    if (++*steps > KC_REGEX_STEPS_MAX || depth > KC_REGEX_DEPTH_MAX) {
-        *steps = KC_REGEX_STEPS_MAX + 1U;
-        return 0;
+    if (work->job_count == KC_REGEX_STEPS_MAX) return KC_REGEX_ELIMIT;
+    if (work->job_count == work->job_capacity) {
+        capacity = work->job_capacity ? work->job_capacity * 2U : 32U;
+        if (capacity > KC_REGEX_STEPS_MAX) capacity = KC_REGEX_STEPS_MAX;
+        jobs = (kc_regex_job_t *)realloc(work->jobs,
+            capacity * sizeof(*jobs));
+        if (!jobs) return KC_REGEX_ENOMEM;
+        work->jobs = jobs;
+        work->job_capacity = capacity;
     }
-    if (!node) return kc_regex_advance(cont, path, state, result,
-        steps, depth + 1U);
-    switch (node->kind) {
-        case KC_REGEX_SEQUENCE:
-            next.parent = cont;
-            next.node = node->right;
-            next.type = 0;
-            return kc_regex_match_node(node->left, &next, path, state,
-                result, steps, depth + 1U);
-        case KC_REGEX_CHOICE:
-            if (kc_regex_match_node(node->left, cont, path, state,
-                    result, steps, depth + 1U)) return 1;
-            return kc_regex_match_node(node->right, cont, path, state,
-                result, steps, depth + 1U);
-        case KC_REGEX_REPEAT:
-            next.parent = cont;
-            next.node = node;
-            next.type = 2;
-            next.repeat_count = 0U;
-            next.repeat_pos = state.pos;
-            return kc_regex_advance(&next, path, state, result,
-                steps, depth + 1U);
-        case KC_REGEX_GROUP:
-            next.parent = cont;
-            next.node = NULL;
-            next.type = 1;
-            next.group = node->group;
-            state.start[node->group] = state.pos;
-            return kc_regex_match_node(node->left, &next, path, state,
-                result, steps, depth + 1U);
-        case KC_REGEX_CHAR:
-            if ((unsigned char)path[state.pos] != node->ch ||
-                path[state.pos] == '\0') return 0;
-            break;
-        case KC_REGEX_DOT:
-            if (path[state.pos] == '\0') return 0;
-            break;
-        case KC_REGEX_CLASS:
-            if (path[state.pos] == '\0' ||
-                !(node->bitmap[(unsigned char)path[state.pos] / 8U] &
-                (1U << ((unsigned char)path[state.pos] % 8U)))) return 0;
-            break;
-    }
-    state.pos++;
-    return kc_regex_advance(cont, path, state, result, steps, depth + 1U);
+    work->jobs[work->job_count].node = node;
+    work->jobs[work->job_count].cont = cont;
+    work->jobs[work->job_count].state = state;
+    work->jobs[work->job_count].type = type;
+    work->job_count++;
+    return KC_REGEX_OK;
 }
 
 /**
- * Continue a pending sequence, group closure or greedy repeat.
- * @param cont Continuation frame.
- * @param path Canonical path.
- * @param state Current match state.
- * @param result Receives a successful complete match.
- * @param steps Bounded work counter.
- * @param depth Recursion depth.
- * @return Nonzero when the entire pattern matches.
+ * Store one persistent continuation frame using a stable array index.
+ * @param work Mutable matching workspace.
+ * @param frame New continuation and its parent index.
+ * @param index Receives a stable index valid for this match.
+ * @return Success, allocation error or work limit.
  */
-static int kc_regex_advance(const kc_regex_cont_t *cont, const char *path,
-    kc_regex_state_t state, kc_regex_state_t *result,
-    size_t *steps, size_t depth)
+static int kc_regex_frame(kc_regex_work_t *work,
+    kc_regex_cont_t frame, size_t *index)
 {
-    kc_regex_cont_t next;
+    kc_regex_cont_t *frames;
+    size_t capacity;
 
-    if (++*steps > KC_REGEX_STEPS_MAX || depth > KC_REGEX_DEPTH_MAX)
-        return 0;
-    if (!cont) {
-        if (state.full && path[state.pos]) return 0;
-        *result = state;
-        return 1;
+    if (work->frame_count == KC_REGEX_STEPS_MAX) return KC_REGEX_ELIMIT;
+    if (work->frame_count == work->frame_capacity) {
+        capacity = work->frame_capacity ? work->frame_capacity * 2U : 32U;
+        if (capacity > KC_REGEX_STEPS_MAX) capacity = KC_REGEX_STEPS_MAX;
+        frames = (kc_regex_cont_t *)realloc(work->frames,
+            capacity * sizeof(*frames));
+        if (!frames) return KC_REGEX_ENOMEM;
+        work->frames = frames;
+        work->frame_capacity = capacity;
     }
-    if (cont->type == 0)
-        return kc_regex_match_node(cont->node, cont->parent, path,
-            state, result, steps, depth + 1U);
-    if (cont->type == 1) {
-        state.end[cont->group] = state.pos;
-        return kc_regex_advance(cont->parent, path, state, result,
-            steps, depth + 1U);
-    }
-    if (cont->type == 2) {
-        const kc_regex_node_t *repeat = cont->node;
-
-        if (cont->repeat_count < repeat->maximum &&
-            (cont->repeat_count == 0U || state.pos > cont->repeat_pos)) {
-            next = *cont;
-            next.repeat_count++;
-            next.repeat_pos = state.pos;
-            if (kc_regex_match_node(repeat->left, &next, path, state,
-                    result, steps, depth + 1U)) return 1;
-        }
-        if (cont->repeat_count >= repeat->minimum)
-            return kc_regex_advance(cont->parent, path, state, result,
-                steps, depth + 1U);
-    }
-    return 0;
+    *index = work->frame_count;
+    work->frames[work->frame_count++] = frame;
+    return KC_REGEX_OK;
 }
 
 /**
- * Match one expression against the complete path.
- * @param node Compiled pattern.
+ * Evaluate a compiled expression without consuming the native call stack.
+ * Work and backtracking alternatives live in bounded, temporary arrays.
+ * Alternatives and repetitions are evaluated in left-first greedy order.
+ * @param node Compiled expression root.
  * @param groups Number of capture groups.
- * @param path Canonical URI path.
- * @param result Receives captured byte ranges.
- * @return Nonzero when matched.
+ * @param path Borrowed input text.
+ * @param offset Start position.
+ * @param full Whether to require complete input consumption.
+ * @param result Receives the accepted match and group spans.
+ * @param steps Shared work budget, including previous search offsets.
+ * @return KC_REGEX_OK, KC_REGEX_NOMATCH, or a negative status.
  */
 static int kc_regex_run(const kc_regex_node_t *node, size_t groups,
     const char *path, size_t offset, int full, kc_regex_state_t *result,
-    size_t *work)
+    size_t *steps)
 {
+    kc_regex_work_t work = {0};
     kc_regex_state_t state = {0};
-    size_t i;
+    size_t i, length = strlen(path);
+    int status;
 
     state.pos = offset;
     state.full = full;
-
     for (i = 0U; i < groups; ++i) {
         state.start[i] = SIZE_MAX;
         state.end[i] = SIZE_MAX;
     }
-    return kc_regex_match_node(node, NULL, path, state, result,
-        work, 0U);
+    status = kc_regex_schedule(&work, node, SIZE_MAX, state, 0);
+    while (status == KC_REGEX_OK && work.job_count) {
+        kc_regex_job_t job;
+        kc_regex_cont_t frame;
+        size_t next;
+
+        if (*steps >= KC_REGEX_STEPS_MAX) {
+            status = KC_REGEX_ELIMIT;
+            break;
+        }
+        ++*steps;
+        job = work.jobs[--work.job_count];
+        state = job.state;
+
+        if (job.type == 0) {
+            if (!job.node) {
+                status = kc_regex_schedule(&work, NULL, job.cont,
+                    state, 1);
+                continue;
+            }
+            switch (job.node->kind) {
+                case KC_REGEX_SEQUENCE:
+                    frame = (kc_regex_cont_t){0};
+                    frame.type = 0;
+                    frame.parent = job.cont;
+                    frame.node = job.node->right;
+                    status = kc_regex_frame(&work, frame, &next);
+                    if (status == KC_REGEX_OK)
+                        status = kc_regex_schedule(&work,
+                            job.node->left, next, state, 0);
+                    break;
+
+                case KC_REGEX_CHOICE:
+                    status = kc_regex_schedule(&work, job.node->right,
+                        job.cont, state, 0);
+                    if (status == KC_REGEX_OK)
+                        status = kc_regex_schedule(&work, job.node->left,
+                            job.cont, state, 0);
+                    break;
+
+                case KC_REGEX_REPEAT:
+                    frame = (kc_regex_cont_t){0};
+                    frame.type = 2;
+                    frame.parent = job.cont;
+                    frame.node = job.node;
+                    frame.repeat_pos = state.pos;
+                    status = kc_regex_frame(&work, frame, &next);
+                    if (status == KC_REGEX_OK)
+                        status = kc_regex_schedule(&work, NULL,
+                            next, state, 1);
+                    break;
+
+                case KC_REGEX_GROUP:
+                    frame = (kc_regex_cont_t){0};
+                    frame.type = 1;
+                    frame.parent = job.cont;
+                    frame.group = job.node->group;
+                    state.start[frame.group] = state.pos;
+                    status = kc_regex_frame(&work, frame, &next);
+                    if (status == KC_REGEX_OK)
+                        status = kc_regex_schedule(&work,
+                            job.node->left, next, state, 0);
+                    break;
+
+                case KC_REGEX_CHAR:
+                    if (state.pos < length &&
+                        (unsigned char)path[state.pos] == job.node->ch) {
+                        state.pos++;
+                        status = kc_regex_schedule(&work, NULL,
+                            job.cont, state, 1);
+                    }
+                    break;
+
+                case KC_REGEX_DOT:
+                    if (state.pos < length) {
+                        state.pos++;
+                        status = kc_regex_schedule(&work, NULL,
+                            job.cont, state, 1);
+                    }
+                    break;
+
+                case KC_REGEX_CLASS:
+                    if (state.pos < length) {
+                        unsigned char ch = (unsigned char)path[state.pos];
+
+                        if (job.node->bitmap[ch / 8U] &
+                            (1U << (ch % 8U))) {
+                            state.pos++;
+                            status = kc_regex_schedule(&work, NULL,
+                                job.cont, state, 1);
+                        }
+                    }
+                    break;
+            }
+        } else if (job.cont == SIZE_MAX) {
+            if (!state.full || state.pos == length) {
+                *result = state;
+                goto done;
+            }
+        } else {
+            frame = work.frames[job.cont];
+            switch (frame.type) {
+                case 0:
+                    status = kc_regex_schedule(&work, frame.node,
+                        frame.parent, state, 0);
+                    break;
+
+                case 1:
+                    state.end[frame.group] = state.pos;
+                    status = kc_regex_schedule(&work, NULL,
+                        frame.parent, state, 1);
+                    break;
+
+                case 2:
+                    if (frame.repeat_count >= frame.node->minimum)
+                        status = kc_regex_schedule(&work, NULL,
+                            frame.parent, state, 1);
+                    if (status != KC_REGEX_OK) break;
+                    if (frame.repeat_count < frame.node->maximum &&
+                        (frame.repeat_count == 0U ||
+                         state.pos > frame.repeat_pos)) {
+                        frame.repeat_count++;
+                        frame.repeat_pos = state.pos;
+                        status = kc_regex_frame(&work, frame, &next);
+                        if (status == KC_REGEX_OK)
+                            status = kc_regex_schedule(&work,
+                                frame.node->left, next, state, 0);
+                    }
+                    break;
+            }
+        }
+    }
+    if (status == KC_REGEX_OK) status = KC_REGEX_NOMATCH;
+
+done:
+    free(work.jobs);
+    free(work.frames);
+    return status;
 }
 
 struct kc_regex {
@@ -539,10 +628,12 @@ int kc_regex_match(const kc_regex_t *regex, const char *text,
     if (count) *count = 0U;
     if (!regex || !text || (capacity && !captures))
         return KC_REGEX_EINVAL;
-    if (!kc_regex_run(regex->pattern, regex->groups, text, 0U, 1,
-            &state, &steps))
-        return steps > KC_REGEX_STEPS_MAX ?
-            KC_REGEX_ELIMIT : KC_REGEX_NOMATCH;
+    {
+        int status = kc_regex_run(regex->pattern, regex->groups, text,
+            0U, 1, &state, &steps);
+
+        if (status != KC_REGEX_OK) return status;
+    }
     return kc_regex_output(regex, &state, 0U, captures, capacity, count);
 }
 
@@ -559,7 +650,7 @@ int kc_regex_match(const kc_regex_t *regex, const char *text,
 int kc_regex_search(const kc_regex_t *regex, const char *text, size_t offset,
     kc_regex_capture_t *captures, size_t capacity, size_t *count)
 {
-    size_t len, start;
+    size_t len, start, steps = 0U;
 
     if (count) *count = 0U;
     if (!regex || !text || (capacity && !captures))
@@ -568,13 +659,13 @@ int kc_regex_search(const kc_regex_t *regex, const char *text, size_t offset,
     if (offset > len) return KC_REGEX_EINVAL;
     for (start = offset; start <= len; ++start) {
         kc_regex_state_t state;
-        size_t steps = 0U;
+        int status = kc_regex_run(regex->pattern, regex->groups, text,
+            start, 0, &state, &steps);
 
-        if (kc_regex_run(regex->pattern, regex->groups, text, start, 0,
-                &state, &steps))
+        if (status == KC_REGEX_OK)
             return kc_regex_output(regex, &state, start,
                 captures, capacity, count);
-        if (steps > KC_REGEX_STEPS_MAX) return KC_REGEX_ELIMIT;
+        if (status != KC_REGEX_NOMATCH) return status;
     }
     return KC_REGEX_NOMATCH;
 }
