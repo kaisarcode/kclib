@@ -16,7 +16,11 @@
 static int test_count = 0;
 static int test_failed = 0;
 
+#ifdef __EMSCRIPTEN__
+#define TEST_TOTAL 9
+#else
 #define TEST_TOTAL 10
+#endif
 
 /**
  * Record one named test result.
@@ -274,8 +278,6 @@ int main(void)
     test_result("limit", "bounds pathological matching", test_limit());
 #ifndef __EMSCRIPTEN__
     test_result("cli", "reports status from native executable", test_cli());
-#else
-    test_result("cli", "CLI not applicable for WASM", 0);
 #endif
     printf("%d passed, %d failed\n", test_count - test_failed, test_failed);
     return test_failed ? 1 : 0;
