@@ -20,6 +20,7 @@ The catalog summarizes capabilities; the individual project README documents its
 
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
+| [`regex`](../proj/libregex.c/README.md) | Compiles portable regular expressions with matching and capture ranges. | Extracting matched text or selecting paths with reusable patterns. |
 | [`mdp`](../proj/libmdp.c/README.md) | Separates Markdown frontmatter and body and renders a small subset as HTML. | Reading or serving Markdown, or needing frontmatter metadata. |
 | [`tpl`](../proj/libtpl.c/README.md) | Renders templates with variables, includes, blocks, conditions, and iteration. | Generating output from templates (HTML, configs, reports). |
 | [`min`](../proj/libmin.c/README.md) | Conservatively minifies CSS, JavaScript, and HTML. | Emitting web assets that should be compact. |
