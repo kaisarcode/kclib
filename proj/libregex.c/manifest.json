@@ -1,0 +1,8 @@
+{
+  "name": "libregex",
+  "description": "Compiles portable regular expressions and matches text with capture ranges.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kclib/tree/master/proj/libregex.c"
+}
