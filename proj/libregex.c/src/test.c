@@ -16,7 +16,7 @@
 static int test_count = 0;
 static int test_failed = 0;
 
-#define TEST_TOTAL 9
+#define TEST_TOTAL 10
 
 /**
  * Record one named test result.
@@ -188,6 +188,29 @@ static int test_invalid(void)
 }
 
 /**
+ * Verify a long ordinary repetition without native stack recursion.
+ * @return Zero when a long positive match and a long failed match are safe.
+ */
+static int test_long(void)
+{
+    kc_regex_t *regex = NULL;
+    char text[1025];
+    int failed = kc_regex_open(&regex, "a+") != KC_REGEX_OK;
+
+    memset(text, 'a', sizeof(text) - 1U);
+    text[sizeof(text) - 1U] = '\0';
+    if (!failed) {
+        failed |= kc_regex_match(regex, text, NULL, 0U,
+            NULL) != KC_REGEX_OK;
+        text[sizeof(text) - 2U] = 'b';
+        failed |= kc_regex_match(regex, text, NULL, 0U,
+            NULL) != KC_REGEX_NOMATCH;
+    }
+    kc_regex_close(regex);
+    return failed;
+}
+
+/**
  * Verify large failed searches remain bounded.
  * @return Zero when pathological repetition does not hang.
  */
@@ -246,6 +269,8 @@ int main(void)
     test_result("optional", "preserves unmatched optional groups", test_optional());
     test_result("search", "finds leftmost substrings", test_search());
     test_result("invalid", "rejects invalid arguments and syntax", test_invalid());
+    test_result("long", "matches long repetitions without stack overflow",
+        test_long());
     test_result("limit", "bounds pathological matching", test_limit());
 #ifndef __EMSCRIPTEN__
     test_result("cli", "reports status from native executable", test_cli());
