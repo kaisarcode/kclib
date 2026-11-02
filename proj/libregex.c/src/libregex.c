@@ -198,8 +198,8 @@ static kc_regex_node_t *kc_regex_parse_atom(kc_regex_parser_t *parser)
     if (ch == '\\' && parser->text[parser->pos])
         ch = (unsigned char)parser->text[parser->pos++];
     else if (ch == '\\' || ch == '*' || ch == '+' || ch == '?' ||
-             ch == ')' || ch == '|' || ch == '{' || ch == '}' ||
-             ch == '^' || ch == '
+            ch == ')' || ch == '|' || ch == '{' || ch == '}' ||
+            ch == '^' || ch == '
     char *method;
     char *id;
     kc_regex_node_t *pattern;
