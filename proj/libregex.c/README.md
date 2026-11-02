@@ -1,8 +1,12 @@
 # libregex.c - Portable regular expressions
 
-`libregex.c` compiles small reusable regular expressions and matches text without relying on a system-provided regex engine. It offers full-string matching, substring search, alternatives, groups and byte-offset captures. The implementation is native C with no runtime downloads or external regex dependencies.
+`libregex.c` compiles small reusable regular expressions and matches text without relying on a system-provided regex engine.
+It offers full-string matching, substring search, alternatives, groups and byte-offset captures.
+The implementation is native C with no runtime downloads or external regex dependencies.
 
-The supported syntax is deliberately smaller than POSIX ERE or PCRE. The [syntax and limitations guide](doc/syntax.md) describes exactly what is accepted and what is not. Matching is byte-oriented: UTF-8 literals can be compared byte-for-byte, but Unicode character classes and code-point matching are not implemented.
+The supported syntax is deliberately smaller than POSIX ERE or PCRE.
+The [syntax and limitations guide](doc/syntax.md) describes exactly what is accepted and what is not.
+Matching is byte-oriented: UTF-8 literals can be compared byte-for-byte, but Unicode character classes and code-point matching are not implemented.
 
 ## Quick start
 
@@ -36,7 +40,8 @@ regex match '/(notes|tasks)/([0-9]+)' '/notes/42'
 regex search '([0-9]+)' 'ticket 42 is ready'
 ```
 
-Each successful CLI invocation prints tab-separated capture index, start byte, and end byte. Group 0 is the complete match. An unmatched optional group prints dashes. No match returns a nonzero exit status.
+Each successful CLI invocation prints tab-separated capture index, start byte, and end byte.
+Group 0 is the complete match. An unmatched optional group prints dashes. No match returns a nonzero exit status.
 
 ## Documentation
 
@@ -52,7 +57,9 @@ make
 make test
 ```
 
-Use `make all` for the configured target matrix when the corresponding toolchains are installed. Builds use the repository's normal static, shared and WASM artifact conventions. The implementation and cross-platform artifacts have not yet been fully validated.
+Use `make all` for the configured target matrix when the corresponding toolchains are installed.
+Builds use the repository's normal static, shared and WASM artifact conventions.
+The implementation and cross-platform artifacts have not yet been fully validated.
 
 ## Notice
 
