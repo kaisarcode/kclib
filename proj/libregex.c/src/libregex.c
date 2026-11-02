@@ -213,8 +213,8 @@ static kc_regex_node_t *kc_regex_parse_atom(kc_regex_parser_t *parser)
     if (ch == '\\' && parser->text[parser->pos])
         ch = (unsigned char)parser->text[parser->pos++];
     else if (ch == '\\' || ch == '*' || ch == '+' || ch == '?' ||
-             ch == ')' || ch == '|' || ch == '{' || ch == '}' ||
-             ch == '^' || ch == '$') {
+            ch == ')' || ch == '|' || ch == '{' || ch == '}' ||
+            ch == '^' || ch == '$') {
         parser->error = 1;
         return NULL;
     }
@@ -532,7 +532,7 @@ static int kc_regex_run(const kc_regex_node_t *node, size_t groups,
                     if (status != KC_REGEX_OK) break;
                     if (frame.repeat_count < frame.node->maximum &&
                         (frame.repeat_count == 0U ||
-                         state.pos > frame.repeat_pos)) {
+                        state.pos > frame.repeat_pos)) {
                         frame.repeat_count++;
                         frame.repeat_pos = state.pos;
                         status = kc_regex_frame(&work, frame, &next);
