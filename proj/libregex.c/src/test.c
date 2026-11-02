@@ -207,6 +207,7 @@ static int test_limit(void)
     return failed;
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Verify CLI help, success and no-match statuses.
  * @return Zero on success.
@@ -230,6 +231,7 @@ static int test_cli(void)
     }
     return failed;
 }
+#endif
 
 /**
  * Execute all public contract tests.
