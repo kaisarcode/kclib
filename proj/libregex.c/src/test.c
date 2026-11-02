@@ -213,17 +213,21 @@ static int test_limit(void)
  */
 static int test_cli(void)
 {
+    char command[1024];
     int failed = 0;
+    const char *args[] = {"--help", "match abc abc", "match abc x"};
+    size_t i;
 
+    for (i = 0U; i < 3U; ++i) {
 #ifdef _WIN32
-    failed |= system("regex.exe --help > NUL") != 0;
-    failed |= system("regex.exe match abc abc > NUL") != 0;
-    failed |= system("regex.exe match abc x > NUL") == 0;
+        snprintf(command, sizeof(command),
+            "\"\"%s\" %s > NUL 2>&1\"", KC_CLI_PATH, args[i]);
 #else
-    failed |= system("./regex --help > /dev/null") != 0;
-    failed |= system("./regex match abc abc > /dev/null") != 0;
-    failed |= system("./regex match abc x > /dev/null") == 0;
+        snprintf(command, sizeof(command),
+            "\"%s\" %s > /dev/null 2>&1", KC_CLI_PATH, args[i]);
 #endif
+        failed |= (system(command) == 0) != (i < 2U);
+    }
     return failed;
 }
 
