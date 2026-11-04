@@ -174,7 +174,7 @@ target_is_current() {
     for file in "$destination/lib$name."* "$destination/$name" "$destination/$name.exe"; do
         [ -f "$file" ] || continue
         case "${file##*/}" in "lib$name.h") continue ;; esac
-        grep -Fq "  ${file##*/}" "$checksum" || return 1
+        awk '{print $2}' "$checksum" | grep -Fxq "${file##*/}" || return 1
     done
     return 0
 }
@@ -200,7 +200,7 @@ prune_project_files() {
             filename="${file##*/}"
             if [ "$filename" = "lib$name.h" ]; then
                 [ -d "$source_target" ] && continue
-            elif [ -f "$checksum" ] && grep -Fq "  $filename" "$checksum"; then
+            elif [ -f "$checksum" ] && awk '{print $2}' "$checksum" | grep -Fxq "$filename"; then
                 continue
             fi
             rm -f -- "$file"
