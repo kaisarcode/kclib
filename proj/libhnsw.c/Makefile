@@ -302,6 +302,9 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,wasm_log=$$(mktemp); if ! $(WASM_EMCMAKE) cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DHNSW_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > "$$wasm_log" 2>&1; then cat "$$wasm_log"; rm -f "$$wasm_log"; exit 1; fi; rm -f "$$wasm_log")
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libhnsw.mjs $(BIN_DIR)/wasm/wasm32/libhnsw.mjs
+	@cp src/libhnsw.js $(BIN_DIR)/wasm/wasm32/libhnsw.js
+	@printf '%s\n' '{"type":"module"}' > $(BIN_DIR)/wasm/wasm32/package.json
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libhnsw.wasm $(BIN_DIR)/wasm/wasm32/libhnsw.wasm
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libhnsw.a $(BIN_DIR)/wasm/wasm32/libhnsw.a
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libhnsw.so $(BIN_DIR)/wasm/wasm32/libhnsw.so
@@ -368,7 +371,7 @@ test:
 			echo "Missing Emscripten test runtime: $$node" >&2; \
 			exit 1; \
 		fi; \
-		"$$node" $(BUILD_DIR)/test-wasm/hnsw_contract_test.js all; \
+		"$$node" $(BUILD_DIR)/test-wasm/hnsw_contract_test.js all && "$$node" src/testjs.mjs; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \

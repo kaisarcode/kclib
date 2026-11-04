@@ -40,6 +40,19 @@ The default maximum is 10 tokens, the minimum is 1 token, and the default
 separator set is ASCII whitespace. A maximum of zero means all available
 tokens.
 
+## JavaScript
+
+The WASM target provides `libngram.js` (the public ES module),
+`libngram.mjs` (the Emscripten loader), and `libngram.wasm`.
+The JavaScript API hides the native ABI and owns temporary allocations.
+
+```js
+import { ngram } from "./libngram.js";
+ngram.traverse("hello world");
+```
+
+Run `make test wasm` to check the C contract and JavaScript interface.
+
 ## Build
 
 From this project directory:

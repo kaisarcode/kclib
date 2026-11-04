@@ -38,12 +38,17 @@ if(EMSCRIPTEN)
     target_include_directories(ngram_wasm PRIVATE src)
     set_target_properties(ngram_wasm PROPERTIES
         OUTPUT_NAME "libngram"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(ngram_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_ngram_traverse,_kc_ngram_version
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sALLOW_TABLE_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_ngram_traverse,_kc_ngram_version,_malloc,_free
     )
 
     add_library(ngram_wasm_static STATIC ${NGRAM_SOURCES})

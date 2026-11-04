@@ -35,6 +35,19 @@ search.
 Read the [index lifecycle](doc/index-lifecycle.md) for options, metrics,
 ownership, rebuild behavior, and concurrent searching.
 
+## JavaScript
+
+The WASM target provides `libhnsw.js` (the public ES module),
+`libhnsw.mjs` (the Emscripten loader), and `libhnsw.wasm`.
+The JavaScript API hides the native ABI and owns temporary allocations.
+
+```js
+import { hnsw } from "./libhnsw.js";
+hnsw.open({dimension: 384});
+```
+
+Run `make test wasm` to check the C contract and JavaScript interface.
+
 ## Build
 
 From this project directory:

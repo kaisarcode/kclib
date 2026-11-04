@@ -39,6 +39,19 @@ including Unicode normalization, accent stripping, and punctuation splitting.
 Existing indexes built with older embeddings must be regenerated after updating
 the library.
 
+## JavaScript
+
+The WASM target provides `libemb.js` (the public ES module),
+`libemb.mjs` (the Emscripten loader), and `libemb.wasm`.
+The JavaScript API hides the native ABI and owns temporary allocations.
+
+```js
+import { emb } from "./libemb.js";
+emb.embed("hello world");
+```
+
+Run `make test wasm` to check the C contract and JavaScript interface.
+
 ## Build
 
 From this project directory:

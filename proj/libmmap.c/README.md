@@ -24,6 +24,19 @@ if (kc_mmap_open(&value, "state.bin") == KC_MMAP_OK) {
 After `kc_mmap_del()`, the instance is invalid for operations other than final
 cleanup.
 
+## JavaScript
+
+The WASM target provides `libmmap.js` (the public ES module),
+`libmmap.mjs` (the Emscripten loader), and `libmmap.wasm`.
+The JavaScript API hides the native ABI and owns temporary allocations.
+
+```js
+import { mmap } from "./libmmap.js";
+mmap.open("data.bin");
+```
+
+Run `make test wasm` to check the C contract and JavaScript interface.
+
 ## Build
 
 From this project directory:

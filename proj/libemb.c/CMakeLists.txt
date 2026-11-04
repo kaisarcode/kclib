@@ -177,14 +177,19 @@ if(EMSCRIPTEN)
     target_include_directories(emb_wasm PRIVATE src lib/ggml/include lib/ggml/src lib/ggml/src/ggml-cpu)
     set_target_properties(emb_wasm PROPERTIES
         OUTPUT_NAME "libemb"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(emb_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sALLOW_TABLE_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
         -sINITIAL_MEMORY=268435456
         -sSTACK_SIZE=1048576
-        -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_dimension,_kc_emb_embed,_kc_emb_free
+        -sEXPORTED_FUNCTIONS=_kc_emb_version,_kc_emb_dimension,_kc_emb_embed,_kc_emb_free,_malloc,_free
     )
 
     add_library(emb_wasm_static STATIC ${LIB_SOURCES} ${MODEL_EMBED_SOURCES})

@@ -42,12 +42,17 @@ if(EMSCRIPTEN)
     target_include_directories(hnsw_wasm PRIVATE src)
     set_target_properties(hnsw_wasm PROPERTIES
         OUTPUT_NAME "libhnsw"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(hnsw_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_hnsw_open,_kc_hnsw_close,_kc_hnsw_add,_kc_hnsw_build,_kc_hnsw_search,_kc_hnsw_free,_kc_hnsw_dimension,_kc_hnsw_metric,_kc_hnsw_count,_kc_hnsw_strerror,_kc_hnsw_version
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sALLOW_TABLE_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_hnsw_open,_kc_hnsw_close,_kc_hnsw_add,_kc_hnsw_build,_kc_hnsw_search,_kc_hnsw_free,_kc_hnsw_dimension,_kc_hnsw_metric,_kc_hnsw_count,_kc_hnsw_strerror,_kc_hnsw_version,_malloc,_free
     )
 
     add_library(hnsw_wasm_static STATIC ${LIB_SOURCES})
