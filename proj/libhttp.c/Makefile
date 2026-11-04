@@ -407,6 +407,9 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DHTTP_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libhttp.mjs $(BIN_DIR)/wasm/wasm32/libhttp.mjs
+	@cp src/libhttp.js $(BIN_DIR)/wasm/wasm32/libhttp.js
+	@printf '%s\n' '{"type":"module"}' > $(BIN_DIR)/wasm/wasm32/package.json
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libhttp.wasm $(BIN_DIR)/wasm/wasm32/libhttp.wasm
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libhttp.a $(BIN_DIR)/wasm/wasm32/libhttp.a
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libhttp.so $(BIN_DIR)/wasm/wasm32/libhttp.so
@@ -478,7 +481,7 @@ test:
 			echo "Missing Emscripten test runtime: $$node" >&2; \
 			exit 1; \
 		fi; \
-		"$$node" $(BUILD_DIR)/test-wasm/http_contract_test.js all; \
+		"$$node" $(BUILD_DIR)/test-wasm/http_contract_test.js all && "$$node" src/testjs.mjs; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \

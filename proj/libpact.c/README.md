@@ -34,6 +34,20 @@ policy.
 Read the [integration guide](doc/integration.md) before implementing the full
 invite, join, confirm, seal, framing, and unseal flow.
 
+## JavaScript
+
+The WASM distribution includes `libpact.js` (public ES module),
+`libpact.mjs` (Emscripten loader) and `libpact.wasm`.
+
+```js
+import { pact } from "./libpact.js";
+const trust = pact.init();
+```
+
+Run `make test wasm` for the C and JavaScript contract tests.
+File-based state uses the Emscripten virtual filesystem unless the
+application explicitly supplies a persistent filesystem mount.
+
 ## Build
 
 From this project directory:

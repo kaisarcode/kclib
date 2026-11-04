@@ -40,6 +40,20 @@ multiple messages.
 Read the [integration guide](doc/integration.md) for parser lifecycle, message
 builders, transport composition, defaults, and supported protocol behavior.
 
+## JavaScript
+
+The WASM distribution includes `libhttp.js` (public ES module),
+`libhttp.mjs` (Emscripten loader) and `libhttp.wasm`.
+
+```js
+import { http } from "./libhttp.js";
+const request = http.request({method: "GET", target: "/"});
+```
+
+Run `make test wasm` for the C and JavaScript contract tests.
+File-based state uses the Emscripten virtual filesystem unless the
+application explicitly supplies a persistent filesystem mount.
+
 ## Build
 
 From this project directory:

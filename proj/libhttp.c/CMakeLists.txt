@@ -37,13 +37,18 @@ if(EMSCRIPTEN)
     target_include_directories(http_wasm PRIVATE src)
     set_target_properties(http_wasm PROPERTIES
         OUTPUT_NAME "libhttp"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(http_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_TABLE_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sALLOW_MEMORY_GROWTH=1
         -sSTACK_SIZE=1048576
-        -sEXPORTED_FUNCTIONS=_kc_http_parser_open,_kc_http_parser_write,_kc_http_parser_close,_kc_http_request,_kc_http_response,_kc_http_free,_kc_http_strerror,_kc_http_version
+        -sEXPORTED_FUNCTIONS=_kc_http_parser_open,_kc_http_parser_write,_kc_http_parser_close,_kc_http_request,_kc_http_response,_kc_http_free,_kc_http_strerror,_kc_http_version,_malloc,_free
     )
 
     add_library(http_wasm_static STATIC src/libhttp.c)
