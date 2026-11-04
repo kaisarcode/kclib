@@ -160,6 +160,19 @@ different kclibs. Reuse established conventions exactly where the concept
 matches. Do not weaken an existing standard into a vague preference for
 "similar" or "consistent" code.
 
+## Distribution layout
+
+The repository distribution is grouped by target, not by project:
+`dist/<platform>-<arch>/` holds the artifacts and public headers of all
+available libraries for that target. Each directory contains exactly one
+`LICENSE`, one `COPYING`, and one `SHA256SUMS` for the complete target.
+WASM distributions also contain a single shared `package.json` alongside
+per-library `.js`, `.mjs`, and `.wasm` files. Do not publish generated
+README files or per-library subdirectories in `dist/`. Put per-library
+source metadata and generated artifact inventories in root-level
+`dist/libNAME.json` files. Dist updates must preserve artifacts owned by
+other libraries and other repositories in a shared `KCDIST_DIR`.
+
 ## WASM JavaScript contract
 
 Scripting projections guide the public API shape of every kclib, whether

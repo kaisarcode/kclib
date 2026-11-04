@@ -60,28 +60,55 @@ under `bin/{platform}/{arch}/`; exact multiarch targets depend on the project.
 For example, `make linux/x86_64` builds to `proj/libdemo.c/bin/linux/x86_64/`,
 while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Libraries supporting
 Emscripten publish `libNAME.wasm`, `libNAME.a`, and `libNAME.so` for that
-target. The `.a` archive contains Emscripten object files for static linking;
-the `.so` is an Emscripten side module for a consumer built with
-`-sMAIN_MODULE`, not a native system shared library. For WASM-enabled libraries, the published target also contains
-`libNAME.js` implementing its public JavaScript projection,
-`libNAME.mjs` as the generated Emscripten loader, `libNAME.wasm`, and a
-`package.json` for ES module loading. The JavaScript module is a required
-part of the target, not an optional loader. The WASM test command runs
-the native C tests and the JavaScript API contract tests. Distribution
-publishes individual files under `dist/libNAME.c/{platform}/{arch}/`,
-for example `dist/libdemo.c/linux/x86_64/libdemo.so`. Each target
-directory contains its compiled artifacts, public header, `LICENSE` or
-`COPYING` when provided, a generated minimal `README.md` (project name,
-author and website), and `SHA256SUMS` covering the published files.
-Every kclib owns a source `proj/libNAME.c/manifest.json` with stable,
-machine-readable metadata (name, description, author, license, website and
-repository). `scripts/dist.sh` publishes a per-library
-`dist/libNAME.c/manifest.json`, including that metadata plus the list of
-available target artifacts, their paths, sizes, SHA-256 hashes, build
-checksums, license checksums, and README checksums. There is no root
-distribution manifest. Changes to source metadata republish the affected
-manifest; changes to binaries, headers, licensing files or README content
-republish the affected targets. No ZIP archives are required.
+target. The `.a` archive contains Emscripten objects for static linking;
+the `.so` is an Emscripten side module for a consumer using
+`-sMAIN_MODULE`, rather than a native system shared library.
+WASM-enabled libraries also publish `libNAME.js` (public JavaScript API),
+`libNAME.mjs` (generated loader), `libNAME.wasm` and a shared
+`package.json` declaring ES modules.
+
+Distribution combines every library under the same target directory:
+
+```text
+dist/
+├── linux-x86_64/
+│   ├── libemb.so
+│   ├── libemb.h
+│   ├── libmdp.so
+│   ├── libmdp.h
+│   ├── LICENSE
+│   ├── COPYING
+│   └── SHA256SUMS
+├── wasm-wasm32/
+│   ├── libemb.wasm
+│   ├── libemb.mjs
+│   ├── libemb.js
+│   ├── libemb.a
+│   ├── libemb.h
+│   ├── package.json
+│   ├── LICENSE
+│   ├── COPYING
+│   └── SHA256SUMS
+├── libemb.json
+└── libmdp.json
+```
+
+Each `<platform>-<arch>` directory contains the built artifacts and public
+headers of all libraries available for that target. There is exactly one
+`LICENSE` (LGPLv3), one `COPYING` (GPLv3), and one `SHA256SUMS`
+for the complete target directory. There are no per-library subdirectories,
+duplicate license files, or generated READMEs. Libraries with WASM share
+one `package.json` per target as well.
+
+Every source project retains `proj/libNAME.c/manifest.json`. The script
+publishes its metadata and the hashes/paths of its own files in the
+root-level `dist/libNAME.json` manifest; the shared target's `SHA256SUMS`
+checksums all files in that target. `./scripts/dist.sh NAME` updates only
+that library's files and leaves others untouched. Stale files previously
+published by the selected library are removed. In a local distribution,
+`./scripts/dist.sh all` also removes obsolete per-library distribution
+folders. The shared `KCDIST_DIR` is not pruned of unrelated repositories'
+projects. No ZIP archives are required.
 
 Publish every kclib (omitting `all` is equivalent) or one project:
 

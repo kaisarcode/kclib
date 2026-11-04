@@ -113,8 +113,10 @@ kclib/
 ```
 
 `proj/` contains the kclib source projects. `scripts/` contains
-repository-wide build and distribution tooling. `dist/` is generated from
-project build artifacts and is intentionally excluded from source control.
+repository-wide build and distribution tooling. `dist/` groups all published
+libraries by `platform-arch`, with shared `LICENSE`, `COPYING` and `SHA256SUMS`
+per target. Per-library artifact manifests live at `dist/libNAME.json`.
+The directory is generated from build artifacts and excluded from source control.
 
 ## Next step
 
