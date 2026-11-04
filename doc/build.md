@@ -92,9 +92,8 @@ Publish every kclib (omitting `all` is equivalent) or one project:
 ```
 
 By default, each repository distributes into its own local `dist/` directory.
-`KCDIST_DIR` selects a shared distribution destination for every project,
-including native tools such as `kc`. All projects use their own
-metadata and artifact manifest, without a root inventory.
+`KCDIST_DIR` selects a shared distribution destination for every project.
+Each project uses its own metadata and artifact manifest, without a root inventory.
 For example:
 
 ```sh

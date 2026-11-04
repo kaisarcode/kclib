@@ -30,18 +30,6 @@ Each project directory contains detailed documentation in
 `proj/libNAME.c/README.md`. That README defines the actual behavior, API,
 build, and constraints of its project.
 
-## Standalone tools
-
-The repository also contains independent applications such as
-[`kc`](../../proj/kc/). This is a native executable, **not a kclib**, and is
-not required by any kclib. Each project defines its own build and test
-contracts through its `Makefile`; repository scripts discover projects
-from those files rather than from a hardcoded `libNAME.c` naming rule.
-
-`kc` combines package management (`install`, `update`, `remove`,
-`list`, `info`) and generic dispatch of installed project CLIs.
-Its standalone project metadata is in `proj/kc/manifest.json`.
-
 ## Common form
 
 A project usually has this structure:

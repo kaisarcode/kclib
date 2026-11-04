@@ -1,6 +1,6 @@
 # Project catalog
 
-Browse the current libraries and standalone tools by capability. Each project links to its README, where you can find usage examples, build instructions, and the public interface.
+Browse the current libraries by capability. Each project links to its README, where you can find usage examples, build instructions, and the public interface.
 
 The catalog summarizes capabilities; the individual project README documents its exact behavior and constraints.
 
@@ -67,12 +67,6 @@ The catalog summarizes capabilities; the individual project README documents its
 | Project | Purpose | Use when |
 | :--- | :--- | :--- |
 | [`demo`](../proj/libdemo.c/README.md) | Provides the reference blueprint for new libraries in the collection. | Only when creating a new primitive in the collection; not distributed. |
-
-## Standalone tools (not kclibs)
-
-| Project | Purpose | Use when |
-| :--- | :--- | :--- |
-| [`kc`](../proj/kc/README.md) | Portable native package manager and generic CLI launcher; reads individual project manifests, installs verified artifacts and dispatches installed commands. | Installing, updating, inspecting or executing KaisarCode project CLIs. |
 
 `b64` is a small support utility, not part of the standard kclib distribution contract.
 
