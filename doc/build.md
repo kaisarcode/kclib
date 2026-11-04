@@ -79,18 +79,16 @@ dist/
 │   ├── LICENSE
 │   ├── COPYING
 │   └── SHA256SUMS
-├── wasm-wasm32/
-│   ├── libemb.wasm
-│   ├── libemb.mjs
-│   ├── libemb.js
-│   ├── libemb.a
-│   ├── libemb.h
-│   ├── package.json
-│   ├── LICENSE
-│   ├── COPYING
-│   └── SHA256SUMS
-├── libemb.json
-└── libmdp.json
+└── wasm-wasm32/
+    ├── libemb.wasm
+    ├── libemb.mjs
+    ├── libemb.js
+    ├── libemb.a
+    ├── libemb.h
+    ├── package.json
+    ├── LICENSE
+    ├── COPYING
+    └── SHA256SUMS
 ```
 
 Each `<platform>-<arch>` directory contains the built artifacts and public
@@ -100,15 +98,18 @@ for the complete target directory. There are no per-library subdirectories,
 duplicate license files, or generated READMEs. Libraries with WASM share
 one `package.json` per target as well.
 
-Every source project retains `proj/libNAME.c/manifest.json`. The script
-publishes its metadata and the hashes/paths of its own files in the
-root-level `dist/libNAME.json` manifest; the shared target's `SHA256SUMS`
-checksums all files in that target. `./scripts/dist.sh NAME` updates only
-that library's files and leaves others untouched. Stale files previously
-published by the selected library are removed. In a local distribution,
-`./scripts/dist.sh all` also removes obsolete per-library distribution
-folders. The shared `KCDIST_DIR` is not pruned of unrelated repositories'
-projects. No ZIP archives are required.
+Source projects may retain `proj/libNAME.c/manifest.json` as metadata, but
+the distribution does not generate or publish per-library JSON manifests.
+`dist/<platform>-<arch>/SHA256SUMS` is the sole published artifact inventory
+and checksum reference for that target. The build-generated `SHA256SUMS`
+in each project's `bin/<platform>/<arch>/` is used to detect changes.
+`./scripts/dist.sh NAME` updates only that library's files and preserves
+the other libraries. A second execution without source changes does not
+rewrite the published files. Obsolete files are cleaned by library name.
+On local output, `./scripts/dist.sh all` also removes the former
+`dist/libNAME.json` files and old per-library distribution folders.
+`KCDIST_DIR` does not permit removing other repositories' artifacts.
+No ZIP archives are required.
 
 Publish every kclib (omitting `all` is equivalent) or one project:
 
@@ -120,7 +121,7 @@ Publish every kclib (omitting `all` is equivalent) or one project:
 
 By default, each repository distributes into its own local `dist/` directory.
 `KCDIST_DIR` selects a shared distribution destination for every project.
-Each project uses its own metadata and artifact manifest, without a root inventory.
+No root-level generated JSON manifests are published; each target's SHA256SUMS is the inventory.
 For example:
 
 ```sh

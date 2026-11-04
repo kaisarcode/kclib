@@ -115,7 +115,7 @@ kclib/
 `proj/` contains the kclib source projects. `scripts/` contains
 repository-wide build and distribution tooling. `dist/` groups all published
 libraries by `platform-arch`, with shared `LICENSE`, `COPYING` and `SHA256SUMS`
-per target. Per-library artifact manifests live at `dist/libNAME.json`.
+per target. The artifact inventory for each target is its `SHA256SUMS`; no per-library generated JSON manifests are distributed.
 The directory is generated from build artifacts and excluded from source control.
 
 ## Next step
