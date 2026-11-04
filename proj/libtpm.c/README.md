@@ -22,6 +22,18 @@ n-gram size defaults to 3 and accepts values from 1 through 8.
 
 A valid empty input or successfully created empty profile scores `0.0`.
 
+## JavaScript
+
+The WebAssembly target includes `libtpm.js` (the public ES module),
+`libtpm.mjs` (the Emscripten loader), and `libtpm.wasm`.
+
+```js
+import { tpm } from "./libtpm.js";
+tpm.open("sample text").score("sample text");
+```
+
+Use `make test wasm` to verify the C and JavaScript contracts.
+
 ## Build
 
 From this project directory:

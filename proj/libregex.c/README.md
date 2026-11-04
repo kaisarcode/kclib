@@ -48,6 +48,18 @@ Group 0 is the complete match. An unmatched optional group prints dashes. No mat
 - [Syntax, examples and limitations](doc/syntax.md) - supported constructs, unsupported features and matching behavior.
 - [C API and CLI](doc/api.md) - ownership, capture indices, status codes and command outputs.
 
+## JavaScript
+
+The WebAssembly target includes `libregex.js` (the public ES module),
+`libregex.mjs` (the Emscripten loader), and `libregex.wasm`.
+
+```js
+import { regex } from "./libregex.js";
+regex.open("a(b)").match("ab");
+```
+
+Use `make test wasm` to verify the C and JavaScript contracts.
+
 ## Build
 
 From the project directory:

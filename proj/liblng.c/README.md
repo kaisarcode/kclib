@@ -30,6 +30,18 @@ Scores are ranking values in the range `[0, 1]`, not calibrated probabilities.
 Results are sorted from highest to lowest score. Zero matches is a successful
 result.
 
+## JavaScript
+
+The WebAssembly target includes `liblng.js` (the public ES module),
+`liblng.mjs` (the Emscripten loader), and `liblng.wasm`.
+
+```js
+import { lng } from "./liblng.js";
+lng.detect("hello world");
+```
+
+Use `make test wasm` to verify the C and JavaScript contracts.
+
 ## Build
 
 From this project directory:

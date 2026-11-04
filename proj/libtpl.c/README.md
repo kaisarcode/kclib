@@ -35,6 +35,18 @@ into later renders.
 Read the [template syntax guide](doc/template-syntax.md) for escaping, includes,
 variables, blocks, conditionals, and iteration.
 
+## JavaScript
+
+The WebAssembly target includes `libtpl.js` (the public ES module),
+`libtpl.mjs` (the Emscripten loader), and `libtpl.wasm`.
+
+```js
+import { tpl } from "./libtpl.js";
+tpl.open("Hello {{ name }}").render({name: "John"});
+```
+
+Use `make test wasm` to verify the C and JavaScript contracts.
+
 ## Build
 
 From this project directory:

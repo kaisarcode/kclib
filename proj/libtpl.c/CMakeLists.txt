@@ -40,13 +40,17 @@ if(EMSCRIPTEN)
     target_include_directories(tpl_wasm PRIVATE src)
     set_target_properties(tpl_wasm PROPERTIES
         OUTPUT_NAME "libtpl"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(tpl_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
         -sSTACK_SIZE=4194304
-        -sEXPORTED_FUNCTIONS=_kc_tpl_open,_kc_tpl_render,_kc_tpl_error,_kc_tpl_free,_kc_tpl_close,_kc_tpl_version
+        -sEXPORTED_FUNCTIONS=_kc_tpl_open,_kc_tpl_render,_kc_tpl_error,_kc_tpl_free,_kc_tpl_close,_kc_tpl_version,_malloc,_free
     )
 
     add_library(tpl_wasm_static STATIC ${TPL_SOURCES})

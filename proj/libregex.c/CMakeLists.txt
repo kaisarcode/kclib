@@ -44,12 +44,16 @@ if(EMSCRIPTEN)
     target_include_directories(libregex_wasm PRIVATE src)
     set_target_properties(libregex_wasm PROPERTIES
         OUTPUT_NAME "libregex"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(libregex_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_regex_open,_kc_regex_match,_kc_regex_search,_kc_regex_close,_kc_regex_strerror,_kc_regex_version
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_regex_open,_kc_regex_match,_kc_regex_search,_kc_regex_close,_kc_regex_strerror,_kc_regex_version,_malloc,_free
     )
 
     add_library(regex_wasm_static STATIC ${REGEX_CORE_SOURCES})

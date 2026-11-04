@@ -395,6 +395,9 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,)
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libregex.mjs $(BIN_DIR)/wasm/wasm32/libregex.mjs
+	@cp src/libregex.js $(BIN_DIR)/wasm/wasm32/libregex.js
+	@printf '%s\n' '{"type":"module"}' > $(BIN_DIR)/wasm/wasm32/package.json
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libregex.wasm $(BIN_DIR)/wasm/wasm32/libregex.wasm
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libregex.a $(BIN_DIR)/wasm/wasm32/libregex.a
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libregex.so $(BIN_DIR)/wasm/wasm32/libregex.so
@@ -454,7 +457,7 @@ test:
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wasm --target regex_contract_test; \
 		if [ -n "$(EMSDK_NODE)" ]; then node="$(EMSDK_NODE)"; else node="$(WASM_NODE)"; fi; \
-		"$$node" $(BUILD_DIR)/test-wasm/regex_contract_test.js all; \
+		"$$node" $(BUILD_DIR)/test-wasm/regex_contract_test.js all && "$$node" src/testjs.mjs; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
