@@ -37,6 +37,7 @@ declare -a PUBLISHED_PATHS=()
 declare -A PUBLISHED_SET=()
 declare -A SOURCE_BUILD_SHA=()
 CHANGED=0
+NEED_REFRESH=0
 
 # Print supported commands.
 # @return None.
@@ -227,7 +228,7 @@ prune_project_files() {
 # @param project_dir Source project directory.
 # @return None.
 write_manifest() {
-    local project_dir="$1" project_name name manifest temporary metadata_sha
+    local project_dir="$1" source_sha="$2" project_name name manifest temporary metadata_sha
     local relative file target platform arch sha bytes build_sha first
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
@@ -245,7 +246,7 @@ write_manifest() {
     {
         printf '{\n  "metadata": '
         cat "$project_dir/manifest.json"
-        printf ',\n  "metadata_sha256": "%s",\n  "artifacts": [\n' "$metadata_sha"
+        printf ',\n  "metadata_sha256": "%s",\n  "source_sha256": "%s",\n  "artifacts": [\n' "$metadata_sha" "$source_sha"
         first=1
         for relative in "${PUBLISHED_PATHS[@]}"; do
             target="$DIST_DIR/$relative"
@@ -280,12 +281,104 @@ write_manifest() {
     fi
 }
 
+# Compute a deterministic fingerprint of one project's distribution inputs.
+# The generated files and their timestamps do not affect this value.
+# @param project_dir Source project.
+# @return SHA-256 of source metadata, header, licenses and build checksums.
+project_source_sha256() {
+    local project_dir="$1" project_name name file target_dir relative platform arch
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+    {
+        for file in manifest.json "src/lib$name.h" LICENSE COPYING; do
+            [ -f "$project_dir/$file" ] || return 1
+            printf '%s  %s\n' "$(compute_sha256 "$project_dir/$file")" "$file"
+        done
+        for target_dir in "$project_dir"/bin/*/*; do
+            [ -d "$target_dir" ] || continue
+            relative="${target_dir#"$project_dir/bin/"}"
+            platform="${relative%%/*}"
+            arch="${relative#*/}"
+            is_platform "$platform" || continue
+            [[ "$arch" =~ ^[A-Za-z0-9_]+$ ]] || continue
+            file="$target_dir/SHA256SUMS"
+            [ -f "$file" ] || return 1
+            printf '%s  %s\n' "$(compute_sha256 "$file")" "$relative/SHA256SUMS"
+        done
+    } | compute_sha256 -
+}
+
+# Check the recorded input fingerprint and the integrity of published files.
+# @param project_dir Source project.
+# @param manifest Existing project manifest.
+# @param source_sha Current source input fingerprint.
+# @return 0 when nothing needs to be republished.
+project_distribution_current() {
+    local project_dir="$1" manifest="$2" source_sha="$3"
+    local project_name name expected_sha relative filename target_dir target_path
+    local current_sha count=0
+    local -A checked_targets=()
+
+    project_name=$(basename "$project_dir")
+    name=$(capability_name "$project_name")
+    [ -f "$manifest" ] || return 1
+    grep -Fq "\"source_sha256\": \"$source_sha\"" "$manifest" || return 1
+    [ ! -f "$DIST_DIR/$project_name/manifest.json" ] || return 1
+
+    while IFS=$'\t' read -r expected_sha relative; do
+        [ -n "$relative" ] || continue
+        [[ "$expected_sha" =~ ^[[:xdigit:]]{64}$ ]] || return 1
+        [[ "$relative" =~ ^(linux|windows|macos|ios|iossim|android|wasm)-[A-Za-z0-9_]+/[A-Za-z0-9_.-]+$ ]] || return 1
+        filename="${relative##*/}"
+        case "$filename" in
+            "lib$name."*|"$name"|"$name.exe") ;;
+            *) return 1 ;;
+        esac
+        target_path="$DIST_DIR/$relative"
+        [ -f "$target_path" ] || return 1
+        current_sha=$(compute_sha256 "$target_path") || return 1
+        [ "$current_sha" = "$expected_sha" ] || return 1
+
+        target_dir="${relative%/*}"
+        if [ -z "${checked_targets[$target_dir]+x}" ]; then
+            cmp -s "$project_dir/LICENSE" "$DIST_DIR/$target_dir/LICENSE" || return 1
+            cmp -s "$project_dir/COPYING" "$DIST_DIR/$target_dir/COPYING" || return 1
+            [ -f "$DIST_DIR/$target_dir/SHA256SUMS" ] || return 1
+            if [[ "$target_dir" == wasm-* ]] &&
+                [ -f "$project_dir/bin/wasm/${target_dir#wasm-}/package.json" ]; then
+                cmp -s "$project_dir/bin/wasm/${target_dir#wasm-}/package.json" \
+                    "$DIST_DIR/$target_dir/package.json" || return 1
+            fi
+            checked_targets["$target_dir"]=1
+        fi
+        count=$((count + 1))
+    done < <(
+        awk '
+            /"artifacts": \[/ { inside = 1; next }
+            inside && /"sha256":/ {
+                sha = $0
+                sub(/^.*"sha256": "/, "", sha)
+                sub(/".*$/, "", sha)
+            }
+            inside && /"path":/ {
+                path = $0
+                sub(/^.*"path": "/, "", path)
+                sub(/".*$/, "", path)
+                print sha "\t" path
+                sha = ""
+            }
+        ' "$manifest"
+    )
+    [ "$count" -gt 0 ]
+}
+
 # Publish a single library's available targets and public header.
 # @param project_dir Source project directory.
 # @return None.
 package_project() {
     local project_dir="$1" project_name name header manifest target_dir relative
     local platform arch destination checksum build_sha sha file count published=0
+    local source_sha previous_changed="$CHANGED"
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
     header="$project_dir/src/lib$name.h"
@@ -300,6 +393,12 @@ package_project() {
         echo "error: missing public header, LICENSE or COPYING in $project_dir" >&2
         return 1
     fi
+    source_sha=$(project_source_sha256 "$project_dir") || return 1
+    if project_distribution_current "$project_dir" "$manifest" "$source_sha"; then
+        echo "    [=] Distribution current."
+        return 0
+    fi
+    NEED_REFRESH=1
 
     for target_dir in "$project_dir"/bin/*/*; do
         [ -d "$target_dir" ] || continue
@@ -352,7 +451,7 @@ package_project() {
     done
 
     prune_project_files "$project_name" "$manifest"
-    write_manifest "$project_dir"
+    write_manifest "$project_dir" "$source_sha"
 
     # Remove only this project's obsolete layout, also in a shared root.
     if [ -f "$DIST_DIR/$project_name/manifest.json" ]; then
@@ -361,8 +460,10 @@ package_project() {
     fi
     if [ "$published" -eq 0 ]; then
         echo "    [=] No build artifacts."
+    elif [ "$CHANGED" -eq "$previous_changed" ]; then
+        echo "    [=] Distribution current."
     else
-        echo "    [+] Published $published target(s)."
+        echo "    [+] Updated $published target(s)."
     fi
 }
 
@@ -479,7 +580,9 @@ main() {
             package_project "$project_dir"
             ;;
     esac
-    refresh_target_checksums
+    if [ "$CHANGED" -ne 0 ] || [ "$NEED_REFRESH" -ne 0 ]; then
+        refresh_target_checksums
+    fi
     if [ "$CHANGED" -eq 0 ]; then
         echo "Done. No distribution changes."
     else
