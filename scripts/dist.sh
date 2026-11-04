@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # kclib dist tool
 # Summary: Publishes all libraries together by platform and architecture.
 # Author:  KaisarCode
@@ -353,9 +353,10 @@ package_project() {
 
     prune_project_files "$project_name" "$manifest"
     write_manifest "$project_dir"
+
     # Remove only this project's obsolete layout, also in a shared root.
     if [ -f "$DIST_DIR/$project_name/manifest.json" ]; then
-        rm -rf "$DIST_DIR/$project_name"
+        rm -rf "${DIST_DIR:?}/${project_name:?}"
         CHANGED=1
     fi
     if [ "$published" -eq 0 ]; then
