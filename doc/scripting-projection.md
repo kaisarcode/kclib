@@ -4,7 +4,24 @@ This document defines the canonical projection of kclib public APIs into Lua and
 
 The public C header remains the native contract. These scripting shapes preserve the same capability model while removing ABI-only mechanics such as output pointers, explicit allocation cleanup, buffer/count pairs, and opaque pointer handling.
 
-These references describe language-facing APIs only. They do not prescribe a binding runtime, host application framework, transport, or packaging system.
+These references describe language-facing APIs independently of any binding runtime,
+host application framework or transport. They guide the design of every kclib
+public API, including libraries that do not support WebAssembly.
+
+For a kclib with a `wasm/wasm32` build target, the JavaScript projection is
+also an **implemented public contract**. The target must publish a complete
+ES module exposing the projected operations; exporting C ABI functions from
+the WASM binary alone is not sufficient. A binding translates ABI values,
+memory ownership and callbacks without implementing separate library semantics.
+
+The standard WASM distribution includes `libNAME.js` (public JavaScript
+projection), `libNAME.mjs` (generated Emscripten loader),
+`libNAME.wasm` (execution module), and target-specific static/side-module
+artifacts when supported. `package.json` identifies `.js` files as ES
+modules for Node.js. JavaScript consumers import `libNAME.js`.
+`make test wasm` must exercise both the compiled C contract and the actual
+public JavaScript module. The build and distribution process must include
+these artifacts and their checksums.
 
 ## General rules
 

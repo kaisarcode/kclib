@@ -62,8 +62,12 @@ while `make wasm/wasm32` uses `bin/wasm/wasm32/`. Libraries supporting
 Emscripten publish `libNAME.wasm`, `libNAME.a`, and `libNAME.so` for that
 target. The `.a` archive contains Emscripten object files for static linking;
 the `.so` is an Emscripten side module for a consumer built with
-`-sMAIN_MODULE`, not a native system shared library. Existing JavaScript
-loaders, where provided, are retained. Distribution
+`-sMAIN_MODULE`, not a native system shared library. For WASM-enabled libraries, the published target also contains
+`libNAME.js` implementing its public JavaScript projection,
+`libNAME.mjs` as the generated Emscripten loader, `libNAME.wasm`, and a
+`package.json` for ES module loading. The JavaScript module is a required
+part of the target, not an optional loader. The WASM test command runs
+the native C tests and the JavaScript API contract tests. Distribution
 publishes individual files under `dist/libNAME.c/{platform}/{arch}/`,
 for example `dist/libdemo.c/linux/x86_64/libdemo.so`. Each target
 directory contains its compiled artifacts, public header, `LICENSE` or

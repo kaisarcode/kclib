@@ -170,6 +170,19 @@ different kclibs. Reuse established conventions exactly where the concept
 matches. Do not weaken an existing standard into a vague preference for
 "similar" or "consistent" code.
 
+## WASM JavaScript contract
+
+Scripting projections guide the public API shape of every kclib, whether
+or not it supports WASM. If a project declares `wasm/wasm32`, it must also
+build, test and distribute a JavaScript ES module implementing its public
+projection. A WASM export list is not a JavaScript binding. The public module
+must preserve native semantics while mechanically adapting values, callbacks,
+ownership and lifecycle; clients do not manage raw C pointers. Ship
+`libNAME.js`, the generated `libNAME.mjs` loader, `libNAME.wasm` and the
+available WASM link artifacts together. `make test wasm` exercises both C
+and JavaScript contracts. Keep the binding entirely within its owning project,
+without modifying unrelated libraries to accommodate consumers.
+
 ## Public API philosophy
 
 A kclib public API must express the user's intent and the capability being
