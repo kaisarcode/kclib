@@ -46,7 +46,6 @@ if(EMSCRIPTEN)
         -sMODULARIZE=1
         -sEXPORT_ES6=1
         -sALLOW_TABLE_GROWTH=1
-        -sWASM_BIGINT=1
         -sALLOW_MEMORY_GROWTH=1
         -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
         -sEXPORTED_FUNCTIONS=_kc_lng_detect,_kc_lng_free,_kc_lng_version,_malloc,_free

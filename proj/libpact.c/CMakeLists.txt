@@ -57,7 +57,6 @@ if(EMSCRIPTEN)
         --no-entry
         -sMODULARIZE=1
         -sEXPORT_ES6=1
-        -sWASM_BIGINT=1
         -sALLOW_TABLE_GROWTH=1
         -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
         -sEXPORTED_FUNCTIONS=_kc_pact_init,_kc_pact_invite,_kc_pact_join,_kc_pact_confirm,_kc_pact_seal,_kc_pact_size,_kc_pact_unseal,_kc_pact_revoke,_kc_pact_close,_kc_pact_free,_kc_pact_version,_malloc,_free
