@@ -323,8 +323,9 @@ package_project() {
         # Verify the entire artifact set before publishing this target.
         while read -r sha file; do
             [ -n "$sha" ] || continue
+            case "$file" in *.h) continue ;; esac
             verify_artifact "$target_dir" "$sha" "$file" "$name" "$platform"
-            count=$((count + 1))
+            [ "$file" = package.json ] || count=$((count + 1))
         done < "$checksum"
         if [ "$count" -eq 0 ]; then
             echo "error: no build artifacts in $checksum" >&2
@@ -337,6 +338,7 @@ package_project() {
         publish_file "$project_dir/COPYING" "$destination/COPYING" 1
         while read -r sha file; do
             [ -n "$sha" ] || continue
+            case "$file" in *.h) continue ;; esac
             if [ "$file" = package.json ]; then
                 publish_file "$target_dir/$file" "$destination/$file" 1
             else
