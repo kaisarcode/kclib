@@ -395,6 +395,9 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,)
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libbm25.mjs $(BIN_DIR)/wasm/wasm32/libbm25.mjs
+	@cp src/libbm25.js $(BIN_DIR)/wasm/wasm32/libbm25.js
+	@printf '%s\n' '{"type":"module"}' > $(BIN_DIR)/wasm/wasm32/package.json
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libbm25.wasm $(BIN_DIR)/wasm/wasm32/libbm25.wasm
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libbm25.a $(BIN_DIR)/wasm/wasm32/libbm25.a
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libbm25.so $(BIN_DIR)/wasm/wasm32/libbm25.so
@@ -454,7 +457,7 @@ test:
 		fi; \
 		cmake --build $(BUILD_DIR)/test-wasm --target bm25_contract_test; \
 		if [ -n "$(EMSDK_NODE)" ]; then node="$(EMSDK_NODE)"; else node="$(WASM_NODE)"; fi; \
-		"$$node" $(BUILD_DIR)/test-wasm/bm25_contract_test.js all; \
+		"$$node" $(BUILD_DIR)/test-wasm/bm25_contract_test.js all && "$$node" src/testjs.mjs; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \

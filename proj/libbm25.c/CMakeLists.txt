@@ -51,12 +51,17 @@ if(EMSCRIPTEN)
     target_include_directories(libbm25_wasm PRIVATE src)
     set_target_properties(libbm25_wasm PROPERTIES
         OUTPUT_NAME "libbm25"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(libbm25_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_bm25_open,_kc_bm25_add,_kc_bm25_build,_kc_bm25_search,_kc_bm25_export,_kc_bm25_import,_kc_bm25_save,_kc_bm25_load,_kc_bm25_count,_kc_bm25_fold_accents,_kc_bm25_free,_kc_bm25_close,_kc_bm25_strerror,_kc_bm25_version
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sALLOW_TABLE_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_bm25_open,_kc_bm25_add,_kc_bm25_build,_kc_bm25_search,_kc_bm25_export,_kc_bm25_import,_kc_bm25_save,_kc_bm25_load,_kc_bm25_count,_kc_bm25_fold_accents,_kc_bm25_free,_kc_bm25_close,_kc_bm25_strerror,_kc_bm25_version,_kc_bm25_tokens,_kc_bm25_vocabulary,_kc_bm25_postings,_malloc,_free
     )
 
     add_library(bm25_wasm_static STATIC ${BM25_CORE_SOURCES})

@@ -90,6 +90,19 @@ Each result is one tab-separated line containing ordinal, public ID,
 BM25 score, and original text. Source lines must contain one ID/text pair
 separated by a tab, with no embedded tabs, newlines, or NUL bytes.
 
+## JavaScript
+
+The WASM distribution publishes `libbm25.js`, the public API module;
+`libbm25.mjs`, the Emscripten loader; and `libbm25.wasm`.
+All native buffers are converted to owned JavaScript values.
+
+```js
+import { bm25 } from "./libbm25.js";
+const index = bm25.open();
+```
+
+The C and JavaScript contracts are exercised by `make test wasm`.
+
 ## Build
 
 From this project directory:

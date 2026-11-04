@@ -47,6 +47,19 @@ from its leading bytes.
 
 - [Protocol and backends](doc/protocol.md) - backend selection, binary formats, and interoperability vectors.
 
+## JavaScript
+
+The WASM distribution publishes `libpow.js`, the public API module;
+`libpow.mjs`, the Emscripten loader; and `libpow.wasm`.
+All native buffers are converted to owned JavaScript values.
+
+```js
+import { pow } from "./libpow.js";
+const challenge = pow.challenge(1);
+```
+
+The C and JavaScript contracts are exercised by `make test wasm`.
+
 ## Build
 
 From this project directory:

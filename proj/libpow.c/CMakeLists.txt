@@ -92,12 +92,17 @@ if(EMSCRIPTEN)
     )
     set_target_properties(libpow_wasm PROPERTIES
         OUTPUT_NAME "libpow"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(libpow_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_pow_challenge,_kc_pow_solve,_kc_pow_verify,_kc_pow_size,_kc_pow_free,_kc_pow_version
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sALLOW_TABLE_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_pow_challenge,_kc_pow_solve,_kc_pow_verify,_kc_pow_size,_kc_pow_free,_kc_pow_version,_kc_pow_challenge_with_backend,_kc_pow_get_backend,_kc_pow_backend_available,_kc_pow_backend_name,_kc_pow_backend_from_name,_malloc,_free
     )
 
     add_library(pow_wasm_static STATIC ${POW_CORE_SOURCES})
