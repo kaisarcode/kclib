@@ -27,6 +27,19 @@ leven kitten sitting --max 3
 
 It prints the edit distance on success; a threshold exceedance or invalid input exits unsuccessfully.
 
+## JavaScript
+
+The WebAssembly target publishes `libleven.js` with the public JavaScript
+projection, `libleven.mjs` with the Emscripten runtime, and `libleven.wasm`.
+Load the public module as an ES module:
+
+```js
+import { leven } from "./libleven.js";
+leven.distance("kitten", "sitting");
+```
+
+`make test wasm` runs the native WASM contract tests and the JavaScript API tests.
+
 ## Build
 
 From this project directory:

@@ -33,6 +33,19 @@ is open.
 Read the [Markdown behavior guide](doc/markdown.md) for frontmatter, supported
 syntax, and renderer-specific behavior.
 
+## JavaScript
+
+The WebAssembly target publishes `libmdp.js` with the public JavaScript
+projection, `libmdp.mjs` with the Emscripten runtime, and `libmdp.wasm`.
+Load the public module as an ES module:
+
+```js
+import { mdp } from "./libmdp.js";
+(await mdp.open("# Hello")).html();
+```
+
+`make test wasm` runs the native WASM contract tests and the JavaScript API tests.
+
 ## Build
 
 From this project directory:

@@ -22,6 +22,19 @@ kc_min_free(text);
 The minifiers preserve syntax-sensitive content such as quoted strings. HTML
 also preserves verbatim content inside `pre` and `textarea` elements.
 
+## JavaScript
+
+The WebAssembly target publishes `libmin.js` with the public JavaScript
+projection, `libmin.mjs` with the Emscripten runtime, and `libmin.wasm`.
+Load the public module as an ES module:
+
+```js
+import { min } from "./libmin.js";
+min.css("a { color: red; }");
+```
+
+`make test wasm` runs the native WASM contract tests and the JavaScript API tests.
+
 ## Build
 
 From this project directory:

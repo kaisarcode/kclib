@@ -44,12 +44,16 @@ if(EMSCRIPTEN)
     target_include_directories(libdemo_wasm PRIVATE src)
     set_target_properties(libdemo_wasm PROPERTIES
         OUTPUT_NAME "libdemo"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(libdemo_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_demo_greet,_kc_demo_free,_kc_demo_version
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_demo_greet,_kc_demo_free,_kc_demo_version,_malloc,_free
     )
 
     add_library(demo_wasm_static STATIC ${DEMO_CORE_SOURCES})

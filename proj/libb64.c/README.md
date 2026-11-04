@@ -24,6 +24,19 @@ if (decoded != NULL) {
 Empty input is valid. Use `kc_b64_free()` for every buffer returned by the
 library.
 
+## JavaScript
+
+The WebAssembly target publishes `libb64.js` with the public JavaScript
+projection, `libb64.mjs` with the Emscripten runtime, and `libb64.wasm`.
+Load the public module as an ES module:
+
+```js
+import { b64 } from "./libb64.js";
+b64.encode(new TextEncoder().encode("hello"));
+```
+
+`make test wasm` runs the native WASM contract tests and the JavaScript API tests.
+
 ## Build
 
 From this project directory:

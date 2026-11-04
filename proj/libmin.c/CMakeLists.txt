@@ -39,12 +39,16 @@ if(EMSCRIPTEN)
     target_include_directories(min_wasm PRIVATE src)
     set_target_properties(min_wasm PROPERTIES
         OUTPUT_NAME "libmin"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(min_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_min_css,_kc_min_js,_kc_min_html,_kc_min_txt,_kc_min_free,_kc_min_version
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_min_css,_kc_min_js,_kc_min_html,_kc_min_txt,_kc_min_free,_kc_min_version,_malloc,_free
     )
 
     add_library(min_wasm_static STATIC ${MIN_SOURCES})

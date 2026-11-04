@@ -406,6 +406,9 @@ define wasm_target
 			-G Ninja -Wno-dev > /dev/null; \
 	fi
 	$(call cmake_build,$(BUILD_DIR)/wasm32-wasm,cmake -S . -B $(BUILD_DIR)/wasm32-wasm -DCMAKE_BUILD_TYPE=Release -DMDP_BUILD_VERSION=$$ver -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/wasm32-wasm/out -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/wasm32-wasm/out/libmdp.mjs $(BIN_DIR)/wasm/wasm32/libmdp.mjs
+	@cp src/libmdp.js $(BIN_DIR)/wasm/wasm32/libmdp.js
+	@printf '%s\n' '{"type":"module"}' > $(BIN_DIR)/wasm/wasm32/package.json
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libmdp.wasm $(BIN_DIR)/wasm/wasm32/libmdp.wasm
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libmdp.a $(BIN_DIR)/wasm/wasm32/libmdp.a
 	@cp $(BUILD_DIR)/wasm32-wasm/out/libmdp.so $(BIN_DIR)/wasm/wasm32/libmdp.so
@@ -468,7 +471,7 @@ test:
 			echo "Missing Emscripten test runtime: $$node" >&2; \
 			exit 1; \
 		fi; \
-		"$$node" $(BUILD_DIR)/test-wasm/mdp_contract_test.js all; \
+		"$$node" $(BUILD_DIR)/test-wasm/mdp_contract_test.js all && "$$node" src/testjs.mjs; \
 	else \
 		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
 			echo "Unsupported native test target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \

@@ -43,12 +43,16 @@ if(EMSCRIPTEN)
     target_include_directories(libb64_wasm PRIVATE src)
     set_target_properties(libb64_wasm PROPERTIES
         OUTPUT_NAME "libb64"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(libb64_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_b64_version,_kc_b64_encode,_kc_b64_decode,_kc_b64_free
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_b64_version,_kc_b64_encode,_kc_b64_decode,_kc_b64_free,_malloc,_free
     )
 
     add_library(b64_wasm_static STATIC ${B64_CORE_SOURCES})

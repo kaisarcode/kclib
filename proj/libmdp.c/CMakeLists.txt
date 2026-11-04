@@ -43,12 +43,16 @@ if(EMSCRIPTEN)
     target_include_directories(mdp_wasm PRIVATE src)
     set_target_properties(mdp_wasm PROPERTIES
         OUTPUT_NAME "libmdp"
-        SUFFIX ".wasm"
+        SUFFIX ".mjs"
     )
     target_link_options(mdp_wasm PRIVATE
         --no-entry
-        -sSTANDALONE_WASM=1
-        -sEXPORTED_FUNCTIONS=_kc_mdp_open,_kc_mdp_html,_kc_mdp_ansi,_kc_mdp_body,_kc_mdp_meta,_kc_mdp_close,_kc_mdp_version
+        -sMODULARIZE=1
+        -sEXPORT_ES6=1
+        -sWASM_BIGINT=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction
+        -sEXPORTED_FUNCTIONS=_kc_mdp_open,_kc_mdp_html,_kc_mdp_ansi,_kc_mdp_body,_kc_mdp_meta,_kc_mdp_close,_kc_mdp_version,_malloc,_free
     )
 
     add_library(mdp_wasm_static STATIC ${MDP_SOURCES})

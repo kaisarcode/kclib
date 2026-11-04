@@ -18,6 +18,19 @@ if (greeting != NULL) {
 `kc_demo_greet()` returns an allocated greeting. Release it with
 `kc_demo_free()`.
 
+## JavaScript
+
+The WebAssembly target publishes `libdemo.js` with the public JavaScript
+projection, `libdemo.mjs` with the Emscripten runtime, and `libdemo.wasm`.
+Load the public module as an ES module:
+
+```js
+import { demo } from "./libdemo.js";
+demo.greet("John");
+```
+
+`make test wasm` runs the native WASM contract tests and the JavaScript API tests.
+
 ## Build
 
 From this project directory:
