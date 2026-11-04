@@ -11,6 +11,10 @@ import createModule from "./libleven.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,16 +24,29 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
 export const leven = {
+
+    /**
+     * Measure the edit distance between two strings.
+     * @return Edit distance or null.
+     */
     distance(left, right, options = {}) {
         const a = cstring(left);
         let b = 0, maximum = 0, output = 0;
@@ -58,6 +75,11 @@ export const leven = {
             wasm._free(a);
         }
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_leven_version()); }
 };
 export default leven;

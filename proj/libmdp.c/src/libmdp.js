@@ -11,6 +11,10 @@ import createModule from "./libmdp.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,16 +24,29 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
 export const mdp = {
+
+    /**
+     * Open the native capability.
+     * @return API with an explicit close operation.
+     */
     open(source) {
         const input = cstring(source);
         const out = wasm._malloc(4);
@@ -42,15 +59,45 @@ export const mdp = {
             if (wasm._kc_mdp_open(out, input) !== 0) throw new Error("Markdown open failed");
             let handle = uint(out);
             if (!handle) throw new Error("Markdown document was not created");
+
+            /**
+             * Return the active native handle.
+             * @return Open native handle.
+             */
             function valid() {
                 if (!handle) throw new Error("Document is closed");
                 return handle;
             }
             return {
+
+                /**
+                 * Render the document as HTML.
+                 * @return HTML string.
+                 */
                 html() { return string(wasm._kc_mdp_html(valid())); },
+
+                /**
+                 * Render the document as ANSI text.
+                 * @return ANSI string.
+                 */
                 ansi() { return string(wasm._kc_mdp_ansi(valid())); },
+
+                /**
+                 * Return the document body.
+                 * @return Body string.
+                 */
                 body() { return string(wasm._kc_mdp_body(valid())); },
+
+                /**
+                 * Return document metadata.
+                 * @return Metadata string.
+                 */
                 meta() { return string(wasm._kc_mdp_meta(valid())); },
+
+                /**
+                 * Release the native capability.
+                 * @return void.
+                 */
                 close() {
                     if (handle) {
                         wasm._kc_mdp_close(handle);
@@ -63,6 +110,11 @@ export const mdp = {
             wasm._free(input);
         }
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_mdp_version()); }
 };
 export default mdp;

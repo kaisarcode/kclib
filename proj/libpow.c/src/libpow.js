@@ -11,6 +11,10 @@ import createModule from "./libpow.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,32 +24,58 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
-
+/**
+ * Allocate WebAssembly memory for a temporary value.
+ * @return Owned native memory pointer.
+ */
 function allocate(size) {
     const ptr = wasm._malloc(Math.max(1, size));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Pass a temporary native string to a callback.
+ * @return Callback result.
+ */
 function withString(text, fn) {
     const ptr = cstring(text);
     try { return fn(ptr); }
     finally { wasm._free(ptr); }
 }
+
+/**
+ * Copy bytes into WebAssembly memory.
+ * @return Owned native memory pointer.
+ */
 function copyBytes(data) {
     if (!(data instanceof Uint8Array)) throw new TypeError("Expected Uint8Array");
     const ptr = allocate(data.length);
     wasm.HEAPU8.set(data, ptr);
     return ptr;
 }
+
+/**
+ * Throw when a native operation reports an error.
+ * @return void.
+ */
 function check(status, describe) {
     if (status !== 0) throw new Error(describe ? string(describe(status)) : "Native error " + status);
 }
@@ -54,6 +84,11 @@ export const pow = {
     SHA256: 1,
     HASHWX: 2,
     INVALID: -1,
+
+    /**
+     * Create a proof-of-work challenge.
+     * @return Challenge string.
+     */
     challenge(effort, {backend} = {}) {
         const out = allocate(4), size = allocate(4);
         try {
@@ -67,6 +102,11 @@ export const pow = {
             finally { if (ptr) wasm._kc_pow_free(ptr); }
         } finally { wasm._free(size); wasm._free(out); }
     },
+
+    /**
+     * Solve a proof-of-work challenge.
+     * @return Solution string.
+     */
     solve(challenge) {
         const input = copyBytes(challenge), out = allocate(4), size = allocate(4);
         try {
@@ -81,6 +121,11 @@ export const pow = {
             wasm._free(input);
         }
     },
+
+    /**
+     * Verify a proof-of-work solution.
+     * @return Whether the solution is valid.
+     */
     verify(challenge, solution) {
         const a = copyBytes(challenge), b = copyBytes(solution);
         try {
@@ -90,6 +135,11 @@ export const pow = {
             return true;
         } finally { wasm._free(b); wasm._free(a); }
     },
+
+    /**
+     * Return the sealed size for bytes.
+     * @return Sealed size or null.
+     */
     size(data) {
         const input = copyBytes(data), output = allocate(4);
         try {
@@ -99,6 +149,11 @@ export const pow = {
             return uint(output);
         } finally { wasm._free(output); wasm._free(input); }
     },
+
+    /**
+     * Return the backend used by a challenge.
+     * @return Backend identifier.
+     */
     getBackend(challenge) {
         const input = copyBytes(challenge), output = allocate(4);
         try {
@@ -106,14 +161,34 @@ export const pow = {
             return wasm.getValue(output, "i32");
         } finally { wasm._free(output); wasm._free(input); }
     },
+
+    /**
+     * Report whether a backend is available.
+     * @return Whether the backend is available.
+     */
     backendAvailable(backend) { return Boolean(wasm._kc_pow_backend_available(backend)); },
+
+    /**
+     * Return a backend name.
+     * @return Backend name.
+     */
     backendName(backend) {
         const ptr = wasm._kc_pow_backend_name(backend);
         return ptr ? string(ptr) : null;
     },
+
+    /**
+     * Resolve a backend name.
+     * @return Backend identifier.
+     */
     backendFromName(name) {
         return withString(name, ptr => wasm._kc_pow_backend_from_name(ptr));
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_pow_version()); }
 };
 export default pow;

@@ -11,6 +11,10 @@ import createModule from "./libpact.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,45 +24,82 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
-
+/**
+ * Allocate WebAssembly memory for a temporary value.
+ * @return Owned native memory pointer.
+ */
 function allocate(size) {
     const ptr = wasm._malloc(Math.max(1, size));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Pass a temporary native string to a callback.
+ * @return Callback result.
+ */
 function withString(value, fn) {
     const ptr = cstring(value);
     try { return fn(ptr); }
     finally { wasm._free(ptr); }
 }
+
+/**
+ * Copy bytes into WebAssembly memory.
+ * @return Owned native memory pointer.
+ */
 function copyBytes(data) {
     if (!(data instanceof Uint8Array)) throw new TypeError("Expected Uint8Array");
     const ptr = allocate(data.length);
     wasm.HEAPU8.set(data, ptr);
     return ptr;
 }
+
+/**
+ * Throw when a native operation reports an error.
+ * @return void.
+ */
 function check(status) {
     if (status !== 0) throw new Error("Native operation failed: " + status);
 }
+
 /**
  * Wrap a native trust context.
  * @param handle Native context.
  * @return Trust API.
  */
 function trustObject(handle) {
+
+    /**
+     * Return the active native handle.
+     * @return Open native handle.
+     */
     const valid = () => {
         if (!handle) throw new Error("Trust context is closed");
         return handle;
     };
+
+    /**
+     * Collect native string results and release their storage.
+     * @return String values.
+     */
     function strings(operation, count) {
         const out = Array.from({length: count}, () => allocate(4));
         try {
@@ -77,6 +118,11 @@ function trustObject(handle) {
             }
         }
     }
+
+    /**
+     * Collect native binary results and release their storage.
+     * @return Byte array.
+     */
     function binary(operation) {
         const out = allocate(4), size = allocate(4);
         try {
@@ -88,20 +134,40 @@ function trustObject(handle) {
         } finally { wasm._free(size); wasm._free(out); }
     }
     return {
+
+        /**
+         * Create a trust invitation.
+         * @return Invitation data.
+         */
         invite() {
             const [uid, code] = strings((a, b) => wasm._kc_pact_invite(valid(), a, b), 2);
             return {uid, code};
         },
+
+        /**
+         * Join a trust context with an invitation.
+         * @return Join result.
+         */
         join(code) {
             return withString(code, input => {
                 const [uid, confirmation] = strings((a, b) => wasm._kc_pact_join(valid(), input, a, b), 2);
                 return {uid, confirmation};
             });
         },
+
+        /**
+         * Confirm a trust invitation.
+         * @return Confirmation value.
+         */
         confirm(confirmation) {
             return withString(confirmation, input =>
                 strings(out => wasm._kc_pact_confirm(valid(), input, out), 1)[0]);
         },
+
+        /**
+         * Seal bytes for a trusted peer.
+         * @return Sealed byte array.
+         */
         seal(uid, data) {
             return withString(uid, remote => {
                 const ptr = copyBytes(data);
@@ -110,6 +176,11 @@ function trustObject(handle) {
                 finally { wasm._free(ptr); }
             });
         },
+
+        /**
+         * Return the sealed size for bytes.
+         * @return Sealed size or null.
+         */
         size(uid, data) {
             return withString(uid, remote => {
                 const ptr = copyBytes(data), out = allocate(4);
@@ -121,6 +192,11 @@ function trustObject(handle) {
                 } finally { wasm._free(out); wasm._free(ptr); }
             });
         },
+
+        /**
+         * Unseal bytes from a trusted peer.
+         * @return Unsealed byte array.
+         */
         unseal(uid, data) {
             return withString(uid, remote => {
                 const ptr = copyBytes(data);
@@ -129,9 +205,19 @@ function trustObject(handle) {
                 finally { wasm._free(ptr); }
             });
         },
+
+        /**
+         * Revoke a trusted peer.
+         * @return void.
+         */
         revoke(uid) {
             return withString(uid, remote => check(wasm._kc_pact_revoke(valid(), remote)));
         },
+
+        /**
+         * Release the native capability.
+         * @return void.
+         */
         close() {
             if (handle) {
                 wasm._kc_pact_close(handle);
@@ -142,6 +228,11 @@ function trustObject(handle) {
 }
 
 export const pact = {
+
+    /**
+     * Create a native trust context.
+     * @return Trust API with explicit lifetime.
+     */
     init() {
         const out = allocate(4);
         try {
@@ -152,6 +243,11 @@ export const pact = {
             return trustObject(handle);
         } finally { wasm._free(out); }
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_pact_version()); }
 };
 export default pact;

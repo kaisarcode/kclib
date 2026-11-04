@@ -11,6 +11,10 @@ import createModule from "./libb64.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,16 +24,29 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
 export const b64 = {
+
+    /**
+     * Encode bytes as Base64 text.
+     * @return Base64 string.
+     */
     encode(data) {
         if (!(data instanceof Uint8Array)) throw new TypeError("Expected Uint8Array");
         const input = wasm._malloc(Math.max(1, data.length));
@@ -44,6 +61,11 @@ export const b64 = {
             wasm._free(input);
         }
     },
+
+    /**
+     * Decode Base64 text into bytes.
+     * @return Decoded byte array.
+     */
     decode(encoded) {
         const input = cstring(encoded);
         const size = wasm._malloc(4);
@@ -61,6 +83,11 @@ export const b64 = {
             wasm._free(input);
         }
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_b64_version()); }
 };
 export default b64;

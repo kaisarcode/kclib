@@ -11,6 +11,11 @@ import createModule from "./libhnsw.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @param value JavaScript string.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,29 +25,55 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
-
+/**
+ * Allocate WebAssembly memory for a temporary value.
+ * @return Owned native memory pointer.
+ */
 function allocate(size) {
     const ptr = wasm._malloc(Math.max(1, size));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Pass a temporary native string to a callback.
+ * @return Callback result.
+ */
 function withString(input, fn) {
     const ptr = cstring(input);
     try { return fn(ptr); }
     finally { wasm._free(ptr); }
 }
+
+/**
+ * Throw when a native operation reports an error.
+ * @return void.
+ */
 function check(status, error) {
     if (status !== 0) throw new Error(error ? string(error(status)) : "Native error " + status);
 }
+
+/**
+ * Copy bytes into WebAssembly memory.
+ * @return Owned native memory pointer.
+ */
 function copyBytes(input) {
     if (!(input instanceof Uint8Array)) throw new TypeError("Expected Uint8Array");
     const ptr = allocate(input.length);
@@ -53,6 +84,11 @@ export const hnsw = {
     COSINE: 1,
     INNER_PRODUCT: 2,
     L2: 3,
+
+    /**
+     * Open the native capability.
+     * @return API with an explicit close operation.
+     */
     open(options) {
         if (!Number.isSafeInteger(options?.dimension) || options.dimension < 1 || options.dimension > 0xffffffff) throw new RangeError("Invalid dimension");
         const opt = allocate(20);
@@ -74,10 +110,20 @@ export const hnsw = {
             check(wasm._kc_hnsw_open(out, opt), wasm._kc_hnsw_strerror);
             let handle = uint(out);
             if (!handle) throw new Error("Index was not created");
+
+            /**
+             * Return the active native handle.
+             * @return Open native handle.
+             */
             const valid = () => {
                 if (!handle) throw new Error("Index is closed");
                 return handle;
             };
+
+            /**
+             * Copy a vector into WebAssembly memory.
+             * @return Owned native vector pointer.
+             */
             const vector = values => {
                 if (!(values instanceof Float32Array) || values.length !== options.dimension) throw new TypeError("Invalid vector dimension");
                 const ptr = allocate(values.byteLength);
@@ -85,6 +131,11 @@ export const hnsw = {
                 return ptr;
             };
             return {
+
+                /**
+                 * Add a value to the native capability.
+                 * @return void.
+                 */
                 add(id, values) {
                     return withString(id, name => {
                         const ptr = vector(values);
@@ -92,7 +143,17 @@ export const hnsw = {
                         finally { wasm._free(ptr); }
                     });
                 },
+
+                /**
+                 * Build native state from JavaScript values.
+                 * @return Native operation result.
+                 */
                 build() { check(wasm._kc_hnsw_build(valid()), wasm._kc_hnsw_strerror); },
+
+                /**
+                 * Search the native capability.
+                 * @return Search results.
+                 */
                 search(values, {limit = 10, threshold = 0} = {}) {
                     if (!Number.isSafeInteger(limit) || limit < 0 || limit > 0xffffffff) throw new RangeError("Invalid limit");
                     const ptr = vector(values);
@@ -112,9 +173,29 @@ export const hnsw = {
                         wasm._free(ptr);
                     }
                 },
+
+                /**
+                 * Return the configured vector dimension.
+                 * @return Vector dimension.
+                 */
                 dimension() { return wasm._kc_hnsw_dimension(valid()); },
+
+                /**
+                 * Return the configured distance metric.
+                 * @return Metric identifier.
+                 */
                 metric() { return wasm._kc_hnsw_metric(valid()); },
+
+                /**
+                 * Return the number of stored entries.
+                 * @return Entry count.
+                 */
                 count() { return wasm._kc_hnsw_count(valid()); },
+
+                /**
+                 * Release the native capability.
+                 * @return void.
+                 */
                 close() {
                     if (handle) { wasm._kc_hnsw_close(handle); handle = 0; }
                 }
@@ -125,6 +206,11 @@ export const hnsw = {
             wasm._free(opt);
         }
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_hnsw_version()); }
 };
 export default hnsw;

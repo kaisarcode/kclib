@@ -11,6 +11,10 @@ import createModule from "./libhttp.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,35 +24,62 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
-
+/**
+ * Allocate WebAssembly memory for a temporary value.
+ * @return Owned native memory pointer.
+ */
 function allocate(size) {
     const ptr = wasm._malloc(Math.max(1, size));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Pass a temporary native string to a callback.
+ * @return Callback result.
+ */
 function withString(value, fn) {
     const ptr = cstring(value);
     try { return fn(ptr); }
     finally { wasm._free(ptr); }
 }
+
+/**
+ * Copy bytes into WebAssembly memory.
+ * @return Owned native memory pointer.
+ */
 function copyBytes(data) {
     if (!(data instanceof Uint8Array)) throw new TypeError("Expected Uint8Array");
     const ptr = allocate(data.length);
     wasm.HEAPU8.set(data, ptr);
     return ptr;
 }
+
+/**
+ * Throw when a native operation reports an error.
+ * @return void.
+ */
 function check(status) {
     if (status !== 0) throw new Error("Native operation failed: " + status);
 }
+
 /**
  * Copy an array of borrowed HTTP fields.
  * @param ptr Native field array.
@@ -62,10 +93,18 @@ function fields(ptr, count) {
     }));
 }
 
+/**
+ * Decode an optional native string pointer.
+ * @return String value or null.
+ */
 function nullable(ptr) {
     return ptr ? string(ptr) : null;
 }
 
+/**
+ * Copy a native HTTP request into JavaScript data.
+ * @return Request object.
+ */
 function requestValue(ptr) {
     const body = uint(ptr + 28);
     return {
@@ -82,6 +121,10 @@ function requestValue(ptr) {
     };
 }
 
+/**
+ * Copy a native HTTP response into JavaScript data.
+ * @return Response object.
+ */
 function responseValue(ptr) {
     const body = uint(ptr + 20);
     return {
@@ -105,13 +148,28 @@ function responseValue(ptr) {
  */
 function build(options, response, fn) {
     const owned = [], data = allocate(44), out = allocate(4), size = allocate(4);
+
+    /**
+     * Retain native memory until the build completes.
+     * @return Retained memory pointer.
+     */
     function hold(ptr) {
         owned.push(ptr);
         return ptr;
     }
+
+    /**
+     * Encode an optional string for native use.
+     * @return Native string pointer or zero.
+     */
     function optional(value) {
         return value === undefined || value === null ? 0 : hold(cstring(value));
     }
+
+    /**
+     * Encode HTTP fields in a native structure.
+     * @return void.
+     */
     function headers(value, offset) {
         const entries = Array.isArray(value) ? value.map(v => [v.name, v.value]) : Object.entries(value || {});
         const ptr = entries.length ? hold(allocate(entries.length * 8)) : 0;
@@ -164,15 +222,35 @@ function build(options, response, fn) {
 }
 
 export const http = {
+
+    /**
+     * Build an HTTP request.
+     * @return Encoded HTTP request.
+     */
     request(options = {}) {
         return build(options, false, wasm._kc_http_request);
     },
+
+    /**
+     * Build an HTTP response.
+     * @return Encoded HTTP response.
+     */
     response(options = {}) {
         return build(options, true, wasm._kc_http_response);
     },
+
+    /**
+     * Open an incremental HTTP parser.
+     * @return Parser API with explicit close operation.
+     */
     parser({onRequest, onResponse, onError} = {}) {
         const callbacks = [];
         let pending = null;
+
+        /**
+         * Wrap a JavaScript callback for native events.
+         * @return Native callback pointer or zero.
+         */
         const wrap = (fn, transform) => {
             if (!fn) return 0;
             const ptr = wasm.addFunction((value) => {
@@ -190,11 +268,21 @@ export const http = {
             wasm.setValue(out, 0, "i32");
             check(wasm._kc_http_parser_open(out, request, response, error, 0));
             let handle = uint(out);
+
+            /**
+             * Return the active native handle.
+             * @return Open native handle.
+             */
             const valid = () => {
                 if (!handle) throw new Error("Parser is closed");
                 return handle;
             };
             return {
+
+                /**
+                 * Write bytes to the native parser.
+                 * @return void.
+                 */
                 write(data) {
                     const ptr = copyBytes(data);
                     try {
@@ -206,6 +294,11 @@ export const http = {
                         }
                     } finally { wasm._free(ptr); }
                 },
+
+                /**
+                 * Release the native capability.
+                 * @return void.
+                 */
                 close() {
                     if (!handle) return;
                     wasm._kc_http_parser_close(handle);
@@ -223,6 +316,11 @@ export const http = {
             throw failure;
         } finally { wasm._free(out); }
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_http_version()); }
 };
 export default http;

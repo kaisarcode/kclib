@@ -11,6 +11,10 @@ import createModule from "./libtpl.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,30 +24,56 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
-
+/**
+ * Allocate WebAssembly memory for a temporary value.
+ * @return Owned native memory pointer.
+ */
 function allocate(length) {
     const ptr = wasm._malloc(Math.max(length, 1));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Pass a temporary native string to a callback.
+ * @return Callback result.
+ */
 function withString(value, fn) {
     const ptr = cstring(value);
     try { return fn(ptr); }
     finally { wasm._free(ptr); }
 }
+
+/**
+ * Throw when a native operation reports an error.
+ * @return void.
+ */
 function check(status, error) {
     if (status !== 0) throw new Error(error ? string(error(status)) : "Native error " + status);
 }
 export const tpl = {
+
+    /**
+     * Open the native capability.
+     * @return API with an explicit close operation.
+     */
     open(source, options = {}) {
         return withString(source, input => {
             const out = allocate(4);
@@ -58,11 +88,21 @@ export const tpl = {
                 check(wasm._kc_tpl_open(out, input, cfg));
                 let handle = uint(out);
                 if (!handle) throw new Error("Template was not created");
+
+                /**
+                 * Return the active native handle.
+                 * @return Open native handle.
+                 */
                 const valid = () => {
                     if (!handle) throw new Error("Template is closed");
                     return handle;
                 };
                 return {
+
+                    /**
+                     * Render a template with variables.
+                     * @return Rendered string.
+                     */
                     render(variables = {}) {
                         const entries = Object.entries(variables);
                         const array = allocate(entries.length * 8);
@@ -85,7 +125,17 @@ export const tpl = {
                             wasm._free(array);
                         }
                     },
+
+                    /**
+                     * Return the most recent template error.
+                     * @return Error string.
+                     */
                     error() { return string(wasm._kc_tpl_error(valid())); },
+
+                    /**
+                     * Release the native capability.
+                     * @return void.
+                     */
                     close() {
                         if (handle) {
                             wasm._kc_tpl_close(handle);
@@ -100,6 +150,11 @@ export const tpl = {
             }
         });
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_tpl_version()); }
 };
 export default tpl;

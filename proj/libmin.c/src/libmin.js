@@ -11,6 +11,10 @@ import createModule from "./libmin.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,15 +24,27 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
+/**
+ * Minify source with a native operation.
+ * @return Minified source.
+ */
 function minify(operation, source) {
     const input = cstring(source);
     try {
@@ -41,10 +57,35 @@ function minify(operation, source) {
     }
 }
 export const min = {
+
+    /**
+     * Minify CSS source.
+     * @return Minified CSS.
+     */
     css(source) { return minify(wasm._kc_min_css, source); },
+
+    /**
+     * Minify JavaScript source.
+     * @return Minified JavaScript.
+     */
     js(source) { return minify(wasm._kc_min_js, source); },
+
+    /**
+     * Render the document as HTML.
+     * @return HTML string.
+     */
     html(source) { return minify(wasm._kc_min_html, source); },
+
+    /**
+     * Minify plain-text source.
+     * @return Minified text.
+     */
     txt(source) { return minify(wasm._kc_min_txt, source); },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_min_version()); }
 };
 export default min;

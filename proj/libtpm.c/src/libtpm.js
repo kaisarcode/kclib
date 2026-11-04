@@ -11,6 +11,10 @@ import createModule from "./libtpm.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,30 +24,56 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
-
+/**
+ * Allocate WebAssembly memory for a temporary value.
+ * @return Owned native memory pointer.
+ */
 function allocate(length) {
     const ptr = wasm._malloc(Math.max(length, 1));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Pass a temporary native string to a callback.
+ * @return Callback result.
+ */
 function withString(value, fn) {
     const ptr = cstring(value);
     try { return fn(ptr); }
     finally { wasm._free(ptr); }
 }
+
+/**
+ * Throw when a native operation reports an error.
+ * @return void.
+ */
 function check(status, error) {
     if (status !== 0) throw new Error(error ? string(error(status)) : "Native error " + status);
 }
 export const tpm = {
+
+    /**
+     * Open the native capability.
+     * @return API with an explicit close operation.
+     */
     open(text, options = {}) {
         return withString(text, input => {
             const out = allocate(4);
@@ -60,11 +90,21 @@ export const tpm = {
                 check(wasm._kc_tpm_open(out, input, cfg));
                 let handle = uint(out);
                 if (!handle) throw new Error("Profile was not created");
+
+                /**
+                 * Return the active native handle.
+                 * @return Open native handle.
+                 */
                 const valid = () => {
                     if (!handle) throw new Error("Profile is closed");
                     return handle;
                 };
                 return {
+
+                    /**
+                     * Perform the requested native operation.
+                     * @return Operation result.
+                     */
                     score(text) {
                         return withString(text, textPtr => {
                             const result = allocate(8);
@@ -74,6 +114,11 @@ export const tpm = {
                             } finally { wasm._free(result); }
                         });
                     },
+
+                    /**
+                     * Release the native capability.
+                     * @return void.
+                     */
                     close() {
                         if (handle) {
                             wasm._kc_tpm_close(handle);
@@ -88,6 +133,11 @@ export const tpm = {
             }
         });
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_tpm_version()); }
 };
 export default tpm;

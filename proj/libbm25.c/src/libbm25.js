@@ -11,6 +11,10 @@ import createModule from "./libbm25.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Copy a JavaScript string into WebAssembly memory.
+ * @return Owned native string pointer.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(value) + 1;
@@ -20,51 +24,98 @@ function cstring(value) {
     return ptr;
 }
 
+/**
+ * Decode a native string pointer.
+ * @return JavaScript string.
+ */
 function string(ptr) {
     if (!ptr) throw new Error("Native operation failed");
     return wasm.UTF8ToString(ptr);
 }
 
+/**
+ * Read an unsigned 32-bit value from WebAssembly memory.
+ * @return Unsigned integer value.
+ */
 function uint(ptr) {
     return wasm.getValue(ptr, "i32") >>> 0;
 }
 
-
+/**
+ * Allocate WebAssembly memory for a temporary value.
+ * @return Owned native memory pointer.
+ */
 function allocate(size) {
     const ptr = wasm._malloc(Math.max(1, size));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Pass a temporary native string to a callback.
+ * @return Callback result.
+ */
 function withString(text, fn) {
     const ptr = cstring(text);
     try { return fn(ptr); }
     finally { wasm._free(ptr); }
 }
+
+/**
+ * Copy bytes into WebAssembly memory.
+ * @return Owned native memory pointer.
+ */
 function copyBytes(data) {
     if (!(data instanceof Uint8Array)) throw new TypeError("Expected Uint8Array");
     const ptr = allocate(data.length);
     wasm.HEAPU8.set(data, ptr);
     return ptr;
 }
+
+/**
+ * Throw when a native operation reports an error.
+ * @return void.
+ */
 function check(status, describe) {
     if (status !== 0) throw new Error(describe ? string(describe(status)) : "Native error " + status);
 }
+
 /**
  * Return the projected index API for one native BM25 handle.
  * @param handle Native index.
  * @return Index object with explicit lifetime.
  */
 function indexObject(handle) {
+
+    /**
+     * Return the active native handle.
+     * @return Open native handle.
+     */
     const valid = () => {
         if (!handle) throw new Error("Index is closed");
         return handle;
     };
     return {
+
+        /**
+         * Add a value to the native capability.
+         * @return void.
+         */
         add(id, content) {
             return withString(id, key => withString(content, text =>
                 check(wasm._kc_bm25_add(valid(), key, text), wasm._kc_bm25_strerror)));
         },
+
+        /**
+         * Build native state from JavaScript values.
+         * @return Native operation result.
+         */
         build() { check(wasm._kc_bm25_build(valid()), wasm._kc_bm25_strerror); },
+
+        /**
+         * Search the native capability.
+         * @return Search results.
+         */
         search(query, options = {}) {
             return withString(query, text => {
                 const result = allocate(4), count = allocate(4);
@@ -110,6 +161,11 @@ function indexObject(handle) {
                 }
             });
         },
+
+        /**
+         * Export the native capability state.
+         * @return Serialized byte array.
+         */
         export() {
             const out = allocate(4), size = allocate(4);
             try {
@@ -123,11 +179,31 @@ function indexObject(handle) {
                 wasm._free(out);
             }
         },
+
+        /**
+         * Save the native capability state.
+         * @return void.
+         */
         save(path) {
             return withString(path, p => check(wasm._kc_bm25_save(valid(), p), wasm._kc_bm25_strerror));
         },
+
+        /**
+         * Return the number of stored entries.
+         * @return Entry count.
+         */
         count() { return wasm._kc_bm25_count(valid()); },
+
+        /**
+         * Report whether accent folding is enabled.
+         * @return Whether accent folding is enabled.
+         */
         foldAccents() { return Boolean(wasm._kc_bm25_fold_accents(valid())); },
+
+        /**
+         * Tokenize text with the native index.
+         * @return Token strings.
+         */
         tokens(text) {
             return withString(text, input => {
                 const result = [];
@@ -140,6 +216,11 @@ function indexObject(handle) {
                 return result;
             });
         },
+
+        /**
+         * Return the native vocabulary.
+         * @return Vocabulary entries.
+         */
         vocabulary() {
             const result = [];
             const callback = wasm.addFunction((ptr, count) => {
@@ -150,6 +231,11 @@ function indexObject(handle) {
             finally { wasm.removeFunction(callback); }
             return result;
         },
+
+        /**
+         * Return postings for a term.
+         * @return Posting entries.
+         */
         postings(term) {
             return withString(term, input => {
                 const result = [];
@@ -162,6 +248,11 @@ function indexObject(handle) {
                 return result;
             });
         },
+
+        /**
+         * Release the native capability.
+         * @return void.
+         */
         close() {
             if (handle) {
                 wasm._kc_bm25_close(handle);
@@ -171,6 +262,11 @@ function indexObject(handle) {
     };
 }
 export const bm25 = {
+
+    /**
+     * Open the native capability.
+     * @return API with an explicit close operation.
+     */
     open(options = {}) {
         const out = allocate(4);
         let cfg = 0, fold = 0;
@@ -192,6 +288,11 @@ export const bm25 = {
             wasm._free(out);
         }
     },
+
+    /**
+     * Import native capability state.
+     * @return API with an explicit close operation.
+     */
     import(data) {
         const input = copyBytes(data), out = allocate(4);
         try {
@@ -202,6 +303,11 @@ export const bm25 = {
             return indexObject(handle);
         } finally { wasm._free(out); wasm._free(input); }
     },
+
+    /**
+     * Load native capability state from a path.
+     * @return API with an explicit close operation.
+     */
     load(path) {
         return withString(path, input => {
             const out = allocate(4);
@@ -214,6 +320,11 @@ export const bm25 = {
             } finally { wasm._free(out); }
         });
     },
+
+    /**
+     * Return the native library version.
+     * @return Version number.
+     */
     version() { return Number(wasm._kc_bm25_version()); }
 };
 export default bm25;
