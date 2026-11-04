@@ -7,6 +7,8 @@
 
 set -euo pipefail
 
+# Resolves the real script directory, including relative and chained symlinks.
+# @return Absolute directory containing the script.
 resolve_script_dir() {
     local source="${BASH_SOURCE[0]}" directory link hops=0
     while [ -L "$source" ]; do
@@ -170,6 +172,7 @@ target_is_current() {
         found=$((found + 1))
     done < "$checksum"
     [ "$found" -gt 0 ] || return 1
+
     # No obsolete file may remain for this particular library.
     for file in "$destination/lib$name."* "$destination/$name" "$destination/$name.exe"; do
         [ -f "$file" ] || continue
@@ -314,6 +317,7 @@ package_project() {
         done < "$checksum"
         publish_file "$header" "$destination/lib$name.h" 0
         updated=$((updated + 1))
+
         # An out-of-date or missing target SHA256SUMS must be regenerated even
         # if every destination file was already byte-identical.
         NEED_REFRESH=1
